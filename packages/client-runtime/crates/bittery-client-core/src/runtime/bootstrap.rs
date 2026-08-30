@@ -765,13 +765,17 @@ impl Runtime {
     }
 
     pub(super) fn mark_reauthentication_required(&self, account_id: &AccountId) {
-        self.waiting_reasons
+        let previous = self
+            .waiting_reasons
             .lock()
             .expect("waiting reason lock poisoned")
             .insert(
                 account_id.clone(),
                 AccountWaitingReason::ReauthenticationRequired,
             );
+        if previous == Some(AccountWaitingReason::ReauthenticationRequired) {
+            return;
+        }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all_unless_closed();
     }

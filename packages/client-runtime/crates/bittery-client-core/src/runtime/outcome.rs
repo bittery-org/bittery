@@ -12,8 +12,8 @@ use crate::{
     auth_http::AuthenticatedOutcome,
     platform_storage::CurrentSessionDocument,
     replica::{
-        AuthorityItemRecord, CursorAdvance, ObservedOutcome, OperationKind, OperationOutcomeResult,
-        OperationRejectionCode, ReplicaSnapshot, SyncCursor,
+        AuthorityAttachmentRecord, AuthorityItemRecord, CursorAdvance, ObservedOutcome,
+        OperationKind, OperationOutcomeResult, OperationRejectionCode, ReplicaSnapshot, SyncCursor,
     },
     server_contract::{
         CreateShareOperationRejectionCode as WireShareRejectionCode,
@@ -31,11 +31,30 @@ pub(super) enum SemanticAnswer {
     Undecided,
     /// No semantic answer. The same work is owed, and the same bytes will go again later.
     Transient,
+    /// This attempt already spent its single Session renewal and met another 401.
+    ReauthenticationRequired,
     /// The Server answered this Operation ID for other request bytes, or for another entity.
     ///
     /// That is identity reuse. It is neither a retry nor a replay, and the only safe response is
     /// to fail the Account module rather than to guess which request the answer belongs to.
     IdentityReused,
+}
+
+/// One renewal allowance shared by every authenticated exchange that resolves one outcome.
+#[derive(Default)]
+pub(super) struct OutcomeResolutionAuthBudget {
+    renewal_consumed: bool,
+}
+
+impl OutcomeResolutionAuthBudget {
+    pub(super) fn consume_renewal(&mut self) -> bool {
+        if self.renewal_consumed {
+            false
+        } else {
+            self.renewal_consumed = true;
+            true
+        }
+    }
 }
 
 /// What one completion attempt left behind.
@@ -193,6 +212,7 @@ impl Runtime {
         operation: &OperationRecord,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> SemanticAnswer {
         let cancellation = RequestCancellation::new();
         let mut answer = http
@@ -203,11 +223,20 @@ impl Runtime {
             )
             .await;
         if matches!(answer, Ok(AuthenticatedOutcome::ReauthenticationRequired)) {
-            let Ok(renewed) = self
+            if !auth_budget.consume_renewal() {
+                self.mark_reauthentication_required(account_id);
+                return SemanticAnswer::ReauthenticationRequired;
+            }
+            let renewed = match self
                 .renew_session(account_id, session, http, cancellation.clone())
                 .await
-            else {
-                return SemanticAnswer::Transient;
+            {
+                Ok(renewed) => renewed,
+                Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
+                    self.mark_reauthentication_required(account_id);
+                    return SemanticAnswer::ReauthenticationRequired;
+                }
+                Err(_) => return SemanticAnswer::Transient,
             };
             *session = renewed;
             answer = http
@@ -221,9 +250,11 @@ impl Runtime {
         match answer {
             Ok(AuthenticatedOutcome::Ok(Some(outcome))) => observed_outcome(operation, outcome),
             Ok(AuthenticatedOutcome::Ok(None)) => SemanticAnswer::Undecided,
-            Ok(AuthenticatedOutcome::ReauthenticationRequired)
-            | Ok(AuthenticatedOutcome::Transient)
-            | Err(_) => SemanticAnswer::Transient,
+            Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
+                self.mark_reauthentication_required(account_id);
+                SemanticAnswer::ReauthenticationRequired
+            }
+            Ok(AuthenticatedOutcome::Transient) | Err(_) => SemanticAnswer::Transient,
         }
     }
 
@@ -246,14 +277,25 @@ impl Runtime {
         session: &mut CurrentSessionDocument,
         cursor: Option<CursorAdvance>,
     ) -> CompletionResult {
+        let mut auth_budget = OutcomeResolutionAuthBudget::default();
         self.complete_operation_with_fence(
-            account_id, operation, outcome, http, session, cursor, false,
+            account_id,
+            operation,
+            outcome,
+            http,
+            session,
+            cursor,
+            false,
+            &mut auth_budget,
         )
         .await
     }
 
-    /// Dispatch already owns the Account execution fence across Session use and reconciliation.
-    pub(super) async fn complete_operation_fenced(
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the caller-held fence and attempt-wide authentication budget preserve one completion path"
+    )]
+    pub(super) async fn complete_operation_fenced_with_auth_budget(
         &self,
         account_id: &AccountId,
         operation: &OperationRecord,
@@ -261,9 +303,17 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
         cursor: Option<CursorAdvance>,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
         self.complete_operation_with_fence(
-            account_id, operation, outcome, http, session, cursor, true,
+            account_id,
+            operation,
+            outcome,
+            http,
+            session,
+            cursor,
+            true,
+            auth_budget,
         )
         .await
     }
@@ -281,18 +331,50 @@ impl Runtime {
         session: &mut CurrentSessionDocument,
         cursor: Option<CursorAdvance>,
         fence_already_held: bool,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
         let observed = outcome.clone();
         let mutation = match &outcome.result {
             OperationOutcomeResult::Applied { entity_id, version } => {
                 if operation.kind != OperationKind::CreateItem {
-                    let item = match self
-                        .fetch_authoritative_item(account_id, entity_id, http, session)
+                    let mut item = match self
+                        .fetch_authoritative_item(account_id, entity_id, http, session, auth_budget)
                         .await
                     {
                         Ok(item) => item,
                         Err(result) => return result,
                     };
+                    if operation.kind == OperationKind::MoveItem {
+                        let Some(authority) = item.as_mut() else {
+                            return self
+                                .fail_account_module_for_fence(account_id, fence_already_held)
+                                .await;
+                        };
+                        let attachments = match self
+                            .fetch_move_attachments(
+                                account_id,
+                                entity_id,
+                                authority,
+                                http,
+                                session,
+                                auth_budget,
+                                fence_already_held,
+                            )
+                            .await
+                        {
+                            Ok(attachments) => attachments,
+                            Err(result) => return result,
+                        };
+                        if attachments.iter().any(|attachment| {
+                            attachment.item_id != authority.id
+                                || attachment.vault_id != authority.vault_id
+                        }) {
+                            return self
+                                .fail_account_module_for_fence(account_id, fence_already_held)
+                                .await;
+                        }
+                        authority.attachments = attachments;
+                    }
                     let valid = match (&item, operation.kind) {
                         (None, OperationKind::PermanentlyDeleteItem) => true,
                         (Some(item), kind) if kind != OperationKind::PermanentlyDeleteItem => {
@@ -316,7 +398,7 @@ impl Runtime {
                     }
                 } else {
                     let item = match self
-                        .fetch_authoritative_item(account_id, entity_id, http, session)
+                        .fetch_authoritative_item(account_id, entity_id, http, session, auth_budget)
                         .await
                     {
                         Ok(Some(item)) => item,
@@ -349,13 +431,39 @@ impl Runtime {
                 if operation.kind == OperationKind::CreateShare {
                     PlanMutation::ReconcileShareOutcome { outcome, cursor }
                 } else if operation.kind != OperationKind::CreateItem {
-                    let item = match self
-                        .fetch_authoritative_item(account_id, &operation.item_id, http, session)
+                    let mut item = match self
+                        .fetch_authoritative_item(
+                            account_id,
+                            &operation.item_id,
+                            http,
+                            session,
+                            auth_budget,
+                        )
                         .await
                     {
                         Ok(item) => item,
                         Err(result) => return result,
                     };
+                    if operation.kind == OperationKind::MoveItem {
+                        if let Some(authority) = item.as_mut() {
+                            let attachments = match self
+                                .fetch_move_attachments(
+                                    account_id,
+                                    &operation.item_id,
+                                    authority,
+                                    http,
+                                    session,
+                                    auth_budget,
+                                    fence_already_held,
+                                )
+                                .await
+                            {
+                                Ok(attachments) => attachments,
+                                Err(result) => return result,
+                            };
+                            authority.attachments = attachments;
+                        }
+                    }
                     PlanMutation::ReconcileItemMutation {
                         outcome,
                         item: item.map(Box::new),
@@ -382,12 +490,17 @@ impl Runtime {
         item_id: &str,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> Result<Option<AuthorityItemRecord>, CompletionResult> {
         let cancellation = RequestCancellation::new();
         let mut fetched = http
             .fetch_item_or_absent(session.token.as_ref(), item_id, cancellation.clone())
             .await;
         if matches!(fetched, Ok(AuthenticatedOutcome::ReauthenticationRequired)) {
+            if !auth_budget.consume_renewal() {
+                self.mark_reauthentication_required(account_id);
+                return Err(CompletionResult::Reauthenticate);
+            }
             match self
                 .renew_session(account_id, session, http, cancellation.clone())
                 .await
@@ -415,6 +528,102 @@ impl Runtime {
                 Err(CompletionResult::Reauthenticate)
             }
             Ok(AuthenticatedOutcome::Transient) | Err(_) => Err(CompletionResult::Retry),
+        }
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "bounded authority validation keeps Account, Item, Vault, fence, and authentication scope explicit"
+    )]
+    async fn fetch_move_attachments(
+        &self,
+        account_id: &AccountId,
+        expected_item_id: &str,
+        item: &AuthorityItemRecord,
+        http: &AuthHttpClient<'_>,
+        session: &mut CurrentSessionDocument,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
+        fence_already_held: bool,
+    ) -> Result<Vec<AuthorityAttachmentRecord>, CompletionResult> {
+        let Some(snapshot) = self.replica.snapshot(account_id) else {
+            return Err(CompletionResult::Retry);
+        };
+        if item.id != expected_item_id
+            || !snapshot
+                .bootstrap
+                .snapshot()
+                .visible_vaults
+                .iter()
+                .any(|vault| vault.id == item.vault_id)
+        {
+            return Err(self
+                .fail_account_module_for_fence(account_id, fence_already_held)
+                .await);
+        }
+        let item_id = &item.id;
+        let cancellation = RequestCancellation::new();
+        let mut fetch = http
+            .begin_attachment_authority(item_id)
+            .map_err(|_| CompletionResult::Retry)?;
+        loop {
+            match http
+                .fetch_attachment_authority_page(
+                    session.token.as_ref(),
+                    &mut fetch,
+                    cancellation.clone(),
+                )
+                .await
+            {
+                Ok(AuthenticatedOutcome::Ok(Some(attachments))) => {
+                    let attachments: Vec<_> = attachments
+                        .into_iter()
+                        .map(super::attachment::authority_attachment_from_dto)
+                        .collect();
+                    if attachments.iter().any(|attachment| {
+                        attachment.item_id != item.id || attachment.vault_id != item.vault_id
+                    }) {
+                        return Err(self
+                            .fail_account_module_for_fence(account_id, fence_already_held)
+                            .await);
+                    }
+                    return Ok(attachments);
+                }
+                Ok(AuthenticatedOutcome::Ok(None)) => {}
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+                    if auth_budget.consume_renewal() =>
+                {
+                    match self
+                        .renew_session(account_id, session, http, cancellation.clone())
+                        .await
+                    {
+                        Ok(replacement) => *session = replacement,
+                        Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
+                            self.mark_reauthentication_required(account_id);
+                            return Err(CompletionResult::Reauthenticate);
+                        }
+                        Err(_) => return Err(CompletionResult::Retry),
+                    }
+                }
+                Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
+                    self.mark_reauthentication_required(account_id);
+                    return Err(CompletionResult::Reauthenticate);
+                }
+                Ok(AuthenticatedOutcome::Transient) | Err(_) => {
+                    return Err(CompletionResult::Retry);
+                }
+            }
+        }
+    }
+
+    async fn fail_account_module_for_fence(
+        &self,
+        account_id: &AccountId,
+        fence_already_held: bool,
+    ) -> CompletionResult {
+        if fence_already_held {
+            self.fail_account_module_fenced(account_id).await
+        } else {
+            self.fail_account_module(account_id).await
         }
     }
 
@@ -591,6 +800,7 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
     ) -> CompletionResult {
+        let mut auth_budget = OutcomeResolutionAuthBudget::default();
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return CompletionResult::Retry;
         };
@@ -605,7 +815,7 @@ impl Runtime {
             return CompletionResult::Completed;
         };
         match self
-            .lookup_operation_outcome(account_id, &operation, http, session)
+            .lookup_operation_outcome(account_id, &operation, http, session, &mut auth_budget)
             .await
         {
             SemanticAnswer::Outcome(outcome) => {
@@ -618,14 +828,29 @@ impl Runtime {
                     // exact immutable request under this same Sync fence so identity remains
                     // proven before Bootstrap advances the page watermark.
                     return self
-                        .replay_lookup_hint_for_sync_fenced(&snapshot, &operation, http, session)
+                        .replay_lookup_hint_for_sync_fenced(
+                            &snapshot,
+                            &operation,
+                            http,
+                            session,
+                            &mut auth_budget,
+                        )
                         .await;
                 }
-                self.complete_operation_fenced(account_id, &operation, outcome, http, session, None)
-                    .await
+                self.complete_operation_fenced_with_auth_budget(
+                    account_id,
+                    &operation,
+                    outcome,
+                    http,
+                    session,
+                    None,
+                    &mut auth_budget,
+                )
+                .await
             }
             SemanticAnswer::IdentityReused => self.fail_account_module_fenced(account_id).await,
             SemanticAnswer::Undecided | SemanticAnswer::Transient => CompletionResult::Retry,
+            SemanticAnswer::ReauthenticationRequired => CompletionResult::Reauthenticate,
         }
     }
 

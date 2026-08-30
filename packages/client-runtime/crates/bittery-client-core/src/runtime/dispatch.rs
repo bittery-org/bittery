@@ -6,7 +6,7 @@
 //! status as a semantic result — reading an answer is `outcome.rs`'s job, and completing on one
 //! is a single reconciliation plan.
 
-use super::outcome::{CompletionResult, SemanticAnswer};
+use super::outcome::{CompletionResult, OutcomeResolutionAuthBudget, SemanticAnswer};
 use super::*;
 use crate::{
     auth_http::AuthenticatedOutcome,
@@ -121,19 +121,21 @@ impl Runtime {
         operation: &OperationRecord,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
         match self
-            .send_exact_operation_fenced(snapshot, operation, http, session)
+            .send_exact_operation_fenced(snapshot, operation, http, session, auth_budget)
             .await
         {
             ExactSendOutcome::Outcome(outcome) => {
-                self.complete_operation_fenced(
+                self.complete_operation_fenced_with_auth_budget(
                     &snapshot.account_id,
                     operation,
                     outcome,
                     http,
                     session,
                     None,
+                    auth_budget,
                 )
                 .await
             }
@@ -157,6 +159,7 @@ impl Runtime {
         operation: &OperationRecord,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> ExactSendOutcome {
         let Ok(now_ms) = self.clock.now_ms() else {
             return ExactSendOutcome::Deferred;
@@ -177,6 +180,11 @@ impl Runtime {
             .await;
 
         if matches!(answer, Ok(AuthenticatedOutcome::ReauthenticationRequired)) {
+            if !auth_budget.consume_renewal() {
+                self.persist_backoff(snapshot, operation).await;
+                self.mark_reauthentication_required(account_id);
+                return ExactSendOutcome::Reauthenticate;
+            }
             match self
                 .renew_session(account_id, session, http, cancellation.clone())
                 .await
@@ -213,6 +221,7 @@ impl Runtime {
                         self.persist_backoff(snapshot, operation).await;
                         ExactSendOutcome::RetryScheduled
                     }
+                    SemanticAnswer::ReauthenticationRequired => ExactSendOutcome::Reauthenticate,
                 }
             }
             Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
@@ -436,19 +445,33 @@ impl Runtime {
         mut session: CurrentSessionDocument,
     ) -> AttemptOutcome {
         let account_id = &snapshot.account_id;
+        let mut auth_budget = OutcomeResolutionAuthBudget::default();
 
         // A retry has already handed these exact bytes to the Server at least once, so the
         // Server may already hold the answer this Device never saw. Asking creates no second
         // effect; sending again would rely entirely on the Server's own deduplication.
         if operation.scheduling.attempt_count > 0 {
             match self
-                .lookup_operation_outcome(account_id, operation, http, &mut session)
+                .lookup_operation_outcome(
+                    account_id,
+                    operation,
+                    http,
+                    &mut session,
+                    &mut auth_budget,
+                )
                 .await
             {
                 SemanticAnswer::Outcome(outcome) => {
                     if operation.kind == OperationKind::CreateItem {
                         return self
-                            .finish_operation(snapshot, operation, outcome, http, &mut session)
+                            .finish_operation(
+                                snapshot,
+                                operation,
+                                outcome,
+                                http,
+                                &mut session,
+                                &mut auth_budget,
+                            )
                             .await;
                     }
                     // Lookup has no request fingerprint. For Share and existing-Item work it is
@@ -467,16 +490,24 @@ impl Runtime {
                     self.persist_backoff(snapshot, operation).await;
                     return AttemptOutcome::Progressed;
                 }
+                SemanticAnswer::ReauthenticationRequired => return AttemptOutcome::Parked,
             }
         }
 
         match self
-            .send_exact_operation_fenced(snapshot, operation, http, &mut session)
+            .send_exact_operation_fenced(snapshot, operation, http, &mut session, &mut auth_budget)
             .await
         {
             ExactSendOutcome::Outcome(outcome) => {
-                self.finish_operation(snapshot, operation, outcome, http, &mut session)
-                    .await
+                self.finish_operation(
+                    snapshot,
+                    operation,
+                    outcome,
+                    http,
+                    &mut session,
+                    &mut auth_budget,
+                )
+                .await
             }
             ExactSendOutcome::IdentityReused => {
                 self.fail_account_module_fenced(account_id).await;
@@ -501,15 +532,17 @@ impl Runtime {
         outcome: crate::replica::ObservedOutcome,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> AttemptOutcome {
         match self
-            .complete_operation_fenced(
+            .complete_operation_fenced_with_auth_budget(
                 &snapshot.account_id,
                 operation,
                 outcome,
                 http,
                 session,
                 None,
+                auth_budget,
             )
             .await
         {

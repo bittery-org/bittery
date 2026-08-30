@@ -296,6 +296,12 @@ pub(super) struct FakeServer {
     pub(super) outcomes: Mutex<BTreeMap<String, StoredOutcome>>,
     /// Every Item row the Server actually created. This is the effect under test.
     pub(super) created_items: Mutex<Vec<StoredItem>>,
+    /// Authoritative Attachment rows returned by the Item-scoped paginated route.
+    pub(super) attachments: Mutex<Vec<Value>>,
+    /// Explicit Attachment authority pages, consumed only after a request succeeds.
+    pub(super) attachment_pages: Mutex<VecDeque<Value>>,
+    /// Per-request faults for Attachment authority; `None` lets that request reach its page.
+    pub(super) attachment_faults: Mutex<VecDeque<Option<Fault>>>,
     pub(super) faults: Mutex<VecDeque<Fault>>,
     /// Faults for the authoritative Item read, so reconciliation can fail after a real outcome.
     pub(super) item_faults: Mutex<VecDeque<Fault>>,
@@ -328,6 +334,9 @@ impl FakeServer {
             requests: Mutex::new(Vec::new()),
             outcomes: Mutex::new(BTreeMap::new()),
             created_items: Mutex::new(Vec::new()),
+            attachments: Mutex::new(Vec::new()),
+            attachment_pages: Mutex::new(VecDeque::new()),
+            attachment_faults: Mutex::new(VecDeque::new()),
             faults: Mutex::new(VecDeque::new()),
             item_faults: Mutex::new(VecDeque::new()),
             outcome_faults: Mutex::new(VecDeque::new()),
@@ -359,6 +368,26 @@ impl FakeServer {
 
     pub(super) fn reject_next(&self, code: &'static str) {
         self.rejections.lock().unwrap().push_back(code);
+    }
+
+    pub(super) fn set_attachment_authority(&self, attachments: Vec<Value>) {
+        *self.attachments.lock().unwrap() = attachments;
+    }
+
+    pub(super) fn script_attachment_page(
+        &self,
+        attachments: Vec<Value>,
+        next_cursor: Option<&str>,
+    ) {
+        self.attachment_pages.lock().unwrap().push_back(json!({
+            "items": attachments,
+            "hasMore": next_cursor.is_some(),
+            "nextCursor": next_cursor,
+        }));
+    }
+
+    pub(super) fn script_attachment_faults(&self, faults: impl IntoIterator<Item = Option<Fault>>) {
+        self.attachment_faults.lock().unwrap().extend(faults);
     }
 
     pub(super) fn answer_next_mutation_with(&self, body: Vec<u8>) {
@@ -786,6 +815,30 @@ impl FakeServer {
         }
     }
 
+    pub(super) fn handle_attachments(&self, request: &RecordedRequest) -> Value {
+        if !self.authorized(request) {
+            return completed(401, b"{}".to_vec());
+        }
+        if let Some(fault) = self.attachment_faults.lock().unwrap().pop_front().flatten() {
+            return match fault {
+                Fault::NetworkFailure => json!({ "type": "networkFailure" }),
+                Fault::Status(status) => completed(status, b"{}".to_vec()),
+            };
+        }
+        if let Some(page) = self.attachment_pages.lock().unwrap().pop_front() {
+            return completed(200, serde_json::to_vec(&page).unwrap());
+        }
+        completed(
+            200,
+            serde_json::to_vec(&json!({
+                "items": self.attachments.lock().unwrap().clone(),
+                "hasMore": false,
+                "nextCursor": null,
+            }))
+            .unwrap(),
+        )
+    }
+
     /// Publishes the `operation_resolved` event the real Server writes in the same transaction.
     pub(super) fn script_operation_event(&self, operation_id: &str, cursor: &str) {
         self.sync_events.lock().unwrap().push(json!({
@@ -975,6 +1028,8 @@ impl crate::http_transport::SerializedHttpExecutor for FakeServer {
             completed(204, Vec::new())
         } else if request.method == "GET" && request.url.contains("/api/v1/operations/") {
             self.handle_outcome_lookup(&request)
+        } else if request.method == "GET" && request.url.contains("/attachments?") {
+            self.handle_attachments(&request)
         } else if request.method == "GET" && request.url.contains("/api/v1/items/") {
             self.handle_item(&request)
         } else {

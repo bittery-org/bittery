@@ -2449,7 +2449,9 @@ fn size_rejected(message: &str) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::SizeRejected, message)
 }
 
-fn authority_attachment_from_dto(attachment: VaultAttachmentResponse) -> AuthorityAttachmentRecord {
+pub(super) fn authority_attachment_from_dto(
+    attachment: VaultAttachmentResponse,
+) -> AuthorityAttachmentRecord {
     AuthorityAttachmentRecord {
         id: attachment.id,
         item_id: attachment.item_id,

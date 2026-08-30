@@ -10,6 +10,7 @@ use super::*;
 use crate::replica::{
     OperationOutcomeResult, OperationRejectionCode, ReplicaItemRecord, ReplicaSnapshot,
 };
+use crate::test_fixtures::TEST_VAULT_ID;
 use async_trait::async_trait;
 
 #[derive(Clone, Copy, Debug)]
@@ -152,6 +153,27 @@ fn ordinary_rejected_body(operation_id: &str, kind: &str) -> Vec<u8> {
     .unwrap()
 }
 
+fn attachment_authority_json(item_id: &str, vault_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": "attachment-current",
+        "itemId": item_id,
+        "vaultId": vault_id,
+        "storageKey": format!("attachments/{item_id}/attachment-current.enc"),
+        "encryptedName": "encrypted-name",
+        "encryptionIv": "name-iv",
+        "encryptionAlgorithm": "AES-256-GCM",
+        "encryptedAttachmentKey": "encrypted-key",
+        "attachmentKeyIv": "key-iv",
+        "attachmentKeyAlgorithm": "AES-256-GCM",
+        "encryptedContentType": "encrypted-content-type",
+        "encryptedContentTypeIv": "content-type-iv",
+        "envelopeVersion": 1,
+        "fileSize": 17,
+        "uploadedBy": USER,
+        "createdAt": "2026-08-30T00:00:00Z"
+    })
+}
+
 #[tokio::test]
 async fn each_ordinary_item_kind_accepts_its_exact_tagged_applied_outcome() {
     for case in OrdinaryItemCase::ALL {
@@ -225,6 +247,349 @@ async fn all_six_ordinary_item_outcomes_reconcile_authority_overlay_and_validato
             }
         }
     }
+}
+
+#[tokio::test]
+async fn applied_move_reconciles_authoritative_target_attachments_with_the_receipt() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness
+        .server
+        .set_attachment_authority(vec![attachment_authority_json("item-existing", "vault-2")]);
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let snapshot = harness.snapshot();
+    assert!(snapshot.operations.is_empty());
+    assert_eq!(snapshot.receipts.len(), 1);
+    let authority = harness.authority_items();
+    assert_eq!(authority.len(), 1);
+    assert_eq!(authority[0].vault_id, "vault-2");
+    assert_eq!(authority[0].attachments.len(), 1);
+    assert_eq!(authority[0].attachments[0].id, "attachment-current");
+    assert_eq!(authority[0].attachments[0].item_id, "item-existing");
+    assert_eq!(authority[0].attachments[0].vault_id, "vault-2");
+}
+
+#[tokio::test]
+async fn every_rejected_move_reconciles_current_authoritative_attachments_with_its_receipt() {
+    for &code in OrdinaryItemCase::Move.allowed_rejections() {
+        let harness = seeded_with_existing_item(false, false).await;
+        harness.server.reject_next(code);
+        harness
+            .server
+            .set_attachment_authority(vec![attachment_authority_json(
+                "item-existing",
+                TEST_VAULT_ID,
+            )]);
+        let (operation_id, _) = harness
+            .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+            .await;
+
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+
+        let snapshot = harness.snapshot();
+        assert!(snapshot.operations.is_empty(), "{code}");
+        assert_eq!(snapshot.receipts.len(), 1, "{code}");
+        assert!(
+            matches!(
+                snapshot.receipts[0].result,
+                OperationOutcomeResult::Rejected { .. }
+            ),
+            "{code}"
+        );
+        let authority = harness.authority_items();
+        assert_eq!(authority.len(), 1, "{code}");
+        assert_eq!(authority[0].vault_id, TEST_VAULT_ID, "{code}");
+        assert_eq!(authority[0].attachments.len(), 1, "{code}");
+        assert_eq!(
+            authority[0].attachments[0].id, "attachment-current",
+            "{code}"
+        );
+        assert_eq!(
+            authority[0].attachments[0].item_id, "item-existing",
+            "{code}"
+        );
+        assert_eq!(
+            authority[0].attachments[0].vault_id, TEST_VAULT_ID,
+            "{code}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn item_renewal_consumes_the_move_outcome_attempt_budget_before_attachment_authority() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness.server.reject_next("attachment_state_conflict");
+    harness
+        .server
+        .set_attachment_authority(vec![attachment_authority_json(
+            "item-existing",
+            TEST_VAULT_ID,
+        )]);
+    harness.server.script_item_faults([Fault::Status(401)]);
+    harness
+        .server
+        .script_attachment_faults([Some(Fault::Status(401))]);
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let retained = harness.snapshot();
+    assert_eq!(retained.operations.len(), 1);
+    assert_eq!(retained.operations[0].operation_id, operation_id);
+    assert_eq!(retained.items.len(), 1);
+    assert!(retained.receipts.is_empty());
+    assert_eq!(
+        harness.waiting_reason(),
+        Some(AccountWaitingReason::ReauthenticationRequired)
+    );
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.authority_items()[0].attachments.len(), 0);
+    let stored = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &retained.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.token.as_ref(), SECOND_TOKEN);
+}
+
+#[tokio::test]
+async fn dispatch_renewal_consumes_the_move_outcome_attempt_budget_before_item_authority() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness.server.reject_next("attachment_state_conflict");
+    harness.server.script([Fault::Status(401)]);
+    harness.server.script_item_faults([Fault::Status(401)]);
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let retained = harness.snapshot();
+    assert_eq!(retained.operations.len(), 1);
+    assert_eq!(retained.operations[0].operation_id, operation_id);
+    assert_eq!(retained.items.len(), 1);
+    assert!(retained.receipts.is_empty());
+    assert_eq!(
+        harness.waiting_reason(),
+        Some(AccountWaitingReason::ReauthenticationRequired)
+    );
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.server.item_calls.load(Ordering::SeqCst), 1);
+    let stored = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &retained.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.token.as_ref(), SECOND_TOKEN);
+}
+
+#[tokio::test]
+async fn lookup_renewal_consumes_the_move_outcome_attempt_budget_before_attachment_authority() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness.server.reject_next("attachment_state_conflict");
+    harness.server.lose_next_response();
+    harness
+        .server
+        .set_attachment_authority(vec![attachment_authority_json(
+            "item-existing",
+            TEST_VAULT_ID,
+        )]);
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    harness.clock.advance(1_000);
+    harness
+        .server
+        .outcome_faults
+        .lock()
+        .unwrap()
+        .push_back(Fault::Status(401));
+    harness
+        .server
+        .script_attachment_faults([Some(Fault::Status(401))]);
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let retained = harness.snapshot();
+    assert_eq!(retained.operations.len(), 1);
+    assert_eq!(retained.operations[0].operation_id, operation_id);
+    assert!(retained.receipts.is_empty());
+    assert_eq!(
+        harness.waiting_reason(),
+        Some(AccountWaitingReason::ReauthenticationRequired)
+    );
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.server.outcome_lookups(), 2);
+    let stored = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &retained.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.token.as_ref(), SECOND_TOKEN);
+}
+
+#[tokio::test]
+async fn applied_move_attachment_authority_renews_on_a_later_page_and_persists_the_session() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let attachment = serde_json::json!({
+        "id": "attachment-moved",
+        "itemId": "item-existing",
+        "vaultId": "vault-2",
+        "storageKey": "attachments/item-existing/attachment-moved.enc",
+        "encryptedName": "encrypted-name",
+        "encryptionIv": "name-iv",
+        "encryptionAlgorithm": "AES-256-GCM",
+        "encryptedAttachmentKey": "encrypted-key",
+        "attachmentKeyIv": "key-iv",
+        "attachmentKeyAlgorithm": "AES-256-GCM",
+        "encryptedContentType": "encrypted-content-type",
+        "encryptedContentTypeIv": "content-type-iv",
+        "envelopeVersion": 1,
+        "fileSize": 17,
+        "uploadedBy": USER,
+        "createdAt": "2026-08-30T00:00:00Z"
+    });
+    harness
+        .server
+        .script_attachment_page(vec![attachment], Some("attachment-page-2"));
+    harness.server.script_attachment_page(Vec::new(), None);
+    harness
+        .server
+        .script_attachment_faults([None, Some(Fault::Status(401)), None]);
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let snapshot = harness.snapshot();
+    assert!(snapshot.operations.is_empty());
+    assert_eq!(snapshot.receipts.len(), 1);
+    assert_eq!(harness.authority_items()[0].attachments.len(), 1);
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    let attachment_requests: Vec<_> = harness
+        .server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.contains("/attachments?"))
+        .cloned()
+        .collect();
+    assert_eq!(attachment_requests.len(), 3);
+    assert_eq!(
+        attachment_requests[0].url,
+        "https://vault.example.test/api/v1/items/item-existing/attachments?limit=500"
+    );
+    assert_eq!(
+        attachment_requests[1].url,
+        "https://vault.example.test/api/v1/items/item-existing/attachments?limit=500&cursor=attachment-page-2"
+    );
+    assert_eq!(attachment_requests[1].url, attachment_requests[2].url);
+    assert_eq!(attachment_requests[1].method, attachment_requests[2].method);
+    assert_eq!(attachment_requests[1].body, attachment_requests[2].body);
+    let headers_without_authorization = |request: &RecordedRequest| {
+        request
+            .headers
+            .iter()
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("authorization"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        headers_without_authorization(&attachment_requests[1]),
+        headers_without_authorization(&attachment_requests[2])
+    );
+    assert_eq!(
+        attachment_requests[1].header("authorization"),
+        Some("Bearer session-token-1")
+    );
+    assert_eq!(
+        attachment_requests[2].header("authorization"),
+        Some("Bearer session-token-2")
+    );
+    let stored = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &snapshot.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.token.as_ref(), SECOND_TOKEN);
+}
+
+#[tokio::test]
+async fn applied_move_attachment_authority_second_401_retains_durable_work() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness
+        .server
+        .script_attachment_faults([Some(Fault::Status(401)), Some(Fault::Status(401))]);
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let retained = harness.snapshot();
+    assert_eq!(retained.operations.len(), 1);
+    assert_eq!(retained.operations[0].operation_id, operation_id);
+    assert_eq!(retained.items.len(), 1);
+    assert!(retained.receipts.is_empty());
+    assert_eq!(
+        harness.waiting_reason(),
+        Some(AccountWaitingReason::ReauthenticationRequired)
+    );
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    let stored = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &retained.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.token.as_ref(), SECOND_TOKEN);
 }
 
 #[tokio::test]
@@ -833,6 +1198,47 @@ async fn a_lost_first_success_response_is_recovered_by_looking_the_outcome_up() 
 }
 
 #[tokio::test]
+async fn lookup_401_then_refresh_401_parks_without_timed_retries_or_losing_work() {
+    let harness = seeded(true).await;
+    harness.server.lose_next_response();
+    let (operation_id, item_id) = harness.accept_create().await;
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    harness.clock.advance(1_000);
+    let accepted = harness.snapshot();
+    harness.server.accepted_tokens.lock().unwrap().clear();
+
+    let dispatcher = tokio::spawn(Arc::clone(&harness.runtime).run_operation_dispatch());
+    until("the failed lookup renewal parks the Account", || {
+        harness.waiting_reason() == Some(AccountWaitingReason::ReauthenticationRequired)
+    })
+    .await;
+    settle().await;
+
+    let parked = harness.snapshot();
+    assert_eq!(parked.operations, accepted.operations);
+    assert_eq!(parked.items, accepted.items);
+    assert_eq!(harness.overlay().map(|item| item.item_id), Some(item_id));
+    assert!(parked.receipts.is_empty());
+    assert_eq!(harness.server.outcome_lookups(), 1);
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        harness.timer.requested().is_empty(),
+        "reauthentication parks on an event instead of scheduling a timed lookup"
+    );
+
+    settle().await;
+    assert_eq!(harness.server.outcome_lookups(), 1);
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+
+    harness.runtime.close().await;
+    dispatcher.await.unwrap();
+}
+
+#[tokio::test]
 async fn the_same_operation_id_with_other_request_bytes_fails_the_account() {
     let harness = seeded(false).await;
     let (operation_id, item_id) = harness.accept_create().await;
@@ -1324,6 +1730,205 @@ async fn ordinary_sync_second_401_parks_with_backoff_without_moving_work_or_curs
         harness.waiting_reason(),
         Some(AccountWaitingReason::ReauthenticationRequired)
     );
+}
+
+#[tokio::test]
+async fn sync_lookup_401_then_refresh_401_marks_once_and_keeps_work_and_cursor() {
+    let harness = seeded(false).await;
+    harness.server.lose_next_response();
+    let (operation_id, _) = harness.accept_create().await;
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    harness.clock.advance(1_000);
+    let before_page = harness.snapshot();
+    let revision_before = harness.runtime.device_revision.load(Ordering::SeqCst);
+    harness
+        .server
+        .script_operation_event(&operation_id, "sync-lookup-refresh-401");
+    harness
+        .server
+        .outcome_faults
+        .lock()
+        .unwrap()
+        .push_back(Fault::Status(401));
+
+    let error = harness
+        .runtime
+        .bootstrap_account(&harness.account_id, RequestCancellation::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+    let parked = harness.snapshot();
+    assert_eq!(parked.operations, before_page.operations);
+    assert_eq!(parked.items, before_page.items);
+    assert!(parked.receipts.is_empty());
+    assert_eq!(
+        parked.bootstrap.active_cursor, before_page.bootstrap.active_cursor,
+        "the Sync page cannot advance past an unrenewable outcome lookup"
+    );
+    assert_eq!(
+        harness.waiting_reason(),
+        Some(AccountWaitingReason::ReauthenticationRequired)
+    );
+    assert_eq!(harness.server.outcome_lookups(), 1);
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.runtime.device_revision.load(Ordering::SeqCst),
+        revision_before + 1,
+        "lookup and Bootstrap share one observable reauthentication transition"
+    );
+}
+
+#[tokio::test]
+async fn sync_page_cursor_does_not_advance_past_move_attachment_authority_second_401() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness.server.lose_next_response();
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    harness.clock.advance(1_000);
+    let before_page = harness.snapshot();
+    harness
+        .server
+        .script_operation_event(&operation_id, "sync-move-attachment-second-401");
+    harness
+        .server
+        .script_attachment_faults([Some(Fault::Status(401)), Some(Fault::Status(401))]);
+    *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+
+    let error = harness
+        .runtime
+        .bootstrap_account(&harness.account_id, RequestCancellation::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::AuthenticationRequired);
+    let retained = harness.snapshot();
+    assert_eq!(retained.operations.len(), 1);
+    assert_eq!(retained.operations[0].operation_id, operation_id);
+    assert_eq!(retained.items, before_page.items);
+    assert!(retained.receipts.is_empty());
+    assert_eq!(
+        retained.bootstrap.active_cursor, before_page.bootstrap.active_cursor,
+        "the Sync page cannot advance past unresolved Move authority"
+    );
+    assert_eq!(
+        harness.waiting_reason(),
+        Some(AccountWaitingReason::ReauthenticationRequired)
+    );
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    let attachment_requests: Vec<_> = harness
+        .server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.contains("/attachments?"))
+        .cloned()
+        .collect();
+    assert_eq!(attachment_requests.len(), 2);
+    assert_eq!(attachment_requests[0].url, attachment_requests[1].url);
+    assert_eq!(attachment_requests[0].method, attachment_requests[1].method);
+    assert_eq!(attachment_requests[0].body, attachment_requests[1].body);
+    let headers_without_authorization = |request: &RecordedRequest| {
+        request
+            .headers
+            .iter()
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("authorization"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        headers_without_authorization(&attachment_requests[0]),
+        headers_without_authorization(&attachment_requests[1])
+    );
+    assert_eq!(
+        attachment_requests[0].header("authorization"),
+        Some("Bearer session-token-1")
+    );
+    assert_eq!(
+        attachment_requests[1].header("authorization"),
+        Some("Bearer session-token-2")
+    );
+    let stored = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &retained.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.token.as_ref(), SECOND_TOKEN);
+}
+
+#[tokio::test]
+async fn rejected_move_malformed_foreign_or_transient_attachment_authority_moves_no_work_or_cursor()
+{
+    enum AuthorityFailure {
+        Malformed,
+        Foreign,
+        Transient,
+    }
+
+    for failure in [
+        AuthorityFailure::Malformed,
+        AuthorityFailure::Foreign,
+        AuthorityFailure::Transient,
+    ] {
+        let harness = seeded_with_existing_item(false, false).await;
+        harness.server.reject_next("attachment_state_conflict");
+        harness.server.lose_next_response();
+        let (operation_id, _) = harness
+            .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+            .await;
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        harness.clock.advance(1_000);
+        let before_page = harness.snapshot();
+        harness
+            .server
+            .script_operation_event(&operation_id, "sync-rejected-move-authority-failure");
+        match failure {
+            AuthorityFailure::Malformed => harness
+                .server
+                .script_attachment_page(vec![serde_json::json!({ "id": "incomplete" })], None),
+            AuthorityFailure::Foreign => harness.server.script_attachment_page(
+                vec![attachment_authority_json("foreign-item", TEST_VAULT_ID)],
+                None,
+            ),
+            AuthorityFailure::Transient => harness
+                .server
+                .script_attachment_faults([Some(Fault::NetworkFailure)]),
+        }
+
+        let _ = harness
+            .runtime
+            .bootstrap_account(&harness.account_id, RequestCancellation::new())
+            .await;
+
+        let retained = harness.snapshot();
+        assert_eq!(retained.operations.len(), 1);
+        assert_eq!(retained.operations[0].operation_id, operation_id);
+        assert_eq!(retained.items, before_page.items);
+        assert!(retained.receipts.is_empty());
+        assert_eq!(
+            retained.bootstrap.active_cursor, before_page.bootstrap.active_cursor,
+            "invalid Attachment authority cannot advance the terminal Sync page"
+        );
+        assert_eq!(
+            harness.authority_items(),
+            before_page.bootstrap.snapshot().visible_items,
+            "invalid Attachment authority cannot replace current Item authority"
+        );
+    }
 }
 
 #[tokio::test]

@@ -167,6 +167,13 @@ struct AttachmentAuthorityPage {
     next_cursor: Option<String>,
 }
 
+pub(crate) struct AttachmentAuthorityFetch {
+    item_id: String,
+    cursor: Option<String>,
+    authority: AttachmentAuthorityAccumulator,
+    page_pending: bool,
+}
+
 struct RawHttpResponse {
     status: u16,
     headers: Vec<HttpHeader>,
@@ -1131,71 +1138,108 @@ impl<'transport> AuthHttpClient<'transport> {
         AuthenticatedOutcome<Vec<crate::server_contract::VaultAttachmentResponse>>,
         RuntimeError,
     > {
-        validate_bearer(token)?;
-        validate_identifier(item_id, "Item")?;
-        let mut cursor = None;
-        let mut authority = AttachmentAuthorityAccumulator::new();
+        let mut fetch = self.begin_attachment_authority(item_id)?;
         loop {
-            authority.begin_page()?;
-            let mut url = self.endpoint(&["api", "v1", "items", item_id, "attachments"])?;
-            {
-                let mut query = url.query_pairs_mut();
-                query.append_pair("limit", "500");
-                if let Some(cursor) = cursor.as_deref() {
-                    query.append_pair("cursor", cursor);
-                }
-            }
-            let page = match self
-                .get_authenticated_json_with_transport_policy::<AttachmentAuthorityPage>(
-                    url,
-                    ATTACHMENT_AUTHORITY_RESPONSE_BYTES,
-                    token,
-                    cancellation.clone(),
-                    true,
-                )
+            match self
+                .fetch_attachment_authority_page(token, &mut fetch, cancellation.clone())
                 .await?
             {
-                AuthenticatedOutcome::Ok(page) => page,
+                AuthenticatedOutcome::Ok(Some(authority)) => {
+                    return Ok(AuthenticatedOutcome::Ok(authority));
+                }
+                AuthenticatedOutcome::Ok(None) => {}
                 AuthenticatedOutcome::ReauthenticationRequired => {
                     return Ok(AuthenticatedOutcome::ReauthenticationRequired);
                 }
                 AuthenticatedOutcome::Transient => {
                     return Ok(AuthenticatedOutcome::Transient);
                 }
-            };
-            let RawJsonPage { raw_body, value } = page;
-            authority.record_raw_page(raw_body.len())?;
-            drop(raw_body);
-            let AttachmentAuthorityPage {
-                items,
-                has_more,
-                next_cursor,
-            } = value;
-            authority.append(items)?;
-            match (has_more, next_cursor) {
-                (false, None) => {
-                    return Ok(AuthenticatedOutcome::Ok(authority.into_items()));
-                }
-                (false, Some(_)) => {
-                    return Err(invariant(
-                        "Attachment authority final page retained a continuation",
-                    ));
-                }
-                (true, _) if authority.last_page_was_empty() => {
-                    return Err(invariant(
-                        "Attachment authority continuation made no progress",
-                    ));
-                }
-                (true, Some(next)) if !next.is_empty() => {
-                    authority.record_cursor(&next)?;
-                    cursor = Some(next);
-                }
-                (true, _) => {
-                    return Err(invariant(
-                        "Attachment authority page omitted its continuation",
-                    ));
-                }
             }
+        }
+    }
+
+    pub(crate) fn begin_attachment_authority(
+        &self,
+        item_id: &str,
+    ) -> Result<AttachmentAuthorityFetch, RuntimeError> {
+        validate_identifier(item_id, "Item")?;
+        Ok(AttachmentAuthorityFetch {
+            item_id: item_id.to_owned(),
+            cursor: None,
+            authority: AttachmentAuthorityAccumulator::new(),
+            page_pending: false,
+        })
+    }
+
+    /// Fetches one bounded page. A 401 leaves the page pending so a caller can durably replace its
+    /// Session and retry the exact URL without replaying earlier pages.
+    pub(crate) async fn fetch_attachment_authority_page(
+        &self,
+        token: &str,
+        fetch: &mut AttachmentAuthorityFetch,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<Option<Vec<crate::server_contract::VaultAttachmentResponse>>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        if !fetch.page_pending {
+            fetch.authority.begin_page()?;
+            fetch.page_pending = true;
+        }
+        let mut url = self.endpoint(&["api", "v1", "items", &fetch.item_id, "attachments"])?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", "500");
+            if let Some(cursor) = fetch.cursor.as_deref() {
+                query.append_pair("cursor", cursor);
+            }
+        }
+        let page = match self
+            .get_authenticated_json_with_transport_policy::<AttachmentAuthorityPage>(
+                url,
+                ATTACHMENT_AUTHORITY_RESPONSE_BYTES,
+                token,
+                cancellation,
+                true,
+            )
+            .await?
+        {
+            AuthenticatedOutcome::Ok(page) => page,
+            AuthenticatedOutcome::ReauthenticationRequired => {
+                return Ok(AuthenticatedOutcome::ReauthenticationRequired);
+            }
+            AuthenticatedOutcome::Transient => return Ok(AuthenticatedOutcome::Transient),
+        };
+        fetch.page_pending = false;
+        let RawJsonPage { raw_body, value } = page;
+        fetch.authority.record_raw_page(raw_body.len())?;
+        drop(raw_body);
+        let AttachmentAuthorityPage {
+            items,
+            has_more,
+            next_cursor,
+        } = value;
+        fetch.authority.append(items)?;
+        match (has_more, next_cursor) {
+            (false, None) => Ok(AuthenticatedOutcome::Ok(Some(
+                std::mem::replace(&mut fetch.authority, AttachmentAuthorityAccumulator::new())
+                    .into_items(),
+            ))),
+            (false, Some(_)) => Err(invariant(
+                "Attachment authority final page retained a continuation",
+            )),
+            (true, _) if fetch.authority.last_page_was_empty() => Err(invariant(
+                "Attachment authority continuation made no progress",
+            )),
+            (true, Some(next)) if !next.is_empty() => {
+                fetch.authority.record_cursor(&next)?;
+                fetch.cursor = Some(next);
+                Ok(AuthenticatedOutcome::Ok(None))
+            }
+            (true, _) => Err(invariant(
+                "Attachment authority page omitted its continuation",
+            )),
         }
     }
 

@@ -118,6 +118,13 @@ export interface SignUpOptions {
 	plan?: SignUpPlan;
 	/** Budget for the whole flow; WASM key generation and SRP dominate it. */
 	timeoutMs?: number;
+	/**
+	 * Runs after legacy signup has installed its authenticated Account but before
+	 * the fixture performs the first full Runtime sign-in. Acceptance fixtures use
+	 * this only to create Server authority that the initial Runtime Bootstrap must
+	 * discover; it does not replace or shorten either authentication ceremony.
+	 */
+	beforeRuntimeSignIn?: (page: Page) => Promise<void>;
 }
 
 /** The Team tile's name in `packages/shared/src/pricing.ts`. */
@@ -288,6 +295,7 @@ export async function signUp(
 	]);
 	let secretKey: string | undefined;
 	if (needsRuntimeUnlock) {
+		await options.beforeRuntimeSignIn?.(page);
 		// A just-created legacy account has no Rust installation to quick-unlock yet.
 		// Keep the Secret Key before switching the form, then perform the full Rust
 		// Sign-in that creates that installation.
