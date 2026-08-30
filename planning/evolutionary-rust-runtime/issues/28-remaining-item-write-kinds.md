@@ -2,7 +2,7 @@
 
 Type: task
 Status: claimed
-Blocked by: 22, 24, 31, 32, 43, 45, 46, 48
+Blocked by: 22, 24, 31, 32, 43, 45, 46, 48, 58
 Spec: ../spec.md#offline-create
 
 ## Outcome
@@ -1610,3 +1610,314 @@ Playwright scenario 1/1 in 1.7 minutes. The clean-tree root `pnpm check:ci` and
 D does not complete Ticket 28. Final Web cutover and the transitional-owner reachability audit,
 `idempotency_record` removal, native host work, and Ticket 30's Runtime-owned live Sync remain open;
 Ticket 28 stays claimed.
+
+### 2026-08-30 — final Web Item and Import frontier resolved
+
+The paused host-only cutover exposed a product-preservation gap. The current Rust external seam and
+decrypted projection are Login-only, and ordinary existing-Item admission rejects every other
+category. The reachable `use-vault-import` path still reads transitional Vault keys, creates Vaults
+through `packages/core`, encrypts five-category plaintext in TypeScript, calls the Server's legacy
+bulk-import writer directly, and repairs transitional caches afterward. Removing that path now would
+drop existing Import behavior; completing the current host cutover around it would leave a second
+writer and make the implementation Web-specific.
+
+The maintainer confirmed that final Web Import preserves the existing product behavior and that Rust
+Runtime owns both Vault creation and imported Item creation for Login, Secure Note, Credit Card,
+Identity, and Authenticator. `totp` remains the existing Server wire spelling for Authenticator. The
+deep shared module's external seam is the Rust-defined Runtime protocol and its platform-neutral
+client facade. A React hook may retain file selection, provider parsing, localized preview, mapping,
+progress, and summary state, but it owns no key, encryption, network, retry, outcome, Replica, or
+cache-repair policy. Desktop and Extension eventually call the same client interface; Kotlin and
+Swift receive the same generated closed values. No concrete Web registry or `apps/web` hook becomes
+the reusable interface.
+
+**Caller and route audit.** Production create-Vault reachability is not limited to Import. The Web
+Vault route, Desktop Vault route, and Mobile create sheet all call the shared `useCreateVault` hook;
+Web Import calls the same underlying `packages/core` service directly. The shared service mints the
+Vault ID and key, optionally obtains an image upload, sends `PUT /api/v1/vaults/{vaultId}`, then
+destroys its only plaintext key handle. The current PUT requires no `Idempotency-Key`, returns only
+`{ vaultId }`, has no retained outcome, and can commit a Vault while a lost response leaves the
+caller without its key authority. Its image-grant route also checks management access when given the
+not-yet-created Vault ID, so pre-creation image handling must be covered by the cutover rather than
+assumed to work. Extension has no create-Vault UI caller.
+
+The PUT therefore cannot evolve underneath a reachable legacy caller. There is no parallel route or
+compatibility response. Its one atomic cutover must open Runtime dispatch, replace both Web callers,
+delete the transitional shared create writer, and make the incompatible Desktop and Mobile creation
+affordances explicitly absent, as already done for Share creation. Their create UI returns only in
+their later Runtime host slices, in delivery order. Extension remains unchanged because it exposes
+no such affordance. This is an intentional temporary product boundary, not a silent broken button or
+a native host implementation inside the Web slice.
+
+**Five-category Item foundation.** Replace the Login-only draft and projection with one closed,
+category-tagged Rust Item vocabulary covering the complete plaintext currently preserved by import
+and edit, including Login TOTP, Password history, Passkeys, Custom fields and linked Item identity,
+and the existing Secure Note, Credit Card, Identity and Authenticator fields. Generated Web, Kotlin,
+and Swift shapes remain redacted at diagnostic/stringification seams. Bootstrap decryption and the
+Items projection preserve the category and its exact data. Category tagging must not narrow away an
+optional field that the current provider or Bittery export round trip preserves. Create and update
+accept the matching category draft, while favorite, trash, restore, move, permanent delete, Share,
+and Attachment authority stop imposing a Login-only admission guard. Existing ordinary Server Item
+routes and their outcome kinds are already category-agnostic and need no new Server schema.
+
+The reusable TypeScript client module derives the import Vault catalog from Runtime status and the
+Account-scoped Items/Vault projections. That preserves mapping source Vaults to writable Vaults from
+more than one unlocked Account without adding a second Rust Vault revision line or asking Web
+storage. Active Account remains host UI state and is passed explicitly only when the user asks
+Import to create a new target Vault.
+
+**Vault creation is a durable `create_vault` Operation.** The closed Runtime request covers every
+currently reachable Web input, not only Import: explicit Account, bounded trimmed name, personal or
+shared Vault (`team` on the Server wire), icon, and an optional opaque image-source capability.
+Import uses personal plus the existing default icon. Rust mints the stable Operation ID, final Vault
+ID, and random Vault key, wraps that key under the live Master unlock key with the unchanged
+version-1 Vault-key context, and builds one immutable intent. Its acceptance transaction commits the
+intent together with a `PendingVaultCreation` optimistic effect that references the Operation and
+reserves the Vault identity without duplicating key bytes or publishing authoritative or writable
+Vault state. Plaintext key material is zeroized after that commit. No Web, Desktop, Mobile, React,
+or source adapter supplies an ID, key, encrypted key, image key, request fingerprint, retry count,
+or Runtime incarnation.
+
+**A Vault image becomes Runtime-owned before acceptance.** The host grants one opaque, single-use
+source through the shared client facade, not through an `apps/web` hook or a caller-visible registry.
+Its closed grant declares Account, exact raw byte length, and bounded content type. Runtime claims it
+for the prepared Operation ID and accepts exactly `image/jpeg`, `image/png`, `image/webp`,
+`image/gif`, or `image/avif`, with no parameters or aliases, and 1 through 2,097,152 raw bytes,
+adopting the product's existing 2 MiB native image limit as the shared contract. Reads are at most
+256 KiB. Runtime requires exact EOF at the declared length and computes lowercase SHA-256 over the
+exact raw bytes while copying them; it accepts no host-supplied digest. A short, long, replayed,
+expired, wrong-Account, or wrong-content-type source fails before acceptance.
+
+The copy is atomically published by a new **Vault-image artifact port** under
+`(Account ID, Operation ID)`, with Vault ID, byte length, canonical content type, and raw-byte digest
+as immutable metadata. It holds the original image bytes because those exact plaintext bytes are
+what object storage receives. The existing Attachment artifact store holds format-preserving
+Attachment ciphertext and is scoped by Attachment identity, ciphertext digest, and Move publication
+proof; that interface does not fit and is not reused or renamed. Its chunking, atomic-publication,
+exclusive-startup-sweep, and idempotent-deletion patterns are evidence for the new port, whose Web
+adapter is IndexedDB and whose native conformance adapter is SQLite. The shared client facade reuses
+and deepens the Attachment upload source-registry invariants rather than exposing another Web-owned
+registry. Every claim binds the grant to the actual Runtime incarnation, Account, prepared Operation, and
+exact closed request. One inclusive capacity of 1,024 identities counts live entries, expiry/replay
+tombstones, retained Account states, and the active/pending/retired Runtime-incarnation state; at
+most 1,024 source operations may be in flight, and a grant expires within at most one hour. Exact
+replay and expiry remain fail-closed. Failed cleanup retries, while failed-open recovery drains the
+old registry before constructing one fresh bounded registry. The Vault-image scope remains distinct
+from Attachment-specific `itemId`, name, and ciphertext policy.
+
+Artifact publication completes before the Replica acceptance transaction. These two different
+stores are deliberately not described as one cross-store atomic commit: acceptance first verifies
+the exact published artifact and then durably references it. Failure or cancellation before
+acceptance drains and closes the source, leaves no Operation or optimistic effect, and idempotently
+deletes every partial artifact. Lock, Sign-out, Remove, Wipe, Runtime close, failed-open cleanup,
+Account retirement, and Runtime-incarnation retirement must cancel and drain source work and
+complete or durably retain that deletion before the relevant authority retires. Acceptance shares
+the same fence and cannot race any retirement. A crash after artifact publication but before
+acceptance can therefore leave only a bounded local orphan, never an Operation without bytes; the
+exclusive startup sweep removes it before accepting or resuming Account work. Runtime-owned and
+transferred plaintext buffers are zeroized after copy or on every failure. The original host
+`File`, `Blob`, provider backing, browser structured-clone source, and other memory the Runtime never
+owned are outside that promise. Artifact cleanup logically deletes its metadata and chunks; neither
+browser nor SQLite adapters promise physical media overwrite.
+
+Acceptance freezes the artifact reference and one stable image request identity over Account,
+Operation, Vault, raw-byte digest, length, and content type. The Server-facing canonical object key
+is exactly `vaults/{userId}/{vaultId}/create/{operationId}-{lowercaseSha256}` after canonical
+resource-ID validation and has no random filename component, so every retry names the same object
+while the Server still binds it to the authenticated User. Accepted work never reads the host
+capability again. Cancellation after acceptance, including before the first dispatch, detaches only
+that caller's wait; it neither deletes nor rewrites the Operation, artifact, or staging identity.
+
+**Remote image staging follows acceptance and precedes the final Vault request.** Runtime persists
+closed checkpoints for `artifact_ready`, `remote_upload_confirmed`, and `final_request_frozen`.
+Grant URLs and transport attempts are never checkpoints. It obtains or renews a grant for the exact
+accepted identity, uploads the durable artifact with content length and payload SHA-256 bound by the
+grant, and asks the Server to confirm the exact object length, digest, and content type. A lost grant
+or upload response is resolved by that confirmation; absence or mismatch restarts the same-key
+upload rather than changing the intent. Only an exact confirmation lets Runtime durably freeze the
+final immutable Vault PUT body containing that image key. Only that body may be dispatched, and no
+`create_vault` outcome can be retained before it. The image-free path freezes its final body at
+acceptance.
+
+The Server staging schema is keyed by `(User, Operation)` and stores the bound Vault ID, canonical
+object key, digest, length, content type, state, and rolling 24-hour cleanup lease. Exact status,
+grant, or confirmation access renews that lease; upload traffic alone and cleanup do not. Each User
+may have at most 64 outstanding bindings and 128 MiB of declared raw image bytes across them. An
+exact idempotent replay returns the existing binding and renews its lease without consuming another
+slot or byte; a changed binding is `OPERATION_ID_REUSED`, never a second object or another quota
+claim. New over-quota bindings fail before object access and retain no semantic Operation outcome.
+Status, grant, confirmation, and cleanup exchanges remain idempotent. The existing image-grant route
+evolves in the atomic cutover so a not-yet-created Vault is
+admitted only under this staging identity; an existing Vault still requires management access. The
+create executor accepts only the exact confirmed row and key for its Operation. Object-store or
+confirmation failures are infrastructure failures and leave the accepted local Operation owed.
+Each dispatch/recovery cycle shares one at-most-once Session renewal across image status/grant,
+upload confirmation, final PUT, outcome lookup, exact replay, and authoritative Vault/key fetches.
+
+The Server adds `create_vault` to the one retained `OperationOutcome` union. An applied result is
+exactly `{ vaultId }`. Its closed semantic rejection set is `vault_id_conflict`,
+`team_membership_required`, `vault_sharing_entitlement_denied`, and
+`shared_vault_limit_reached`. Invalid name, type, encrypted-key shape, image-key binding, oversized
+input, absent authentication, and malformed transport fail before Domain execution and retain no
+outcome; database, object-storage, and other infrastructure failures roll back without one. Missing
+or corrupt team billing authority is infrastructure, not a fabricated membership rejection.
+
+`Idempotency-Key` is the stable Operation ID. The Server fingerprints kind, canonical Vault path,
+and exact immutable body, locks `(user, operation)`, and in one transaction either replays the exact
+retained answer or commits Vault, owner Vault key, audit, `vault_created`, outcome, and
+`operation_resolved`. A different fingerprint returns `OPERATION_ID_REUSED`; a different Operation
+claiming the same final Vault ID gets retained `vault_id_conflict`. The applied validator requires
+the accepted kind, Operation ID, and Vault ID, and lookup is only a hint until an identical PUT
+replay proves the fingerprint. It then fetches bounded authoritative Vault and Vault-key state and
+requires the accepted name, type, icon, owner role, exact wrapped key, and image absence/presence;
+the replayed fingerprint proves the exact bound image key. Anything missing or mismatched preserves
+the Operation and its retry obligation. Every semantic rejection commits its rejection audit,
+retained outcome, and `operation_resolved` atomically without Vault or Vault-key writes.
+
+One guarded Replica transaction installs that exact `AuthorityVaultRecord`, a compact create-Vault
+receipt, and removes the Operation and `PendingVaultCreation`. A rejection records the closed receipt
+and removes the Operation and optimistic effect without publishing Vault or key authority. The
+accepted immutable request is the only durable local copy of the wrapped new key before success;
+rejection and Device Account removal erase it, while applied reconciliation replaces it with the
+authoritative wrapped-key record. Outcome reconciliation also atomically creates any still-required
+artifact/remote cleanup obligation before removing the Operation; cleanup may outlive semantic
+completion but remains durable Runtime work. Applied cleanup deletes only the local plaintext
+artifact because the authoritative Vault now references the remote object. Rejected cleanup deletes
+the local artifact and requests deletion of the staging object; the Server rejection transaction
+also marks that staging row `cleanup_pending`, so a lost client cleanup cannot strand it.
+
+Lock fences readers and zeroizes transient buffers but retains the accepted Operation, artifact, and
+checkpoints for later resumption. Restart, caller unmount, response loss, Sign-out, and more than five
+transport failures also preserve them; Sign-out removes Session/key authority and parks Server work
+until a later Full sign-in; retained artifact bytes are never projected or reopened to the host.
+Sign-out therefore does not turn a UI lifecycle event into Operation discard. The explicit
+`RemoveAccount` and `Wipe` teardown authorities from ticket 48 are different: after fencing work they
+destroy the selected accepted Operations, image artifacts, checkpoints, and cleanup records under
+their existing idempotent `complete | incomplete` contract. They make a best-effort bound
+remote-cleanup request while usable authority remains, but local teardown completion does not depend
+on the network; the Server lease sweep owns the resulting remote orphan.
+
+At Account startup, the local sweep compares every published or partial Vault-image generation with
+live Operations and cleanup records, deletes abandoned pre-accept and completed-work artifacts, and
+retains exact live ones. On the Server, expired unconfirmed or `cleanup_pending` staging rows are
+swept with idempotent object deletion. A lease may expire while an accepted Operation is offline;
+because the local artifact is authoritative and the object key stable, resumption recreates the same
+binding and reuploads if needed. An applied row is consumed by the Vault transaction and is never
+swept as an orphan. Missing rows and already-deleted chunks/objects are successful cleanup states,
+while partial adapter failures persist the obligation and retry with bounded backoff.
+
+Each dispatch/recovery cycle has one shared at-most-once Session-renewal budget across the exact PUT,
+outcome lookup, exact replay, Vault fetch, and paginated Vault-key fetch, extended by the image
+exchanges above when present. A second 401 or failed renewal parks the Account for reauthentication
+without completing or deleting the Operation. The number of cycles remains unbounded with persisted
+bounded backoff. Tests must cover response loss before and after commit, exact duplicate and
+changed-fingerprint replay, restart before dispatch and between staging/outcome/fetch/commit, Lock,
+Sign-out, Account-removal, and Wipe races, one renewal at every request position, more than five
+grant/upload/confirmation/final-request failures, every rejection, exact key wrapping and transient
+zeroization, local and remote orphan recovery, cleanup failure at every primitive, and a stale
+guarded commit.
+
+**Each import batch is one durable `import_items` Operation.** The existing observable batch boundary
+is retained: at most 200 Items in one target Vault are all applied or all rejected, earlier successful
+batches survive a later batch failure, favorite values and every category are preserved, and summary
+counts advance only after authoritative completion. Rust generates every final Item ID, encrypts
+every closed draft, and atomically accepts one immutable ordered batch plus its local import-progress
+effect. The host request waits for the terminal result, but caller cancellation only stops that wait.
+Accepted encrypted bytes survive unmount, restart, more than five transport failures, and response
+loss. Pending or rejected work never masquerades as imported Items.
+
+The current `POST /api/v1/vaults/{vaultId}/item-imports` evolves in place. It requires
+`Idempotency-Key`, fingerprints the exact ordered body and canonical Vault path, and commits the
+complete Item set, existing bulk audit and `vault_updated`, retained outcome, and
+`operation_resolved` in one transaction. The closed applied payload is `{ vaultId, importedCount }`;
+the rejection set is `invalid_ciphertext`, `vault_access_denied`, `vault_read_only`, and
+`item_id_conflict`. Malformed, oversized, or duplicate-ID input is rejected before Domain execution
+and retains no outcome. Lookup cannot complete the local Operation until identical POST replay proves
+the fingerprint. Reconciliation requires `importedCount` to equal the accepted ordered length, then
+fetches all accepted Items within the existing 200-Item/16-MiB bounds and matches every ID, Vault,
+category, favorite flag, ciphertext field, and version 1 before one guarded commit installs their
+authority, the compact batch receipt, and removes the Operation and progress record.
+
+Import dispatch, lookup, exact replay, and every authoritative Item page share one at-most-once
+Session-renewal budget per recovery cycle. A second 401 parks the Account without advancing import
+progress, removing accepted bytes, or producing a failed-Vault summary. Every semantic rejection
+commits a rejection audit, retained outcome, and `operation_resolved` atomically without Item or
+`vault_updated` effects.
+
+An empty accepted batch retains the existing successful zero-item semantics. For an authenticated,
+writable target it resolves applied with `{ vaultId, importedCount: 0 }`; it inserts no Item and
+emits no bulk audit or `vault_updated` event. Only the retained outcome and `operation_resolved`
+record the Operation decision. Reconciliation performs no Item fetch and advances counts by zero.
+An inaccessible or read-only target still receives the corresponding retained semantic rejection,
+matching the current access check before the empty-list return.
+
+The route and Item-category enum already exist, but the durable batch and create-Vault facts do not.
+Both need new Server `operation_kind` values, closed outcome variants and database constraints,
+generated OpenAPI/Runtime contracts, non-Item Operation/receipt addresses, and shared Replica
+conformance histories. The old responses are not sufficient evidence and cannot survive as parallel
+production contracts.
+
+The smallest sequential, independently verifiable continuation is:
+
+1. **[E1 — five-category Runtime Item interface](49-five-category-runtime-item-interface.md):** land closed drafts/projections and widen every
+   existing ordinary Item path through dispatch, outcome validation, reconciliation, bindings, and
+   the shared client interface. Full fixtures cover all five categories and prove no plaintext
+   persistence or diagnostic leakage. Import and Vault Server routes remain unchanged.
+2. **[E2 — create-Vault outcome foundation](50-create-vault-outcome-foundation.md):** add the migration, `create_vault` outcome/rejections,
+   exact applied-payload constraints, lookup union, OpenAPI/generated shapes, and consumer handling
+   without changing the reachable PUT or accepting production Runtime work. No second writer exists.
+3. **[E3 — durable local Vault-image ingress](51-vault-image-local-ingress.md):** define the Vault-image artifact and source-control
+   ports, generated control contracts, atomic publication, raw-byte bounds/digest, local cleanup and
+   startup sweep. Land IndexedDB, SQLite, and in-memory conformance histories without creating or
+   dispatching a Vault Operation. Prove every write/delete failure, crash boundary, Account scope,
+   cancellation, teardown, replay, zeroization, and the fact that Attachment ciphertext artifacts
+   cannot satisfy this port.
+4. **[E4 — Server Vault-image staging foundation](52-vault-image-server-staging.md):** add the Operation-bound staging schema and the
+   idempotent status/grant, confirmation, cleanup, and lease-sweep Domain machinery with
+   deterministic object identity, exact length/digest/content-type enforcement, and object-store
+   failure tests. Keep it behind a test transport: the public image-grant route, legacy create PUT,
+   OpenAPI, and all reachable callers remain unchanged, and no Runtime production dispatcher can
+   use the staging exchanges yet.
+5. **[E5 — durable Runtime create-Vault lifecycle behind the gate](53-runtime-create-vault-lifecycle.md):** add stable ID/key/intent
+   generation, optional pre-accept artifact preparation, atomic Operation acceptance, resumable
+   post-accept staging checkpoints, final-request freezing, persisted unbounded scheduling, exact
+   replay and validator, authoritative Vault/key reconciliation, durable cleanup obligations,
+   receipts, generated bindings, and the shared derived multi-Account catalog while production
+   dispatch stays closed. In-memory and adapter histories prove loss, restart, Lock/Sign-out/
+   removal/Wipe, renewal sharing, more than five failures at every stage, all rejections, key
+   destruction, and local/remote orphan convergence.
+6. **[E6 — atomic create-Vault Server/Web cutover](54-create-vault-atomic-cutover.md):** in one commit replace the PUT with its Operation
+   executor, require the exact confirmed staging row, open production dispatch, route both the Web
+   Vault dialog and Import's create-target branch through the shared Runtime client, and remove the
+   transitional shared create writer and refresh/cache repair. Make Desktop and Mobile create
+   affordances explicitly absent until their host slices; Extension has no caller. An executable
+   whole-repository entry graph begins at every Web, Desktop, Mobile, Extension, and shared-package
+   production entry and proves the legacy create-Vault writer unreachable in the same atomic
+   change. Actual Web acceptance covers personal, team, image, Import-default creation, pre-accept cancellation,
+   response loss, restart after every staging checkpoint, more than five upload failures, rejection
+   cleanup, Sign-out recovery, and Remove/Wipe orphan handling.
+7. **[E7 — Import outcome foundation](55-import-outcome-foundation.md):** add the migration, closed `import_items` outcome and lookup
+   generation support while the one reachable import route retains its legacy contract. Existing
+   consumers handle the new kind explicitly; no second import writer is created.
+8. **[E8 — durable Runtime import batch behind the gate](56-runtime-import-batch.md):** add atomic acceptance, persisted unbounded
+   retry, exact replay, tagged validation, bounded authoritative fetch, and guarded reconciliation
+   with production dispatch closed. Shared histories cover empty zero, restart, more than five
+   failures, duplicate send, dropped response, every rejection, all categories, and favorite.
+9. **[E9 — atomic Import route and Web cutover](57-import-atomic-cutover.md):** switch the one route to its Operation executor,
+   open dispatch, and make `use-vault-import` a shallow presentation adapter in the same commit.
+   Preserve provider parsing, localization, empty-Source-Vault filtering, create/existing and
+   multi-Account mapping, 200-Item batching, progress, partial-across-batches behavior, warnings,
+   failed-Vault summaries, and final counts. Remove transitional storage, direct HTTP, crypto,
+   invalidation, and cache-refresh reachability. An executable whole-repository entry graph begins
+   at every Web, Desktop, Mobile, Extension, and shared-package production entry and proves no
+   legacy Import read or writer survives the same atomic change. Browser acceptance covers all five categories and a
+   favorite in newly created and existing Vaults, empty zero, response loss, and later-batch
+   rejection.
+10. **[E10 — resume the paused final Web host cutover](58-final-web-host-cutover.md):** only after E1 through E9 are reviewed and
+   green, reconcile the preserved dirty host files, finish remaining mutation/lifecycle consumers,
+   and tighten the whole-entry graph so `item-write` and the Import writer/read holdout are forbidden.
+
+These slices amend the earlier assumptions that the final cutover was host-only and Vault creation
+could be foreground. Ticket 28 remains claimed. Rotation outcome conversion and final
+`idempotency_record` deletion remain Ticket 29; Ticket 30's held-SSE ownership and the later Desktop,
+Extension, Android Compose, and iOS SwiftUI production host cutovers remain outside this frontier.

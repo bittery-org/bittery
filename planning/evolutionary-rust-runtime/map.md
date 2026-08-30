@@ -103,14 +103,37 @@ or rollout order.
 - [Empty Vault Bootstrap authority](issues/35-empty-vault-bootstrap.md): keep one bounded Bootstrap
   feed, but make it explicitly two-phase: cursor-paginated standalone Vault summaries and wrapped
   keys first, then cursor-paginated Items under the same pinned watermark and promotion boundary.
+- [Final Web Item and Import frontier](issues/28-remaining-item-write-kinds.md#2026-08-30--final-web-item-and-import-frontier-resolved):
+  pause the host-only cutover until the shared Runtime models every Item category, owns Vault
+  creation as a durable `create_vault` Operation, and owns each existing 200-Item import batch
+  as one durable `import_items` Operation. Both Server routes gain closed retained outcomes only at
+  atomic Runtime/Web cutovers; an empty import remains an applied zero-item no-op. The Web import
+  hook remains presentation and provider orchestration only. Before an image-bearing Vault Operation
+  is accepted, Runtime copies the bounded opaque host source into a distinct Account/Operation-bound
+  durable plaintext artifact; accepted work never depends on a host capability. The shared source
+  facade preserves the Attachment registry's exact Runtime-incarnation/Account/Operation/request
+  binding, inclusive bounded state and tombstones, replay/expiry behavior, reconstructable cleanup,
+  and retirement fencing. Allowed image types are exactly JPEG, PNG, WebP, GIF, and AVIF. Runtime
+  promises zeroization only for buffers it owns or receives, not an original host source or physical
+  media overwrite. After acceptance, Runtime alone resumes deterministic remote staging under a
+  rolling 24-hour lease renewed by exact status/grant/confirmation. Each User is limited to 64
+  outstanding bindings and 128 MiB total; exact replay consumes no additional quota. Runtime then
+  freezes the final Vault request, reconciles its retained outcome, and drives idempotent local/remote
+  orphan cleanup. The Attachment ciphertext artifact store is not this plaintext-image port.
+  Incompatible Desktop and Mobile create affordances stay explicitly absent until their later Runtime
+  host slices; no `apps/web` hook or transitional writer becomes the reusable interface. Delivery is
+  dependency-ordered as [tickets 49 through 58](issues/49-five-category-runtime-item-interface.md),
+  with executable whole-repository caller-reachability gates in both atomic cutovers.
 
 ## Not yet specified
 
 - First Web slice implementation is specified in [the accepted specification](spec.md) and queued in
   [tickets 15 through 23](issues/15-binding-compile-spike.md), with the host binding
   architecture split out into [tickets 25 through 27](issues/25-runtime-protocol-contract.md).
-  The remaining Item write kinds follow in
-  [ticket 28](issues/28-remaining-item-write-kinds.md), which ends the Web cutover. Its C4 review
+  The remaining Item write kinds follow under the claimed
+  [ticket 28](issues/28-remaining-item-write-kinds.md) umbrella; its final frontier is split into
+  dependency-ordered [tickets 49 through 58](issues/49-five-category-runtime-item-interface.md),
+  after which ticket 28 ends the Web cutover. Its C4 review
   split the committed shared-Attachment uploader-AAD correction into
   [ticket 43](issues/43-attachment-move-uploader-aad.md); its first clean-tree gate recorded earlier
   integration drift in [ticket 44](issues/44-ticket-43-ci-gate-drift.md).
@@ -134,7 +157,7 @@ or rollout order.
   optional browser-SQLite path then proceeds through the Web deployment decision, conditional
   implementation, Extension placement decision, and recovery work in
   [tickets 39 through 42](issues/39-web-sqlite-deployment-decision.md).
-- Web host integration, followed by Extension and Desktop host integration.
+- Extension and Desktop host integration after the specified Web cutover.
 - Android extraction and native host responsibilities, followed by iOS host responsibilities.
 - Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.
 
