@@ -1544,3 +1544,37 @@ JavaScript/TypeScript files, and `git diff --check` passes.
 Deliberately left open: C foreground upload, D authenticated C4b2b browser acceptance, the final Web
 cutover and transitional-writer reachability audit, removal of `idempotency_record`, native-host
 Share creation, and Ticket 30's held-SSE work. Ticket 28 remains claimed.
+
+### 2026-08-30 — C foreground Attachment Upload delivered
+
+Commit `d96c7e40` adds foreground, non-durable `UploadAttachment` outside the accepted `Operation`
+union. The generated closed Runtime, Kotlin, Swift, and WASM shapes carry only explicit Account and
+Item identity, bounded plaintext metadata, declared size, and an opaque single-use source capability;
+the host supplies no Runtime incarnation, and the closed result exposes only the new Attachment ID
+and Replica revision.
+
+The deep Rust Attachment module owns source claiming, key and uploader authority, format-preserving
+streaming encryption, authenticated grant and metadata HTTP exchanges, exact plaintext/ciphertext
+length and SHA-256 enforcement, at-most-once Session renewal, ambiguous-response probing, and the
+single exact guarded Replica reconciliation that can publish success. It creates no durable
+Operation. Owned plaintext is zeroized, while source and binary owners transfer failed or abandoned
+cleanup into the lifecycle drain; Lock, Sign-out, Remove, Wipe, close, failed-open retirement, and
+Account or incarnation retirement cannot complete before asynchronous source, OPFS, and binary
+cleanup is proved complete. The production source registry closes replay, expiry, aggregate-capacity,
+Account-retirement, and fresh-reconstruction behavior. The Server, OpenAPI, generated contract, and
+Runtime now classify quota failure with the stable `ATTACHMENT_QUOTA_EXCEEDED` code rather than
+Problem Details prose.
+
+The joined production Chromium proof drives generated `UploadAttachment` through Web composition,
+the Worker, source registry and reverse RPC, generated real WASM Core, controlled HTTP and storage
+authority, and the production binary executor. It observes the grant, encrypted PUT, metadata
+creation, exact guarded reconciliation, source cleanup, and closed result without substituting a
+fake Core. Fresh final non-writer review reported **APPROVED**.
+
+The orchestrator's independent gates pass 495 Core tests, 45 binding tests, 30 generator tests, 324
+TypeScript tests, all 8 Chromium tests, 139 Crypto Core tests plus 9 persisted-format vectors, 89
+Desktop Rust tests plus 50 Desktop Node tests, and all 14 dependent type tasks. The clean-tree root
+`pnpm check:ci` and `pnpm check:ci:rust` gates, contracts, Biome, and `git diff --check` also pass.
+
+C does not complete Ticket 28. D authenticated C4b2b browser acceptance and the ticket's later
+cutover and cleanup work remain; Ticket 28 stays claimed.
