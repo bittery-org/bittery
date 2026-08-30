@@ -1,4 +1,5 @@
 import type {
+	ForegroundUploadOutcome,
 	TransferControlRequest,
 	TransferControlResponse,
 } from "../generated/transfer-control/contract";
@@ -6,6 +7,11 @@ import {
 	validateTransferControlRequest,
 	validateTransferControlResponse,
 } from "../generated/transfer-control/validator.js";
+import {
+	copyUint8ArrayIntrinsic,
+	inspectUint8ArrayIntrinsic,
+	wipeBinaryIntrinsic,
+} from "./binary-intrinsics";
 import { OpfsUploadSpoolRoot } from "./opfs-upload-spool-internal";
 
 export type BinaryTransferFetch = (
@@ -19,7 +25,7 @@ export type BinaryTransferFetch = (
  */
 type UploadSpool = Pick<
 	OpfsUploadSpoolRoot,
-	"withUploadFile" | "deleteAccount" | "wipeDevice"
+	"withUploadFile" | "cleanup" | "deleteAccount" | "wipeDevice"
 >;
 
 export interface WebBinaryTransferExecutorOptions {
@@ -45,6 +51,26 @@ interface UploadSession {
 	writtenBytes: bigint;
 }
 
+export type { ForegroundUploadOutcome } from "../generated/transfer-control/contract";
+
+interface ForegroundUploadSession {
+	readonly controller: AbortController;
+	readonly chunks: UploadChunkQueue;
+	readonly result: Promise<UploadAttemptOutcome>;
+	readonly maxChunkBytes: number;
+	readonly expectedBytes: bigint;
+	writtenBytes: bigint;
+	readonly request: Extract<TransferControlRequest, { type: "beginUpload" }>;
+	abortTask?: Promise<void>;
+}
+
+type UploadAttemptOutcome =
+	| { readonly type: "uploaded" }
+	| { readonly type: "notDispatched" }
+	| { readonly type: "rejected"; readonly status: number }
+	| { readonly type: "ambiguous" }
+	| { readonly type: "cancelled" };
+
 export interface BinaryTransferInvocationResult {
 	readonly controlResponseJson: string;
 	readonly bytes?: ArrayBuffer;
@@ -55,6 +81,7 @@ export class ConfigurableWebBinaryTransferExecutor {
 	#spoolRoot: Promise<UploadSpool> | undefined;
 	readonly #downloads = new Map<string, DownloadSession>();
 	readonly #uploads = new Map<string, UploadSession>();
+	readonly #foregroundUploads = new Map<string, ForegroundUploadSession>();
 	#closed = false;
 
 	constructor(options: WebBinaryTransferExecutorOptions = {}) {
@@ -63,6 +90,138 @@ export class ConfigurableWebBinaryTransferExecutor {
 			options.spoolRoot === undefined
 				? undefined
 				: Promise.resolve(options.spoolRoot);
+	}
+
+	beginForegroundUpload(
+		accountId: string,
+		attachmentId: string,
+		url: string,
+		expectedByteLength: number,
+	): string {
+		if (
+			this.#closed ||
+			!/^[A-Za-z0-9._~-]{1,128}$/.test(accountId) ||
+			!/^[A-Za-z0-9._~-]{1,128}$/.test(attachmentId) ||
+			!Number.isSafeInteger(expectedByteLength) ||
+			expectedByteLength <= 0
+		)
+			throw new BinaryTransferInvocationError();
+		const transferId = `foreground-${globalThis.crypto.randomUUID()}`;
+		const controller = new AbortController();
+		const chunks = new UploadChunkQueue();
+		const request = {
+			type: "beginUpload" as const,
+			transferId,
+			accountId,
+			operationId: transferId,
+			attachmentId,
+			artifactId: transferId,
+			generation: "1",
+			url,
+			headers: [
+				{ name: "content-type", value: "application/octet-stream" },
+				{ name: "x-amz-content-sha256", value: "0".repeat(64) },
+			],
+			ciphertextSha256: "0".repeat(64),
+			byteLength: String(expectedByteLength),
+			maxChunkBytes: 262_144,
+		};
+		const result = this.#runUpload(
+			request,
+			expectedByteLength,
+			controller,
+			chunks,
+		);
+		void result.catch((error) => chunks.fail(error));
+		this.#foregroundUploads.set(transferId, {
+			controller,
+			chunks,
+			result,
+			request,
+			maxChunkBytes: 262_144,
+			expectedBytes: BigInt(expectedByteLength),
+			writtenBytes: 0n,
+		});
+		return transferId;
+	}
+
+	async writeForegroundUpload(
+		transferId: string,
+		bytes: Uint8Array,
+	): Promise<void> {
+		const session = this.#foregroundUploads.get(transferId);
+		const view = inspectUint8ArrayIntrinsic(bytes);
+		if (
+			session === undefined ||
+			view === undefined ||
+			!view.hasOnlyIndexedOwnData ||
+			view.byteLength === 0 ||
+			view.byteLength > session.maxChunkBytes ||
+			session.writtenBytes + BigInt(view.byteLength) > session.expectedBytes
+		) {
+			wipeBinaryIntrinsic(bytes);
+			throw new BinaryTransferInvocationError();
+		}
+		session.writtenBytes += BigInt(view.byteLength);
+		await session.chunks.push(copyUint8ArrayIntrinsic(view));
+	}
+
+	async finishForegroundUpload(
+		transferId: string,
+		ciphertextSha256: string,
+	): Promise<ForegroundUploadOutcome> {
+		const session = this.#foregroundUploads.get(transferId);
+		if (
+			session === undefined ||
+			session.writtenBytes !== session.expectedBytes ||
+			!/^[0-9a-f]{64}$/.test(ciphertextSha256)
+		)
+			throw new BinaryTransferInvocationError();
+		session.request.ciphertextSha256 = ciphertextSha256;
+		session.request.headers = session.request.headers.map((header) =>
+			header.name === "x-amz-content-sha256"
+				? { ...header, value: ciphertextSha256 }
+				: header,
+		);
+		session.chunks.close();
+		const result = await session.result;
+		if (
+			result.type === "uploaded" &&
+			this.#foregroundUploads.get(transferId) === session
+		)
+			this.#foregroundUploads.delete(transferId);
+		return result.type === "uploaded"
+			? { type: "uploaded", ciphertextSha256 }
+			: result;
+	}
+
+	async abortForegroundUpload(transferId: string): Promise<void> {
+		const session = this.#foregroundUploads.get(transferId);
+		if (session === undefined) return;
+		if (session.abortTask === undefined) {
+			session.controller.abort();
+			session.chunks.fail(new BinaryTransferInvocationError());
+			session.abortTask = (async () => {
+				await session.result.catch(() => undefined);
+				await this.#cleanSpool((spool) =>
+					spool.cleanup({
+						accountId: session.request.accountId,
+						operationId: session.request.operationId,
+						attachmentId: session.request.attachmentId,
+						artifactId: session.request.artifactId,
+						generation: session.request.generation,
+					}),
+				);
+				if (this.#foregroundUploads.get(transferId) === session)
+					this.#foregroundUploads.delete(transferId);
+			})();
+		}
+		try {
+			await session.abortTask;
+		} catch (error) {
+			session.abortTask = undefined;
+			throw error;
+		}
 	}
 
 	async invoke(
@@ -113,15 +272,22 @@ export class ConfigurableWebBinaryTransferExecutor {
 		};
 	}
 
-	close(): void {
+	async close(): Promise<void> {
 		if (this.#closed) return;
 		this.#closed = true;
+		const activeUploads = [...this.#uploads.values()];
 		for (const transferId of [
 			...this.#downloads.keys(),
 			...this.#uploads.keys(),
 		]) {
 			this.#abort(transferId);
 		}
+		await Promise.all([
+			...activeUploads.map((upload) => upload.result.catch(() => undefined)),
+			...[...this.#foregroundUploads.keys()].map((transferId) =>
+				this.abortForegroundUpload(transferId),
+			),
+		]);
 	}
 
 	async #openDownload(
@@ -276,7 +442,20 @@ export class ConfigurableWebBinaryTransferExecutor {
 			expectedByteLength,
 			controller,
 			chunks,
-		);
+		).then((outcome): TransferControlResponse => {
+			switch (outcome.type) {
+				case "uploaded":
+					return { type: "uploadFinished" };
+				case "rejected":
+					return { type: "httpFailure", status: outcome.status };
+				case "ambiguous":
+					return { type: "networkFailure" };
+				case "cancelled":
+					return { type: "cancelled" };
+				case "notDispatched":
+					throw new BinaryTransferInvocationError();
+			}
+		});
 		void result.catch((error) => chunks.fail(error));
 		this.#uploads.set(request.transferId, {
 			controller,
@@ -354,10 +533,11 @@ export class ConfigurableWebBinaryTransferExecutor {
 		expectedByteLength: number,
 		controller: AbortController,
 		chunks: UploadChunkQueue,
-	): Promise<TransferControlResponse> {
+	): Promise<UploadAttemptOutcome> {
+		let dispatchStarted = false;
+		let result: UploadAttemptOutcome | undefined;
 		try {
 			const spoolRoot = await this.#spool();
-			let result: TransferControlResponse | undefined;
 			await spoolRoot.withUploadFile(
 				{
 					accountId: request.accountId,
@@ -394,24 +574,34 @@ export class ConfigurableWebBinaryTransferExecutor {
 					}
 					let response: Response;
 					try {
+						dispatchStarted = true;
 						response = await this.#fetch(browserRequest, fetchPolicy);
 					} catch {
 						result = controller.signal.aborted
 							? { type: "cancelled" }
-							: { type: "networkFailure" };
+							: { type: "ambiguous" };
 						return;
 					}
 					await response.body?.cancel().catch(() => undefined);
-					result = response.ok
-						? { type: "uploadFinished" }
-						: { type: "httpFailure", status: response.status };
+					if (response.ok) result = { type: "uploaded" };
+					else if (response.status === 0) result = { type: "ambiguous" };
+					else if (
+						Number.isInteger(response.status) &&
+						response.status >= 300 &&
+						response.status <= 599
+					)
+						result = { type: "rejected", status: response.status };
+					else throw new BinaryTransferInvocationError();
 				},
 			);
 			if (result === undefined) throw new BinaryTransferInvocationError();
 			return result;
 		} catch {
 			if (controller.signal.aborted) return { type: "cancelled" };
-			throw new BinaryTransferInvocationError();
+			if (result?.type === "rejected") return result;
+			return dispatchStarted
+				? { type: "ambiguous" }
+				: { type: "notDispatched" };
 		}
 	}
 

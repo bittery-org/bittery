@@ -27,7 +27,7 @@ describe("binary transfer adapter in an actual MV3 service worker", () => {
 		const arrivalPromises = new Map<string, Promise<void>>();
 		const releases = new Map<string, () => void>();
 		const releasePromises = new Map<string, Promise<void>>();
-		for (const id of ["first", "second"]) {
+		for (const id of ["first", "second", "foreground"]) {
 			arrivalPromises.set(
 				id,
 				new Promise((resolve) => arrivals.set(id, resolve)),
@@ -149,6 +149,22 @@ describe("binary transfer adapter in an actual MV3 service worker", () => {
 				finish: { type: "uploadFinished" },
 				scriptHeaderNames: ["content-type", "x-amz-content-sha256"],
 			});
+			const foreground = worker.evaluate(
+				({ uploadUrl }) =>
+					globalThis.runForegroundAttachmentUpload(
+						"account-browser",
+						"attachment-browser",
+						uploadUrl,
+					),
+				{ uploadUrl },
+			);
+			await arrivalPromises.get("foreground");
+			releases.get("foreground")?.();
+			expect(await foreground).toEqual({
+				type: "uploaded",
+				ciphertextSha256:
+					"787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472",
+			});
 			for (const id of ["first", "second"]) {
 				expect(observed.get(id)).toEqual({
 					body: [1, 2, 3],
@@ -158,9 +174,17 @@ describe("binary transfer adapter in an actual MV3 service worker", () => {
 						"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
 				});
 			}
+			expect(observed.get("foreground")).toEqual({
+				body: [4, 5, 6],
+				contentLength: "3",
+				contentType: "application/octet-stream",
+				contentSha256:
+					"787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472",
+			});
 		} finally {
 			releases.get("first")?.();
 			releases.get("second")?.();
+			releases.get("foreground")?.();
 			await context.close();
 			server.stop(true);
 		}

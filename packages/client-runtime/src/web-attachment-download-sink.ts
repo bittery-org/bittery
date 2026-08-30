@@ -63,6 +63,7 @@ const runtimeScopeOwners = new WeakMap<
 	{
 		prepare(runtimeIncarnation: string): Promise<void>;
 		commit(runtimeIncarnation: string): Promise<void>;
+		owns(runtimeIncarnation: string): boolean;
 	}
 >();
 
@@ -163,6 +164,10 @@ export class WebAttachmentDownloadSinkRegistry {
 				this.#prepareRuntimeIncarnation(runtimeIncarnation),
 			commit: (runtimeIncarnation) =>
 				this.#commitRuntimeIncarnation(runtimeIncarnation),
+			owns: (runtimeIncarnation) =>
+				this.#runtimeState.activeIncarnation === runtimeIncarnation ||
+				this.#runtimeState.pendingIncarnation === runtimeIncarnation ||
+				this.#runtimeState.retiredIncarnation === runtimeIncarnation,
 		});
 	}
 
@@ -488,7 +493,11 @@ export class WebAttachmentDownloadSinkRegistry {
 
 	async #retireRuntime(runtimeIncarnation: string): Promise<void> {
 		if (runtimeIncarnation === this.#runtimeState.retiredIncarnation) return;
-		this.#phase = "fenced";
+		const terminalPhase =
+			this.#phase === "closing" || this.#phase === "closed"
+				? this.#phase
+				: undefined;
+		if (terminalPhase === undefined) this.#phase = "fenced";
 		let target = this.#runtimeState.pendingRetirement;
 		if (target === undefined) {
 			if (
@@ -513,7 +522,8 @@ export class WebAttachmentDownloadSinkRegistry {
 			this.#runtimeState.pendingIncarnation = undefined;
 		if (runtimeIncarnation === this.#runtimeState.activeIncarnation)
 			this.#runtimeState.activeIncarnation = undefined;
-		this.#phase = "uninitialized";
+		if (this.#phase !== "closing" && this.#phase !== "closed")
+			this.#phase = terminalPhase ?? "uninitialized";
 		for (const accountId of [...this.#accountStates.keys()])
 			this.#releaseAccountGeneration(accountId);
 	}
@@ -681,6 +691,13 @@ export function commitWebAttachmentDownloadRuntimeIncarnation(
 	if (owner === undefined)
 		throw new Error("Attachment Download owner is invalid");
 	return owner.commit(runtimeIncarnation);
+}
+
+export function ownsWebAttachmentDownloadRuntimeIncarnation(
+	registry: WebAttachmentDownloadSinkRegistry,
+	runtimeIncarnation: string,
+): boolean {
+	return runtimeScopeOwners.get(registry)?.owns(runtimeIncarnation) ?? false;
 }
 
 function randomIdentity(): string {

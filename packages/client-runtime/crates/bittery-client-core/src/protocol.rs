@@ -216,6 +216,35 @@ pub enum RuntimeRequest {
         )]
         sink_capability_id: String,
     },
+    UploadAttachment {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(length(min = 1, max = 255))
+        )]
+        name: String,
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(length(min = 1, max = 255))
+        )]
+        content_type: String,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        file_size: u64,
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(length(min = 1, max = 128), regex(pattern = "^[A-Za-z0-9._~-]+$"))
+        )]
+        source_capability_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -357,6 +386,18 @@ impl fmt::Debug for RuntimeRequest {
                 .field("attachment_id", attachment_id)
                 .field("sink_capability", &"[redacted]")
                 .finish(),
+            Self::UploadAttachment {
+                account_id,
+                item_id,
+                file_size,
+                ..
+            } => formatter
+                .debug_struct("UploadAttachment")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("file_size", file_size)
+                .field("plaintext_and_source_capability", &"[redacted]")
+                .finish(),
         }
     }
 }
@@ -381,7 +422,8 @@ impl RuntimeRequest {
             | Self::AcknowledgeShareResult { account_id, .. }
             | Self::RenameAttachment { account_id, .. }
             | Self::DeleteAttachment { account_id, .. }
-            | Self::DownloadAttachment { account_id, .. } => Some(account_id),
+            | Self::DownloadAttachment { account_id, .. }
+            | Self::UploadAttachment { account_id, .. } => Some(account_id),
         }
     }
 }
@@ -584,6 +626,15 @@ pub enum RuntimeResponse {
         )]
         account_id: AccountId,
         attachment_id: String,
+    },
+    AttachmentUploaded {
+        attachment_id: String,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        replica_revision: u64,
     },
     Teardown {
         scope: TeardownScope,
@@ -1204,7 +1255,7 @@ impl RequestCancellation {
         self.0.cancelled.load(Ordering::SeqCst)
     }
 
-    pub(crate) async fn cancelled(&self) {
+    pub async fn cancelled(&self) {
         let mut changed = self.0.changed.subscribe();
         while !*changed.borrow_and_update() {
             if changed.changed().await.is_err() {

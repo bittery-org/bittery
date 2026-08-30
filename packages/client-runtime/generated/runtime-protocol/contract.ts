@@ -61,6 +61,10 @@ accountId: string
 attachmentId: string
 type: "attachmentDownloaded"
 } | {
+attachmentId: string
+replicaRevision: string
+type: "attachmentUploaded"
+} | {
 /**
  * @maxItems 4
  */
@@ -179,6 +183,14 @@ accountId: string
 attachmentId: string
 sinkCapabilityId: string
 type: "downloadAttachment"
+} | {
+accountId: string
+contentType: string
+fileSize: string
+itemId: string
+name: string
+sourceCapabilityId: string
+type: "uploadAttachment"
 })
 export type ShareAccessMode = ("anyone" | "email-restricted")
 export type ShareExpiration = ("1hour" | "1day" | "7days" | "14days" | "30days")

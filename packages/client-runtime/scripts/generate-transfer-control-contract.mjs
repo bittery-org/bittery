@@ -57,6 +57,8 @@ for (const name of ["uint16", "uint32"]) ajv.addFormat(name, true);
 ajv.addSchema(schema);
 const requestId = `${schemaId}:request`;
 const responseId = `${schemaId}:response`;
+const uploadSourceControlId = `${schemaId}:attachment-upload-source-control`;
+const uploadSourceAnswerId = `${schemaId}:attachment-upload-source-answer`;
 ajv.addSchema({
 	$id: requestId,
 	$ref: `${schemaId}#/$defs/TransferControlRequest`,
@@ -65,15 +67,27 @@ ajv.addSchema({
 	$id: responseId,
 	$ref: `${schemaId}#/$defs/TransferControlResponse`,
 });
+ajv.addSchema({
+	$id: uploadSourceControlId,
+	$ref: `${schemaId}#/$defs/AttachmentUploadSourceControl`,
+});
+ajv.addSchema({
+	$id: uploadSourceAnswerId,
+	$ref: `${schemaId}#/$defs/AttachmentUploadSourceAnswer`,
+});
 const standaloneValidator = generateStandaloneValidator(ajv, {
 	validateTransferControlRequest: requestId,
 	validateTransferControlResponse: responseId,
+	validateAttachmentUploadSourceControl: uploadSourceControlId,
+	validateAttachmentUploadSourceAnswer: uploadSourceAnswerId,
 });
 const validatorText = `/* This file is generated. Do not edit. */\n${standaloneValidator}`;
 const declarationsText = `/* This file is generated. Do not edit. */
-import type { TransferControlRequest, TransferControlResponse } from "./contract";
+import type { AttachmentUploadSourceAnswer, AttachmentUploadSourceControl, TransferControlRequest, TransferControlResponse } from "./contract";
 export declare function validateTransferControlRequest(value: unknown): value is TransferControlRequest;
 export declare function validateTransferControlResponse(value: unknown): value is TransferControlResponse;
+export declare function validateAttachmentUploadSourceControl(value: unknown): value is AttachmentUploadSourceControl;
+export declare function validateAttachmentUploadSourceAnswer(value: unknown): value is AttachmentUploadSourceAnswer;
 `;
 const outputs = [
 	[path.join(outputRoot, "contract.schema.json"), schemaText],

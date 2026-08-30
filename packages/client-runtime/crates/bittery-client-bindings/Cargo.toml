@@ -9,7 +9,7 @@ description = "Shallow native and Web bindings for the Bittery Client Runtime"
 default = []
 artifact-control-contract-schema = ["dep:schemars"]
 transfer-control-contract-schema = ["dep:schemars"]
-binding-test-harness = []
+binding-test-harness = ["bittery-client-core/binding-test-harness"]
 
 [lib]
 crate-type = ["cdylib", "rlib", "staticlib"]

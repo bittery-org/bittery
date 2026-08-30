@@ -196,8 +196,12 @@ impl Runtime {
         match &scope {
             TeardownScope::Account { account_id } => {
                 self.retire_attachment_download_account(account_id).await;
+                self.retire_attachment_upload_account(account_id).await;
             }
-            TeardownScope::Device => self.retire_all_attachment_downloads().await,
+            TeardownScope::Device => {
+                self.retire_all_attachment_downloads().await;
+                self.retire_all_attachment_uploads().await;
+            }
         }
         {
             let _publication = self.publication.lock().expect("publication lock poisoned");
@@ -285,6 +289,8 @@ impl Runtime {
         if failures.is_empty() {
             if let TeardownScope::Account { account_id } = &scope {
                 self.complete_attachment_download_account_retirement(account_id)
+                    .await;
+                self.complete_attachment_upload_account_retirement(account_id)
                     .await;
             }
             let _publication = self.publication.lock().expect("publication lock poisoned");

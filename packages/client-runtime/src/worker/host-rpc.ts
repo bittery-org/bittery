@@ -1,9 +1,12 @@
 import {
-	copyWorkerValue,
+	isAttachmentUploadSourceWorkerRequest,
 	isWorkerRequest,
 	prepareWorkerValueForPost,
+	receiveHostResponseValue,
 	type WorkerReply,
 	WorkerRpcError,
+	wipeAttachmentUploadSourceResponseBinary,
+	wipeWorkerEnvelopeBinary,
 } from "./wire";
 
 export interface WorkerHostRpcScope {
@@ -21,6 +24,7 @@ export interface WorkerHostRpc {
 interface PendingHostRequest {
 	resolve(value: unknown): void;
 	reject(error: unknown): void;
+	expectsAttachmentUploadSource: boolean;
 }
 
 /**
@@ -32,21 +36,30 @@ export function createWorkerHostRpc(scope: WorkerHostRpcScope): WorkerHostRpc {
 	const pending = new Map<number, PendingHostRequest>();
 
 	scope.addEventListener("message", (event) => {
-		if (!isWorkerRequest(event.data)) return;
+		if (!isWorkerRequest(event.data)) {
+			wipeWorkerEnvelopeBinary(event.data);
+			return;
+		}
 		const message = event.data;
 		if (message.type !== "host-response") return;
 		const request = pending.get(message.id);
-		if (request === undefined) return;
-		pending.delete(message.id);
+		if (request === undefined) {
+			if (message.ok) wipeAttachmentUploadSourceResponseBinary(message.value);
+			return;
+		}
 		if (!message.ok) {
+			pending.delete(message.id);
 			request.reject(new WorkerRpcError(message.code, message.message));
 			return;
 		}
 		try {
-			request.resolve(copyWorkerValue(message.value));
-		} catch (error) {
-			request.reject(error);
-		}
+			const value = receiveHostResponseValue(
+				message.value,
+				request.expectsAttachmentUploadSource,
+			);
+			pending.delete(message.id);
+			request.resolve(value);
+		} catch {}
 	});
 
 	return {
@@ -59,7 +72,12 @@ export function createWorkerHostRpc(scope: WorkerHostRpcScope): WorkerHostRpc {
 			}
 			const id = nextId++;
 			const answer = new Promise<unknown>((resolve, reject) => {
-				pending.set(id, { resolve, reject });
+				pending.set(id, {
+					resolve,
+					reject,
+					expectsAttachmentUploadSource:
+						isAttachmentUploadSourceWorkerRequest(payload),
+				});
 			});
 			try {
 				scope.postMessage(
@@ -72,11 +90,17 @@ export function createWorkerHostRpc(scope: WorkerHostRpcScope): WorkerHostRpc {
 				);
 			} catch (error) {
 				pending.delete(id);
+				wipeAttachmentUploadSourceResponseBinary(payload);
+				wipeAttachmentUploadSourceResponseBinary(prepared.value);
+				const message =
+					typeof error === "object" && error !== null
+						? Object.getOwnPropertyDescriptor(error, "message")?.value
+						: undefined;
 				return Promise.reject(
 					new WorkerRpcError(
 						"backend-failure",
-						error instanceof Error && error.message.length > 0
-							? error.message
+						typeof message === "string" && message.length > 0
+							? message
 							: "Could not post the host request.",
 					),
 				);

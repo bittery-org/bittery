@@ -572,6 +572,28 @@ describe("Web Attachment Download sink capabilities", () => {
 		expect(() => grant(registry)).toThrow();
 	});
 
+	test("beginClose stays terminal when it races the awaited half of Runtime retirement", async () => {
+		let release!: () => void;
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const registry = await activeRegistry({ identity: () => "mid-retirement" });
+		grant(registry, { ...emptySink(), discard: async () => blocked });
+		const retirement = registry.invoke(
+			control({ type: "retireRuntime" }),
+			undefined,
+			runtimeScope,
+		);
+		await Promise.resolve();
+		registry.beginClose();
+		release();
+		expect(await retirement).toBe('{"type":"retired"}');
+		await expect(
+			prepareWebAttachmentDownloadRuntimeIncarnation(registry, "after-close"),
+		).rejects.toThrow();
+		await registry.drainClose();
+	});
+
 	test("a failed commit retains cleanup ownership until explicit discard retries", async () => {
 		let discards = 0;
 		const registry = await activeRegistry({ identity: () => "commit-cleanup" });

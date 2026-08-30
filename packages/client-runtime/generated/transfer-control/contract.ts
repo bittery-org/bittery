@@ -1,6 +1,62 @@
 /* eslint-disable */
 /* This file is generated. Do not edit. */
 
+export type AttachmentUploadSourceAnswer = ({
+type: "claimed"
+} | {
+type: "chunk"
+} | {
+type: "end"
+} | {
+type: "closed"
+} | {
+type: "retired"
+} | {
+type: "retirementCompleted"
+} | {
+type: "sourceFailure"
+} | {
+type: "cancelled"
+} | {
+type: "invariantViolation"
+})
+export type AttachmentUploadSourceControl = ({
+accountId: string
+capabilityId: string
+contentType: string
+expectedBytes: string
+itemId: string
+name: string
+type: "claim"
+} | {
+capabilityId: string
+maxBytes: number
+type: "read"
+} | {
+capabilityId: string
+type: "close"
+} | {
+accountId: string
+type: "retireAccount"
+} | {
+accountId: string
+type: "completeAccountRetirement"
+} | {
+type: "retireRuntime"
+})
+export type ForegroundUploadOutcome = ({
+ciphertextSha256: string
+type: "uploaded"
+} | {
+type: "notDispatched"
+} | {
+status: number
+type: "rejected"
+} | {
+type: "ambiguous"
+} | {
+type: "cancelled"
+})
 export type TransferControlRequest = ({
 /**
  * @maxItems 64
@@ -77,6 +133,9 @@ type: "httpFailure"
 })
 
 export interface TransferControlContract {
+attachmentUploadSourceAnswer: AttachmentUploadSourceAnswer
+attachmentUploadSourceControl: AttachmentUploadSourceControl
+foregroundUploadOutcome: ForegroundUploadOutcome
 request: TransferControlRequest
 response: TransferControlResponse
 }

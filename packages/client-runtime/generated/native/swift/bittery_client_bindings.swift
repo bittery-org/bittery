@@ -862,6 +862,127 @@ public func FfiConverterTypeAttachmentProjection_lower(_ value: AttachmentProjec
 
 
 
+/**
+ * Native-only opaque plaintext metadata for Attachment Upload.
+ */
+public protocol AttachmentUploadMetadataProtocol: AnyObject, Sendable {
+
+}
+/**
+ * Native-only opaque plaintext metadata for Attachment Upload.
+ */
+open class AttachmentUploadMetadata: AttachmentUploadMetadataProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_attachmentuploadmetadata(self.handle, $0) }
+    }
+public convenience init(name: String, contentType: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_attachmentuploadmetadata_new(
+        FfiConverterString.lower(name),
+        FfiConverterString.lower(contentType),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_attachmentuploadmetadata(handle, $0) }
+    }
+
+
+
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAttachmentUploadMetadata: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = AttachmentUploadMetadata
+
+    public static func lift(_ handle: UInt64) throws -> AttachmentUploadMetadata {
+        return AttachmentUploadMetadata(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: AttachmentUploadMetadata) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AttachmentUploadMetadata {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: AttachmentUploadMetadata, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentUploadMetadata_lift(_ handle: UInt64) throws -> AttachmentUploadMetadata {
+    return try FfiConverterTypeAttachmentUploadMetadata.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentUploadMetadata_lower(_ value: AttachmentUploadMetadata) -> UInt64 {
+    return FfiConverterTypeAttachmentUploadMetadata.lower(value)
+}
+
+
+
+
+
+
 public protocol ClientRuntimeProtocol: AnyObject, Sendable {
 
     func observe(request: ObservationRequest, sink: ObservationSink) throws  -> ObservationHandle
@@ -3351,6 +3472,8 @@ public enum RuntimeRequest {
     )
     case downloadAttachment(accountId: String, attachmentId: String, sinkCapabilityId: String
     )
+    case uploadAttachment(accountId: String, itemId: String, metadata: AttachmentUploadMetadata, fileSize: UInt64, sourceCapabilityId: String
+    )
 
 
 
@@ -3426,6 +3549,9 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         )
 
         case 19: return .downloadAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), sinkCapabilityId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 20: return .uploadAttachment(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), metadata: try FfiConverterTypeAttachmentUploadMetadata.read(from: &buf), fileSize: try FfiConverterUInt64.read(from: &buf), sourceCapabilityId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3555,6 +3681,15 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterString.write(attachmentId, into: &buf)
             FfiConverterString.write(sinkCapabilityId, into: &buf)
 
+
+        case let .uploadAttachment(accountId,itemId,metadata,fileSize,sourceCapabilityId):
+            writeInt(&buf, Int32(20))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+            FfiConverterTypeAttachmentUploadMetadata.write(metadata, into: &buf)
+            FfiConverterUInt64.write(fileSize, into: &buf)
+            FfiConverterString.write(sourceCapabilityId, into: &buf)
+
         }
     }
 }
@@ -3595,6 +3730,8 @@ public enum RuntimeResponse: Equatable, Hashable {
     case attachmentDeleted(accountId: String, attachmentId: String
     )
     case attachmentDownloaded(accountId: String, attachmentId: String
+    )
+    case attachmentUploaded(attachmentId: String, replicaRevision: UInt64
     )
     case teardown(scope: TeardownScope, status: TeardownStatus, failures: [TeardownPhase]
     )
@@ -3643,7 +3780,10 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 8: return .attachmentDownloaded(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
         )
 
-        case 9: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
+        case 9: return .attachmentUploaded(attachmentId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        )
+
+        case 10: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3704,8 +3844,14 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             FfiConverterString.write(attachmentId, into: &buf)
 
 
-        case let .teardown(scope,status,failures):
+        case let .attachmentUploaded(attachmentId,replicaRevision):
             writeInt(&buf, Int32(9))
+            FfiConverterString.write(attachmentId, into: &buf)
+            FfiConverterUInt64.write(replicaRevision, into: &buf)
+
+
+        case let .teardown(scope,status,failures):
+            writeInt(&buf, Int32(10))
             FfiConverterTypeTeardownScope.write(scope, into: &buf)
             FfiConverterTypeTeardownStatus.write(status, into: &buf)
             FfiConverterSequenceTypeTeardownPhase.write(failures, into: &buf)
@@ -4824,6 +4970,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new() != 20792) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_attachmentuploadmetadata_new() != 26080) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_constructor_clientruntime_new() != 45744) {

@@ -10,18 +10,24 @@
  */
 
 import {
-	commitWebAttachmentDownloadRuntimeIncarnation,
 	isAttachmentDownloadSinkCleanupHostRequest,
 	isAttachmentDownloadSinkHostRequest,
 	isAttachmentDownloadSinkRuntimeScopeRequest,
-	prepareWebAttachmentDownloadRuntimeIncarnation,
 	WebAttachmentDownloadSinkRegistry,
 } from "../web-attachment-download-sink";
+import {
+	isAttachmentUploadSourceHostRequest,
+	WebAttachmentUploadSourceRegistry,
+} from "../web-attachment-upload-source";
 
 export type {
 	AtomicAttachmentDownloadSink,
 	AttachmentDownloadSinkGrant,
 } from "../web-attachment-download-sink";
+export type {
+	AtomicAttachmentUploadSource,
+	AttachmentUploadSourceGrant,
+} from "../web-attachment-upload-source";
 
 import { WebPlatformStorageHost } from "../web-platform-storage-host";
 import {
@@ -31,6 +37,7 @@ import {
 	type WorkerRpcChannel,
 } from "../worker/owner";
 import { createWorkerRuntime, type WorkerRuntime } from "../worker-runtime";
+import { createAttachmentRuntimeIncarnationTransitions } from "./attachment-runtime-incarnation";
 
 export {
 	decodeRuntimeClientIdentity,
@@ -60,6 +67,7 @@ export interface WebClientRuntime {
 	/** The Crypto channel. The host wraps it in a `CryptoPort`; ticket 22 removes it. */
 	cryptoChannel: WorkerRpcChannel;
 	attachmentDownloads: WebAttachmentDownloadSinkRegistry;
+	attachmentUploads: WebAttachmentUploadSourceRegistry;
 	workerOwner: SharedWorkerOwner;
 	close(): Promise<void>;
 }
@@ -69,18 +77,29 @@ export function createWebClientRuntime(
 ): WebClientRuntime {
 	const platformStorage = new WebPlatformStorageHost();
 	const attachmentDownloads = new WebAttachmentDownloadSinkRegistry();
+	const attachmentUploads = new WebAttachmentUploadSourceRegistry();
 	const fallbackHostRequest =
 		deps.handleHostRequest ?? platformStorage.invoke.bind(platformStorage);
+	const transitionAttachmentRuntimeIncarnation =
+		createAttachmentRuntimeIncarnationTransitions(
+			attachmentDownloads,
+			attachmentUploads,
+		);
 	const workerOwner = createSharedWorkerOwner({
 		createWorker: deps.createWorker,
 		handleHostRequest: (payload, signal) => {
 			if (isAttachmentDownloadSinkRuntimeScopeRequest(payload)) {
-				const transition =
-					payload.phase === "prepare"
-						? prepareWebAttachmentDownloadRuntimeIncarnation
-						: commitWebAttachmentDownloadRuntimeIncarnation;
-				return transition(attachmentDownloads, payload.runtimeIncarnation).then(
-					() => payload.phase,
+				return transitionAttachmentRuntimeIncarnation(
+					payload.phase,
+					payload.runtimeIncarnation,
+				);
+			}
+			if (isAttachmentUploadSourceHostRequest(payload)) {
+				if (signal.aborted)
+					return Promise.reject(new Error("Source request cancelled"));
+				return attachmentUploads.invoke(
+					payload.controlRequestJson,
+					payload.runtimeIncarnation,
 				);
 			}
 			if (isAttachmentDownloadSinkHostRequest(payload)) {
@@ -96,14 +115,16 @@ export function createWebClientRuntime(
 		},
 		handleClosingHostRequest: (payload, signal) => {
 			if (isAttachmentDownloadSinkRuntimeScopeRequest(payload)) {
-				const transition =
-					payload.phase === "prepare"
-						? prepareWebAttachmentDownloadRuntimeIncarnation
-						: commitWebAttachmentDownloadRuntimeIncarnation;
-				return transition(attachmentDownloads, payload.runtimeIncarnation).then(
-					() => payload.phase,
+				return transitionAttachmentRuntimeIncarnation(
+					payload.phase,
+					payload.runtimeIncarnation,
 				);
 			}
+			if (isAttachmentUploadSourceHostRequest(payload) && !signal.aborted)
+				return attachmentUploads.invoke(
+					payload.controlRequestJson,
+					payload.runtimeIncarnation,
+				);
 			if (
 				!isAttachmentDownloadSinkCleanupHostRequest(payload) ||
 				signal.aborted
@@ -115,19 +136,30 @@ export function createWebClientRuntime(
 				payload.runtimeIncarnation,
 			);
 		},
-		beforeWorkerTerminate: () => attachmentDownloads.drainClose(),
+		beforeWorkerTerminate: () =>
+			Promise.all([
+				attachmentDownloads.drainClose(),
+				attachmentUploads.drainClose(),
+			]).then(() => undefined),
 		preserveHostRequestDuringClose: (payload) =>
 			isAttachmentDownloadSinkHostRequest(payload) ||
-			isAttachmentDownloadSinkRuntimeScopeRequest(payload),
+			isAttachmentDownloadSinkRuntimeScopeRequest(payload) ||
+			isAttachmentUploadSourceHostRequest(payload),
 	});
 	let closeTask: Promise<void> | undefined;
 	const close = (): Promise<void> => {
 		attachmentDownloads.beginClose();
+		attachmentUploads.beginClose();
 		if (closeTask !== undefined) return closeTask;
 		const closing = workerOwner.close().then(
-			() => attachmentDownloads.drainClose(),
+			() =>
+				Promise.all([
+					attachmentDownloads.drainClose(),
+					attachmentUploads.drainClose(),
+				]).then(() => undefined),
 			async (error) => {
 				await attachmentDownloads.drainClose();
+				await attachmentUploads.drainClose();
 				throw error;
 			},
 		);
@@ -141,6 +173,7 @@ export function createWebClientRuntime(
 	return {
 		workerOwner,
 		attachmentDownloads,
+		attachmentUploads,
 		cryptoChannel: workerOwner.channel("crypto"),
 		runtime,
 		normalizeAccountEmail: runtime.normalizeAccountEmail,

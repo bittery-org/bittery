@@ -144,6 +144,21 @@ pub(crate) enum AttachmentDeleteAnswer {
     AccessDenied,
 }
 
+pub(crate) enum AttachmentUploadGrantAnswer {
+    Grant(crate::server_contract::AttachmentUploadResponse),
+    AccessDenied,
+    QuotaRejected,
+    SizeRejected,
+}
+
+pub(crate) enum AttachmentMetadataCreateAnswer {
+    Created(crate::server_contract::CreateAttachmentResponse),
+    Ambiguous,
+    AccessDenied,
+    Missing,
+    Rejected,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AttachmentAuthorityPage {
@@ -817,6 +832,173 @@ impl<'transport> AuthHttpClient<'transport> {
                 "Attachment download grant returned an unexpected status",
             )),
         }
+    }
+
+    pub(crate) async fn create_attachment_upload_grant(
+        &self,
+        token: &str,
+        item_id: &str,
+        body: &crate::server_contract::AttachmentUploadBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentUploadGrantAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Attachment Upload grant could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Post,
+                    self.endpoint(&["api", "v1", "items", item_id, "attachment-uploads"])?
+                        .into(),
+                    headers,
+                    body,
+                    ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let grant = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment Upload grant returned invalid JSON")
+                })?;
+                AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::Grant(grant))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed {
+                status: 403,
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure(
+                        "Attachment Upload grant returned invalid Problem Details",
+                    )
+                })?;
+                AuthenticatedOutcome::Ok(if problem.code == ErrorCode::AttachmentQuotaExceeded {
+                    AttachmentUploadGrantAnswer::QuotaRejected
+                } else {
+                    AttachmentUploadGrantAnswer::AccessDenied
+                })
+            }
+            HttpResponse::Completed {
+                status: 400 | 413, ..
+            } => AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::SizeRejected),
+            HttpResponse::Completed {
+                status: 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => AuthenticatedOutcome::Transient,
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment Upload grant was cancelled",
+                ))
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant(
+                    "Attachment Upload grant returned an unexpected status",
+                ))
+            }
+        })
+    }
+
+    pub(crate) async fn create_attachment_metadata(
+        &self,
+        token: &str,
+        item_id: &str,
+        body: &crate::server_contract::CreateAttachmentBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentMetadataCreateAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Attachment metadata could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Post,
+                    self.endpoint(&["api", "v1", "items", item_id, "attachments"])?
+                        .into(),
+                    headers,
+                    body,
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let created = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment metadata returned invalid JSON")
+                })?;
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Created(created))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed { status: 403, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::AccessDenied)
+            }
+            HttpResponse::Completed { status: 404, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Missing)
+            }
+            HttpResponse::Completed {
+                status: 400 | 413, ..
+            } => AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Rejected),
+            HttpResponse::Completed {
+                status: 408 | 409 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Ambiguous)
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment metadata creation was cancelled",
+                ))
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant(
+                    "Attachment metadata returned an unexpected status",
+                ))
+            }
+        })
     }
 
     pub(crate) async fn rename_attachment(
@@ -1897,6 +2079,144 @@ mod tests {
             "encryptionAlgorithm": "AES-GCM-AAD-V1",
             "fileSize": 1048576
         })
+    }
+
+    #[tokio::test]
+    async fn owns_exact_authenticated_attachment_upload_grant_and_metadata_exchanges() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            completed(
+                200,
+                "application/json",
+                json!({ "attachmentId": "attachment-7", "key": "attachments/key", "uploadUrl": "https://storage.test/upload" }),
+            ),
+            completed(
+                200,
+                "application/json",
+                json!({ "attachmentId": "attachment-7" }),
+            ),
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+        let grant_body = crate::server_contract::AttachmentUploadBody {
+            file_name: "opaque.enc".into(),
+            content_type: "application/octet-stream".into(),
+            file_size: 7,
+        };
+        let grant = client
+            .create_attachment_upload_grant(
+                "token",
+                "item-7",
+                &grant_body,
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            grant,
+            AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::Grant(_))
+        ));
+        let create_body = crate::server_contract::CreateAttachmentBody {
+            attachment_id: "attachment-7".into(),
+            storage_key: "attachments/key".into(),
+            encrypted_attachment_key: "key".into(),
+            attachment_key_iv: "key-iv".into(),
+            attachment_key_algorithm: "AES-GCM-AAD-V1".into(),
+            envelope_version: 1,
+            encrypted_name: "name".into(),
+            encrypted_content_type: "type".into(),
+            encryption_iv: "name-iv".into(),
+            encrypted_content_type_iv: "type-iv".into(),
+            encryption_algorithm: "AES-GCM-AAD-V1".into(),
+            file_size: 7,
+        };
+        let created = client
+            .create_attachment_metadata("token", "item-7", &create_body, RequestCancellation::new())
+            .await
+            .unwrap();
+        assert!(matches!(
+            created,
+            AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Created(_))
+        ));
+        let requests = executor.requests();
+        assert_eq!(requests[0]["method"], "POST");
+        assert_eq!(
+            requests[0]["url"],
+            "https://server.test/api/v1/items/item-7/attachment-uploads"
+        );
+        assert_eq!(
+            serde_json::from_value::<Vec<u8>>(requests[0]["body"].clone()).unwrap(),
+            serde_json::to_vec(&grant_body).unwrap()
+        );
+        assert_eq!(
+            requests[1]["url"],
+            "https://server.test/api/v1/items/item-7/attachments"
+        );
+        assert_eq!(
+            serde_json::from_value::<Vec<u8>>(requests[1]["body"].clone()).unwrap(),
+            serde_json::to_vec(&create_body).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn attachment_upload_quota_classification_uses_only_the_stable_code() {
+        let problem = |code: &str, detail: &str| {
+            json!({
+                "type": "https://bittery.com/problems/attachment-upload",
+                "title": "Upload rejected",
+                "status": 403,
+                "code": code,
+                "detail": detail,
+                "instance": "urn:bittery:request:request-1",
+                "requestId": "request-1",
+                "retryable": false,
+                "errors": null
+            })
+        };
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            completed(
+                403,
+                "application/problem+json",
+                problem("FORBIDDEN", "quota quota quota"),
+            ),
+            completed(
+                403,
+                "application/problem+json",
+                problem("ATTACHMENT_QUOTA_EXCEEDED", "Speicherplatz nicht verfugbar"),
+            ),
+        ]));
+        let transport = HttpTransport::new(executor);
+        let client =
+            AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+        let body = crate::server_contract::AttachmentUploadBody {
+            file_name: "opaque.enc".into(),
+            content_type: "application/octet-stream".into(),
+            file_size: 7,
+        };
+        assert!(matches!(
+            client
+                .create_attachment_upload_grant(
+                    "token",
+                    "item-7",
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::AccessDenied)
+        ));
+        assert!(matches!(
+            client
+                .create_attachment_upload_grant(
+                    "token",
+                    "item-7",
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::QuotaRejected)
+        ));
     }
 
     #[tokio::test]

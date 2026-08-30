@@ -120,6 +120,31 @@ fn attachment_move_transcrypt_preserves_the_existing_envelope_format() {
 }
 
 #[test]
+fn attachment_upload_stream_preserves_the_existing_envelope_format() {
+    use core::attachment_move::{AttachmentBlobEncryptor, AttachmentBlobScope};
+
+    // Produced independently with Node's `crypto.createCipheriv("aes-256-gcm", ...)` over the
+    // historical Base64 plaintext representation.
+    const TARGET: &[u8] = br#"{"ciphertext":"8WLjUKtkpbLR4hxKQ5rmrXPnonCTyNFAYQZvS2uVNQ6UcvzhpW2US6fQn+aNZQm+a4Zbk4uY2QD49dBF3TdS8g==","iv":"RERERERERERERERE","algorithm":"AES-GCM-AAD-V1"}"#;
+    let plaintext = b"raw attachment bytes\0across chunks";
+    let mut encryptor = AttachmentBlobEncryptor::new_with_test_iv(
+        [0x22; 32],
+        AttachmentBlobScope::new(
+            "vault-target".into(),
+            "attachment-7".into(),
+            "user-9".into(),
+        ),
+        [0x44; 12],
+    )
+    .unwrap();
+    let mut target = encryptor.push(&plaintext[..5]).unwrap();
+    target.extend(encryptor.push(&plaintext[5..19]).unwrap());
+    target.extend(encryptor.push(&plaintext[19..]).unwrap());
+    target.extend(encryptor.finish().unwrap().final_chunk);
+    assert_eq!(target, TARGET);
+}
+
+#[test]
 fn srp_6a_api_and_core_complete_the_same_session() {
     let password = "correct horse battery staple";
     let registration = block_on(api::generate_srp_registration(password.into())).unwrap();

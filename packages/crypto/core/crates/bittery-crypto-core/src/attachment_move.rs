@@ -375,6 +375,158 @@ pub struct AttachmentTranscryptFinish {
     pub publication_proof: AttachmentPublicationProof,
 }
 
+/// Bounded-memory writer for the existing Attachment JSON/Base64 AES-GCM envelope.
+///
+/// Input is raw plaintext bytes. The historical format first Base64-encodes those bytes, encrypts
+/// that UTF-8 text, then Base64-encodes the authenticated ciphertext into the JSON envelope.
+pub struct AttachmentBlobEncryptor {
+    target: Option<GcmStream>,
+    plaintext_base64: Base64Encoder,
+    ciphertext_base64: Base64Encoder,
+    prefix_pending: bool,
+    target_iv: [u8; IV_LENGTH],
+    envelope_hash: Sha256,
+    envelope_length: u64,
+    plaintext_length: u64,
+}
+
+pub struct AttachmentBlobEncryptFinish {
+    pub final_chunk: Vec<u8>,
+    pub ciphertext_sha256: String,
+    pub byte_length: u64,
+    pub plaintext_length: u64,
+}
+
+impl AttachmentBlobEncryptor {
+    pub fn new(
+        key: [u8; 32],
+        scope: AttachmentBlobScope,
+    ) -> Result<Self, AttachmentMoveCryptoError> {
+        let mut rng = system_rng();
+        let mut iv = [0_u8; IV_LENGTH];
+        rng.fill_bytes(&mut iv);
+        Self::new_with_iv(key, scope, iv)
+    }
+
+    #[cfg(any(test, feature = "attachment-move-test-vectors"))]
+    pub fn new_with_test_iv(
+        key: [u8; 32],
+        scope: AttachmentBlobScope,
+        iv: [u8; IV_LENGTH],
+    ) -> Result<Self, AttachmentMoveCryptoError> {
+        Self::new_with_iv(key, scope, iv)
+    }
+
+    fn new_with_iv(
+        key: [u8; 32],
+        scope: AttachmentBlobScope,
+        target_iv: [u8; IV_LENGTH],
+    ) -> Result<Self, AttachmentMoveCryptoError> {
+        let key = Zeroizing::new(key);
+        let aad = Zeroizing::new(scope.aad_bytes()?);
+        Ok(Self {
+            target: Some(GcmStream::new(&key, target_iv, &aad)?),
+            plaintext_base64: Base64Encoder::new(),
+            ciphertext_base64: Base64Encoder::new(),
+            prefix_pending: true,
+            target_iv,
+            envelope_hash: Sha256::new(),
+            envelope_length: 0,
+            plaintext_length: 0,
+        })
+    }
+
+    pub fn push(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, AttachmentMoveCryptoError> {
+        if plaintext.len() > MAX_ATTACHMENT_ENVELOPE_INPUT_CHUNK {
+            return self.fail(AttachmentMoveCryptoError::InputChunkTooLarge);
+        }
+        self.plaintext_length = self
+            .plaintext_length
+            .checked_add(plaintext.len() as u64)
+            .ok_or(AttachmentMoveCryptoError::AttachmentTooLarge)?;
+        let mut encoded_plaintext = Zeroizing::new(Vec::with_capacity(
+            plaintext.len().saturating_add(2) / 3 * 4,
+        ));
+        for byte in plaintext {
+            self.plaintext_base64.push(*byte, &mut encoded_plaintext);
+        }
+        self.encrypt_encoded(&encoded_plaintext)
+    }
+
+    pub fn finish(mut self) -> Result<AttachmentBlobEncryptFinish, AttachmentMoveCryptoError> {
+        let mut tail_plaintext = Zeroizing::new(Vec::with_capacity(4));
+        self.plaintext_base64.finish(&mut tail_plaintext);
+        let mut final_chunk = self.encrypt_encoded(&tail_plaintext)?;
+        let tag = self
+            .target
+            .take()
+            .ok_or(AttachmentMoveCryptoError::InvalidEnvelope)?
+            .finish()?;
+        let metadata_offset = final_chunk.len();
+        for byte in tag {
+            self.ciphertext_base64.push(byte, &mut final_chunk);
+        }
+        self.ciphertext_base64.finish(&mut final_chunk);
+        final_chunk.extend_from_slice(br#"","iv":""#);
+        final_chunk.extend_from_slice(BASE64.encode(self.target_iv).as_bytes());
+        final_chunk.extend_from_slice(br#"","algorithm":"AES-GCM-AAD-V1"}"#);
+        self.note_output(&final_chunk[metadata_offset..])?;
+        Ok(AttachmentBlobEncryptFinish {
+            final_chunk,
+            ciphertext_sha256: hex::encode(self.envelope_hash.clone().finalize()),
+            byte_length: self.envelope_length,
+            plaintext_length: self.plaintext_length,
+        })
+    }
+
+    fn encrypt_encoded(
+        &mut self,
+        encoded_plaintext: &[u8],
+    ) -> Result<Vec<u8>, AttachmentMoveCryptoError> {
+        let mut output = Vec::with_capacity(encoded_plaintext.len().saturating_add(16));
+        if self.prefix_pending {
+            output.extend_from_slice(TARGET_PREFIX);
+            self.prefix_pending = false;
+        }
+        for byte in encoded_plaintext {
+            let ciphertext = match self.target.as_mut() {
+                Some(target) => target.encrypt_byte(*byte)?,
+                None => return self.fail(AttachmentMoveCryptoError::InvalidEnvelope),
+            };
+            self.ciphertext_base64.push(ciphertext, &mut output);
+        }
+        self.note_output(&output)?;
+        Ok(output)
+    }
+
+    fn note_output(&mut self, bytes: &[u8]) -> Result<(), AttachmentMoveCryptoError> {
+        self.envelope_hash.update(bytes);
+        self.envelope_length = self
+            .envelope_length
+            .checked_add(bytes.len() as u64)
+            .ok_or(AttachmentMoveCryptoError::AttachmentTooLarge)?;
+        Ok(())
+    }
+
+    fn fail<T>(
+        &mut self,
+        error: AttachmentMoveCryptoError,
+    ) -> Result<T, AttachmentMoveCryptoError> {
+        self.target.take();
+        self.plaintext_base64.zeroize();
+        self.ciphertext_base64.zeroize();
+        Err(error)
+    }
+}
+
+impl Drop for AttachmentBlobEncryptor {
+    fn drop(&mut self) {
+        self.target_iv.zeroize();
+        self.plaintext_base64.zeroize();
+        self.ciphertext_base64.zeroize();
+    }
+}
+
 pub struct AttachmentMoveTranscryptor {
     parser: Option<EnvelopeParser>,
     source: Option<GcmStream>,
@@ -1296,9 +1448,10 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AttachmentBlobDecryptor, AttachmentBlobScope, AttachmentEnvelopeScanner,
-        AttachmentMoveCryptoError, AttachmentMoveTranscryptor, AttachmentPublicationIdentity,
-        GcmStream, MoveTargetNonce, ATTACHMENT_ENCRYPTION_ALGORITHM, MAX_GCM_TEXT_LENGTH,
+        AttachmentBlobDecryptor, AttachmentBlobEncryptor, AttachmentBlobScope,
+        AttachmentEnvelopeScanner, AttachmentMoveCryptoError, AttachmentMoveTranscryptor,
+        AttachmentPublicationIdentity, GcmStream, MoveTargetNonce, ATTACHMENT_ENCRYPTION_ALGORITHM,
+        MAX_GCM_TEXT_LENGTH,
     };
     use aes_gcm::{
         aead::{Aead, KeyInit, Payload},
@@ -1355,6 +1508,33 @@ mod tests {
             scanner.push(&envelope[offset..]).unwrap();
         }
         scanner.finish().unwrap()
+    }
+
+    #[test]
+    fn streaming_upload_encryption_preserves_the_historical_attachment_envelope() {
+        let plaintext = b"raw attachment bytes\0across chunks";
+        let expected = envelope(
+            BASE64.encode(plaintext).as_bytes(),
+            &TARGET_KEY,
+            TARGET_IV,
+            "vault-target",
+        );
+        let mut encryptor =
+            AttachmentBlobEncryptor::new_with_test_iv(TARGET_KEY, scope("vault-target"), TARGET_IV)
+                .unwrap();
+        let mut actual = encryptor.push(&plaintext[..5]).unwrap();
+        actual.extend(encryptor.push(&plaintext[5..19]).unwrap());
+        actual.extend(encryptor.push(&plaintext[19..]).unwrap());
+        let finish = encryptor.finish().unwrap();
+        actual.extend(finish.final_chunk);
+
+        assert_eq!(actual, expected);
+        assert_eq!(finish.plaintext_length, plaintext.len() as u64);
+        assert_eq!(finish.byte_length, actual.len() as u64);
+        assert_eq!(
+            finish.ciphertext_sha256,
+            hex::encode(sha2::Sha256::digest(&actual))
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ import { IndexedDbAttachmentArtifactExecutor } from "../indexeddb-attachment-art
 import { IndexedDbReplicaExecutor } from "../indexeddb-executor";
 import { WebAccountLeaseExecutor } from "../web-account-lease-executor";
 import { WebAttachmentDownloadSinkExecutor } from "../web-attachment-download-sink";
+import { WebAttachmentUploadSourceExecutor } from "../web-attachment-upload-source";
 import { WebBinaryTransferExecutor } from "../web-binary-transfer-executor";
 import { WebHttpTransportExecutor } from "../web-http-transport-executor";
 import { createWorkerHostRpc } from "../worker/host-rpc";
@@ -79,6 +80,11 @@ export function serveWebRuntimeWorker(
 			attachmentDownloadSinkExecutorFactory: (runtimeIncarnation) =>
 				new WebAttachmentDownloadSinkExecutor(
 					(payload) => hostRpc.request<string>(payload),
+					runtimeIncarnation,
+				),
+			attachmentUploadSourceExecutorFactory: (runtimeIncarnation) =>
+				new WebAttachmentUploadSourceExecutor(
+					(payload) => hostRpc.request(payload),
 					runtimeIncarnation,
 				),
 			accountLeaseExecutor,

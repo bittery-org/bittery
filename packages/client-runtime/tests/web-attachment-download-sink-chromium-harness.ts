@@ -1,3 +1,4 @@
+import { takeFullOwnedUint8ArrayIntrinsic } from "../src/binary-intrinsics";
 import { IndexedDbAttachmentArtifactExecutor } from "../src/indexeddb-attachment-artifact-executor";
 import { IndexedDbReplicaExecutor } from "../src/indexeddb-executor";
 import { createWebClientRuntime } from "../src/web/composition";
@@ -7,6 +8,11 @@ import {
 	prepareWebAttachmentDownloadRuntimeIncarnation,
 	WebAttachmentDownloadSinkRegistry,
 } from "../src/web-attachment-download-sink";
+import {
+	commitWebAttachmentUploadRuntimeIncarnation,
+	prepareWebAttachmentUploadRuntimeIncarnation,
+	WebAttachmentUploadSourceRegistry,
+} from "../src/web-attachment-upload-source";
 import { WebBinaryTransferExecutor } from "../src/web-binary-transfer-executor";
 import { WebPlatformStorageHost } from "../src/web-platform-storage-host";
 
@@ -57,8 +63,10 @@ Object.assign(globalThis, {
 		const replica = new IndexedDbReplicaExecutor();
 		const platform = new WebPlatformStorageHost();
 		const registry = new WebAttachmentDownloadSinkRegistry();
+		const uploadRegistry = new WebAttachmentUploadSourceRegistry();
 		const construct = async (scope: string) => {
 			await prepareWebAttachmentDownloadRuntimeIncarnation(registry, scope);
+			await prepareWebAttachmentUploadRuntimeIncarnation(uploadRegistry, scope);
 			return bindings.WebClientRuntime.withConfiguredAttachmentMovePreparation(
 				replica.invoke.bind(replica),
 				platform.invoke.bind(platform),
@@ -75,6 +83,11 @@ Object.assign(globalThis, {
 					invoke: (controlRequestJson: string, binaryChunk?: Uint8Array) =>
 						registry.invoke(controlRequestJson, binaryChunk, scope),
 				},
+				{
+					invoke: (controlRequestJson: string) =>
+						uploadRegistry.invoke(controlRequestJson, scope),
+				},
+				takeFullOwnedUint8ArrayIntrinsic,
 			);
 		};
 		const wedged = await construct("real-core-one");
@@ -97,6 +110,10 @@ Object.assign(globalThis, {
 			registry,
 			"real-core-two",
 		);
+		await commitWebAttachmentUploadRuntimeIncarnation(
+			uploadRegistry,
+			"real-core-two",
+		);
 		const freshProjection = await new Promise<Record<string, unknown>>(
 			(resolve, reject) => {
 				const timeout = setTimeout(
@@ -115,6 +132,7 @@ Object.assign(globalThis, {
 		);
 		fresh.unobserve("fresh-device");
 		let grantSucceeded = true;
+		let uploadGrantSucceeded = true;
 		try {
 			registry.grant({
 				accountId: "account-one",
@@ -128,6 +146,18 @@ Object.assign(globalThis, {
 			});
 		} catch {
 			grantSucceeded = false;
+		}
+		try {
+			uploadRegistry.grant({
+				accountId: "account-one",
+				itemId: "item-one",
+				name: "report.txt",
+				contentType: "text/plain",
+				expectedBytes: 1n,
+				source: { read: async () => null, close: async () => {} },
+			});
+		} catch {
+			uploadGrantSucceeded = false;
 		}
 		await fresh.close();
 		const freshStatus = freshProjection.value as
@@ -144,7 +174,7 @@ Object.assign(globalThis, {
 				Array.isArray(freshStatus?.accounts) &&
 				freshStatus.accounts.length === 0 &&
 				freshStatus.closed === false,
-			grantSucceeded,
+			grantSucceeded: grantSucceeded && uploadGrantSucceeded,
 		};
 	},
 	async exerciseAttachmentDownloadTimerProbe(mode: string) {

@@ -217,6 +217,8 @@ export class WebClientRuntime {
    * @param {string} version
    * @param {Function} lifecycle_error
    * @param {any} download_sink_executor
+   * @param {any} upload_source_executor
+   * @param {Function} take_upload_source_binary
    * @returns {WebClientRuntime}
    */
   static withConfiguredAttachmentMovePreparation(
@@ -232,6 +234,8 @@ export class WebClientRuntime {
     version,
     lifecycle_error,
     download_sink_executor,
+    upload_source_executor,
+    take_upload_source_binary,
   ) {
     const ptr0 = passStringToWasm0(
       client_id,
@@ -267,6 +271,8 @@ export class WebClientRuntime {
       len2,
       lifecycle_error,
       download_sink_executor,
+      upload_source_executor,
+      take_upload_source_binary,
     );
     if (ret[2]) {
       throw takeFromExternrefTable0(ret[1]);
@@ -2438,6 +2444,12 @@ function __wbg_get_imports() {
         return ret;
       }, arguments);
     },
+    __wbg_call_d118afd8bd2557eb: function () {
+      return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
+        const ret = arg0.call(arg1, arg2, arg3, arg4, arg5);
+        return ret;
+      }, arguments);
+    },
     __wbg_call_e3b662382210db98: function () {
       return handleError(function (arg0, arg1, arg2, arg3) {
         const ret = arg0.call(arg1, arg2, arg3);
@@ -2446,6 +2458,10 @@ function __wbg_get_imports() {
     },
     __wbg_crypto_48300657fced39f9: function (arg0) {
       const ret = arg0.crypto;
+      return ret;
+    },
+    __wbg_fill_5663f5c647107cce: function (arg0, arg1, arg2, arg3) {
+      const ret = arg0.fill(arg1, arg2 >>> 0, arg3 >>> 0);
       return ret;
     },
     __wbg_getRandomValues_263d0aa5464054ee: function () {
@@ -2466,6 +2482,16 @@ function __wbg_get_imports() {
     },
     __wbg_get_unchecked_6e0ad6d2a41b06f6: function (arg0, arg1) {
       const ret = arg0[arg1 >>> 0];
+      return ret;
+    },
+    __wbg_instanceof_ArrayBuffer_4480b9e0068a8adb: function (arg0) {
+      let result;
+      try {
+        result = arg0 instanceof ArrayBuffer;
+      } catch (_) {
+        result = false;
+      }
+      const ret = result;
       return ret;
     },
     __wbg_instanceof_Promise_4cb210c0b8f8c959: function (arg0) {

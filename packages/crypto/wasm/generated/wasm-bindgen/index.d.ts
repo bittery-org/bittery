@@ -38,6 +38,8 @@ export class WebClientRuntime {
     version: string,
     lifecycle_error: Function,
     download_sink_executor: any,
+    upload_source_executor: any,
+    take_upload_source_binary: Function,
   ): WebClientRuntime;
   static withConfiguredExecutors(
     replica_invoke: Function,
@@ -1640,6 +1642,7 @@ export interface InitOutput {
   ) => void;
   readonly ffi_bittery_client_bindings_uniffi_contract_version: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_attachmentuploadmetadata_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
@@ -1688,6 +1691,11 @@ export interface InitOutput {
     a: number,
     b: number,
   ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_attachmentuploadmetadata_new: (
+    a: number,
+    b: number,
+    c: number,
+  ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new: (
     a: number,
     b: number,
@@ -1712,6 +1720,10 @@ export interface InitOutput {
     b: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_attachmentprojection: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_attachmentuploadmetadata: (
     a: bigint,
     b: number,
   ) => void;
@@ -1958,6 +1970,8 @@ export interface InitOutput {
     m: number,
     n: any,
     o: any,
+    p: any,
+    q: any,
   ) => [number, number, number];
   readonly webclientruntime_withConfiguredExecutors: (
     a: any,
@@ -1979,6 +1993,10 @@ export interface InitOutput {
   ) => number;
   readonly webclientruntime_withReplicaExecutor: (a: any) => number;
   readonly uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_attachmentuploadmetadata: (
     a: bigint,
     b: number,
   ) => bigint;

@@ -186,7 +186,7 @@ mod wasm {
     };
     use async_trait::async_trait;
     use bittery_client_core as core;
-    use js_sys::{Function, Promise, Reflect, Uint8Array};
+    use js_sys::{ArrayBuffer, Function, Promise, Reflect, Uint8Array};
     use std::{
         cell::{Cell, RefCell},
         collections::HashMap,
@@ -199,6 +199,9 @@ mod wasm {
     use tokio::sync::Notify;
     use wasm_bindgen::{JsCast, JsValue};
     use wasm_bindgen_futures::{spawn_local, JsFuture};
+    #[cfg(feature = "binding-test-harness")]
+    use zeroize::Zeroize;
+    use zeroize::Zeroizing;
 
     fn binary_error(failure: BinaryTransferFailure) -> core::AttachmentMoveTransferError {
         bridge_transfer_error(match failure {
@@ -240,7 +243,7 @@ mod wasm {
     }
 
     #[derive(serde::Deserialize, PartialEq, Eq)]
-    #[serde(tag = "type", rename_all = "camelCase")]
+    #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
     enum SinkAnswer {
         Begun,
         Written,
@@ -251,6 +254,423 @@ mod wasm {
         SinkFailure,
         Cancelled,
         InvariantViolation,
+    }
+
+    use crate::web_binary_transfer_control::{
+        AttachmentUploadSourceAnswer as SourceAnswer,
+        AttachmentUploadSourceControl as SourceControl,
+    };
+
+    fn parse_source_answer(json: &str) -> Result<SourceAnswer, ()> {
+        let value: serde_json::Value = serde_json::from_str(json).map_err(|_| ())?;
+        let serde_json::Value::Object(fields) = &value else {
+            return Err(());
+        };
+        if fields.len() != 1 || !fields.get("type").is_some_and(serde_json::Value::is_string) {
+            return Err(());
+        }
+        serde_json::from_value(value).map_err(|_| ())
+    }
+
+    #[derive(Clone)]
+    struct JsAttachmentUploadSourcePort {
+        executor: JsValue,
+        take_binary: Function,
+    }
+    impl JsAttachmentUploadSourcePort {
+        fn new(executor: JsValue, take_binary: Function) -> Result<Self, JsValue> {
+            validate_exact_surface(&executor, &["invoke"])?;
+            Ok(Self {
+                executor,
+                take_binary,
+            })
+        }
+        async fn invoke(
+            &self,
+            control: SourceControl,
+        ) -> Result<(SourceAnswer, Option<Zeroizing<Vec<u8>>>), core::AttachmentUploadSourceError>
+        {
+            let json = serde_json::to_string(&control)
+                .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+            let invoke = function(&self.executor, "invoke")
+                .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+            let promise = invoke
+                .call1(&self.executor, &JsValue::from_str(&json))
+                .map_err(|_| core::AttachmentUploadSourceError::Source)?
+                .dyn_into::<Promise>()
+                .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+            let value = JsFuture::from(promise)
+                .await
+                .map_err(|_| core::AttachmentUploadSourceError::Source)?;
+            let binary_value = Reflect::get(&value, &JsValue::from_str("binaryChunk"))
+                .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+            let binary = if binary_value.is_undefined() {
+                None
+            } else {
+                // The captured-intrinsic host helper validates, copies, and wipes the untrusted
+                // source synchronously. Rust only ever constructs a fresh view over its returned
+                // owned ArrayBuffer, so js_sys never consults hostile typed-array metadata.
+                let backing = self
+                    .take_binary
+                    .call1(&JsValue::UNDEFINED, &binary_value)
+                    .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+                if backing.is_undefined() {
+                    return Err(core::AttachmentUploadSourceError::Invariant);
+                }
+                let backing = backing
+                    .dyn_into::<ArrayBuffer>()
+                    .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+                let bytes = Uint8Array::new(&backing);
+                let owned = Zeroizing::new(bytes.to_vec());
+                let wipe_length = u32::try_from(owned.len())
+                    .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+                bytes.fill(0, 0, wipe_length);
+                Some(owned)
+            };
+            let expected_fields = if binary.is_some() {
+                &["binaryChunk", "controlResponseJson"][..]
+            } else {
+                &["controlResponseJson"][..]
+            };
+            if !has_exact_value_fields(&value, expected_fields) {
+                return Err(core::AttachmentUploadSourceError::Invariant);
+            }
+            let answer_json = Reflect::get(&value, &JsValue::from_str("controlResponseJson"))
+                .map_err(|_| core::AttachmentUploadSourceError::Invariant)?
+                .as_string()
+                .ok_or(core::AttachmentUploadSourceError::Invariant)?;
+            let answer = parse_source_answer(&answer_json)
+                .map_err(|_| core::AttachmentUploadSourceError::Invariant)?;
+            if (answer == SourceAnswer::Chunk) != binary.is_some() {
+                return Err(core::AttachmentUploadSourceError::Invariant);
+            }
+            match answer {
+                SourceAnswer::SourceFailure => Err(core::AttachmentUploadSourceError::Source),
+                SourceAnswer::Cancelled => Err(core::AttachmentUploadSourceError::Cancelled),
+                SourceAnswer::InvariantViolation => {
+                    Err(core::AttachmentUploadSourceError::Invariant)
+                }
+                answer => Ok((answer, binary)),
+            }
+        }
+    }
+    struct JsAttachmentUploadSource {
+        port: Arc<JsAttachmentUploadSourcePort>,
+        capability_id: String,
+    }
+    #[async_trait(?Send)]
+    impl core::AttachmentUploadSource for JsAttachmentUploadSource {
+        async fn begin(
+            &mut self,
+            cancellation: core::RequestCancellation,
+        ) -> Result<(), core::AttachmentUploadSourceError> {
+            if cancellation.is_cancelled() {
+                Err(core::AttachmentUploadSourceError::Cancelled)
+            } else {
+                Ok(())
+            }
+        }
+        async fn next_chunk(
+            &mut self,
+            cancellation: core::RequestCancellation,
+        ) -> Result<Option<Vec<u8>>, core::AttachmentUploadSourceError> {
+            let port = Arc::clone(&self.port);
+            let capability_id = self.capability_id.clone();
+            let read = port.invoke(SourceControl::Read {
+                capability_id: self.capability_id.clone(),
+                max_bytes: MAX_TRANSFER_CHUNK_BYTES as u32,
+            });
+            tokio::pin!(read);
+            let (answer, binary) = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => {
+                    let cleanup = port.invoke(SourceControl::Close {
+                        capability_id,
+                    });
+                    let (read_result, cleanup_result) = tokio::join!(read, cleanup);
+                    drop(read_result);
+                    let _ = cleanup_result;
+                    return Err(core::AttachmentUploadSourceError::Cancelled);
+                }
+                result = &mut read => result?,
+            };
+            match (answer, binary) {
+                (SourceAnswer::Chunk, Some(mut bytes))
+                    if !bytes.is_empty() && bytes.len() <= MAX_TRANSFER_CHUNK_BYTES =>
+                {
+                    Ok(Some(std::mem::take(&mut *bytes)))
+                }
+                (SourceAnswer::End, None) => Ok(None),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+        async fn close(&mut self) -> Result<(), core::AttachmentUploadSourceError> {
+            match self
+                .port
+                .invoke(SourceControl::Close {
+                    capability_id: self.capability_id.clone(),
+                })
+                .await?
+                .0
+            {
+                SourceAnswer::Closed => Ok(()),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+    }
+    #[async_trait(?Send)]
+    impl core::AttachmentUploadSourcePort for JsAttachmentUploadSourcePort {
+        async fn claim(
+            &self,
+            account_id: &core::AccountId,
+            item_id: &str,
+            name: &str,
+            content_type: &str,
+            capability_id: &str,
+            expected_bytes: u64,
+        ) -> Result<Box<dyn core::AttachmentUploadSource>, core::AttachmentUploadSourceError>
+        {
+            let identity = (
+                account_id.as_str().to_owned(),
+                item_id.to_owned(),
+                name.to_owned(),
+                content_type.to_owned(),
+                capability_id.to_owned(),
+            );
+            match self
+                .invoke(SourceControl::Claim {
+                    account_id: identity.0.clone(),
+                    item_id: identity.1.clone(),
+                    name: identity.2.clone(),
+                    content_type: identity.3.clone(),
+                    capability_id: identity.4.clone(),
+                    expected_bytes: expected_bytes.to_string(),
+                })
+                .await?
+                .0
+            {
+                SourceAnswer::Claimed => {}
+                _ => return Err(core::AttachmentUploadSourceError::Invariant),
+            }
+            Ok(Box::new(JsAttachmentUploadSource {
+                port: Arc::new(self.clone()),
+                capability_id: identity.4,
+            }))
+        }
+        async fn retire_account(
+            &self,
+            account_id: &core::AccountId,
+        ) -> Result<(), core::AttachmentUploadSourceError> {
+            match self
+                .invoke(SourceControl::RetireAccount {
+                    account_id: account_id.as_str().to_owned(),
+                })
+                .await?
+                .0
+            {
+                SourceAnswer::Retired => Ok(()),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+        async fn complete_account_retirement(
+            &self,
+            account_id: &core::AccountId,
+        ) -> Result<(), core::AttachmentUploadSourceError> {
+            match self
+                .invoke(SourceControl::CompleteAccountRetirement {
+                    account_id: account_id.as_str().to_owned(),
+                })
+                .await?
+                .0
+            {
+                SourceAnswer::RetirementCompleted => Ok(()),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+        async fn retire_runtime(&self) -> Result<(), core::AttachmentUploadSourceError> {
+            match self.invoke(SourceControl::RetireRuntime).await?.0 {
+                SourceAnswer::Retired => Ok(()),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    struct JsForegroundUploadTransfer {
+        executor: JsValue,
+    }
+    struct JsForegroundUpload {
+        executor: JsValue,
+        transfer_id: String,
+    }
+    #[async_trait(?Send)]
+    impl core::AttachmentUploadBinary for JsForegroundUpload {
+        async fn write(
+            &mut self,
+            bytes: &[u8],
+            cancellation: core::RequestCancellation,
+        ) -> Result<(), core::AttachmentMoveTransferError> {
+            let function = function(&self.executor, "writeForegroundUpload")
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?;
+            let promise = function
+                .call2(
+                    &self.executor,
+                    &JsValue::from_str(&self.transfer_id),
+                    &Uint8Array::from(bytes).into(),
+                )
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?
+                .dyn_into::<Promise>()
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?;
+            let operation = JsFuture::from(promise);
+            tokio::pin!(operation);
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => {
+                    let cleanup = abort_foreground_upload(&self.executor, &self.transfer_id);
+                    let (operation_result, cleanup_result) = tokio::join!(operation, cleanup);
+                    let _ = operation_result;
+                    cleanup_result?;
+                    Err(core::AttachmentMoveTransferError::Transient)
+                }
+                result = &mut operation => result.map(|_| ()).map_err(|_| core::AttachmentMoveTransferError::Invariant),
+            }
+        }
+        async fn finish(
+            &mut self,
+            digest: &str,
+            cancellation: core::RequestCancellation,
+        ) -> Result<core::AttachmentUploadBinaryOutcome, core::AttachmentMoveTransferError>
+        {
+            let function = function(&self.executor, "finishForegroundUpload")
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?;
+            let promise = function
+                .call2(
+                    &self.executor,
+                    &JsValue::from_str(&self.transfer_id),
+                    &JsValue::from_str(digest),
+                )
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?
+                .dyn_into::<Promise>()
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?;
+            let operation = JsFuture::from(promise);
+            tokio::pin!(operation);
+            let value = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => {
+                    let cleanup = abort_foreground_upload(&self.executor, &self.transfer_id);
+                    let (operation_result, cleanup_result) = tokio::join!(operation, cleanup);
+                    let _ = operation_result;
+                    cleanup_result?;
+                    return Ok(core::AttachmentUploadBinaryOutcome::Cancelled);
+                }
+                result = &mut operation => result.map_err(|_| core::AttachmentMoveTransferError::Invariant)?,
+            };
+            parse_foreground_upload_outcome(&value)
+        }
+        async fn abort(&mut self) -> Result<(), core::AttachmentMoveTransferError> {
+            abort_foreground_upload(&self.executor, &self.transfer_id).await
+        }
+    }
+
+    async fn abort_foreground_upload(
+        executor: &JsValue,
+        transfer_id: &str,
+    ) -> Result<(), core::AttachmentMoveTransferError> {
+        let promise = function(executor, "abortForegroundUpload")
+            .and_then(|function| function.call1(executor, &JsValue::from_str(transfer_id)))
+            .map_err(|_| core::AttachmentMoveTransferError::Invariant)?
+            .dyn_into::<Promise>()
+            .map_err(|_| core::AttachmentMoveTransferError::Invariant)?;
+        JsFuture::from(promise)
+            .await
+            .map(|_| ())
+            .map_err(|_| core::AttachmentMoveTransferError::Transient)
+    }
+
+    fn parse_foreground_upload_outcome(
+        value: &JsValue,
+    ) -> Result<core::AttachmentUploadBinaryOutcome, core::AttachmentMoveTransferError> {
+        let kind = Reflect::get(value, &JsValue::from_str("type"))
+            .map_err(|_| core::AttachmentMoveTransferError::Invariant)?
+            .as_string()
+            .ok_or(core::AttachmentMoveTransferError::Invariant)?;
+        match kind.as_str() {
+            "uploaded" if has_exact_value_fields(value, &["type", "ciphertextSha256"]) => {
+                let ciphertext_sha256 = Reflect::get(value, &JsValue::from_str("ciphertextSha256"))
+                    .map_err(|_| core::AttachmentMoveTransferError::Invariant)?
+                    .as_string()
+                    .ok_or(core::AttachmentMoveTransferError::Invariant)?;
+                Ok(core::AttachmentUploadBinaryOutcome::Uploaded { ciphertext_sha256 })
+            }
+            "notDispatched" if has_exact_value_fields(value, &["type"]) => {
+                Ok(core::AttachmentUploadBinaryOutcome::NotDispatched)
+            }
+            "rejected" if has_exact_value_fields(value, &["type", "status"]) => {
+                let status = Reflect::get(value, &JsValue::from_str("status"))
+                    .map_err(|_| core::AttachmentMoveTransferError::Invariant)?
+                    .as_f64()
+                    .filter(|status| status.fract() == 0.0 && (300.0..=599.0).contains(status))
+                    .ok_or(core::AttachmentMoveTransferError::Invariant)?;
+                Ok(core::AttachmentUploadBinaryOutcome::Rejected {
+                    status: status as u16,
+                })
+            }
+            "ambiguous" if has_exact_value_fields(value, &["type"]) => {
+                Ok(core::AttachmentUploadBinaryOutcome::Ambiguous)
+            }
+            "cancelled" if has_exact_value_fields(value, &["type"]) => {
+                Ok(core::AttachmentUploadBinaryOutcome::Cancelled)
+            }
+            _ => Err(core::AttachmentMoveTransferError::Invariant),
+        }
+    }
+
+    fn has_exact_value_fields(value: &JsValue, expected: &[&str]) -> bool {
+        if value.is_null() || value.is_undefined() || !value.is_object() {
+            return false;
+        }
+        let Ok(keys) = Reflect::own_keys(value) else {
+            return false;
+        };
+        let actual: Vec<String> = keys.iter().filter_map(|key| key.as_string()).collect();
+        actual.len() == keys.length() as usize && exact_surface_names(actual, expected)
+    }
+    #[async_trait(?Send)]
+    impl core::AttachmentUploadTransferPort for JsForegroundUploadTransfer {
+        async fn open(
+            &self,
+            account_id: &core::AccountId,
+            attachment_id: &str,
+            upload_url: &str,
+            expected_bytes: u64,
+            cancellation: core::RequestCancellation,
+        ) -> Result<Box<dyn core::AttachmentUploadBinary>, core::AttachmentMoveTransferError>
+        {
+            let bytes = u32::try_from(expected_bytes)
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?;
+            let begin = function(&self.executor, "beginForegroundUpload")
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?;
+            let id = begin
+                .call4(
+                    &self.executor,
+                    &JsValue::from_str(account_id.as_str()),
+                    &JsValue::from_str(attachment_id),
+                    &JsValue::from_str(upload_url),
+                    &JsValue::from_f64(f64::from(bytes)),
+                )
+                .map_err(|_| core::AttachmentMoveTransferError::Invariant)?
+                .as_string()
+                .ok_or(core::AttachmentMoveTransferError::Invariant)?;
+            let upload = JsForegroundUpload {
+                executor: self.executor.clone(),
+                transfer_id: id,
+            };
+            if cancellation.is_cancelled() {
+                abort_foreground_upload(&upload.executor, &upload.transfer_id).await?;
+                return Err(core::AttachmentMoveTransferError::Transient);
+            }
+            Ok(Box::new(upload))
+        }
     }
 
     #[derive(Clone)]
@@ -920,14 +1340,23 @@ mod wasm {
         lease_executor: JsValue,
         lifecycle_error: Function,
         download_sink_executor: JsValue,
+        upload_source_executor: JsValue,
+        take_upload_source_binary: Function,
     ) -> Result<(Arc<core::Runtime>, WebAttachmentMoveResources), JsValue> {
         let artifacts = Arc::new(JsAttachmentArtifactStore::new(artifact_executor)?);
         let (provisional, published) = shared_artifact_ports(artifacts);
+        let foreground_upload_transfer: Arc<dyn core::AttachmentUploadTransferPort> =
+            Arc::new(JsForegroundUploadTransfer {
+                executor: binary_executor.clone(),
+            });
         let binary = Arc::new(JsBinaryTransferExecutor::new(binary_executor)?);
         let transfer: Arc<dyn core::AttachmentMoveTransferPort> =
             Arc::new(JsAttachmentMoveTransferPort::new(Arc::clone(&binary))?);
         let download_sink_port: Arc<dyn core::AttachmentDownloadSinkPort> =
             Arc::new(JsAttachmentDownloadSinkPort::new(download_sink_executor)?);
+        let upload_source_port: Arc<dyn core::AttachmentUploadSourcePort> = Arc::new(
+            JsAttachmentUploadSourcePort::new(upload_source_executor, take_upload_source_binary)?,
+        );
         let leases = Arc::new(JsAttachmentMoveAccountLeasePort::new(lease_executor)?);
         let lease_port: Arc<dyn core::AttachmentMoveAccountLeasePort> = leases.clone();
         let preparation = core::AttachmentMovePreparationFacade::new(
@@ -949,6 +1378,10 @@ mod wasm {
             transfer,
             download_sink_port,
         ));
+        runtime.install_attachment_upload(core::AttachmentUploadFacade::new(
+            upload_source_port,
+            foreground_upload_transfer,
+        ));
         let lifecycle = PreparationLifecycleTask::start(Arc::clone(&runtime), lifecycle_error);
         Ok((
             runtime,
@@ -966,12 +1399,85 @@ mod wasm {
     pub struct WebAttachmentMoveBridgeTestHarness {
         binary: Arc<JsBinaryTransferExecutor>,
         transfer: Arc<JsAttachmentMoveTransferPort>,
+        foreground_transfer: Arc<JsForegroundUploadTransfer>,
         leases: Arc<JsAttachmentMoveAccountLeasePort>,
         lease: RefCell<Option<Box<dyn core::AttachmentMoveAccountLease>>>,
         download: RefCell<Option<Box<dyn core::AttachmentMoveDownload>>>,
         upload: RefCell<Option<Box<dyn core::AttachmentMoveUpload>>>,
+        foreground_upload: RefCell<Option<Box<dyn core::AttachmentUploadBinary>>>,
         lifecycle: RefCell<Option<Rc<PreparationLifecycleTask>>>,
         close_signal: Rc<Notify>,
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    pub struct WebAttachmentUploadSourceBridgeTestHarness {
+        port: Arc<JsAttachmentUploadSourcePort>,
+        source: RefCell<Option<Box<dyn core::AttachmentUploadSource>>>,
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    impl WebAttachmentUploadSourceBridgeTestHarness {
+        #[wasm_bindgen::prelude::wasm_bindgen(constructor)]
+        pub fn new(executor: JsValue, take_binary: Function) -> Result<Self, JsValue> {
+            Ok(Self {
+                port: Arc::new(JsAttachmentUploadSourcePort::new(executor, take_binary)?),
+                source: RefCell::new(None),
+            })
+        }
+
+        pub async fn claim(&self) -> Result<(), JsValue> {
+            let source = core::AttachmentUploadSourcePort::claim(
+                self.port.as_ref(),
+                &core::AccountId::from("account-source"),
+                "item-source",
+                "held.txt",
+                "text/plain",
+                "capability-source",
+                1,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
+            *self.source.borrow_mut() = Some(source);
+            Ok(())
+        }
+
+        pub async fn cancel_read(&self) -> Result<String, JsValue> {
+            let mut source = self
+                .source
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| JsValue::from_str("No Upload source is held"))?;
+            let cancellation = core::RequestCancellation::new();
+            cancellation.cancel();
+            match core::AttachmentUploadSource::next_chunk(source.as_mut(), cancellation).await {
+                Err(core::AttachmentUploadSourceError::Cancelled) => Ok("cancelled".into()),
+                _ => Err(JsValue::from_str("Invariant")),
+            }
+        }
+
+        pub async fn read_once(&self) -> Result<String, JsValue> {
+            let mut source = self
+                .source
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| JsValue::from_str("No Upload source is held"))?;
+            match core::AttachmentUploadSource::next_chunk(
+                source.as_mut(),
+                core::RequestCancellation::new(),
+            )
+            .await
+            {
+                Ok(Some(mut bytes)) => {
+                    let length = bytes.len();
+                    bytes.zeroize();
+                    Ok(format!("chunk:{length}"))
+                }
+                Ok(None) => Ok("end".into()),
+                Err(error) => Err(JsValue::from_str(&format!("{error:?}"))),
+            }
+        }
     }
 
     #[cfg(feature = "binding-test-harness")]
@@ -979,19 +1485,40 @@ mod wasm {
     impl WebAttachmentMoveBridgeTestHarness {
         #[wasm_bindgen::prelude::wasm_bindgen(constructor)]
         pub fn new(binary_executor: JsValue, lease_executor: JsValue) -> Result<Self, JsValue> {
+            let foreground_transfer = Arc::new(JsForegroundUploadTransfer {
+                executor: binary_executor.clone(),
+            });
             let binary = Arc::new(JsBinaryTransferExecutor::new(binary_executor)?);
             let transfer = Arc::new(JsAttachmentMoveTransferPort::new(Arc::clone(&binary))?);
             let leases = Arc::new(JsAttachmentMoveAccountLeasePort::new(lease_executor)?);
             Ok(Self {
                 binary,
                 transfer,
+                foreground_transfer,
                 leases,
                 lease: RefCell::new(None),
                 download: RefCell::new(None),
                 upload: RefCell::new(None),
+                foreground_upload: RefCell::new(None),
                 lifecycle: RefCell::new(None),
                 close_signal: Rc::new(Notify::new()),
             })
+        }
+
+        pub fn parse_upload_source_answer(&self, json: String) -> Result<String, JsValue> {
+            let answer = parse_source_answer(&json).map_err(|_| JsValue::from_str("Invariant"))?;
+            Ok(match answer {
+                SourceAnswer::Claimed => "claimed",
+                SourceAnswer::Chunk => "chunk",
+                SourceAnswer::End => "end",
+                SourceAnswer::Closed => "closed",
+                SourceAnswer::Retired => "retired",
+                SourceAnswer::RetirementCompleted => "retirementCompleted",
+                SourceAnswer::SourceFailure => "sourceFailure",
+                SourceAnswer::Cancelled => "cancelled",
+                SourceAnswer::InvariantViolation => "invariantViolation",
+            }
+            .into())
         }
 
         pub async fn acquire_lease(&self, account_id: String) -> Result<bool, JsValue> {
@@ -1108,6 +1635,98 @@ mod wasm {
             self.upload.borrow_mut().take();
         }
 
+        pub async fn open_foreground_upload(&self) -> Result<(), JsValue> {
+            let upload = core::AttachmentUploadTransferPort::open(
+                self.foreground_transfer.as_ref(),
+                &core::AccountId::from("account-foreground"),
+                "attachment-foreground",
+                "https://objects.test/foreground?opaque=credential",
+                3,
+                core::RequestCancellation::new(),
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
+            *self.foreground_upload.borrow_mut() = Some(upload);
+            Ok(())
+        }
+
+        pub async fn abort_foreground_upload(&self) -> Result<(), JsValue> {
+            let mut upload = self
+                .foreground_upload
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| JsValue::from_str("No foreground Upload is held"))?;
+            upload
+                .abort()
+                .await
+                .map_err(|error| JsValue::from_str(&format!("{error:?}")))
+        }
+
+        pub async fn finish_foreground_upload(&self) -> Result<String, JsValue> {
+            let mut upload = self
+                .foreground_upload
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| JsValue::from_str("No foreground Upload is held"))?;
+            let outcome = upload
+                .finish(&"0".repeat(64), core::RequestCancellation::new())
+                .await
+                .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
+            let answer = match &outcome {
+                core::AttachmentUploadBinaryOutcome::Uploaded { ciphertext_sha256 } => {
+                    format!("uploaded:{ciphertext_sha256}")
+                }
+                core::AttachmentUploadBinaryOutcome::NotDispatched => "notDispatched".into(),
+                core::AttachmentUploadBinaryOutcome::Rejected { status } => {
+                    format!("rejected:{status}")
+                }
+                core::AttachmentUploadBinaryOutcome::Ambiguous => "ambiguous".into(),
+                core::AttachmentUploadBinaryOutcome::Cancelled => "cancelled".into(),
+            };
+            if !matches!(
+                outcome,
+                core::AttachmentUploadBinaryOutcome::Uploaded { .. }
+            ) {
+                upload
+                    .abort()
+                    .await
+                    .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
+            }
+            Ok(answer)
+        }
+
+        pub async fn cancel_foreground_finish(&self) -> Result<String, JsValue> {
+            let mut upload = self
+                .foreground_upload
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| JsValue::from_str("No foreground Upload is held"))?;
+            let cancellation = core::RequestCancellation::new();
+            cancellation.cancel();
+            let outcome = upload
+                .finish(&"0".repeat(64), cancellation)
+                .await
+                .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
+            if outcome != core::AttachmentUploadBinaryOutcome::Cancelled {
+                return Err(JsValue::from_str("Invariant"));
+            }
+            Ok("cancelled".into())
+        }
+
+        pub async fn cancel_foreground_write(&self) -> Result<String, JsValue> {
+            let mut upload = self
+                .foreground_upload
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| JsValue::from_str("No foreground Upload is held"))?;
+            let cancellation = core::RequestCancellation::new();
+            cancellation.cancel();
+            match core::AttachmentUploadBinary::write(upload.as_mut(), &[1], cancellation).await {
+                Err(core::AttachmentMoveTransferError::Transient) => Ok("cancelled".into()),
+                _ => Err(JsValue::from_str("Invariant")),
+            }
+        }
+
         pub fn start_pending_download(&self, url: String, callback: Function) {
             let transfer = Arc::clone(&self.transfer);
             let close_signal = Rc::clone(&self.close_signal);
@@ -1167,6 +1786,7 @@ mod wasm {
             self.lease.borrow_mut().take();
             self.download.borrow_mut().take();
             self.upload.borrow_mut().take();
+            self.foreground_upload.borrow_mut().take();
             self.leases.close();
             self.binary.close();
         }

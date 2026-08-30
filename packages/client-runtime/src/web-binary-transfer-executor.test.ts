@@ -34,6 +34,7 @@ const memorySpoolRoot = () => ({
 			throw new Error("wrong length");
 		await consume(new File(parts, "opaque.ciphertext"));
 	},
+	async cleanup(_scope: typeof uploadScope) {},
 	async deleteAccount(_accountId: string) {},
 	async wipeDevice() {},
 });
@@ -46,6 +47,28 @@ const control = async (
 	const result = await executor.invoke(JSON.stringify(request), bytes);
 	return { ...result, response: JSON.parse(result.controlResponseJson) };
 };
+
+function hostileBinary(values: number[]) {
+	const bytes = new Uint8Array(values);
+	let getterCalls = 0;
+	for (const key of [
+		"buffer",
+		"byteOffset",
+		"byteLength",
+		"length",
+		Symbol.iterator,
+		"custom",
+	] as const) {
+		Object.defineProperty(bytes, key, {
+			configurable: true,
+			get: () => {
+				getterCalls += 1;
+				throw new Error("hostile binary accessor");
+			},
+		});
+	}
+	return { bytes, getterCalls: () => getterCalls };
+}
 
 test("streams a bounded download through binary side channels", async () => {
 	const fetch: BinaryTransferFetch = async () =>
@@ -103,6 +126,277 @@ test("streams a bounded download through binary side channels", async () => {
 			JSON.stringify({ type: "readDownloadChunk", transferId: "download-1" }),
 		),
 	).toEqual({ controlResponseJson: '{"type":"downloadFinished"}' });
+});
+
+test("foreground Attachment Upload uses the Account-scoped production PUT and Rust digest", async () => {
+	let observedScope: typeof uploadScope | undefined;
+	let observedRequest: Request | undefined;
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: {
+			...memorySpoolRoot(),
+			async withUploadFile(scope, expected, maximum, chunks, consume) {
+				observedScope = scope;
+				await memorySpoolRoot().withUploadFile(
+					scope,
+					expected,
+					maximum,
+					chunks,
+					consume,
+				);
+			},
+		},
+		fetch: async (request, init) => {
+			observedRequest =
+				request instanceof Request ? request : new Request(request, init);
+			return new Response(null, { status: 204 });
+		},
+	});
+	const transferId = executor.beginForegroundUpload(
+		"account-a",
+		"attachment-a",
+		"https://objects.example/upload",
+		3,
+	);
+	await executor.writeForegroundUpload(transferId, new Uint8Array([1, 2, 3]));
+	expect(await executor.finishForegroundUpload(transferId, digest123)).toEqual({
+		type: "uploaded",
+		ciphertextSha256: digest123,
+	});
+	expect(observedScope?.accountId).toBe("account-a");
+	expect(observedScope?.attachmentId).toBe("attachment-a");
+	const request = observedRequest;
+	if (request === undefined) throw new Error("foreground PUT was not observed");
+	expect(request.headers.get("x-amz-content-sha256")).toBe(digest123);
+	expect(Array.from(new Uint8Array(await request.arrayBuffer()))).toEqual([
+		1, 2, 3,
+	]);
+});
+
+test("foreground WASM boundary wipes hostile actual Uint8Array input without invoking accessors", async () => {
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: memorySpoolRoot(),
+		fetch: async () => new Response(null, { status: 204 }),
+	});
+	const transferId = executor.beginForegroundUpload(
+		"account-a",
+		"attachment-a",
+		"https://objects.example/upload",
+		3,
+	);
+	const hostile = hostileBinary([1, 2, 3]);
+	await expect(
+		executor.writeForegroundUpload(transferId, hostile.bytes),
+	).rejects.toThrow("Binary transfer invocation failed");
+	expect(hostile.getterCalls()).toBe(0);
+	expect(Uint8Array.prototype.slice.call(hostile.bytes)).toEqual(
+		new Uint8Array(3),
+	);
+	await executor.abortForegroundUpload(transferId);
+});
+
+test("foreground Attachment Upload reports malformed request construction before dispatch", async () => {
+	let fetchCalls = 0;
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: memorySpoolRoot(),
+		fetch: async () => {
+			fetchCalls += 1;
+			return new Response(null, { status: 204 });
+		},
+	});
+	const transferId = executor.beginForegroundUpload(
+		"account-a",
+		"attachment-a",
+		"not a URL",
+		3,
+	);
+	await executor.writeForegroundUpload(transferId, new Uint8Array([1, 2, 3]));
+	expect(await executor.finishForegroundUpload(transferId, digest123)).toEqual({
+		type: "notDispatched",
+	});
+	expect(fetchCalls).toBe(0);
+});
+
+test("foreground Attachment Upload reports an explicit object-store rejection", async () => {
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: memorySpoolRoot(),
+		fetch: async () => new Response(null, { status: 403 }),
+	});
+	const transferId = executor.beginForegroundUpload(
+		"account-a",
+		"attachment-a",
+		"https://objects.example/upload",
+		3,
+	);
+	await executor.writeForegroundUpload(transferId, new Uint8Array([1, 2, 3]));
+	expect(await executor.finishForegroundUpload(transferId, digest123)).toEqual({
+		type: "rejected",
+		status: 403,
+	});
+});
+
+test("foreground Attachment Upload never emits a rejected outcome for spoofed informational, successful, or out-of-range statuses", async () => {
+	for (const status of [100, 204, 299, 600]) {
+		const executor = new ConfigurableWebBinaryTransferExecutor({
+			spoolRoot: memorySpoolRoot(),
+			fetch: async () =>
+				({ ok: false, status, body: null }) as unknown as Response,
+		});
+		const transferId = executor.beginForegroundUpload(
+			"account-a",
+			"attachment-a",
+			"https://objects.example/upload",
+			3,
+		);
+		await executor.writeForegroundUpload(transferId, new Uint8Array([1, 2, 3]));
+		expect(
+			await executor.finishForegroundUpload(transferId, digest123),
+		).toEqual({ type: "ambiguous" });
+	}
+});
+
+test("foreground Attachment Upload reports post-dispatch network and opaque responses as ambiguous", async () => {
+	for (const fetch of [
+		async () => {
+			throw new TypeError("connection reset after PUT dispatch");
+		},
+		async () => Response.error(),
+	] satisfies BinaryTransferFetch[]) {
+		const executor = new ConfigurableWebBinaryTransferExecutor({
+			spoolRoot: memorySpoolRoot(),
+			fetch,
+		});
+		const transferId = executor.beginForegroundUpload(
+			"account-a",
+			"attachment-a",
+			"https://objects.example/upload",
+			3,
+		);
+		await executor.writeForegroundUpload(transferId, new Uint8Array([1, 2, 3]));
+		expect(
+			await executor.finishForegroundUpload(transferId, digest123),
+		).toEqual({ type: "ambiguous" });
+	}
+});
+
+test("foreground abort waits for spool cleanup and retries it without double cleanup", async () => {
+	let cleanupCalls = 0;
+	let releaseCleanup!: () => void;
+	const cleanupHeld = new Promise<void>((resolve) => {
+		releaseCleanup = resolve;
+	});
+	const spool = {
+		...memorySpoolRoot(),
+		async cleanup() {
+			cleanupCalls += 1;
+			if (cleanupCalls === 1) throw new Error("injected cleanup failure");
+			await cleanupHeld;
+		},
+	};
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: spool,
+	});
+	const transferId = executor.beginForegroundUpload(
+		"account-a",
+		"attachment-a",
+		"https://objects.example/upload",
+		3,
+	);
+
+	await expect(
+		executor.abortForegroundUpload(transferId),
+	).rejects.toBeDefined();
+	let settled = false;
+	const retry = executor.abortForegroundUpload(transferId).then(() => {
+		settled = true;
+	});
+	while (cleanupCalls < 2)
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(cleanupCalls).toBe(2);
+	expect(settled).toBe(false);
+	releaseCleanup();
+	await retry;
+	await executor.abortForegroundUpload(transferId);
+	expect(cleanupCalls).toBe(2);
+});
+
+test("foreground finish failure retains cleanup ownership until OPFS removal retries successfully", async () => {
+	let cleanupCalls = 0;
+	let releaseCleanup!: () => void;
+	const cleanupHeld = new Promise<void>((resolve) => {
+		releaseCleanup = resolve;
+	});
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: {
+			...memorySpoolRoot(),
+			async cleanup() {
+				cleanupCalls += 1;
+				if (cleanupCalls === 1)
+					throw new Error("injected OPFS removal failure");
+				await cleanupHeld;
+			},
+		},
+		fetch: async (request) => {
+			await (request as Request).arrayBuffer();
+			throw new TypeError("connection reset after PUT");
+		},
+	});
+	const transferId = executor.beginForegroundUpload(
+		"account-a",
+		"attachment-a",
+		"https://objects.example/upload",
+		3,
+	);
+	await executor.writeForegroundUpload(transferId, new Uint8Array([1, 2, 3]));
+	expect(await executor.finishForegroundUpload(transferId, digest123)).toEqual({
+		type: "ambiguous",
+	});
+	await expect(
+		executor.abortForegroundUpload(transferId),
+	).rejects.toBeDefined();
+	let settled = false;
+	const retry = executor.abortForegroundUpload(transferId).then(() => {
+		settled = true;
+	});
+	while (cleanupCalls < 2)
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(settled).toBe(false);
+	releaseCleanup();
+	await retry;
+	expect(cleanupCalls).toBe(2);
+});
+
+test("executor close waits for foreground upload and spool cleanup convergence", async () => {
+	let releaseCleanup!: () => void;
+	let cleanupCalls = 0;
+	const cleanupHeld = new Promise<void>((resolve) => {
+		releaseCleanup = resolve;
+	});
+	const executor = new ConfigurableWebBinaryTransferExecutor({
+		spoolRoot: {
+			...memorySpoolRoot(),
+			async cleanup() {
+				cleanupCalls += 1;
+				await cleanupHeld;
+			},
+		},
+	});
+	executor.beginForegroundUpload(
+		"account-a",
+		"attachment-a",
+		"https://objects.example/upload",
+		3,
+	);
+	let closed = false;
+	const closing = executor.close().then(() => {
+		closed = true;
+	});
+	while (cleanupCalls < 1)
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(cleanupCalls).toBe(1);
+	expect(closed).toBe(false);
+	releaseCleanup();
+	await closing;
+	expect(closed).toBe(true);
 });
 
 test("preserves signed download headers and CORS request policy without returning credentials", async () => {

@@ -1,11 +1,15 @@
 import {
 	copyWorkerValue,
+	isAttachmentUploadSourceWorkerRequest,
 	isWorkerReply,
+	prepareHostResponseValueForPost,
 	receiveWorkerValue,
 	type WorkerChannelName,
 	type WorkerReply,
 	type WorkerRequest,
 	WorkerRpcError,
+	wipeAttachmentUploadSourceResponseBinary,
+	wipeWorkerEnvelopeBinary,
 } from "./wire";
 
 export { copyWorkerValue, WorkerRpcError } from "./wire";
@@ -52,11 +56,13 @@ interface PendingRequest {
 }
 
 function backendFailure(error: unknown, fallback: string): WorkerRpcError {
+	const message =
+		typeof error === "object" && error !== null
+			? Object.getOwnPropertyDescriptor(error, "message")?.value
+			: undefined;
 	return new WorkerRpcError(
 		"backend-failure",
-		error instanceof Error && error.message.length > 0
-			? error.message
-			: fallback,
+		typeof message === "string" && message.length > 0 ? message : fallback,
 	);
 }
 
@@ -172,10 +178,32 @@ export function createSharedWorkerOwner(
 	function postHostResponse(
 		target: SharedWorkerHandle,
 		reply: WorkerRequest,
+		expectAttachmentUploadSource = false,
 	): void {
+		let preparedValue: unknown;
 		try {
-			target.postMessage(reply);
+			if (reply.type === "host-response" && reply.ok) {
+				const prepared = prepareHostResponseValueForPost(
+					reply.value,
+					expectAttachmentUploadSource,
+				);
+				preparedValue = prepared.value;
+				try {
+					target.postMessage(
+						{ ...reply, value: prepared.value },
+						prepared.transfer,
+					);
+				} catch (error) {
+					wipeAttachmentUploadSourceResponseBinary(prepared.value);
+					wipeAttachmentUploadSourceResponseBinary(reply.value);
+					throw error;
+				}
+			} else target.postMessage(reply);
 		} catch (error) {
+			if (reply.type === "host-response" && reply.ok) {
+				wipeAttachmentUploadSourceResponseBinary(preparedValue);
+				wipeAttachmentUploadSourceResponseBinary(reply.value);
+			}
 			failWorker(backendFailure(error, "Could not post the host response."));
 		}
 	}
@@ -231,11 +259,14 @@ export function createSharedWorkerOwner(
 			target,
 			request,
 		};
+		let expectsAttachmentUploadSource = false;
 		activeHostRequests.set(request.id, active);
 		const operation = Promise.resolve()
 			.then(() => {
 				if (activeHostRequests.get(request.id) !== active) return;
 				const payload = receiveWorkerValue(request.payload);
+				expectsAttachmentUploadSource =
+					isAttachmentUploadSourceWorkerRequest(payload);
 				active.preserveDuringClose =
 					deps.preserveHostRequestDuringClose?.(payload) ?? false;
 				if (activeHostRequests.get(request.id) !== active) return;
@@ -243,18 +274,26 @@ export function createSharedWorkerOwner(
 			})
 			.then((value) => {
 				if (activeHostRequests.get(request.id) !== active) return;
-				const wireValue = copyWorkerValue(value);
+				prepareHostResponseValueForPost(value, expectsAttachmentUploadSource);
 				activeHostRequests.delete(request.id);
-				postHostResponse(target, {
-					type: "host-response",
-					id: request.id,
-					ok: true,
-					value: wireValue,
-				});
+				// Posting is synchronous. Stop counting this completed handler before a post failure
+				// begins teardown, or teardown would wait on the task currently calling it.
+				activeHostTasks.delete(operation);
+				postHostResponse(
+					target,
+					{
+						type: "host-response",
+						id: request.id,
+						ok: true,
+						value,
+					},
+					expectsAttachmentUploadSource,
+				);
 			})
 			.catch((error: unknown) => {
 				if (activeHostRequests.get(request.id) !== active) return;
 				activeHostRequests.delete(request.id);
+				activeHostTasks.delete(operation);
 				const record = error as { code?: unknown; message?: unknown };
 				postHostResponse(target, {
 					type: "host-response",
@@ -278,7 +317,10 @@ export function createSharedWorkerOwner(
 		if (worker === null) {
 			worker = deps.createWorker();
 			worker.onmessage = (event) => {
-				if (!isWorkerReply(event.data)) return;
+				if (!isWorkerReply(event.data)) {
+					wipeWorkerEnvelopeBinary(event.data);
+					return;
+				}
 				const reply = event.data;
 				if (reply.type === "host-request") {
 					const target = worker;
@@ -286,9 +328,14 @@ export function createSharedWorkerOwner(
 					return;
 				}
 				if (reply.type === "notification") {
-					for (const listener of listeners.get(reply.channel) ?? []) {
-						listener(reply.value);
+					let value: unknown;
+					try {
+						value = copyWorkerValue(reply.value);
+					} catch {
+						return;
 					}
+					for (const listener of listeners.get(reply.channel) ?? [])
+						listener(value);
 					return;
 				}
 				if (reply.type === "close-ack") {
@@ -315,9 +362,17 @@ export function createSharedWorkerOwner(
 				if (reply.type !== "response") return;
 				const request = pending.get(key(reply.channel, reply.id));
 				if (request === undefined) return;
+				let value: unknown;
+				if (reply.ok) {
+					try {
+						value = copyWorkerValue(reply.value);
+					} catch {
+						return;
+					}
+				}
 				pending.delete(key(reply.channel, reply.id));
 				request.detachAbort();
-				if (reply.ok) request.resolve(reply.value);
+				if (reply.ok) request.resolve(value);
 				else request.reject(new WorkerRpcError(reply.code, reply.message));
 			};
 			worker.onerror = (event) => {

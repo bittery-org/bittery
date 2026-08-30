@@ -6,7 +6,9 @@ pub(crate) use attachment_move_lifecycle::live_artifact_owners;
 mod attachment;
 pub use attachment::{
     AttachmentDownloadFacade, AttachmentDownloadSink, AttachmentDownloadSinkError,
-    AttachmentDownloadSinkPort,
+    AttachmentDownloadSinkPort, AttachmentUploadBinary, AttachmentUploadBinaryOutcome,
+    AttachmentUploadFacade, AttachmentUploadSource, AttachmentUploadSourceError,
+    AttachmentUploadSourcePort, AttachmentUploadTransferPort,
 };
 #[cfg(test)]
 mod attachment_move_lifecycle_tests;
@@ -65,7 +67,7 @@ use dispatch::DispatchLeases;
 use lock::AccessRetirement;
 pub use teardown::{TeardownHostCleanup, TeardownHostCleanupRequest, TeardownHostCleanupResponse};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "binding-test-harness"))]
 use crate::replica::PlanResult;
 use crate::{
     auth_http::{AuthClientConfig, AuthHttpClient},
@@ -524,6 +526,7 @@ pub struct Runtime {
     item_mutation_locks: Mutex<ItemMutationLocks>,
     foreground_attachments: foreground_attachment_lifecycle::ForegroundAttachmentRegistry,
     attachment_download: Mutex<Option<AttachmentDownloadFacade>>,
+    attachment_upload: Mutex<Option<AttachmentUploadFacade>>,
     clock: Arc<dyn Clock>,
     device_timer: Arc<dyn DeviceTimer>,
     /// Wakes the dispatcher when something that can change eligibility happened: work was
@@ -917,6 +920,7 @@ impl Runtime {
             foreground_attachments:
                 foreground_attachment_lifecycle::ForegroundAttachmentRegistry::default(),
             attachment_download: Mutex::new(None),
+            attachment_upload: Mutex::new(None),
             clock,
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
@@ -983,6 +987,14 @@ impl Runtime {
             .attachment_download
             .lock()
             .expect("Attachment Download facade lock poisoned") = Some(facade);
+    }
+
+    #[doc(hidden)]
+    pub fn install_attachment_upload(&self, facade: AttachmentUploadFacade) {
+        *self
+            .attachment_upload
+            .lock()
+            .expect("Attachment Upload facade lock poisoned") = Some(facade);
     }
 
     /// Runs the one core-owned preparation scheduler until the Runtime closes.
@@ -1312,6 +1324,30 @@ impl Runtime {
             )?;
             return self.download_attachment(prepared, cancellation).await;
         }
+        if let RuntimeRequest::UploadAttachment {
+            account_id,
+            item_id,
+            name,
+            content_type,
+            file_size,
+            source_capability_id,
+        } = &request
+        {
+            let prepared = self
+                .prepare_attachment_upload(
+                    attachment::UploadAttachmentRequest {
+                        account_id: account_id.clone(),
+                        item_id: item_id.clone(),
+                        name: name.clone(),
+                        content_type: content_type.clone(),
+                        file_size: *file_size,
+                        source_capability_id: source_capability_id.clone(),
+                    },
+                    cancellation.clone(),
+                )
+                .await?;
+            return self.upload_attachment(prepared, cancellation).await;
+        }
         let _admission = self.teardown_admission.read().await;
         self.reject_request_during_pending_teardown(&request)?;
         match request {
@@ -1637,6 +1673,9 @@ impl Runtime {
             RuntimeRequest::DownloadAttachment { .. } => unreachable!(
                 "Download is handled before ordinary admission so sink cleanup can release it"
             ),
+            RuntimeRequest::UploadAttachment { .. } => unreachable!(
+                "Upload is handled before ordinary admission so source cleanup can release it"
+            ),
             // Teardown returns before ordinary admission. A Runtime bug must not abort the host,
             // so this reports an error rather than panicking on the request path.
             RuntimeRequest::RemoveAccount { .. } | RuntimeRequest::Wipe => Err(RuntimeError::new(
@@ -1787,6 +1826,7 @@ impl Runtime {
             self.wake_dispatch();
             self.foreground_attachments.fence_all_and_drain().await;
             self.retire_all_attachment_downloads().await;
+            self.retire_all_attachment_uploads().await;
             let _catalog_guard = self.catalog_transition.lock().await;
             let mut execution_locks: Vec<_> = self
                 .account_execution_locks
@@ -2020,6 +2060,195 @@ impl Runtime {
             .expect("Account lock epoch lock poisoned")
             .insert(account_id.clone(), snapshot.lock_epoch);
         self.wake_dispatch();
+    }
+
+    /// Seeds only the authority that C's joined generated-Upload browser proof needs. The real
+    /// authentication ceremony and restart/unlock acceptance remain exclusively Ticket 28 D.
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    pub async fn seed_attachment_upload_binding_test_authority(
+        &self,
+        server_url: String,
+        mode: String,
+    ) -> Result<String, RuntimeError> {
+        use crate::{
+            platform_storage::{AccountMetadataDocument, CurrentSessionDocument},
+            replica::{AuthorityItemCategory, AuthorityItemRecord},
+            test_fixtures::{
+                personal_vault, TEST_MASTER_UNLOCK_KEY, TEST_VAULT_ID, TEST_VAULT_KEY,
+            },
+        };
+        use bittery_crypto_core::{encrypt_with_aad, AadContext};
+
+        if !matches!(mode.as_str(), "writable" | "read-only" | "optimistic") {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "binding Upload seed mode is invalid",
+            ));
+        }
+        let account_id = AccountId::from("account-1");
+        let incarnation = crate::Incarnation::from("joined-upload-incarnation");
+        let user_id = "user-1".to_owned();
+        let item_id = "item-existing";
+        let draft = crate::LoginItemDraft {
+            title: "Joined Upload Item".into(),
+            url: None,
+            urls: Vec::new(),
+            username: None,
+            password: None,
+            notes: None,
+            note: None,
+            custom_fields: Vec::new(),
+            tags: Vec::new(),
+        };
+        let encrypted = encrypt_with_aad(
+            &serde_json::to_string(&draft).map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "binding Upload seed could not serialize its Item",
+                )
+            })?,
+            &TEST_VAULT_KEY,
+            &AadContext {
+                vault_id: TEST_VAULT_ID.into(),
+                entity_id: item_id.into(),
+                entity_type: "item".into(),
+                version: 1,
+                user_id: user_id.clone(),
+            },
+        )
+        .map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "binding Upload seed could not encrypt its Item",
+            )
+        })?;
+        let item = AuthorityItemRecord {
+            id: item_id.into(),
+            vault_id: TEST_VAULT_ID.into(),
+            category: AuthorityItemCategory::Login,
+            favorite: false,
+            encrypted_data: encrypted.ciphertext.clone(),
+            encryption_iv: encrypted.iv.clone(),
+            encryption_algorithm: encrypted.algorithm.clone(),
+            version: 1,
+            encryption_version: 1,
+            encrypted_by_user_id: user_id.clone(),
+            last_modified_by: user_id.clone(),
+            created_at: "2026-08-30T00:00:00Z".into(),
+            updated_at: "2026-08-30T00:00:00Z".into(),
+            deleted_at: None,
+            attachments: Vec::new(),
+        };
+        let mut vault = personal_vault(TEST_VAULT_ID, &user_id);
+        if mode == "read-only" {
+            vault.role = AuthorityVaultRole::ReadOnly;
+        }
+        let mut snapshot = self
+            .replica
+            .seed_attachment_upload_authority(
+                account_id.clone(),
+                user_id.clone(),
+                incarnation.clone(),
+                vault,
+                item,
+            )
+            .await?;
+        if mode == "optimistic" {
+            let optimistic = self
+                .replica
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    snapshot.incarnation.clone(),
+                    snapshot.revision,
+                    snapshot.lock_epoch,
+                    vec![PlanMutation::AcceptOperation(
+                        crate::test_fixtures::test_operation("binding-upload-optimistic", item_id),
+                    )],
+                ))
+                .await?;
+            if !matches!(optimistic, PlanResult::Applied { .. }) {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "binding Upload seed could not retain optimistic authority",
+                ));
+            }
+            snapshot = self.replica.load(&account_id).await?.ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "binding Upload seed lost optimistic authority",
+                )
+            })?;
+        }
+        self.platform_storage
+            .store_account_metadata(&AccountMetadataDocument::new(
+                account_id.clone(),
+                incarnation.clone(),
+                user_id.clone(),
+                "joined@example.test".into(),
+                "Joined Upload".into(),
+                server_url,
+                None,
+                None,
+                "A3".into(),
+                1_777_500_000_000,
+                1_777_500_000_000,
+                false,
+                true,
+                bittery_crypto_core::current_kdf_profile(),
+                None,
+            )?)
+            .await?;
+        self.platform_storage
+            .store_current_session(&CurrentSessionDocument::new(
+                account_id.clone(),
+                incarnation.clone(),
+                "joined-session-token".into(),
+                Some("joined-session".into()),
+                4_102_444_800_000,
+                Some(4_102_444_800_000),
+                Vec::new(),
+                "joined-encrypted-private-key".into(),
+            )?)
+            .await?;
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .insert(
+                (account_id.clone(), incarnation.clone()),
+                LiveMasterUnlockKey::new(Zeroizing::new(TEST_MASTER_UNLOCK_KEY)),
+            );
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id, snapshot.lock_epoch);
+        self.decrypt_visible_items(&AccountId::from("account-1"))?;
+        serde_json::to_string(&serde_json::json!({
+            "id": item_id,
+            "vaultId": TEST_VAULT_ID,
+            "category": "login",
+            "favorite": false,
+            "encryptedData": encrypted.ciphertext,
+            "encryptionIv": encrypted.iv,
+            "encryptionAlgorithm": encrypted.algorithm,
+            "encryptionVersion": 1,
+            "version": 1,
+            "encryptedByUserId": user_id,
+            "lastModifiedBy": "user-1",
+            "createdAt": "2026-08-30T00:00:00Z",
+            "updatedAt": "2026-08-30T00:00:00Z",
+            "deletedAt": null,
+        }))
+        .map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "binding Upload seed could not serialize authority",
+            )
+        })
     }
 
     fn clear_live_master_unlock_keys_for_account(&self, account_id: &AccountId) {

@@ -1017,6 +1017,7 @@ export const ffi_bittery_client_bindings_rustbuffer_reserve: (
 ) => void;
 export const ffi_bittery_client_bindings_uniffi_contract_version: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_attachmentuploadmetadata_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
@@ -1065,6 +1066,11 @@ export const uniffi_bittery_client_bindings_fn_constructor_attachmentname_new: (
   a: number,
   b: number,
 ) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_attachmentuploadmetadata_new: (
+  a: number,
+  b: number,
+  c: number,
+) => bigint;
 export const uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new: (
   a: number,
   b: number,
@@ -1089,6 +1095,10 @@ export const uniffi_bittery_client_bindings_fn_free_attachmentname: (
   b: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_free_attachmentprojection: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_attachmentuploadmetadata: (
   a: bigint,
   b: number,
 ) => void;
@@ -1335,6 +1345,8 @@ export const webclientruntime_withConfiguredAttachmentMovePreparation: (
   m: number,
   n: any,
   o: any,
+  p: any,
+  q: any,
 ) => [number, number, number];
 export const webclientruntime_withConfiguredExecutors: (
   a: any,
@@ -1356,6 +1368,10 @@ export const webclientruntime_withExecutors: (
 ) => number;
 export const webclientruntime_withReplicaExecutor: (a: any) => number;
 export const uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_attachmentuploadmetadata: (
   a: bigint,
   b: number,
 ) => bigint;

@@ -60,6 +60,8 @@ rmSync(lockPath);
 		[
 			"tests/web-account-lease.chromium.test.ts",
 			"tests/web-binary-transfer.chromium.test.ts",
+			"tests/web-attachment-download-sink.chromium.test.ts",
+			"tests/web-attachment-upload.chromium.test.ts",
 			"tests/opfs-upload-spool.chromium.test.ts",
 		].flatMap((suite) => [
 			{

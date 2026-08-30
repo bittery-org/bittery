@@ -1115,6 +1115,80 @@ impl Replica {
         }
     }
 
+    /// Builds one durable, cryptographically valid Upload authority for the generated-binding
+    /// browser acceptance. Production reaches the same state through Sign-in and Bootstrap; the
+    /// harness deliberately skips that ceremony because Ticket 28 D owns it.
+    #[cfg(feature = "binding-test-harness")]
+    pub(crate) async fn seed_attachment_upload_authority(
+        &self,
+        account_id: AccountId,
+        user_id: String,
+        incarnation: Incarnation,
+        vault: AuthorityVaultRecord,
+        item: AuthorityItemRecord,
+    ) -> Result<ReplicaSnapshot, RuntimeError> {
+        let mut snapshot = self
+            .install_or_replace(account_id, user_id, incarnation)
+            .await?;
+        let generation_id = BootstrapGenerationId("binding-upload-seed".into());
+        let guard = |snapshot: &ReplicaSnapshot| BootstrapGuard {
+            account_id: snapshot.account_id.clone(),
+            user_id: snapshot.user_id.clone(),
+            incarnation: snapshot.incarnation.clone(),
+            expected_replica_revision: snapshot.revision,
+            expected_lock_epoch: snapshot.lock_epoch,
+        };
+        self.begin_bootstrap(BeginBootstrapPlan {
+            guard: guard(&snapshot),
+            generation_id: generation_id.clone(),
+        })
+        .await?;
+        snapshot = self
+            .load_uncached(&snapshot.account_id)
+            .await?
+            .ok_or_else(|| replica_invariant("binding Upload seed lost its Account"))?;
+        self.stage_bootstrap_page(StageBootstrapPagePlan {
+            guard: guard(&snapshot),
+            generation_id: generation_id.clone(),
+            page_identity: BootstrapPageIdentity::vaults(0),
+            request_cursor: BootstrapPageCursor::VaultsInitial,
+            raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"binding-upload-vaults"),
+            pinned_watermark: SyncCursor::CapturedEmpty,
+            continuation: BootstrapContinuation::Final,
+            vaults: vec![vault],
+            items: Vec::new(),
+        })
+        .await?;
+        snapshot = self
+            .load_uncached(&snapshot.account_id)
+            .await?
+            .ok_or_else(|| replica_invariant("binding Upload seed lost its Vault page"))?;
+        self.stage_bootstrap_page(StageBootstrapPagePlan {
+            guard: guard(&snapshot),
+            generation_id: generation_id.clone(),
+            page_identity: BootstrapPageIdentity::items(0),
+            request_cursor: BootstrapPageCursor::ItemsInitial,
+            raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"binding-upload-items"),
+            pinned_watermark: SyncCursor::CapturedEmpty,
+            continuation: BootstrapContinuation::Final,
+            vaults: Vec::new(),
+            items: vec![item],
+        })
+        .await?;
+        snapshot = self
+            .load_uncached(&snapshot.account_id)
+            .await?
+            .ok_or_else(|| replica_invariant("binding Upload seed lost its Item page"))?;
+        self.promote_bootstrap(PromoteBootstrapPlan {
+            guard: guard(&snapshot),
+            generation_id,
+        })
+        .await?;
+        self.load_uncached(&snapshot.account_id)
+            .await?
+            .ok_or_else(|| replica_invariant("binding Upload seed lost promoted authority"))
+    }
+
     #[allow(
         dead_code,
         reason = "used by the guarded persistence conformance surface"

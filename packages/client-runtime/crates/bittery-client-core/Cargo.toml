@@ -12,6 +12,7 @@ platform-storage-contract-schema = ["dep:schemars"]
 http-transport-contract-schema = ["dep:schemars"]
 runtime-protocol-contract-schema = ["dep:schemars"]
 replica-conformance = []
+binding-test-harness = []
 
 [dependencies]
 async-trait.workspace = true

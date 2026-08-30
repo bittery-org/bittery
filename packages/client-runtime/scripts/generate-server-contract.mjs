@@ -19,6 +19,10 @@ const outputPath = path.join(
 
 export const ROOT_ALLOWLIST = Object.freeze([
 	"BootstrapItemsResponse",
+	"AttachmentUploadBody",
+	"AttachmentUploadResponse",
+	"CreateAttachmentBody",
+	"CreateAttachmentResponse",
 	"CreateItemBody",
 	"DeleteAccountRequest",
 	"DeleteAccountResponse",

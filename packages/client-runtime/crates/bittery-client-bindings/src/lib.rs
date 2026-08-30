@@ -92,6 +92,27 @@ impl AttachmentName {
     }
 }
 
+/// Native-only opaque plaintext metadata for Attachment Upload.
+#[derive(uniffi::Object)]
+pub struct AttachmentUploadMetadata {
+    name: String,
+    content_type: String,
+}
+
+impl fmt::Debug for AttachmentUploadMetadata {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("AttachmentUploadMetadata([redacted])")
+    }
+}
+
+#[uniffi::export]
+impl AttachmentUploadMetadata {
+    #[uniffi::constructor]
+    pub fn new(name: String, content_type: String) -> Arc<Self> {
+        Arc::new(Self { name, content_type })
+    }
+}
+
 #[derive(uniffi::Object)]
 pub struct LoginCustomField {
     id: String,
@@ -337,6 +358,13 @@ pub enum RuntimeRequest {
         attachment_id: String,
         sink_capability_id: String,
     },
+    UploadAttachment {
+        account_id: String,
+        item_id: String,
+        metadata: Arc<AttachmentUploadMetadata>,
+        file_size: u64,
+        source_capability_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -478,6 +506,18 @@ impl fmt::Debug for RuntimeRequest {
                 .field("attachment_id", attachment_id)
                 .field("sink_capability", &"[redacted]")
                 .finish(),
+            Self::UploadAttachment {
+                account_id,
+                item_id,
+                file_size,
+                ..
+            } => formatter
+                .debug_struct("UploadAttachment")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .field("file_size", file_size)
+                .field("plaintext_and_source_capability", &"[redacted]")
+                .finish(),
         }
     }
 }
@@ -517,6 +557,10 @@ pub enum RuntimeResponse {
     AttachmentDownloaded {
         account_id: String,
         attachment_id: String,
+    },
+    AttachmentUploaded {
+        attachment_id: String,
+        replica_revision: u64,
     },
     Teardown {
         scope: TeardownScope,
@@ -1163,6 +1207,20 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 attachment_id,
                 sink_capability_id,
             },
+            RuntimeRequest::UploadAttachment {
+                account_id,
+                item_id,
+                metadata,
+                file_size,
+                source_capability_id,
+            } => Self::UploadAttachment {
+                account_id: account_id.into(),
+                item_id,
+                name: metadata.name.clone(),
+                content_type: metadata.content_type.clone(),
+                file_size,
+                source_capability_id,
+            },
         }
     }
 }
@@ -1274,6 +1332,13 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
             } => Self::AttachmentDownloaded {
                 account_id: account_id.into(),
                 attachment_id,
+            },
+            core::RuntimeResponse::AttachmentUploaded {
+                attachment_id,
+                replica_revision,
+            } => Self::AttachmentUploaded {
+                attachment_id,
+                replica_revision,
             },
             core::RuntimeResponse::Teardown {
                 scope,

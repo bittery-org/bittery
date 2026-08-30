@@ -20,6 +20,7 @@ pub enum AppErrorCode {
     AttachmentStagingIncomplete,
     AttachmentStagingMismatch,
     AttachmentAuthorityStale,
+    AttachmentQuotaExceeded,
     #[serde(rename = "TOO_MANY_REQUESTS")]
     TooManyRequests,
     #[serde(rename = "PAYLOAD_TOO_LARGE")]
@@ -110,6 +111,13 @@ impl AppError {
     pub(crate) fn attachment_authority_stale(message: impl Into<String>) -> Self {
         Self {
             code: AppErrorCode::AttachmentAuthorityStale,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_quota_exceeded(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentQuotaExceeded,
             message: message.into(),
         }
     }

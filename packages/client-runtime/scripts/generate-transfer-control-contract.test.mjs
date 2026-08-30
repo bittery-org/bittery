@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { promisify } from "node:util";
 import {
+	validateAttachmentUploadSourceAnswer,
+	validateAttachmentUploadSourceControl,
 	validateTransferControlRequest,
 	validateTransferControlResponse,
 } from "../generated/transfer-control/validator.js";
@@ -17,6 +19,32 @@ test("generated transfer control artifacts match the Rust contract", async () =>
 		{
 			cwd: new URL("..", import.meta.url),
 		},
+	);
+});
+
+test("generated Attachment Upload source control and answers stay closed", async () => {
+	const fixture = JSON.parse(
+		await readFile(
+			new URL("../generated/transfer-control/fixture.json", import.meta.url),
+			"utf8",
+		),
+	);
+	for (const control of fixture.attachmentUploadSourceControls)
+		assert.equal(validateAttachmentUploadSourceControl(control), true);
+	for (const answer of fixture.attachmentUploadSourceAnswers)
+		assert.equal(validateAttachmentUploadSourceAnswer(answer), true);
+	assert.equal(
+		validateAttachmentUploadSourceControl({
+			type: "read",
+			capabilityId: "source-1",
+			maxBytes: 262144,
+			extra: true,
+		}),
+		false,
+	);
+	assert.equal(
+		validateAttachmentUploadSourceAnswer({ type: "futureAnswer" }),
+		false,
 	);
 });
 

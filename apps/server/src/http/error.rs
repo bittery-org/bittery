@@ -307,6 +307,13 @@ impl From<AppError> for ApiError {
                 error.message,
                 false,
             ),
+            AppErrorCode::AttachmentQuotaExceeded => (
+                StatusCode::FORBIDDEN,
+                ErrorCode::AttachmentQuotaExceeded,
+                "Attachment quota exceeded",
+                error.message,
+                false,
+            ),
             AppErrorCode::TooManyRequests => (
                 StatusCode::TOO_MANY_REQUESTS,
                 ErrorCode::RateLimited,
@@ -455,5 +462,18 @@ mod tests {
         assert_eq!(error.status, StatusCode::CONFLICT);
         assert!(error.problem.retryable);
         assert_eq!(error.problem.code, ErrorCode::Conflict);
+    }
+
+    #[test]
+    fn attachment_quota_has_a_stable_code_independent_of_detail() {
+        for detail in [
+            "Attachment storage quota has been reached.",
+            "Speicherplatz nicht verfugbar.",
+        ] {
+            let error = super::ApiError::from(AppError::attachment_quota_exceeded(detail));
+            assert_eq!(error.status, StatusCode::FORBIDDEN);
+            assert_eq!(error.problem.code, ErrorCode::AttachmentQuotaExceeded);
+            assert_eq!(error.problem.detail, detail);
+        }
     }
 }

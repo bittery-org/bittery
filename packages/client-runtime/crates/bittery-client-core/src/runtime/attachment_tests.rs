@@ -11,7 +11,7 @@ use crate::{
         InMemoryReplica, PlanMutation, PlanResult, Replica, SerializedReplicaPersistence,
     },
     server_contract::{UpdateAttachmentBody, VaultAttachmentResponse},
-    test_fixtures::{personal_vault, TEST_VAULT_ID, TEST_VAULT_KEY},
+    test_fixtures::{personal_vault, test_operation, TEST_VAULT_ID, TEST_VAULT_KEY},
     CreateShareDraft, ShareAccessMode, ShareExpiration,
 };
 use async_trait::async_trait;
@@ -219,6 +219,43 @@ fn download_attachment_request_carries_only_account_attachment_and_sink_capabili
             "type": "attachmentDownloaded",
             "accountId": "account-a",
             "attachmentId": "attachment-a",
+        })
+    );
+}
+
+#[test]
+fn upload_attachment_request_carries_only_account_item_bounded_metadata_and_source_capability() {
+    let request = RuntimeRequest::UploadAttachment {
+        account_id: AccountId::from("account-a"),
+        item_id: "item-a".into(),
+        name: "report.txt".into(),
+        content_type: "text/plain".into(),
+        file_size: 12,
+        source_capability_id: "source-a".into(),
+    };
+
+    assert_eq!(
+        serde_json::to_value(request).expect("serialize Upload request"),
+        serde_json::json!({
+            "type": "uploadAttachment",
+            "accountId": "account-a",
+            "itemId": "item-a",
+            "name": "report.txt",
+            "contentType": "text/plain",
+            "fileSize": "12",
+            "sourceCapabilityId": "source-a",
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(RuntimeResponse::AttachmentUploaded {
+            attachment_id: "attachment-a".into(),
+            replica_revision: 42,
+        })
+        .expect("serialize Upload result"),
+        serde_json::json!({
+            "type": "attachmentUploaded",
+            "attachmentId": "attachment-a",
+            "replicaRevision": "42",
         })
     );
 }
@@ -936,6 +973,33 @@ impl SerializedHttpExecutor for AttachmentServer {
                 }))
                 .unwrap(),
             )
+        } else if request.method == "POST" && request.url.ends_with("/attachment-uploads") {
+            completed(200, serde_json::to_vec(&json!({ "attachmentId": "attachment-uploaded", "key": "attachments/uploaded", "uploadUrl": "https://objects.example.test/upload" })).unwrap())
+        } else if request.method == "POST" && request.url.ends_with("/attachments") {
+            let body: crate::server_contract::CreateAttachmentBody =
+                serde_json::from_slice(&request.body).unwrap();
+            let mut uploaded = self.attachment.lock().unwrap().clone();
+            uploaded.id = body.attachment_id.clone();
+            uploaded.storage_key = body.storage_key;
+            uploaded.encrypted_attachment_key = body.encrypted_attachment_key;
+            uploaded.attachment_key_iv = body.attachment_key_iv;
+            uploaded.attachment_key_algorithm = body.attachment_key_algorithm;
+            uploaded.envelope_version = body.envelope_version;
+            uploaded.encrypted_name = body.encrypted_name;
+            uploaded.encrypted_content_type = body.encrypted_content_type;
+            uploaded.encryption_iv = body.encryption_iv;
+            uploaded.encrypted_content_type_iv = body.encrypted_content_type_iv;
+            uploaded.encryption_algorithm = body.encryption_algorithm;
+            uploaded.file_size = body.file_size;
+            uploaded.uploaded_by = USER.into();
+            self.additional_owning_attachments
+                .lock()
+                .unwrap()
+                .push(uploaded);
+            completed(
+                200,
+                serde_json::to_vec(&json!({ "attachmentId": body.attachment_id })).unwrap(),
+            )
         } else if request.method == "DELETE" {
             self.delete_calls.fetch_add(1, Ordering::SeqCst);
             if self
@@ -1159,6 +1223,356 @@ impl AttachmentMoveTransferPort for DownloadTransfer {
         _owner: &crate::AttachmentArtifactOwner,
     ) -> Result<Box<dyn AttachmentMoveUpload>, AttachmentMoveTransferError> {
         Err(AttachmentMoveTransferError::Invariant)
+    }
+}
+
+struct TestUploadSource {
+    bytes: Option<Vec<u8>>,
+    closed: Arc<AtomicUsize>,
+}
+#[async_trait]
+impl AttachmentUploadSource for TestUploadSource {
+    async fn begin(
+        &mut self,
+        _cancellation: RequestCancellation,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn next_chunk(
+        &mut self,
+        _cancellation: RequestCancellation,
+    ) -> Result<Option<Vec<u8>>, AttachmentUploadSourceError> {
+        Ok(self.bytes.take())
+    }
+    async fn close(&mut self) -> Result<(), AttachmentUploadSourceError> {
+        self.closed.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+type UploadSourceClaims = Arc<Mutex<Vec<(String, String, String, String, String, u64)>>>;
+
+struct TestUploadSourcePort {
+    bytes: Vec<u8>,
+    claims: UploadSourceClaims,
+    closed: Arc<AtomicUsize>,
+}
+
+struct HeldRetryUploadSource {
+    close_calls: Arc<AtomicUsize>,
+    close_started: Arc<AtomicBool>,
+    close_release: Arc<Semaphore>,
+}
+
+#[async_trait]
+impl AttachmentUploadSource for HeldRetryUploadSource {
+    async fn begin(
+        &mut self,
+        _cancellation: RequestCancellation,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+
+    async fn next_chunk(
+        &mut self,
+        _cancellation: RequestCancellation,
+    ) -> Result<Option<Vec<u8>>, AttachmentUploadSourceError> {
+        Ok(None)
+    }
+
+    async fn close(&mut self) -> Result<(), AttachmentUploadSourceError> {
+        let attempt = self.close_calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempt == 1 {
+            return Err(AttachmentUploadSourceError::Source);
+        }
+        self.close_started.store(true, Ordering::SeqCst);
+        self.close_release.acquire().await.unwrap().forget();
+        Ok(())
+    }
+}
+
+struct HeldRetryUploadSourcePort {
+    claims: UploadSourceClaims,
+    close_calls: Arc<AtomicUsize>,
+    close_started: Arc<AtomicBool>,
+    close_release: Arc<Semaphore>,
+}
+
+#[async_trait]
+impl AttachmentUploadSourcePort for HeldRetryUploadSourcePort {
+    async fn claim(
+        &self,
+        account_id: &AccountId,
+        item_id: &str,
+        name: &str,
+        content_type: &str,
+        capability_id: &str,
+        expected_bytes: u64,
+    ) -> Result<Box<dyn AttachmentUploadSource>, AttachmentUploadSourceError> {
+        self.claims.lock().unwrap().push((
+            account_id.as_str().into(),
+            item_id.into(),
+            name.into(),
+            content_type.into(),
+            capability_id.into(),
+            expected_bytes,
+        ));
+        Ok(Box::new(HeldRetryUploadSource {
+            close_calls: Arc::clone(&self.close_calls),
+            close_started: Arc::clone(&self.close_started),
+            close_release: Arc::clone(&self.close_release),
+        }))
+    }
+
+    async fn retire_account(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+
+    async fn complete_account_retirement(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+
+    async fn retire_runtime(&self) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+}
+#[async_trait]
+impl AttachmentUploadSourcePort for TestUploadSourcePort {
+    async fn claim(
+        &self,
+        account_id: &AccountId,
+        item_id: &str,
+        name: &str,
+        content_type: &str,
+        capability_id: &str,
+        expected_bytes: u64,
+    ) -> Result<Box<dyn AttachmentUploadSource>, AttachmentUploadSourceError> {
+        self.claims.lock().unwrap().push((
+            account_id.as_str().into(),
+            item_id.into(),
+            name.into(),
+            content_type.into(),
+            capability_id.into(),
+            expected_bytes,
+        ));
+        Ok(Box::new(TestUploadSource {
+            bytes: Some(self.bytes.clone()),
+            closed: Arc::clone(&self.closed),
+        }))
+    }
+    async fn retire_account(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn complete_account_retirement(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn retire_runtime(&self) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+}
+struct TestUploadBinary {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    finish_outcome: TestUploadFinishOutcome,
+}
+#[derive(Clone, Copy)]
+enum TestUploadFinishOutcome {
+    Uploaded,
+    NotDispatched,
+    Rejected(u16),
+    Ambiguous,
+}
+#[async_trait]
+impl AttachmentUploadBinary for TestUploadBinary {
+    async fn write(
+        &mut self,
+        bytes: &[u8],
+        _cancellation: RequestCancellation,
+    ) -> Result<(), AttachmentMoveTransferError> {
+        self.bytes.lock().unwrap().extend_from_slice(bytes);
+        Ok(())
+    }
+    async fn finish(
+        &mut self,
+        digest: &str,
+        _cancellation: RequestCancellation,
+    ) -> Result<AttachmentUploadBinaryOutcome, AttachmentMoveTransferError> {
+        assert_eq!(digest.len(), 64);
+        Ok(match self.finish_outcome {
+            TestUploadFinishOutcome::Uploaded => AttachmentUploadBinaryOutcome::Uploaded {
+                ciphertext_sha256: digest.into(),
+            },
+            TestUploadFinishOutcome::NotDispatched => AttachmentUploadBinaryOutcome::NotDispatched,
+            TestUploadFinishOutcome::Rejected(status) => {
+                AttachmentUploadBinaryOutcome::Rejected { status }
+            }
+            TestUploadFinishOutcome::Ambiguous => AttachmentUploadBinaryOutcome::Ambiguous,
+        })
+    }
+    async fn abort(&mut self) -> Result<(), AttachmentMoveTransferError> {
+        self.bytes.lock().unwrap().clear();
+        Ok(())
+    }
+}
+struct TestUploadTransfer {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    expected: Arc<AtomicUsize>,
+    finish_outcome: TestUploadFinishOutcome,
+}
+
+struct HeldAbortUploadBinary {
+    abort_calls: Arc<AtomicUsize>,
+    abort_release: Arc<Semaphore>,
+    fail_first_completed_abort: bool,
+    fail_write: bool,
+}
+#[async_trait]
+impl AttachmentUploadBinary for HeldAbortUploadBinary {
+    async fn write(
+        &mut self,
+        _bytes: &[u8],
+        _cancellation: RequestCancellation,
+    ) -> Result<(), AttachmentMoveTransferError> {
+        if self.fail_write {
+            Err(AttachmentMoveTransferError::Transient)
+        } else {
+            Ok(())
+        }
+    }
+    async fn finish(
+        &mut self,
+        _digest: &str,
+        _cancellation: RequestCancellation,
+    ) -> Result<AttachmentUploadBinaryOutcome, AttachmentMoveTransferError> {
+        if self.fail_write {
+            panic!("a failed foreground write must abort instead of finishing")
+        }
+        Ok(AttachmentUploadBinaryOutcome::Ambiguous)
+    }
+    async fn abort(&mut self) -> Result<(), AttachmentMoveTransferError> {
+        let call = self.abort_calls.fetch_add(1, Ordering::SeqCst);
+        self.abort_release.acquire().await.unwrap().forget();
+        if self.fail_first_completed_abort && call == 0 {
+            Err(AttachmentMoveTransferError::Transient)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct HeldAbortUploadTransfer {
+    abort_calls: Arc<AtomicUsize>,
+    abort_release: Arc<Semaphore>,
+    fail_first_completed_abort: bool,
+    fail_write: bool,
+}
+
+struct CancellationHeldFinishUploadBinary {
+    finish_started: Arc<AtomicBool>,
+    abort_calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl AttachmentUploadBinary for CancellationHeldFinishUploadBinary {
+    async fn write(
+        &mut self,
+        _bytes: &[u8],
+        cancellation: RequestCancellation,
+    ) -> Result<(), AttachmentMoveTransferError> {
+        if cancellation.is_cancelled() {
+            Err(AttachmentMoveTransferError::Transient)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn finish(
+        &mut self,
+        _digest: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AttachmentUploadBinaryOutcome, AttachmentMoveTransferError> {
+        self.finish_started.store(true, Ordering::SeqCst);
+        cancellation.cancelled().await;
+        Ok(AttachmentUploadBinaryOutcome::Cancelled)
+    }
+
+    async fn abort(&mut self) -> Result<(), AttachmentMoveTransferError> {
+        self.abort_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+struct CancellationHeldFinishUploadTransfer {
+    finish_started: Arc<AtomicBool>,
+    abort_calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl AttachmentUploadTransferPort for CancellationHeldFinishUploadTransfer {
+    async fn open(
+        &self,
+        _account_id: &AccountId,
+        _attachment_id: &str,
+        _upload_url: &str,
+        _expected_bytes: u64,
+        cancellation: RequestCancellation,
+    ) -> Result<Box<dyn AttachmentUploadBinary>, AttachmentMoveTransferError> {
+        if cancellation.is_cancelled() {
+            return Err(AttachmentMoveTransferError::Transient);
+        }
+        Ok(Box::new(CancellationHeldFinishUploadBinary {
+            finish_started: Arc::clone(&self.finish_started),
+            abort_calls: Arc::clone(&self.abort_calls),
+        }))
+    }
+}
+#[async_trait]
+impl AttachmentUploadTransferPort for HeldAbortUploadTransfer {
+    async fn open(
+        &self,
+        _account_id: &AccountId,
+        _attachment_id: &str,
+        _upload_url: &str,
+        _expected_bytes: u64,
+        _cancellation: RequestCancellation,
+    ) -> Result<Box<dyn AttachmentUploadBinary>, AttachmentMoveTransferError> {
+        Ok(Box::new(HeldAbortUploadBinary {
+            abort_calls: Arc::clone(&self.abort_calls),
+            abort_release: Arc::clone(&self.abort_release),
+            fail_first_completed_abort: self.fail_first_completed_abort,
+            fail_write: self.fail_write,
+        }))
+    }
+}
+#[async_trait]
+impl AttachmentUploadTransferPort for TestUploadTransfer {
+    async fn open(
+        &self,
+        account_id: &AccountId,
+        attachment_id: &str,
+        upload_url: &str,
+        expected_bytes: u64,
+        _cancellation: RequestCancellation,
+    ) -> Result<Box<dyn AttachmentUploadBinary>, AttachmentMoveTransferError> {
+        assert_eq!(account_id.as_str(), ACCOUNT);
+        assert_eq!(attachment_id, "attachment-uploaded");
+        assert_eq!(upload_url, "https://objects.example.test/upload");
+        self.expected
+            .store(expected_bytes as usize, Ordering::SeqCst);
+        Ok(Box::new(TestUploadBinary {
+            bytes: Arc::clone(&self.bytes),
+            finish_outcome: self.finish_outcome,
+        }))
     }
 }
 
@@ -1544,6 +1958,804 @@ async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarn
         replica,
         timer,
     }
+}
+
+fn install_early_upload_source(
+    harness: &AttachmentHarness,
+    claims: UploadSourceClaims,
+    closed: Arc<AtomicUsize>,
+) {
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(TestUploadSourcePort {
+                bytes: b"never exposed".to_vec(),
+                claims,
+                closed,
+            }),
+            Arc::new(TestUploadTransfer {
+                bytes: Arc::new(Mutex::new(Vec::new())),
+                expected: Arc::new(AtomicUsize::new(0)),
+                finish_outcome: TestUploadFinishOutcome::Uploaded,
+            }),
+        ));
+}
+
+#[tokio::test]
+async fn upload_claims_then_closes_the_exact_source_for_every_pre_authority_exit() {
+    for failure in [
+        "cancelled",
+        "account-missing",
+        "item-missing",
+        "optimistic",
+        "read-only",
+    ] {
+        let harness = if failure == "read-only" {
+            seeded_attachment_with_role(AuthorityVaultRole::ReadOnly).await
+        } else {
+            seeded_attachment().await
+        };
+        let claims = Arc::new(Mutex::new(Vec::new()));
+        let closed = Arc::new(AtomicUsize::new(0));
+        install_early_upload_source(&harness, Arc::clone(&claims), Arc::clone(&closed));
+        if failure == "optimistic" {
+            let snapshot = harness
+                .runtime
+                .replica()
+                .snapshot(&harness.account_id)
+                .unwrap();
+            harness
+                .runtime
+                .execute_plan(GuardedCommitPlan::new(
+                    harness.account_id.clone(),
+                    snapshot.incarnation,
+                    snapshot.revision,
+                    snapshot.lock_epoch,
+                    vec![PlanMutation::AcceptOperation(test_operation(
+                        "operation-optimistic",
+                        ITEM_ID,
+                    ))],
+                ))
+                .await
+                .unwrap();
+        }
+        let cancellation = RequestCancellation::new();
+        if failure == "cancelled" {
+            cancellation.cancel();
+        }
+        let account_id = if failure == "account-missing" {
+            AccountId::from("missing-account")
+        } else {
+            harness.account_id.clone()
+        };
+        let item_id = if failure == "item-missing" {
+            "missing-item".to_owned()
+        } else {
+            ITEM_ID.to_owned()
+        };
+        let capability_id = format!("source-{failure}");
+
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::UploadAttachment {
+                    account_id: account_id.clone(),
+                    item_id: item_id.clone(),
+                    name: "early.txt".into(),
+                    content_type: "text/plain".into(),
+                    file_size: 13,
+                    source_capability_id: capability_id.clone(),
+                },
+                cancellation,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            &*claims.lock().unwrap(),
+            &[(
+                account_id.as_str().to_owned(),
+                item_id,
+                "early.txt".into(),
+                "text/plain".into(),
+                capability_id,
+                13,
+            )],
+            "{failure}: {error:?}"
+        );
+        assert_eq!(closed.load(Ordering::SeqCst), 1, "{failure}: {error:?}");
+        assert!(
+            harness.server.requests.lock().unwrap().is_empty(),
+            "{failure}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn upload_claim_and_lifecycle_registration_precede_outer_admission_cancellation() {
+    let harness = seeded_attachment().await;
+    let claims = Arc::new(Mutex::new(Vec::new()));
+    let closed = Arc::new(AtomicUsize::new(0));
+    install_early_upload_source(&harness, Arc::clone(&claims), Arc::clone(&closed));
+    let outer_writer = harness.runtime.teardown_admission.write().await;
+    let cancellation = RequestCancellation::new();
+    let request = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        let cancellation = cancellation.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::UploadAttachment {
+                        account_id,
+                        item_id: ITEM_ID.into(),
+                        name: "waiting.txt".into(),
+                        content_type: "text/plain".into(),
+                        file_size: 13,
+                        source_capability_id: "source-waiting".into(),
+                    },
+                    cancellation,
+                )
+                .await
+        }
+    });
+    until("Upload claims before outer admission", || {
+        claims.lock().unwrap().len() == 1
+    })
+    .await;
+    cancellation.cancel();
+    assert_eq!(
+        request.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    assert_eq!(closed.load(Ordering::SeqCst), 1);
+    drop(outer_writer);
+}
+
+#[tokio::test]
+async fn upload_closes_its_claimed_source_when_cancelled_at_the_per_item_writer() {
+    let harness = seeded_attachment().await;
+    let claims = Arc::new(Mutex::new(Vec::new()));
+    let closed = Arc::new(AtomicUsize::new(0));
+    install_early_upload_source(&harness, Arc::clone(&claims), Arc::clone(&closed));
+    let item_lock = harness
+        .runtime
+        .item_mutation_lock(&harness.account_id, ITEM_ID);
+    let item_owner = item_lock.lock().await;
+    let cancellation = RequestCancellation::new();
+    let upload = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        let cancellation = cancellation.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::UploadAttachment {
+                        account_id,
+                        item_id: ITEM_ID.into(),
+                        name: "writer-wait.txt".into(),
+                        content_type: "text/plain".into(),
+                        file_size: 13,
+                        source_capability_id: "source-writer-wait".into(),
+                    },
+                    cancellation,
+                )
+                .await
+        }
+    });
+    until("Upload claims before per-Item writer", || {
+        claims.lock().unwrap().len() == 1
+    })
+    .await;
+    cancellation.cancel();
+    assert_eq!(
+        upload.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    assert_eq!(closed.load(Ordering::SeqCst), 1);
+    drop(item_owner);
+}
+
+#[tokio::test]
+async fn close_waits_for_retried_upload_source_cleanup_during_outer_admission_race() {
+    let harness = seeded_attachment().await;
+    let claims = Arc::new(Mutex::new(Vec::new()));
+    let close_calls = Arc::new(AtomicUsize::new(0));
+    let close_started = Arc::new(AtomicBool::new(false));
+    let close_release = Arc::new(Semaphore::new(0));
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(HeldRetryUploadSourcePort {
+                claims: Arc::clone(&claims),
+                close_calls: Arc::clone(&close_calls),
+                close_started: Arc::clone(&close_started),
+                close_release: Arc::clone(&close_release),
+            }),
+            Arc::new(TestUploadTransfer {
+                bytes: Arc::new(Mutex::new(Vec::new())),
+                expected: Arc::new(AtomicUsize::new(0)),
+                finish_outcome: TestUploadFinishOutcome::Uploaded,
+            }),
+        ));
+    let outer_writer = harness.runtime.teardown_admission.write().await;
+    let upload = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::UploadAttachment {
+                        account_id,
+                        item_id: ITEM_ID.into(),
+                        name: "close-race.txt".into(),
+                        content_type: "text/plain".into(),
+                        file_size: 1,
+                        source_capability_id: "source-close-race".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("Upload claims before close", || {
+        claims.lock().unwrap().len() == 1
+    })
+    .await;
+    let close = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        async move { runtime.close().await }
+    });
+    until("Upload source cleanup retries and blocks", || {
+        close_started.load(Ordering::SeqCst)
+    })
+    .await;
+    assert_eq!(close_calls.load(Ordering::SeqCst), 2);
+    assert!(!close.is_finished());
+    close_release.add_permits(1);
+    close.await.unwrap();
+    drop(outer_writer);
+    assert_eq!(
+        upload.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    assert_eq!(close_calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn foreground_upload_streams_exact_ciphertext_and_reconciles_authoritative_attachment() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"upload bytes".to_vec();
+    let claims = Arc::new(Mutex::new(Vec::new()));
+    let closed = Arc::new(AtomicUsize::new(0));
+    let uploaded = Arc::new(Mutex::new(Vec::new()));
+    let expected = Arc::new(AtomicUsize::new(0));
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(TestUploadSourcePort {
+                bytes: plaintext.clone(),
+                claims: Arc::clone(&claims),
+                closed: Arc::clone(&closed),
+            }),
+            Arc::new(TestUploadTransfer {
+                bytes: Arc::clone(&uploaded),
+                expected: Arc::clone(&expected),
+                finish_outcome: TestUploadFinishOutcome::Uploaded,
+            }),
+        ));
+
+    let result = harness
+        .runtime
+        .request(
+            RuntimeRequest::UploadAttachment {
+                account_id: harness.account_id.clone(),
+                item_id: ITEM_ID.into(),
+                name: "report.txt".into(),
+                content_type: "text/plain".into(),
+                file_size: plaintext.len() as u64,
+                source_capability_id: "source-one".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        &*claims.lock().unwrap(),
+        &[(
+            ACCOUNT.into(),
+            ITEM_ID.into(),
+            "report.txt".into(),
+            "text/plain".into(),
+            "source-one".into(),
+            plaintext.len() as u64
+        )]
+    );
+    assert_eq!(closed.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        uploaded.lock().unwrap().len(),
+        expected.load(Ordering::SeqCst)
+    );
+    let snapshot = harness
+        .runtime
+        .replica
+        .snapshot(&harness.account_id)
+        .unwrap();
+    assert_eq!(
+        result,
+        RuntimeResponse::AttachmentUploaded {
+            attachment_id: "attachment-uploaded".into(),
+            replica_revision: snapshot.revision,
+        }
+    );
+    let authority = snapshot.bootstrap.snapshot();
+    let attachment = authority
+        .visible_items
+        .iter()
+        .find(|item| item.id == ITEM_ID)
+        .unwrap()
+        .attachments
+        .iter()
+        .find(|attachment| attachment.id == "attachment-uploaded")
+        .unwrap();
+    assert_eq!(attachment.file_size, plaintext.len() as i32);
+    assert_eq!(attachment.uploaded_by, USER);
+}
+
+#[tokio::test]
+async fn definite_binary_upload_failures_never_create_attachment_metadata() {
+    for finish_outcome in [
+        TestUploadFinishOutcome::NotDispatched,
+        TestUploadFinishOutcome::Rejected(403),
+    ] {
+        let harness = seeded_attachment().await;
+        let plaintext = b"upload bytes".to_vec();
+        harness
+            .runtime
+            .install_attachment_upload(AttachmentUploadFacade::new(
+                Arc::new(TestUploadSourcePort {
+                    bytes: plaintext.clone(),
+                    claims: Arc::new(Mutex::new(Vec::new())),
+                    closed: Arc::new(AtomicUsize::new(0)),
+                }),
+                Arc::new(TestUploadTransfer {
+                    bytes: Arc::new(Mutex::new(Vec::new())),
+                    expected: Arc::new(AtomicUsize::new(0)),
+                    finish_outcome,
+                }),
+            ));
+
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::UploadAttachment {
+                    account_id: harness.account_id.clone(),
+                    item_id: ITEM_ID.into(),
+                    name: "report.txt".into(),
+                    content_type: "text/plain".into(),
+                    file_size: plaintext.len() as u64,
+                    source_capability_id: "source-definite-failure".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+        assert_eq!(
+            harness
+                .server
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|request| {
+                    request.method == "POST" && request.url.ends_with("/attachments")
+                })
+                .count(),
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_binary_rejection_status_is_an_invariant_after_cleanup_and_before_metadata() {
+    for status in [0, 204, 299, 600] {
+        let harness = seeded_attachment().await;
+        let uploaded = Arc::new(Mutex::new(Vec::new()));
+        let plaintext = b"upload bytes".to_vec();
+        harness
+            .runtime
+            .install_attachment_upload(AttachmentUploadFacade::new(
+                Arc::new(TestUploadSourcePort {
+                    bytes: plaintext.clone(),
+                    claims: Arc::new(Mutex::new(Vec::new())),
+                    closed: Arc::new(AtomicUsize::new(0)),
+                }),
+                Arc::new(TestUploadTransfer {
+                    bytes: Arc::clone(&uploaded),
+                    expected: Arc::new(AtomicUsize::new(0)),
+                    finish_outcome: TestUploadFinishOutcome::Rejected(status),
+                }),
+            ));
+
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::UploadAttachment {
+                    account_id: harness.account_id.clone(),
+                    item_id: ITEM_ID.into(),
+                    name: "report.txt".into(),
+                    content_type: "text/plain".into(),
+                    file_size: plaintext.len() as u64,
+                    source_capability_id: format!("source-invalid-status-{status}"),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation, "{status}");
+        assert!(uploaded.lock().unwrap().is_empty(), "{status}");
+        assert_eq!(
+            harness
+                .server
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|request| {
+                    request.method == "POST" && request.url.ends_with("/attachments")
+                })
+                .count(),
+            0,
+            "{status}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ambiguous_foreground_upload_is_not_replayed_and_succeeds_only_after_authority_proof() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"upload bytes".to_vec();
+    let claims = Arc::new(Mutex::new(Vec::new()));
+    let closed = Arc::new(AtomicUsize::new(0));
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(TestUploadSourcePort {
+                bytes: plaintext.clone(),
+                claims,
+                closed: Arc::clone(&closed),
+            }),
+            Arc::new(TestUploadTransfer {
+                bytes: Arc::new(Mutex::new(Vec::new())),
+                expected: Arc::new(AtomicUsize::new(0)),
+                finish_outcome: TestUploadFinishOutcome::Ambiguous,
+            }),
+        ));
+
+    let result = harness
+        .runtime
+        .request(
+            RuntimeRequest::UploadAttachment {
+                account_id: harness.account_id.clone(),
+                item_id: ITEM_ID.into(),
+                name: "report.txt".into(),
+                content_type: "text/plain".into(),
+                file_size: plaintext.len() as u64,
+                source_capability_id: "source-ambiguous".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(result, RuntimeResponse::AttachmentUploaded { ref attachment_id, .. } if attachment_id == "attachment-uploaded")
+    );
+    let requests = harness.server.requests.lock().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(
+                |request| request.method == "POST" && request.url.ends_with("/attachment-uploads")
+            )
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.method == "POST" && request.url.ends_with("/attachments"))
+            .count(),
+        1
+    );
+    assert!(requests
+        .iter()
+        .any(|request| request.method == "GET" && request.url.contains("/attachments")));
+    assert_eq!(closed.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn foreground_upload_failure_awaits_exact_binary_cleanup_retry_before_lock_retires_authority()
+{
+    let harness = seeded_attachment().await;
+    let abort_calls = Arc::new(AtomicUsize::new(0));
+    let abort_release = Arc::new(Semaphore::new(0));
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(TestUploadSourcePort {
+                bytes: b"upload bytes".to_vec(),
+                claims: Arc::new(Mutex::new(Vec::new())),
+                closed: Arc::new(AtomicUsize::new(0)),
+            }),
+            Arc::new(HeldAbortUploadTransfer {
+                abort_calls: Arc::clone(&abort_calls),
+                abort_release: Arc::clone(&abort_release),
+                fail_first_completed_abort: true,
+                fail_write: true,
+            }),
+        ));
+    let upload = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::UploadAttachment {
+                        account_id,
+                        item_id: ITEM_ID.into(),
+                        name: "cleanup.txt".into(),
+                        content_type: "text/plain".into(),
+                        file_size: 12,
+                        source_capability_id: "source-cleanup".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("foreground binary abort starts", || {
+        abort_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    let locking = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    settle().await;
+    assert!(!upload.is_finished());
+    assert!(!locking.is_finished());
+
+    abort_release.add_permits(1);
+    until("foreground binary cleanup retries", || {
+        abort_calls.load(Ordering::SeqCst) == 2
+    })
+    .await;
+    assert!(!upload.is_finished());
+    assert!(!locking.is_finished());
+    abort_release.add_permits(1);
+
+    assert_eq!(
+        upload.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::RetryableTransport
+    );
+    locking.await.unwrap().unwrap();
+    assert_eq!(abort_calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn foreground_upload_finish_failure_retains_cleanup_until_lock_can_retire_authority() {
+    let harness = seeded_attachment().await;
+    let abort_calls = Arc::new(AtomicUsize::new(0));
+    let abort_release = Arc::new(Semaphore::new(0));
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(TestUploadSourcePort {
+                bytes: b"upload bytes".to_vec(),
+                claims: Arc::new(Mutex::new(Vec::new())),
+                closed: Arc::new(AtomicUsize::new(0)),
+            }),
+            Arc::new(HeldAbortUploadTransfer {
+                abort_calls: Arc::clone(&abort_calls),
+                abort_release: Arc::clone(&abort_release),
+                fail_first_completed_abort: true,
+                fail_write: false,
+            }),
+        ));
+    let upload = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::UploadAttachment {
+                        account_id,
+                        item_id: ITEM_ID.into(),
+                        name: "finish-cleanup.txt".into(),
+                        content_type: "text/plain".into(),
+                        file_size: 12,
+                        source_capability_id: "source-finish-cleanup".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("failed finish starts binary cleanup", || {
+        abort_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    let locking = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    settle().await;
+    assert!(!upload.is_finished());
+    assert!(!locking.is_finished());
+
+    abort_release.add_permits(1);
+    until("failed finish cleanup retries", || {
+        abort_calls.load(Ordering::SeqCst) == 2
+    })
+    .await;
+    assert!(!locking.is_finished());
+    abort_release.add_permits(1);
+
+    assert_eq!(
+        upload.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    locking.await.unwrap().unwrap();
+    assert_eq!(abort_calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn held_foreground_finish_observes_caller_lock_sign_out_and_close_cancellation_before_drain()
+{
+    for cancellation_owner in ["caller", "lock", "sign-out", "close"] {
+        let harness = seeded_attachment().await;
+        let finish_started = Arc::new(AtomicBool::new(false));
+        let abort_calls = Arc::new(AtomicUsize::new(0));
+        harness
+            .runtime
+            .install_attachment_upload(AttachmentUploadFacade::new(
+                Arc::new(TestUploadSourcePort {
+                    bytes: b"upload bytes".to_vec(),
+                    claims: Arc::new(Mutex::new(Vec::new())),
+                    closed: Arc::new(AtomicUsize::new(0)),
+                }),
+                Arc::new(CancellationHeldFinishUploadTransfer {
+                    finish_started: Arc::clone(&finish_started),
+                    abort_calls: Arc::clone(&abort_calls),
+                }),
+            ));
+        let cancellation = RequestCancellation::new();
+        let upload = tokio::spawn({
+            let runtime = Arc::clone(&harness.runtime);
+            let account_id = harness.account_id.clone();
+            let cancellation = cancellation.clone();
+            async move {
+                runtime
+                    .request(
+                        RuntimeRequest::UploadAttachment {
+                            account_id,
+                            item_id: ITEM_ID.into(),
+                            name: "held-finish.txt".into(),
+                            content_type: "text/plain".into(),
+                            file_size: 12,
+                            source_capability_id: "source-held-finish".into(),
+                        },
+                        cancellation,
+                    )
+                    .await
+            }
+        });
+        until("foreground finish is held", || {
+            finish_started.load(Ordering::SeqCst)
+        })
+        .await;
+
+        match cancellation_owner {
+            "caller" => cancellation.cancel(),
+            "lock" => harness
+                .runtime
+                .mark_account_locked(&harness.account_id)
+                .await
+                .unwrap(),
+            "sign-out" => {
+                harness
+                    .runtime
+                    .request(
+                        RuntimeRequest::SignOut {
+                            account_id: harness.account_id.clone(),
+                        },
+                        RequestCancellation::new(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            "close" => harness.runtime.close().await,
+            _ => unreachable!(),
+        }
+
+        assert_eq!(
+            upload.await.unwrap().unwrap_err().code,
+            RuntimeErrorCode::Cancelled,
+            "{cancellation_owner}"
+        );
+        assert_eq!(
+            abort_calls.load(Ordering::SeqCst),
+            1,
+            "{cancellation_owner}: lifecycle must await explicit binary abort"
+        );
+    }
+}
+
+#[tokio::test]
+async fn abandoned_foreground_upload_transfers_binary_cleanup_ownership_into_lifecycle_drain() {
+    let harness = seeded_attachment().await;
+    let abort_calls = Arc::new(AtomicUsize::new(0));
+    let abort_release = Arc::new(Semaphore::new(0));
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(TestUploadSourcePort {
+                bytes: b"upload bytes".to_vec(),
+                claims: Arc::new(Mutex::new(Vec::new())),
+                closed: Arc::new(AtomicUsize::new(0)),
+            }),
+            Arc::new(HeldAbortUploadTransfer {
+                abort_calls: Arc::clone(&abort_calls),
+                abort_release: Arc::clone(&abort_release),
+                fail_first_completed_abort: false,
+                fail_write: true,
+            }),
+        ));
+    let upload = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::UploadAttachment {
+                        account_id,
+                        item_id: ITEM_ID.into(),
+                        name: "abandoned.txt".into(),
+                        content_type: "text/plain".into(),
+                        file_size: 12,
+                        source_capability_id: "source-abandoned".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("foreground binary abort starts before abandonment", || {
+        abort_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    upload.abort();
+    assert!(upload.await.unwrap_err().is_cancelled());
+    until("dropped foreground owner restarts tracked cleanup", || {
+        abort_calls.load(Ordering::SeqCst) == 2
+    })
+    .await;
+
+    let locking = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    settle().await;
+    assert!(!locking.is_finished());
+    abort_release.add_permits(1);
+    locking.await.unwrap().unwrap();
+    assert_eq!(abort_calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

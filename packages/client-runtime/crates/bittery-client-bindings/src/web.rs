@@ -273,6 +273,8 @@ impl WebClientRuntime {
         version: String,
         lifecycle_error: js_sys::Function,
         download_sink_executor: JsValue,
+        upload_source_executor: JsValue,
+        take_upload_source_binary: js_sys::Function,
     ) -> Result<Self, JsValue> {
         let platform = client_platform(&platform)?;
         let config = core::AuthClientConfig::new(client_id, platform, version)
@@ -294,6 +296,8 @@ impl WebClientRuntime {
             lease_executor,
             lifecycle_error,
             download_sink_executor,
+            upload_source_executor,
+            take_upload_source_binary,
         )?;
         Ok(Self::from_inner_with_attachment_move_resources(
             inner, resources,
@@ -334,6 +338,20 @@ impl WebClientRuntime {
     pub async fn open(&self) -> Result<(), JsValue> {
         self.inner
             .open()
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = seedAttachmentUploadTestAuthority)]
+    pub async fn seed_attachment_upload_test_authority(
+        &self,
+        server_url: String,
+        mode: String,
+    ) -> Result<String, JsValue> {
+        self.inner
+            .seed_attachment_upload_binding_test_authority(server_url, mode)
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))
     }

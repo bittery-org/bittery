@@ -32,7 +32,7 @@ mod replica;
 mod runtime;
 mod wire;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "binding-test-harness"))]
 mod test_fixtures;
 #[cfg(test)]
 mod tests;
@@ -98,8 +98,10 @@ pub use runtime::{
     AttachmentDownloadSinkPort, AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort,
     AttachmentMoveDownload, AttachmentMoveDownloadRequest, AttachmentMovePreparationFacade,
     AttachmentMoveTransferError, AttachmentMoveTransferPort, AttachmentMoveUpload,
-    AttachmentMoveUploadGrant, TeardownHostCleanup, TeardownHostCleanupRequest,
-    TeardownHostCleanupResponse,
+    AttachmentMoveUploadGrant, AttachmentUploadBinary, AttachmentUploadBinaryOutcome,
+    AttachmentUploadFacade, AttachmentUploadSource, AttachmentUploadSourceError,
+    AttachmentUploadSourcePort, AttachmentUploadTransferPort, TeardownHostCleanup,
+    TeardownHostCleanupRequest, TeardownHostCleanupResponse,
 };
 pub use runtime::{ObservationHandle, Runtime};
 

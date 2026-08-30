@@ -1,4 +1,64 @@
 {
+  "attachmentUploadSourceAnswers": [
+    {
+      "type": "claimed"
+    },
+    {
+      "type": "chunk"
+    },
+    {
+      "type": "end"
+    },
+    {
+      "type": "closed"
+    },
+    {
+      "type": "retired"
+    },
+    {
+      "type": "retirementCompleted"
+    },
+    {
+      "type": "sourceFailure"
+    },
+    {
+      "type": "cancelled"
+    },
+    {
+      "type": "invariantViolation"
+    }
+  ],
+  "attachmentUploadSourceControls": [
+    {
+      "accountId": "account-1",
+      "capabilityId": "source-1",
+      "contentType": "text/plain",
+      "expectedBytes": "3",
+      "itemId": "item-1",
+      "name": "secret.txt",
+      "type": "claim"
+    },
+    {
+      "capabilityId": "source-1",
+      "maxBytes": 262144,
+      "type": "read"
+    },
+    {
+      "capabilityId": "source-1",
+      "type": "close"
+    },
+    {
+      "accountId": "account-1",
+      "type": "retireAccount"
+    },
+    {
+      "accountId": "account-1",
+      "type": "completeAccountRetirement"
+    },
+    {
+      "type": "retireRuntime"
+    }
+  ],
   "steps": [
     {
       "request": {

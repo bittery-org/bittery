@@ -19,7 +19,26 @@ const authenticatedDownloadSinkPorts = {
 			}),
 	}),
 	commitAttachmentDownloadSinkRuntimeIncarnation: async () => undefined,
+	attachmentUploadSourceExecutorFactory: () => ({
+		invoke: async (request: string) => ({
+			controlResponseJson: JSON.stringify({
+				type:
+					JSON.parse(request).type === "retireRuntime"
+						? "retired"
+						: "invariantViolation",
+			}),
+		}),
+	}),
 	deviceTimerLivenessProbe: async () => undefined,
+};
+
+const unavailableForegroundUploadBinary = {
+	beginForegroundUpload: () => {
+		throw new Error("foreground Upload is unavailable in this test");
+	},
+	writeForegroundUpload: async () => undefined,
+	finishForegroundUpload: async () => ({ type: "notDispatched" as const }),
+	abortForegroundUpload: async () => undefined,
 };
 
 class RuntimeDouble {
@@ -211,10 +230,14 @@ describe("Runtime worker service", () => {
 			invoke: async () => ({ controlResponseJson: "{}" }),
 		};
 		const binaryExecutor = {
+			...unavailableForegroundUploadBinary,
 			invoke: async () => ({ controlResponseJson: "{}" }),
 			close: () => undefined,
 		};
 		const accountLeaseExecutor = { acquire: async () => null };
+		let configuredDownloadSink: unknown;
+		let configuredUploadSource: unknown;
+		let configuredTakeUploadSourceBinary: unknown;
 		const configuredService = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
 			platformStorageExecutor: { invoke: async () => "{}" },
@@ -258,6 +281,9 @@ describe("Runtime worker service", () => {
 							platform: string,
 							version: string,
 							lifecycleError: unknown,
+							downloadSink: unknown,
+							uploadSource: unknown,
+							takeUploadSourceBinary: unknown,
 						) {
 							readiness.push("construct");
 							constructorThis = this;
@@ -270,6 +296,9 @@ describe("Runtime worker service", () => {
 								version,
 								lifecycleError,
 							);
+							configuredDownloadSink = downloadSink;
+							configuredUploadSource = uploadSource;
+							configuredTakeUploadSourceBinary = takeUploadSourceBinary;
 							return runtime;
 						},
 					},
@@ -280,15 +309,37 @@ describe("Runtime worker service", () => {
 			new AbortController().signal,
 			() => undefined,
 		);
-		expect(configured.slice(0, 6)).toEqual([
-			artifactExecutor,
-			binaryExecutor,
-			accountLeaseExecutor,
-			"bittery-web",
-			"web",
-			"0.5.2",
-		]);
+		expect(Reflect.ownKeys(configured[0] as object)).toEqual(["invoke"]);
+		expect(configured[0]).not.toBe(artifactExecutor);
+		expect(configured[1]).toBe(binaryExecutor);
+		expect(Reflect.ownKeys(configured[2] as object)).toEqual(["acquire"]);
+		expect(configured[2]).not.toBe(accountLeaseExecutor);
+		expect(configured.slice(3, 6)).toEqual(["bittery-web", "web", "0.5.2"]);
 		expect(configured[6]).toBeFunction();
+		expect(Reflect.ownKeys(configuredDownloadSink as object)).toEqual([
+			"invoke",
+		]);
+		expect(Reflect.ownKeys(configuredUploadSource as object)).toEqual([
+			"invoke",
+		]);
+		expect(configuredTakeUploadSourceBinary).toBeFunction();
+		let getterCalls = 0;
+		const hostile = new Uint8Array([9, 8]);
+		Object.defineProperty(hostile, "byteLength", {
+			get() {
+				getterCalls += 1;
+				throw new Error("hostile byteLength getter");
+			},
+		});
+		expect(
+			(
+				configuredTakeUploadSourceBinary as (
+					value: unknown,
+				) => ArrayBuffer | undefined
+			)(hostile),
+		).toBeUndefined();
+		expect(getterCalls).toBe(0);
+		expect(Uint8Array.prototype.slice.call(hostile)).toEqual(new Uint8Array(2));
 		expect(legacyConfiguredCalls).toBe(0);
 		expect(constructorThis).toBeDefined();
 		expect(readiness).toEqual([
@@ -312,6 +363,7 @@ describe("Runtime worker service", () => {
 					invoke: async () => ({ controlResponseJson: "{}" }),
 				},
 				binaryTransferExecutorFactory: () => ({
+					...unavailableForegroundUploadBinary,
 					invoke: async () => ({ controlResponseJson: "{}" }),
 					close: () => undefined,
 				}),
@@ -355,6 +407,11 @@ describe("Runtime worker service", () => {
 	test("authenticated constructor failure closes the created binary executor before any open or request", async () => {
 		const runtime = new RuntimeDouble();
 		let binaryCloses = 0;
+		let releaseBinaryClose!: () => void;
+		const binaryCloseHeld = new Promise<void>((resolve) => {
+			releaseBinaryClose = resolve;
+		});
+		let uploadRetirements = 0;
 		const service = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
 			platformStorageExecutor: { invoke: async () => "{}" },
@@ -363,13 +420,22 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
-				close: () => {
+				close: async () => {
 					binaryCloses += 1;
+					await binaryCloseHeld;
 				},
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
 			...authenticatedDownloadSinkPorts,
+			attachmentUploadSourceExecutorFactory: () => ({
+				invoke: async (request) => {
+					if (JSON.parse(request).type === "retireRuntime")
+						uploadRetirements += 1;
+					return { controlResponseJson: '{"type":"retired"}' };
+				},
+			}),
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => ({
 				WebClientRuntime: {
@@ -380,14 +446,26 @@ describe("Runtime worker service", () => {
 				},
 			}),
 		});
-		await expect(
-			service.request(
+		let rejected = false;
+		const failedStartup = service
+			.request(
 				{ type: "request", requestId: "construction", requestJson: "{}" },
 				new AbortController().signal,
 				() => undefined,
-			),
-		).rejects.toMatchObject({ code: "ATTACHMENT_MOVE_PREPARATION_FAILED" });
+			)
+			.catch((error: unknown) => {
+				rejected = true;
+				throw error;
+			});
+		while (binaryCloses < 1)
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(rejected).toBe(false);
+		releaseBinaryClose();
+		await expect(failedStartup).rejects.toMatchObject({
+			code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+		});
 		expect(binaryCloses).toBe(1);
+		expect(uploadRetirements).toBe(1);
 		expect(runtime.openCalls).toBe(0);
 		expect(runtime.requests).toHaveLength(0);
 	});
@@ -407,6 +485,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -506,6 +585,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -599,6 +679,7 @@ describe("Runtime worker service", () => {
 			binaryTransferExecutorFactory: () => {
 				factoryCalls += 1;
 				const binary = {
+					...unavailableForegroundUploadBinary,
 					closed: false,
 					close() {
 						binary.closed = true;
@@ -631,7 +712,7 @@ describe("Runtime worker service", () => {
 						const runtime = runtimes[loads];
 						if (runtime === undefined) throw new Error("unexpected restart");
 						loads += 1;
-						const received = binary as (typeof binaries)[number];
+						const received = binary as unknown as (typeof binaries)[number];
 						binaries.push(received);
 						lifecycleErrors.push(onLifecycleError);
 						runtime.close = async () => {
@@ -682,6 +763,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -771,6 +853,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -836,6 +919,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -892,6 +976,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -955,6 +1040,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -1051,6 +1137,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -1128,6 +1215,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -1525,6 +1613,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -1697,6 +1786,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),
@@ -1756,6 +1846,7 @@ describe("Runtime worker service", () => {
 				invoke: async () => ({ controlResponseJson: "{}" }),
 			},
 			binaryTransferExecutorFactory: () => ({
+				...unavailableForegroundUploadBinary,
 				invoke: async () => ({ controlResponseJson: "{}" }),
 				close: () => undefined,
 			}),

@@ -209,12 +209,109 @@ pub(crate) enum TransferControlResponse {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+#[cfg(feature = "transfer-control-contract-schema")]
+pub(crate) enum ForegroundUploadOutcome {
+    Uploaded {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^[0-9a-f]{64}$"))
+        )]
+        ciphertext_sha256: String,
+    },
+    NotDispatched,
+    Rejected {
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(range(min = 300, max = 599_u16))
+        )]
+        status: u16,
+    },
+    Ambiguous,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum AttachmentUploadSourceControl {
+    Claim {
+        account_id: String,
+        item_id: String,
+        name: String,
+        content_type: String,
+        capability_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(regex(pattern = "^(0|[1-9][0-9]{0,19})$"))
+        )]
+        expected_bytes: String,
+    },
+    Read {
+        capability_id: String,
+        #[cfg_attr(
+            feature = "transfer-control-contract-schema",
+            schemars(range(min = 1, max = 262_144_u32))
+        )]
+        max_bytes: u32,
+    },
+    Close {
+        capability_id: String,
+    },
+    RetireAccount {
+        account_id: String,
+    },
+    CompleteAccountRetirement {
+        account_id: String,
+    },
+    RetireRuntime,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum AttachmentUploadSourceAnswer {
+    Claimed,
+    Chunk,
+    End,
+    Closed,
+    Retired,
+    RetirementCompleted,
+    SourceFailure,
+    Cancelled,
+    InvariantViolation,
+}
+
 #[cfg(feature = "transfer-control-contract-schema")]
 #[derive(schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct TransferControlContract {
     request: TransferControlRequest,
     response: TransferControlResponse,
+    foreground_upload_outcome: ForegroundUploadOutcome,
+    attachment_upload_source_control: AttachmentUploadSourceControl,
+    attachment_upload_source_answer: AttachmentUploadSourceAnswer,
 }
 
 #[cfg(feature = "transfer-control-contract-schema")]
@@ -286,6 +383,33 @@ pub fn transfer_control_contract_fixture() -> serde_json::Value {
                 "request": { "type": "wipeDevice" },
                 "response": { "type": "deviceWiped" }
             }
+        ],
+        "attachmentUploadSourceControls": [
+            {
+                "type": "claim",
+                "accountId": "account-1",
+                "itemId": "item-1",
+                "name": "secret.txt",
+                "contentType": "text/plain",
+                "capabilityId": "source-1",
+                "expectedBytes": "3"
+            },
+            { "type": "read", "capabilityId": "source-1", "maxBytes": 262144 },
+            { "type": "close", "capabilityId": "source-1" },
+            { "type": "retireAccount", "accountId": "account-1" },
+            { "type": "completeAccountRetirement", "accountId": "account-1" },
+            { "type": "retireRuntime" }
+        ],
+        "attachmentUploadSourceAnswers": [
+            { "type": "claimed" },
+            { "type": "chunk" },
+            { "type": "end" },
+            { "type": "closed" },
+            { "type": "retired" },
+            { "type": "retirementCompleted" },
+            { "type": "sourceFailure" },
+            { "type": "cancelled" },
+            { "type": "invariantViolation" }
         ]
     })
 }

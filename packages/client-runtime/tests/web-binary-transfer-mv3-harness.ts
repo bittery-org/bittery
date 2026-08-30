@@ -16,6 +16,11 @@ declare global {
 		transferId: string,
 	) => Promise<{ finish: unknown; scriptHeaderNames: string[] }>;
 	var closeBinaryTransferExecutor: () => void;
+	var runForegroundAttachmentUpload: (
+		accountId: string,
+		attachmentId: string,
+		uploadUrl: string,
+	) => Promise<string>;
 }
 
 const scriptHeaders = new Map<string, string[]>();
@@ -79,3 +84,21 @@ globalThis.awaitBinaryTransferUpload = async (transferId) => {
 };
 
 globalThis.closeBinaryTransferExecutor = () => executor.close();
+
+globalThis.runForegroundAttachmentUpload = async (
+	accountId,
+	attachmentId,
+	uploadUrl,
+) => {
+	const transferId = executor.beginForegroundUpload(
+		accountId,
+		attachmentId,
+		`${uploadUrl}?transfer=foreground`,
+		3,
+	);
+	await executor.writeForegroundUpload(transferId, new Uint8Array([4, 5, 6]));
+	return executor.finishForegroundUpload(
+		transferId,
+		"787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472",
+	);
+};

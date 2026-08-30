@@ -1,3 +1,12 @@
+import type { AttachmentUploadSourceAnswer } from "../../generated/transfer-control/contract";
+import { validateAttachmentUploadSourceAnswer } from "../../generated/transfer-control/validator";
+import {
+	copyUint8ArrayIntrinsic,
+	inspectUint8ArrayIntrinsic,
+	isFullOwnedUint8Array,
+	wipeBinaryIntrinsic,
+} from "../binary-intrinsics";
+
 export const WORKER_CHANNELS = ["crypto", "runtime"] as const;
 
 export type WorkerChannelName = (typeof WORKER_CHANNELS)[number];
@@ -62,6 +71,198 @@ export class WorkerRpcError extends Error {
 
 type PreparedWorkerValue = { value: unknown; transfer: Transferable[] };
 
+export function isAttachmentUploadSourceWorkerRequest(value: unknown): boolean {
+	if (!isRecord(value)) return false;
+	return (
+		exactOwnDataFields(value, [
+			"controlRequestJson",
+			"runtimeIncarnation",
+			"type",
+		]) &&
+		value.type === "attachmentUploadSource" &&
+		typeof value.runtimeIncarnation === "string" &&
+		typeof value.controlRequestJson === "string"
+	);
+}
+
+function wipeBinaryValue(value: unknown): void {
+	wipeBinaryIntrinsic(value);
+}
+
+export function wipeAttachmentUploadSourceResponseBinary(value: unknown): void {
+	if (!isRecord(value)) return;
+	wipeBinaryValue(Object.getOwnPropertyDescriptor(value, "binaryChunk")?.value);
+}
+
+/** Wipe a binary reachable through a malformed wire envelope without invoking accessors. */
+export function wipeWorkerEnvelopeBinary(value: unknown): void {
+	if (!isRecord(value)) return;
+	for (const field of ["payload", "value"] as const) {
+		const nested = Object.getOwnPropertyDescriptor(value, field)?.value;
+		wipeAttachmentUploadSourceResponseBinary(nested);
+	}
+}
+
+function exactOwnDataFields(
+	value: Record<string, unknown>,
+	expected: string[],
+): boolean {
+	const keys = Reflect.ownKeys(value);
+	if (
+		keys.length !== expected.length ||
+		keys.some((key) => typeof key !== "string") ||
+		keys.map(String).sort().join("\0") !== expected.slice().sort().join("\0")
+	)
+		return false;
+	return keys.every((key) => {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		return (
+			descriptor?.enumerable === true &&
+			descriptor.get === undefined &&
+			descriptor.set === undefined
+		);
+	});
+}
+
+function ownDataValue(value: Record<string, unknown>, key: string): unknown {
+	const descriptor = Object.getOwnPropertyDescriptor(value, key);
+	return descriptor?.get === undefined && descriptor?.set === undefined
+		? descriptor?.value
+		: undefined;
+}
+
+function attachmentUploadSourceAnswerType(
+	value: unknown,
+): AttachmentUploadSourceAnswer["type"] | undefined {
+	if (typeof value !== "string") return undefined;
+	try {
+		const answer: unknown = JSON.parse(value);
+		if (!validateAttachmentUploadSourceAnswer(answer)) return undefined;
+		return answer.type;
+	} catch {
+		return undefined;
+	}
+}
+
+function isBinaryAttachmentUploadSourceResponse(
+	value: unknown,
+): value is { controlResponseJson: string; binaryChunk: Uint8Array } {
+	if (!isRecord(value)) return false;
+	const binary = ownDataValue(value, "binaryChunk");
+	if (inspectUint8ArrayIntrinsic(binary) === undefined) return false;
+	return (
+		exactOwnDataFields(value, ["controlResponseJson", "binaryChunk"]) &&
+		typeof ownDataValue(value, "controlResponseJson") === "string"
+	);
+}
+
+export function prepareHostResponseValueForPost(
+	value: unknown,
+	expectAttachmentUploadSource = false,
+): PreparedWorkerValue {
+	if (!expectAttachmentUploadSource)
+		return { value: copyWorkerValue(value), transfer: [] };
+	const binary = isRecord(value)
+		? Object.getOwnPropertyDescriptor(value, "binaryChunk")?.value
+		: undefined;
+	const hasBinary = binary !== undefined;
+	const exactShape =
+		isRecord(value) &&
+		exactOwnDataFields(
+			value,
+			hasBinary
+				? ["binaryChunk", "controlResponseJson"]
+				: ["controlResponseJson"],
+		);
+	const answer = isRecord(value)
+		? attachmentUploadSourceAnswerType(
+				Object.getOwnPropertyDescriptor(value, "controlResponseJson")?.value,
+			)
+		: undefined;
+	if (
+		!exactShape ||
+		answer === undefined ||
+		(answer === "chunk") !== hasBinary ||
+		(hasBinary && !isBinaryAttachmentUploadSourceResponse(value))
+	) {
+		wipeAttachmentUploadSourceResponseBinary(value);
+		throw new WorkerRpcError(
+			"invalid-input",
+			"Attachment Upload source returned an invalid answer and binary pairing.",
+		);
+	}
+	if (!hasBinary) return { value: copyWorkerValue(value), transfer: [] };
+	if (!isBinaryAttachmentUploadSourceResponse(value))
+		throw new Error("unreachable");
+	const source = value.binaryChunk;
+	const view = inspectUint8ArrayIntrinsic(source);
+	if (
+		view === undefined ||
+		!view.hasOnlyIndexedOwnData ||
+		!isFullOwnedUint8Array(view)
+	) {
+		wipeBinaryIntrinsic(source);
+		throw new WorkerRpcError(
+			"invalid-input",
+			"Attachment Upload plaintext requires a full owned ArrayBuffer view.",
+		);
+	}
+	return { value, transfer: [view.arrayBuffer as ArrayBuffer] };
+}
+
+export function receiveHostResponseValue(
+	value: unknown,
+	expectAttachmentUploadSource = false,
+): unknown {
+	if (!expectAttachmentUploadSource) return copyWorkerValue(value);
+	const binary = isRecord(value)
+		? Object.getOwnPropertyDescriptor(value, "binaryChunk")?.value
+		: undefined;
+	const hasBinary = binary !== undefined;
+	const exactShape =
+		isRecord(value) &&
+		exactOwnDataFields(
+			value,
+			hasBinary
+				? ["binaryChunk", "controlResponseJson"]
+				: ["controlResponseJson"],
+		);
+	const answer = isRecord(value)
+		? attachmentUploadSourceAnswerType(
+				Object.getOwnPropertyDescriptor(value, "controlResponseJson")?.value,
+			)
+		: undefined;
+	if (
+		!exactShape ||
+		answer === undefined ||
+		(answer === "chunk") !== hasBinary ||
+		(hasBinary && !isBinaryAttachmentUploadSourceResponse(value))
+	) {
+		wipeAttachmentUploadSourceResponseBinary(value);
+		throw new WorkerRpcError(
+			"invalid-input",
+			"Attachment Upload source returned an invalid answer and binary pairing.",
+		);
+	}
+	if (!hasBinary) return copyWorkerValue(value);
+	if (!isBinaryAttachmentUploadSourceResponse(value))
+		throw new Error("unreachable");
+	const source = value.binaryChunk;
+	const view = inspectUint8ArrayIntrinsic(source);
+	if (
+		view === undefined ||
+		!view.hasOnlyIndexedOwnData ||
+		!isFullOwnedUint8Array(view)
+	) {
+		wipeBinaryIntrinsic(source);
+		throw new WorkerRpcError(
+			"invalid-input",
+			"Attachment Upload plaintext requires transferred ownership.",
+		);
+	}
+	return value;
+}
+
 function isBinaryAttachmentDownloadSinkRequest(value: unknown): value is {
 	type: "attachmentDownloadSink";
 	runtimeIncarnation: string;
@@ -69,30 +270,50 @@ function isBinaryAttachmentDownloadSinkRequest(value: unknown): value is {
 	binaryChunk: Uint8Array;
 } {
 	if (!isRecord(value)) return false;
+	const binary = ownDataValue(value, "binaryChunk");
+	if (inspectUint8ArrayIntrinsic(binary) === undefined) return false;
 	return (
-		Object.keys(value).sort().join("\0") ===
-			["binaryChunk", "controlRequestJson", "runtimeIncarnation", "type"]
-				.sort()
-				.join("\0") &&
-		value.type === "attachmentDownloadSink" &&
-		typeof value.runtimeIncarnation === "string" &&
-		typeof value.controlRequestJson === "string" &&
-		value.binaryChunk instanceof Uint8Array
+		exactOwnDataFields(value, [
+			"binaryChunk",
+			"controlRequestJson",
+			"runtimeIncarnation",
+			"type",
+		]) &&
+		ownDataValue(value, "type") === "attachmentDownloadSink" &&
+		typeof ownDataValue(value, "runtimeIncarnation") === "string" &&
+		typeof ownDataValue(value, "controlRequestJson") === "string"
 	);
 }
 
 /** Transfer ownership for the one audited plaintext reverse-RPC shape; copy everything else. */
 export function prepareWorkerValueForPost(value: unknown): PreparedWorkerValue {
 	if (!isBinaryAttachmentDownloadSinkRequest(value)) {
-		return { value: copyWorkerValue(value), transfer: [] };
+		if (
+			isRecord(value) &&
+			ownDataValue(value, "type") === "attachmentDownloadSink" &&
+			Object.hasOwn(value, "binaryChunk")
+		) {
+			wipeAttachmentUploadSourceResponseBinary(value);
+			throw new WorkerRpcError(
+				"invalid-input",
+				"Attachment Download plaintext requires an exact host-request shape.",
+			);
+		}
+		try {
+			return { value: copyWorkerValue(value), transfer: [] };
+		} catch (error) {
+			wipeAttachmentUploadSourceResponseBinary(value);
+			throw error;
+		}
 	}
 	const source = value.binaryChunk;
-	if (!(source.buffer instanceof ArrayBuffer)) {
-		try {
-			new Uint8Array(source.buffer).fill(0);
-		} catch {
-			// Keep the rejection deterministic even if the backing store became unusable.
-		}
+	const view = inspectUint8ArrayIntrinsic(source);
+	if (
+		view === undefined ||
+		!view.hasOnlyIndexedOwnData ||
+		!isFullOwnedUint8Array(view)
+	) {
+		wipeBinaryIntrinsic(source);
 		throw new WorkerRpcError(
 			"invalid-input",
 			"Attachment Download plaintext requires an owned ArrayBuffer.",
@@ -105,25 +326,39 @@ export function prepareWorkerValueForPost(value: unknown): PreparedWorkerValue {
 			controlRequestJson: value.controlRequestJson,
 			binaryChunk: source,
 		},
-		transfer: [source.buffer],
+		transfer: [view.arrayBuffer as ArrayBuffer],
 	};
 }
 
 /** Preserve transferred ownership for the audited plaintext shape; validate/copy all others. */
 export function receiveWorkerValue(value: unknown): unknown {
-	if (!isBinaryAttachmentDownloadSinkRequest(value))
-		return copyWorkerValue(value);
-	const source = value.binaryChunk;
-	if (
-		!(source.buffer instanceof ArrayBuffer) ||
-		source.byteOffset !== 0 ||
-		source.byteLength !== source.buffer.byteLength
-	) {
-		try {
-			new Uint8Array(source.buffer).fill(0);
-		} catch {
-			// Keep the rejection deterministic even if the backing store became unusable.
+	if (!isBinaryAttachmentDownloadSinkRequest(value)) {
+		if (
+			isRecord(value) &&
+			ownDataValue(value, "type") === "attachmentDownloadSink" &&
+			Object.hasOwn(value, "binaryChunk")
+		) {
+			wipeAttachmentUploadSourceResponseBinary(value);
+			throw new WorkerRpcError(
+				"invalid-input",
+				"Attachment Download plaintext requires an exact host-request shape.",
+			);
 		}
+		try {
+			return copyWorkerValue(value);
+		} catch (error) {
+			wipeAttachmentUploadSourceResponseBinary(value);
+			throw error;
+		}
+	}
+	const source = value.binaryChunk;
+	const view = inspectUint8ArrayIntrinsic(source);
+	if (
+		view === undefined ||
+		!view.hasOnlyIndexedOwnData ||
+		!isFullOwnedUint8Array(view)
+	) {
+		wipeBinaryIntrinsic(source);
 		throw new WorkerRpcError(
 			"invalid-input",
 			"Attachment Download plaintext requires a full owned ArrayBuffer view.",
@@ -147,47 +382,91 @@ export function isWorkerChannelName(
 }
 
 export function isWorkerRequest(value: unknown): value is WorkerRequest {
-	if (!isRecord(value) || !isRequestId(value.id)) return false;
-	if (value.type === "close") return true;
-	if (value.type === "host-response") {
-		return (
-			(value.ok === true && Object.hasOwn(value, "value")) ||
-			(value.ok === false &&
+	if (!isRecord(value)) return false;
+	try {
+		const type = ownDataValue(value, "type");
+		if (type === "close") {
+			return exactOwnDataFields(value, ["type", "id"]) && isRequestId(value.id);
+		}
+		if (type === "host-response") {
+			const ok = ownDataValue(value, "ok");
+			if (ok === true) {
+				return (
+					exactOwnDataFields(value, ["type", "id", "ok", "value"]) &&
+					isRequestId(value.id)
+				);
+			}
+			return (
+				ok === false &&
+				exactOwnDataFields(value, ["type", "id", "ok", "code", "message"]) &&
+				isRequestId(value.id) &&
 				typeof value.code === "string" &&
-				typeof value.message === "string")
+				typeof value.message === "string"
+			);
+		}
+		if (type === "cancel") {
+			return (
+				exactOwnDataFields(value, ["type", "channel", "id"]) &&
+				isWorkerChannelName(value.channel) &&
+				isRequestId(value.id)
+			);
+		}
+		return (
+			type === "request" &&
+			exactOwnDataFields(value, ["type", "channel", "id", "payload"]) &&
+			isWorkerChannelName(value.channel) &&
+			isRequestId(value.id)
 		);
+	} catch {
+		return false;
 	}
-	if (!isWorkerChannelName(value.channel)) return false;
-	if (value.type === "cancel") return true;
-	return value.type === "request" && Object.hasOwn(value, "payload");
 }
 
 export function isWorkerReply(value: unknown): value is WorkerReply {
 	if (!isRecord(value)) return false;
-	if (value.type === "host-request") {
-		return isRequestId(value.id) && Object.hasOwn(value, "payload");
-	}
-	if (value.type === "notification") {
-		return isWorkerChannelName(value.channel) && Object.hasOwn(value, "value");
-	}
-	if (!isRequestId(value.id)) return false;
-	if (value.type === "close-ack") {
+	try {
+		const type = ownDataValue(value, "type");
+		if (type === "host-request") {
+			return (
+				exactOwnDataFields(value, ["type", "id", "payload"]) &&
+				isRequestId(value.id)
+			);
+		}
+		if (type === "notification") {
+			return (
+				exactOwnDataFields(value, ["type", "channel", "value"]) &&
+				isWorkerChannelName(value.channel)
+			);
+		}
+		if (type !== "response" && type !== "close-ack") return false;
+		const ok = ownDataValue(value, "ok");
+		const common = type === "response" ? ["channel"] : [];
+		if (ok === true) {
+			const expected =
+				type === "response"
+					? ["type", "channel", "id", "ok", "value"]
+					: ["type", "id", "ok"];
+			return (
+				exactOwnDataFields(value, expected) &&
+				isRequestId(value.id) &&
+				(common.length === 0 || isWorkerChannelName(value.channel))
+			);
+		}
+		const expected =
+			type === "response"
+				? ["type", "channel", "id", "ok", "code", "message"]
+				: ["type", "id", "ok", "code", "message"];
 		return (
-			value.ok === true ||
-			(value.ok === false &&
-				typeof value.code === "string" &&
-				typeof value.message === "string")
+			ok === false &&
+			exactOwnDataFields(value, expected) &&
+			isRequestId(value.id) &&
+			(common.length === 0 || isWorkerChannelName(value.channel)) &&
+			typeof value.code === "string" &&
+			typeof value.message === "string"
 		);
-	}
-	if (value.type !== "response" || !isWorkerChannelName(value.channel)) {
+	} catch {
 		return false;
 	}
-	return (
-		(value.ok === true && Object.hasOwn(value, "value")) ||
-		(value.ok === false &&
-			typeof value.code === "string" &&
-			typeof value.message === "string")
-	);
 }
 
 /** Validate the deliberately small worker wire vocabulary and copy every byte buffer. */
@@ -211,7 +490,17 @@ export function copyWorkerValue(
 			"The worker boundary accepts only plain data and byte arrays.",
 		);
 	}
-	if (value instanceof Uint8Array) return new Uint8Array(value);
+	const byteView = inspectUint8ArrayIntrinsic(value);
+	if (byteView !== undefined) {
+		if (!byteView.hasOnlyIndexedOwnData) {
+			wipeBinaryIntrinsic(value);
+			throw new WorkerRpcError(
+				"invalid-input",
+				"Worker byte arrays may not carry custom own fields.",
+			);
+		}
+		return copyUint8ArrayIntrinsic(byteView);
+	}
 	if (seen.has(value)) {
 		throw new WorkerRpcError(
 			"invalid-input",
@@ -221,10 +510,48 @@ export function copyWorkerValue(
 	seen.add(value);
 	try {
 		if (Array.isArray(value)) {
-			return value.map((member) => copyWorkerValue(member, seen));
+			if (Object.getPrototypeOf(value) !== Array.prototype) {
+				throw new WorkerRpcError(
+					"invalid-input",
+					"The worker boundary accepts only ordinary arrays.",
+				);
+			}
+			const descriptors = Object.getOwnPropertyDescriptors(value);
+			const keys = Reflect.ownKeys(descriptors);
+			if (
+				keys.length !== value.length + 1 ||
+				keys.some(
+					(key) =>
+						typeof key !== "string" ||
+						(key !== "length" && !/^(0|[1-9]\d*)$/.test(key)),
+				)
+			) {
+				throw new WorkerRpcError(
+					"invalid-input",
+					"Worker arrays must be dense and have no extra fields.",
+				);
+			}
+			const copy: unknown[] = [];
+			for (let index = 0; index < value.length; index += 1) {
+				const descriptor = descriptors[String(index)];
+				if (
+					descriptor === undefined ||
+					!descriptor.enumerable ||
+					descriptor.get !== undefined ||
+					descriptor.set !== undefined
+				) {
+					throw new WorkerRpcError(
+						"invalid-input",
+						"Worker arrays accept only enumerable data elements.",
+					);
+				}
+				copy.push(copyWorkerValue(descriptor.value, seen));
+			}
+			return copy;
 		}
 		const prototype = Object.getPrototypeOf(value) as object | null;
-		if (prototype !== Object.prototype && prototype !== null) {
+		if (prototype !== Object.prototype) {
+			wipeBinaryIntrinsic(value);
 			throw new WorkerRpcError(
 				"invalid-input",
 				"The worker boundary accepts only plain data and byte arrays.",
@@ -240,7 +567,11 @@ export function copyWorkerValue(
 		for (const [name, descriptor] of Object.entries(
 			Object.getOwnPropertyDescriptors(value),
 		)) {
-			if (descriptor.get !== undefined || descriptor.set !== undefined) {
+			if (
+				!descriptor.enumerable ||
+				descriptor.get !== undefined ||
+				descriptor.set !== undefined
+			) {
 				throw new WorkerRpcError(
 					"invalid-input",
 					"Accessor properties are forbidden at the worker boundary.",

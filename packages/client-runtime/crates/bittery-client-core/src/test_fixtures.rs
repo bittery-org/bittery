@@ -4,13 +4,18 @@
 //! a ready Replica, and one personal Vault whose key that MUK opens. These fixtures build exactly
 //! that, with the real wrapped-key format, so no test invents a second crypto shape.
 
+use crate::replica::{AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType};
+#[cfg(any(test, feature = "binding-test-harness"))]
 use crate::{
     http_transport::{HttpHeader, HttpMethod},
     replica::{
-        AuthorityItemCategory, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
-        ImmutableHttpRequest, InMemoryReplica, OperationKind, OperationRecord,
-        OperationSchedulingState, ReplicaItemRecord, Sha256Fingerprint,
+        ImmutableHttpRequest, OperationKind, OperationRecord, OperationSchedulingState,
+        Sha256Fingerprint,
     },
+};
+#[cfg(test)]
+use crate::{
+    replica::{AuthorityItemCategory, InMemoryReplica, ReplicaItemRecord},
     AccountId, RuntimeError,
 };
 use bittery_crypto_core::{encrypt_vault_key_with_muk, VaultKeyWrapContext};
@@ -38,6 +43,7 @@ pub(crate) fn personal_vault(vault_id: &str, user_id: &str) -> AuthorityVaultRec
 }
 
 /// Leaves `account_id` ready with one writable personal Vault at `TEST_VAULT_ID`.
+#[cfg(test)]
 pub(crate) fn seed_ready_personal_vault(
     state: &InMemoryReplica,
     account_id: &AccountId,
@@ -50,6 +56,7 @@ pub(crate) fn seed_ready_personal_vault(
 }
 
 /// One structurally valid accepted Operation, for tests about plan mechanics rather than crypto.
+#[cfg(any(test, feature = "binding-test-harness"))]
 pub(crate) fn test_operation(operation_id: &str, item_id: &str) -> OperationRecord {
     let body = format!(r#"{{"itemId":"{item_id}"}}"#).into_bytes();
     OperationRecord {
@@ -73,6 +80,7 @@ pub(crate) fn test_operation(operation_id: &str, item_id: &str) -> OperationReco
 }
 
 /// The encrypted overlay half of `test_operation`. The ciphertext is opaque to plan mechanics.
+#[cfg(test)]
 pub(crate) fn test_overlay(
     account_id: AccountId,
     item_id: &str,

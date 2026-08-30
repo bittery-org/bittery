@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
+import { takeFullOwnedUint8ArrayIntrinsic } from "../src/binary-intrinsics.ts";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const combinedRoot =
@@ -19,6 +21,19 @@ const unavailableDownloadSink = () => ({
 		return type === "completeAccountRetirement"
 			? '{"type":"retirementCompleted"}'
 			: '{"type":"invariantViolation"}';
+	},
+});
+
+const unavailableUploadSource = () => ({
+	invoke: async (controlRequestJson) => {
+		const type = JSON.parse(controlRequestJson).type;
+		const answer =
+			type === "retireAccount" || type === "retireRuntime"
+				? { type: "retired" }
+				: type === "completeAccountRetirement"
+					? { type: "retirementCompleted" }
+					: { type: "invariantViolation" };
+		return { controlResponseJson: JSON.stringify(answer) };
 	},
 });
 
@@ -42,6 +57,8 @@ const timerProbeRuntime = (
 		"1.0.0",
 		() => undefined,
 		downloadSink,
+		unavailableUploadSource(),
+		takeFullOwnedUint8ArrayIntrinsic,
 	);
 
 test("authenticated WASM construction leaves callback-liveness probing to the trusted Worker host", async () => {
@@ -272,9 +289,274 @@ test("the feature-only WASM harness exercises the closed lease and transfer brid
 	await bindings.default({ module_or_path: wasm });
 
 	assert.equal(typeof bindings.WebAttachmentMoveBridgeTestHarness, "function");
+	assert.equal(
+		typeof bindings.WebAttachmentUploadSourceBridgeTestHarness,
+		"function",
+	);
+	let resolveHeldSourceRead;
+	let resolveHeldSourceClose;
+	let heldSourceCloseCalls = 0;
+	const heldSourcePlaintext = new Uint8Array([42]);
+	const uploadSourceExecutor = {
+		invoke(requestJson) {
+			const request = JSON.parse(requestJson);
+			if (request.type === "claim")
+				return Promise.resolve({
+					controlResponseJson: JSON.stringify({ type: "claimed" }),
+				});
+			if (request.type === "read")
+				return new Promise((resolve) => {
+					resolveHeldSourceRead = resolve;
+				});
+			assert.equal(request.type, "close");
+			heldSourceCloseCalls += 1;
+			resolveHeldSourceRead({
+				controlResponseJson: JSON.stringify({ type: "chunk" }),
+				binaryChunk: heldSourcePlaintext,
+			});
+			return new Promise((resolve) => {
+				resolveHeldSourceClose = resolve;
+			});
+		},
+	};
+	const sourceHarness = new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+		uploadSourceExecutor,
+		takeFullOwnedUint8ArrayIntrinsic,
+	);
+	await sourceHarness.claim();
+	let cancelledReadSettled = false;
+	const cancelledRead = sourceHarness.cancel_read().then((result) => {
+		cancelledReadSettled = true;
+		return result;
+	});
+	await delay(0);
+	assert.equal(heldSourceCloseCalls, 1);
+	assert.equal(cancelledReadSettled, false);
+	resolveHeldSourceClose({
+		controlResponseJson: JSON.stringify({ type: "closed" }),
+	});
+	assert.equal(await cancelledRead, "cancelled");
+	assert.deepEqual([...heldSourcePlaintext], [0]);
+
+	for (const invalidResponse of [
+		{ controlResponseJson: "{", binary: true },
+		{ controlResponseJson: JSON.stringify({ type: "chunk" }) },
+		{ controlResponseJson: JSON.stringify({ type: "end" }), binary: true },
+		{ controlResponseJson: JSON.stringify({ type: "claimed" }), binary: true },
+		{ controlResponseJson: JSON.stringify({ type: "closed" }), binary: true },
+		{ controlResponseJson: JSON.stringify({ type: "retired" }), binary: true },
+		{
+			controlResponseJson: JSON.stringify({ type: "retirementCompleted" }),
+			binary: true,
+		},
+		{
+			controlResponseJson: JSON.stringify({ type: "sourceFailure" }),
+			binary: true,
+		},
+		{
+			controlResponseJson: JSON.stringify({ type: "cancelled" }),
+			binary: true,
+		},
+		{
+			controlResponseJson: JSON.stringify({ type: "invariantViolation" }),
+			binary: true,
+		},
+		{
+			controlResponseJson: JSON.stringify({ type: "chunk" }),
+			binary: true,
+			extra: true,
+		},
+	]) {
+		let alias;
+		const executor = {
+			invoke(requestJson) {
+				const request = JSON.parse(requestJson);
+				if (request.type === "claim")
+					return Promise.resolve({
+						controlResponseJson: JSON.stringify({ type: "claimed" }),
+					});
+				assert.equal(request.type, "read");
+				if (invalidResponse.binary) alias = new Uint8Array([9, 8, 7]);
+				return Promise.resolve({
+					controlResponseJson: invalidResponse.controlResponseJson,
+					...(alias === undefined ? {} : { binaryChunk: alias }),
+					...(invalidResponse.extra ? { extra: true } : {}),
+				});
+			},
+		};
+		const adversarial = new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+			executor,
+			takeFullOwnedUint8ArrayIntrinsic,
+		);
+		await adversarial.claim();
+		await assert.rejects(adversarial.read_once(), /Invariant|Source|Cancelled/);
+		if (alias !== undefined) assert.deepEqual([...alias], [0, 0, 0]);
+	}
+
+	const partialBacking = new Uint8Array([9, 1, 2, 8]);
+	const partialSource = new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+		{
+			invoke(requestJson) {
+				const request = JSON.parse(requestJson);
+				return Promise.resolve(
+					request.type === "claim"
+						? { controlResponseJson: JSON.stringify({ type: "claimed" }) }
+						: {
+								controlResponseJson: JSON.stringify({ type: "chunk" }),
+								binaryChunk: new Uint8Array(partialBacking.buffer, 1, 2),
+							},
+				);
+			},
+		},
+		takeFullOwnedUint8ArrayIntrinsic,
+	);
+	await partialSource.claim();
+	await assert.rejects(partialSource.read_once(), /Invariant/);
+	assert.deepEqual([...partialBacking], [0, 0, 0, 0]);
+	const dataViewBacking = new Uint8Array([6, 5, 4, 3]);
+	const dataViewSource =
+		new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+			{
+				invoke(requestJson) {
+					const request = JSON.parse(requestJson);
+					return Promise.resolve(
+						request.type === "claim"
+							? { controlResponseJson: JSON.stringify({ type: "claimed" }) }
+							: {
+									controlResponseJson: JSON.stringify({ type: "chunk" }),
+									binaryChunk: new DataView(dataViewBacking.buffer, 1, 2),
+								},
+					);
+				},
+			},
+			takeFullOwnedUint8ArrayIntrinsic,
+		);
+	await dataViewSource.claim();
+	await assert.rejects(dataViewSource.read_once(), /Invariant/);
+	assert.deepEqual([...dataViewBacking], [0, 0, 0, 0]);
+
+	for (const property of [
+		"buffer",
+		"byteOffset",
+		"byteLength",
+		Symbol.iterator,
+		"at",
+		"01",
+	]) {
+		let getterCalls = 0;
+		const hostileBytes = new Uint8Array([7, 6, 5]);
+		Object.defineProperty(hostileBytes, property, {
+			configurable: true,
+			get() {
+				getterCalls += 1;
+				throw new Error(`hostile ${String(property)} getter`);
+			},
+		});
+		const hostileSource =
+			new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+				{
+					invoke(requestJson) {
+						const request = JSON.parse(requestJson);
+						return Promise.resolve(
+							request.type === "claim"
+								? {
+										controlResponseJson: JSON.stringify({ type: "claimed" }),
+									}
+								: {
+										controlResponseJson: JSON.stringify({ type: "chunk" }),
+										binaryChunk: hostileBytes,
+									},
+						);
+					},
+				},
+				takeFullOwnedUint8ArrayIntrinsic,
+			);
+		await hostileSource.claim();
+		await assert.rejects(hostileSource.read_once(), /Invariant/);
+		assert.equal(getterCalls, 0);
+		assert.deepEqual(
+			Uint8Array.prototype.slice.call(hostileBytes),
+			new Uint8Array(3),
+		);
+	}
+
+	const sharedBacking = new Uint8Array(new SharedArrayBuffer(3));
+	sharedBacking.set([4, 5, 6]);
+	const sharedSource = new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+		{
+			invoke: async (requestJson) =>
+				JSON.parse(requestJson).type === "claim"
+					? { controlResponseJson: JSON.stringify({ type: "claimed" }) }
+					: {
+							controlResponseJson: JSON.stringify({ type: "chunk" }),
+							binaryChunk: sharedBacking,
+						},
+		},
+		takeFullOwnedUint8ArrayIntrinsic,
+	);
+	await sharedSource.claim();
+	await assert.rejects(sharedSource.read_once(), /Invariant/);
+	assert.deepEqual([...sharedBacking], [0, 0, 0]);
+
+	const crossRealmBytes = runInNewContext("new Uint8Array([3, 2, 1])");
+	const crossRealmSource =
+		new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+			{
+				invoke: async (requestJson) =>
+					JSON.parse(requestJson).type === "claim"
+						? { controlResponseJson: JSON.stringify({ type: "claimed" }) }
+						: {
+								controlResponseJson: JSON.stringify({ type: "chunk" }),
+								binaryChunk: crossRealmBytes,
+							},
+			},
+			takeFullOwnedUint8ArrayIntrinsic,
+		);
+	await crossRealmSource.claim();
+	assert.equal(await crossRealmSource.read_once(), "chunk:3");
+	assert.deepEqual(
+		[...Uint8Array.prototype.slice.call(crossRealmBytes)],
+		[0, 0, 0],
+	);
+
+	const detachedBytes = new Uint8Array([8, 9]);
+	structuredClone(detachedBytes.buffer, { transfer: [detachedBytes.buffer] });
+	const detachedSource =
+		new bindings.WebAttachmentUploadSourceBridgeTestHarness(
+			{
+				invoke: async (requestJson) =>
+					JSON.parse(requestJson).type === "claim"
+						? { controlResponseJson: JSON.stringify({ type: "claimed" }) }
+						: {
+								controlResponseJson: JSON.stringify({ type: "chunk" }),
+								binaryChunk: detachedBytes,
+							},
+			},
+			takeFullOwnedUint8ArrayIntrinsic,
+		);
+	await detachedSource.claim();
+	await assert.rejects(detachedSource.read_once(), /Invariant/);
+	assert.equal(
+		Object.getOwnPropertyDescriptor(
+			ArrayBuffer.prototype,
+			"byteLength",
+		).get.call(detachedBytes.buffer),
+		0,
+	);
 
 	const transferRequests = [];
 	let pendingTransfer;
+	let resolveForegroundAbort;
+	let resolveForegroundFinish;
+	let resolveForegroundWrite;
+	let foregroundAbortCalls = 0;
+	let holdForegroundAbort = false;
+	let holdForegroundFinish = false;
+	let holdForegroundWrite = false;
+	let foregroundFinishOutcome = {
+		type: "uploaded",
+		ciphertextSha256: "0".repeat(64),
+	};
 	const binaryExecutor = {
 		invoke(requestJson) {
 			assert.equal(this, binaryExecutor);
@@ -296,6 +578,33 @@ test("the feature-only WASM harness exercises the closed lease and transfer brid
 		close() {
 			assert.equal(this, binaryExecutor);
 		},
+		beginForegroundUpload() {
+			assert.equal(this, binaryExecutor);
+			return "foreground-binding";
+		},
+		writeForegroundUpload() {
+			if (holdForegroundWrite)
+				return new Promise((resolve) => {
+					resolveForegroundWrite = resolve;
+				});
+			return Promise.resolve();
+		},
+		finishForegroundUpload() {
+			if (holdForegroundFinish)
+				return new Promise((resolve) => {
+					resolveForegroundFinish = resolve;
+				});
+			return Promise.resolve(foregroundFinishOutcome);
+		},
+		abortForegroundUpload(transferId) {
+			assert.equal(this, binaryExecutor);
+			assert.equal(transferId, "foreground-binding");
+			foregroundAbortCalls += 1;
+			if (!holdForegroundAbort) return Promise.resolve();
+			return new Promise((resolve) => {
+				resolveForegroundAbort = resolve;
+			});
+		},
 	};
 	let nextLease = null;
 	const acquiredAccounts = [];
@@ -310,6 +619,117 @@ test("the feature-only WASM harness exercises the closed lease and transfer brid
 		binaryExecutor,
 		leaseExecutor,
 	);
+	for (const type of [
+		"claimed",
+		"chunk",
+		"end",
+		"closed",
+		"retired",
+		"retirementCompleted",
+		"sourceFailure",
+		"cancelled",
+		"invariantViolation",
+	]) {
+		assert.equal(
+			harness.parse_upload_source_answer(JSON.stringify({ type })),
+			type,
+		);
+	}
+	for (const invalidAnswer of [
+		null,
+		[],
+		"claimed",
+		{},
+		{ type: null },
+		{ type: "unknown" },
+		{ type: "claimed", extra: true },
+	]) {
+		assert.throws(
+			() => harness.parse_upload_source_answer(JSON.stringify(invalidAnswer)),
+			/Invariant/,
+		);
+	}
+	for (const [outcome, expected] of [
+		[
+			{ type: "uploaded", ciphertextSha256: "0".repeat(64) },
+			`uploaded:${"0".repeat(64)}`,
+		],
+		[{ type: "notDispatched" }, "notDispatched"],
+		[{ type: "rejected", status: 403 }, "rejected:403"],
+		[{ type: "rejected", status: 300 }, "rejected:300"],
+		[{ type: "rejected", status: 599 }, "rejected:599"],
+		[{ type: "ambiguous" }, "ambiguous"],
+	]) {
+		foregroundFinishOutcome = outcome;
+		await harness.open_foreground_upload();
+		assert.equal(await harness.finish_foreground_upload(), expected);
+	}
+	for (const invalidOutcome of [
+		{ type: "rejected", status: 0 },
+		{ type: "rejected", status: 100 },
+		{ type: "rejected", status: 204 },
+		{ type: "rejected", status: 299 },
+		{ type: "rejected", status: 600 },
+		{ type: "ambiguous", message: "network failure after dispatch" },
+	]) {
+		foregroundFinishOutcome = invalidOutcome;
+		await harness.open_foreground_upload();
+		await assert.rejects(harness.finish_foreground_upload(), /Invariant/);
+		await delay(0);
+	}
+	holdForegroundAbort = true;
+	foregroundAbortCalls = 0;
+	await harness.open_foreground_upload();
+	let foregroundAbortSettled = false;
+	const foregroundAbort = harness.abort_foreground_upload().then(() => {
+		foregroundAbortSettled = true;
+	});
+	await Promise.resolve();
+	assert.equal(foregroundAbortSettled, false);
+	assert.equal(foregroundAbortCalls, 1);
+	resolveForegroundAbort();
+	await foregroundAbort;
+	assert.equal(foregroundAbortSettled, true);
+
+	holdForegroundFinish = true;
+	holdForegroundAbort = true;
+	foregroundAbortCalls = 0;
+	await harness.open_foreground_upload();
+	let cancelledFinishSettled = false;
+	const cancelledFinish = harness.cancel_foreground_finish().then((result) => {
+		cancelledFinishSettled = true;
+		return result;
+	});
+	await delay(0);
+	assert.equal(foregroundAbortCalls, 1);
+	assert.equal(cancelledFinishSettled, false);
+	resolveForegroundFinish({ type: "cancelled" });
+	await delay(0);
+	assert.equal(cancelledFinishSettled, false);
+	resolveForegroundAbort();
+	assert.equal(await cancelledFinish, "cancelled");
+	holdForegroundFinish = false;
+	holdForegroundAbort = false;
+
+	holdForegroundWrite = true;
+	holdForegroundAbort = true;
+	foregroundAbortCalls = 0;
+	await harness.open_foreground_upload();
+	let cancelledWriteSettled = false;
+	const cancelledWrite = harness.cancel_foreground_write().then((result) => {
+		cancelledWriteSettled = true;
+		return result;
+	});
+	await delay(0);
+	assert.equal(foregroundAbortCalls, 1);
+	assert.equal(cancelledWriteSettled, false);
+	resolveForegroundWrite();
+	await delay(0);
+	assert.equal(cancelledWriteSettled, false);
+	resolveForegroundAbort();
+	assert.equal(await cancelledWrite, "cancelled");
+	holdForegroundWrite = false;
+	holdForegroundAbort = false;
 
 	harness.reset_lifecycle_drop_probe();
 	let configuredBinaryCloses = 0;
@@ -347,6 +767,8 @@ test("the feature-only WASM harness exercises the closed lease and transfer brid
 				configuredLifecycleError = json;
 			},
 			unavailableDownloadSink(),
+			unavailableUploadSource(),
+			takeFullOwnedUint8ArrayIntrinsic,
 		);
 	assert.equal(harness.lifecycle_drop_probe(), 0);
 	configured.free();
@@ -616,6 +1038,8 @@ test("Web teardown destroys the ciphertext spool and converges", async () => {
 				"1.0.0",
 				() => undefined,
 				unavailableDownloadSink(),
+				unavailableUploadSource(),
+				takeFullOwnedUint8ArrayIntrinsic,
 			);
 		return {
 			runtime,
@@ -815,6 +1239,8 @@ const teardownRuntime = (bindings, spoolInvoke) => {
 			"1.0.0",
 			() => undefined,
 			unavailableDownloadSink(),
+			unavailableUploadSource(),
+			takeFullOwnedUint8ArrayIntrinsic,
 		);
 	return { runtime, spoolRequests };
 };

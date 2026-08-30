@@ -80,8 +80,9 @@ describe("Web Runtime Worker composition", () => {
 							_version: string,
 							_lifecycleError: (errorJson: string) => void,
 							downloadSink: unknown,
+							uploadSource: unknown,
 						) {
-							ports = [artifact, binary, lease, downloadSink];
+							ports = [artifact, binary, lease, downloadSink, uploadSource];
 							return runtime;
 						},
 					},
@@ -98,12 +99,12 @@ describe("Web Runtime Worker composition", () => {
 			await Promise.resolve();
 		}
 
-		expect(ports[0]).toBeInstanceOf(IndexedDbAttachmentArtifactExecutor);
+		expect(ports[0]).not.toBeInstanceOf(IndexedDbAttachmentArtifactExecutor);
+		expect(Reflect.ownKeys(ports[0] ?? {})).toEqual(["invoke"]);
 		expect(ports[1]).toBeInstanceOf(WebBinaryTransferExecutor);
 		expect(Reflect.ownKeys(ports[2] ?? {})).toEqual(["acquire"]);
-		expect(
-			Object.getOwnPropertyNames(Object.getPrototypeOf(ports[3] ?? {})),
-		).toEqual(["constructor", "invoke"]);
+		expect(Reflect.ownKeys(ports[3] ?? {})).toEqual(["invoke"]);
+		expect(Reflect.ownKeys(ports[4] ?? {})).toEqual(["invoke"]);
 	});
 
 	test("reconstruction replaces the concrete binary executor closed by the prior wrapper", async () => {

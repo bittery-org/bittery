@@ -183,6 +183,38 @@ test("every revision crosses the boundary as a canonical decimal string", () => 
 	);
 });
 
+test("Attachment Upload returns only its new identity and authoritative Replica revision", () => {
+	assert.equal(
+		validateRuntimeOutcome({
+			type: "succeeded",
+			value: {
+				type: "attachmentUploaded",
+				attachmentId: "attachment-1",
+				replicaRevision: "42",
+			},
+		}),
+		true,
+	);
+	for (const extra of [
+		{ accountId: "account-1" },
+		{ itemId: "item-1" },
+		{ runtimeIncarnation: "runtime-1" },
+	]) {
+		assert.equal(
+			validateRuntimeOutcome({
+				type: "succeeded",
+				value: {
+					type: "attachmentUploaded",
+					attachmentId: "attachment-1",
+					replicaRevision: "42",
+					...extra,
+				},
+			}),
+			false,
+		);
+	}
+});
+
 test("the Item projection keeps the fields the Web host used to drop", () => {
 	const projection = (item) => ({
 		type: "items",
@@ -313,6 +345,41 @@ test("Attachment Download sink capability identity is canonical and bounded", ()
 	assert.equal(validateRuntimeRequest(request("x".repeat(129))), false);
 	assert.equal(validateRuntimeRequest(request("not canonical")), false);
 	assert.equal(validateRuntimeRequest(request("café")), false);
+});
+
+test("Attachment Upload carries bounded metadata and one opaque source capability", () => {
+	const request = (overrides = {}) => ({
+		type: "uploadAttachment",
+		accountId: "account-1",
+		itemId: "item-1",
+		name: "report.txt",
+		contentType: "text/plain",
+		fileSize: "12",
+		sourceCapabilityId: "source-1",
+		...overrides,
+	});
+	assert.equal(validateRuntimeRequest(request()), true);
+	assert.equal(
+		validateRuntimeRequest(request({ sourceCapabilityId: "not canonical" })),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest(request({ sourceCapabilityId: "x".repeat(129) })),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest(request({ name: "x".repeat(256) })),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest(request({ contentType: "x".repeat(256) })),
+		false,
+	);
+	assert.equal(validateRuntimeRequest(request({ fileSize: 12 })), false);
+	assert.equal(
+		validateRuntimeRequest(request({ storageKey: "forbidden" })),
+		false,
+	);
 });
 
 test("teardown scope and partial failures stay explicit, closed, and redacted", () => {

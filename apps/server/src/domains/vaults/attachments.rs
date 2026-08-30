@@ -542,7 +542,7 @@ pub(crate) async fn create_vault_attachment_upload(
     let current_usage = committed_usage + pending_usage;
     if let Some(quota_bytes) = actor.attachment_storage_bytes {
         if current_usage + i64::from(storage_size) > quota_bytes {
-            return Err(AppError::forbidden(
+            return Err(AppError::attachment_quota_exceeded(
                 "Attachment storage quota has been reached for your current plan.",
             ));
         }

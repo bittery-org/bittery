@@ -23,6 +23,28 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
+function hostilePlaintext(values: number[]) {
+	const bytes = new Uint8Array(values);
+	let getterCalls = 0;
+	for (const key of [
+		"buffer",
+		"byteOffset",
+		"byteLength",
+		"length",
+		Symbol.iterator,
+		"custom",
+	] as const) {
+		Object.defineProperty(bytes, key, {
+			configurable: true,
+			get: () => {
+				getterCalls += 1;
+				throw new Error("hostile binary accessor");
+			},
+		});
+	}
+	return { bytes, getterCalls: () => getterCalls };
+}
+
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 class MultiplexWorkerDouble implements SharedWorkerHandle {
@@ -34,6 +56,7 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 	onPostToMain: ((message: unknown) => void) | null = null;
 	onPostToWorker: ((message: unknown) => void) | null = null;
 	nextPostFailure: Error | null = null;
+	nextWorkerPostFailure: Error | null = null;
 	readonly requests: Array<{ channel: string; id: number }> = [];
 	readonly host: WorkerHostRpc;
 	private readonly listeners = new Set<(event: { data: unknown }) => void>();
@@ -50,6 +73,11 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 				this.listeners.add(listener);
 			},
 			postMessage: (message, transfer) => {
+				if (this.nextWorkerPostFailure !== null) {
+					const failure = this.nextWorkerPostFailure;
+					this.nextWorkerPostFailure = null;
+					throw failure;
+				}
 				const copy = structuredClone(message, { transfer });
 				this.onPostToMain?.(copy);
 				queueMicrotask(() =>
@@ -136,6 +164,234 @@ describe("shared worker RPC", () => {
 		expect(hostReference).toEqual(new Uint8Array([1, 2, 3]));
 	});
 
+	test("transfers one owned Attachment Upload plaintext chunk into the Worker", async () => {
+		let mainReference: Uint8Array | undefined;
+		let workerReference: Uint8Array | undefined;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					const result = await host.request<{
+						controlResponseJson: string;
+						binaryChunk: Uint8Array;
+					}>({
+						type: "attachmentUploadSource",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"read"}',
+					});
+					workerReference = result.binaryChunk;
+					return result.controlResponseJson;
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				mainReference = new Uint8Array([4, 5, 6]);
+				return {
+					controlResponseJson: '{"type":"chunk"}',
+					binaryChunk: mainReference,
+				};
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe(
+			'{"type":"chunk"}',
+		);
+		expect(mainReference?.byteLength).toBe(0);
+		expect(workerReference).toEqual(new Uint8Array([4, 5, 6]));
+	});
+
+	test("wipes every retained Attachment Upload alias when main-to-Worker postMessage throws synchronously", async () => {
+		let source: Uint8Array | undefined;
+		let alias: Uint8Array | undefined;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () =>
+					host.request({
+						type: "attachmentUploadSource",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"read"}',
+					}),
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				source = new Uint8Array([4, 5, 6]);
+				alias = new Uint8Array(source.buffer);
+				worker.nextPostFailure = new Error("upload response post failed");
+				return {
+					controlResponseJson: '{"type":"chunk"}',
+					binaryChunk: source,
+				};
+			},
+		});
+		await expect(owner.channel("runtime").request({})).rejects.toMatchObject({
+			code: "backend-failure",
+		});
+		expect(source?.byteLength).toBe(3);
+		expect(source).toEqual(new Uint8Array(3));
+		expect(alias).toEqual(new Uint8Array(3));
+	});
+
+	test("wipes every retained Attachment Download alias when Worker-to-main postMessage throws synchronously", async () => {
+		let source: Uint8Array | undefined;
+		let alias: Uint8Array | undefined;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					source = new Uint8Array([7, 8, 9]);
+					alias = new Uint8Array(source.buffer);
+					worker.nextWorkerPostFailure = new Error(
+						"download request post failed",
+					);
+					return host.request({
+						type: "attachmentDownloadSink",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"write"}',
+						binaryChunk: source,
+					});
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({ createWorker: () => worker });
+
+		await expect(owner.channel("runtime").request({})).rejects.toMatchObject({
+			code: "backend-failure",
+		});
+		expect(source?.byteLength).toBe(3);
+		expect(source).toEqual(new Uint8Array(3));
+		expect(alias).toEqual(new Uint8Array(3));
+	});
+
+	test("rejects every invalid Attachment Upload answer/binary pairing and wipes the main-thread alias", async () => {
+		for (const response of [
+			{ controlResponseJson: "{" },
+			{ controlResponseJson: '{"type":"chunk"}' },
+			{ controlResponseJson: '{"type":"end"}', withBinary: true },
+			{ controlResponseJson: '{"type":"claimed"}', withBinary: true },
+			{ controlResponseJson: '{"type":"closed"}', withBinary: true },
+			{ controlResponseJson: '{"type":"retired"}', withBinary: true },
+			{
+				controlResponseJson: '{"type":"retirementCompleted"}',
+				withBinary: true,
+			},
+			{ controlResponseJson: '{"type":"sourceFailure"}', withBinary: true },
+			{ controlResponseJson: '{"type":"cancelled"}', withBinary: true },
+			{
+				controlResponseJson: '{"type":"invariantViolation"}',
+				withBinary: true,
+			},
+		]) {
+			let mainReference: Uint8Array | undefined;
+			const worker = new MultiplexWorkerDouble((host) => ({
+				runtime: {
+					request: async () =>
+						host.request({
+							type: "attachmentUploadSource",
+							runtimeIncarnation: "runtime-one",
+							controlRequestJson: '{"type":"read"}',
+						}),
+				},
+			}));
+			const owner = createSharedWorkerOwner({
+				createWorker: () => worker,
+				handleHostRequest: async () => {
+					if (response.withBinary) mainReference = new Uint8Array([7, 8, 9]);
+					return {
+						controlResponseJson: response.controlResponseJson,
+						...(mainReference === undefined
+							? {}
+							: { binaryChunk: mainReference }),
+					};
+				},
+			});
+			await expect(owner.channel("runtime").request({})).rejects.toMatchObject({
+				code: "invalid-input",
+			});
+			if (mainReference !== undefined)
+				expect([...mainReference]).toEqual([0, 0, 0]);
+		}
+	});
+
+	test("wipes partial and extra-field Attachment Upload plaintext before generic cloning", async () => {
+		for (const kind of ["partial", "extra", "dataView"] as const) {
+			let backing: Uint8Array | undefined;
+			const worker = new MultiplexWorkerDouble((host) => ({
+				runtime: {
+					request: async () =>
+						host.request({
+							type: "attachmentUploadSource",
+							runtimeIncarnation: "runtime-one",
+							controlRequestJson: '{"type":"read"}',
+						}),
+				},
+			}));
+			const owner = createSharedWorkerOwner({
+				createWorker: () => worker,
+				handleHostRequest: async () => {
+					backing = new Uint8Array([9, 1, 2, 8]);
+					return {
+						controlResponseJson: '{"type":"chunk"}',
+						binaryChunk:
+							kind === "partial"
+								? new Uint8Array(backing.buffer, 1, 2)
+								: kind === "dataView"
+									? new DataView(backing.buffer, 1, 2)
+									: backing,
+						...(kind === "extra" ? { extra: true } : {}),
+					};
+				},
+			});
+			await expect(owner.channel("runtime").request({})).rejects.toMatchObject({
+				code: "invalid-input",
+			});
+			expect([...(backing ?? [])]).toEqual([0, 0, 0, 0]);
+		}
+	});
+
+	test("wipes a malformed known Worker-side Attachment Upload binary alias without settling", async () => {
+		const hostStarted = deferred<void>();
+		const releaseHost = deferred<void>();
+		let workerAlias: Uint8Array | undefined;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					const pending = host.request({
+						type: "attachmentUploadSource",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"read"}',
+					});
+					await hostStarted.promise;
+					workerAlias = new Uint8Array([4, 3, 2, 1]);
+					worker.emitToWorker({
+						type: "host-response",
+						id: 0,
+						ok: true,
+						value: {
+							controlResponseJson: '{"type":"chunk"}',
+							binaryChunk: new Uint8Array(workerAlias.buffer, 1, 2),
+						},
+					});
+					return pending;
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostStarted.resolve();
+				await releaseHost.promise;
+				return { controlResponseJson: '{"type":"end"}' };
+			},
+		});
+		const request = owner.channel("runtime").request({});
+		await hostStarted.promise;
+		await flush();
+		expect([...(workerAlias ?? [])]).toEqual([0, 0, 0, 0]);
+		releaseHost.resolve();
+		expect(await request).toEqual({ controlResponseJson: '{"type":"end"}' });
+	});
+
 	test("rejects a transferred partial plaintext view before invoking the host", async () => {
 		let workerBacking: Uint8Array | undefined;
 		let hostCalls = 0;
@@ -163,7 +419,7 @@ describe("shared worker RPC", () => {
 		await expect(
 			owner.channel("runtime").request<string>({}),
 		).rejects.toMatchObject({ code: "invalid-input" });
-		expect(workerBacking?.byteLength).toBe(0);
+		expect(workerBacking).toEqual(new Uint8Array(4));
 		expect(hostCalls).toBe(0);
 	});
 
@@ -1063,6 +1319,250 @@ describe("shared worker RPC", () => {
 			value: "later",
 		});
 		expect(await owner.channel("runtime").request<string>({})).toBe("answer");
+	});
+
+	test("malformed known and late host responses neither settle nor retain binary aliases", async () => {
+		const hostStarted = deferred<void>();
+		const releaseHost = deferred<void>();
+		let settled = false;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					const answer = host.request({
+						type: "attachmentUploadSource",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"read"}',
+					});
+					answer.finally(() => {
+						settled = true;
+					});
+					return answer;
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostStarted.resolve();
+				await releaseHost.promise;
+				return { controlResponseJson: '{"type":"end"}' };
+			},
+		});
+		const request = owner.channel("runtime").request({});
+		await hostStarted.promise;
+
+		for (const id of [0, 99]) {
+			for (const kind of ["extra", "accessor", "prototype"] as const) {
+				const backing = new Uint8Array([9, 1, 2, 8]);
+				const valid = {
+					type: "host-response",
+					id,
+					ok: true,
+					value: {
+						controlResponseJson: '{"type":"chunk"}',
+						binaryChunk: new Uint8Array(backing.buffer, 1, 2),
+					},
+				};
+				let malformed: unknown;
+				if (kind === "extra") malformed = { ...valid, extra: true };
+				else if (kind === "prototype") {
+					malformed = Object.assign(Object.create({ hostile: true }), valid);
+				} else {
+					const accessor = { ...valid };
+					Object.defineProperty(accessor, "ok", {
+						get: () => true,
+						enumerable: true,
+					});
+					malformed = accessor;
+				}
+				worker.emitToWorker(malformed);
+				expect([...backing]).toEqual([0, 0, 0, 0]);
+			}
+		}
+		await flush();
+		expect(settled).toBe(false);
+
+		releaseHost.resolve();
+		expect(await request).toEqual({ controlResponseJson: '{"type":"end"}' });
+	});
+
+	test("hostile actual Uint8Array responses are wiped on known and late paths without settling or invoking accessors", async () => {
+		const hostStarted = deferred<void>();
+		const releaseHost = deferred<void>();
+		let settled = false;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					const answer = host.request({
+						type: "attachmentUploadSource",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"read"}',
+					});
+					answer.finally(() => {
+						settled = true;
+					});
+					return answer;
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostStarted.resolve();
+				await releaseHost.promise;
+				return { controlResponseJson: '{"type":"end"}' };
+			},
+		});
+		const request = owner.channel("runtime").request({});
+		await hostStarted.promise;
+		for (const id of [0, 99]) {
+			const hostile = hostilePlaintext([9, 1, 2, 8]);
+			worker.emitToWorker({
+				type: "host-response",
+				id,
+				ok: true,
+				value: {
+					controlResponseJson: '{"type":"chunk"}',
+					binaryChunk: hostile.bytes,
+				},
+			});
+			expect(hostile.getterCalls()).toBe(0);
+			expect(Uint8Array.prototype.slice.call(hostile.bytes)).toEqual(
+				new Uint8Array(4),
+			);
+		}
+		await flush();
+		expect(settled).toBe(false);
+		releaseHost.resolve();
+		expect(await request).toEqual({ controlResponseJson: '{"type":"end"}' });
+	});
+
+	test("hostile actual Uint8Array host requests are wiped before handler invocation", async () => {
+		const worker = new MultiplexWorkerDouble({
+			runtime: { request: async () => "ready" },
+		});
+		let hostCalls = 0;
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostCalls += 1;
+				return "must-not-run";
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("ready");
+		const hostile = hostilePlaintext([8, 7, 6, 5]);
+		worker.emitToMain({
+			type: "host-request",
+			id: 88,
+			payload: {
+				type: "attachmentDownloadSink",
+				runtimeIncarnation: "runtime-one",
+				controlRequestJson: '{"type":"write"}',
+				binaryChunk: hostile.bytes,
+			},
+		});
+		await flush();
+		expect(hostCalls).toBe(0);
+		expect(hostile.getterCalls()).toBe(0);
+		expect(Uint8Array.prototype.slice.call(hostile.bytes)).toEqual(
+			new Uint8Array(4),
+		);
+	});
+
+	test("malformed host requests wipe attached plaintext and never invoke the host", async () => {
+		const worker = new MultiplexWorkerDouble({
+			runtime: { request: async () => "ready" },
+		});
+		let hostCalls = 0;
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostCalls += 1;
+				return "must-not-run";
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("ready");
+		for (const kind of ["extra", "accessor"] as const) {
+			const backing = new Uint8Array([7, 6, 5, 4]);
+			const valid = {
+				type: "host-request",
+				id: 42,
+				payload: {
+					type: "attachmentDownloadSink",
+					runtimeIncarnation: "runtime-one",
+					controlRequestJson: '{"type":"write"}',
+					binaryChunk: new Uint8Array(backing.buffer, 1, 2),
+				},
+			};
+			let malformed: unknown;
+			if (kind === "extra") malformed = { ...valid, extra: true };
+			else {
+				const accessor = { ...valid };
+				Object.defineProperty(accessor, "type", {
+					get: () => "host-request",
+					enumerable: true,
+				});
+				malformed = accessor;
+			}
+			worker.emitToMain(malformed);
+			expect([...backing]).toEqual([0, 0, 0, 0]);
+		}
+		for (const [index, kind] of ["extra", "accessor"].entries()) {
+			const backing = new Uint8Array([8, 7, 6, 5]);
+			const validPayload = {
+				type: "attachmentDownloadSink",
+				runtimeIncarnation: "runtime-one",
+				controlRequestJson: '{"type":"write"}',
+				binaryChunk: new Uint8Array(backing.buffer, 1, 2),
+			};
+			let payload: unknown;
+			if (kind === "extra") payload = { ...validPayload, extra: true };
+			else {
+				const accessor = { ...validPayload };
+				Object.defineProperty(accessor, "type", {
+					get: () => "attachmentDownloadSink",
+					enumerable: true,
+				});
+				payload = accessor;
+			}
+			worker.emitToMain({ type: "host-request", id: 50 + index, payload });
+			await flush();
+			expect([...backing]).toEqual([0, 0, 0, 0]);
+		}
+		expect(hostCalls).toBe(0);
+	});
+
+	test("a malformed close envelope never closes worker services", async () => {
+		let listener!: (event: { data: unknown }) => void;
+		let closeCalls = 0;
+		const replies: unknown[] = [];
+		serveWorkerChannels(
+			{
+				addEventListener: (_type, nextListener) => {
+					listener = nextListener;
+				},
+				postMessage: (message) => replies.push(message),
+			},
+			{
+				runtime: {
+					request: async () => undefined,
+					close: async () => {
+						closeCalls += 1;
+					},
+				},
+			},
+		);
+		const accessor = { type: "close", id: 0 };
+		Object.defineProperty(accessor, "type", {
+			get: () => "close",
+			enumerable: true,
+		});
+		for (const data of [{ type: "close", id: 0, extra: true }, accessor]) {
+			listener({ data });
+		}
+		await flush();
+		expect(closeCalls).toBe(0);
+		expect(replies).toEqual([]);
 	});
 
 	test("close aborts main-thread host work and rejects the worker-side wait", async () => {
