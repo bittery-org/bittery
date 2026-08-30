@@ -1513,3 +1513,34 @@ Deliberately left open: B atomic download, C foreground upload, D authenticated 
 acceptance, the final Web cutover and transitional-writer reachability audit, removal of
 `idempotency_record`, native-host Share creation, and Ticket 30's held-SSE work. Ticket 28 remains
 claimed.
+
+### 2026-08-30 — B atomic Attachment Download delivered
+
+Commit `3e6b28d5` adds the closed foreground Download request with only Account ID, Attachment ID,
+and an opaque sink-capability ID. Rust derives the remaining Item, Vault, envelope, and storage
+authority, obtains the authenticated source grant with at most one Session renewal, performs a
+bounded two-pass exact-ciphertext read and format-preserving authenticated decryption, and transfers
+plaintext only through the single-use capability. The production Web registry scopes that capability
+to the Account, actual Runtime incarnation, and request; rejects replay, expiry, malformed or partial
+buffers, and capacity overflow; and publishes the sink only after complete authenticated success.
+Every failed, cancelled, or partial transfer discards provisional output and wipes owned plaintext.
+
+Downloads release the Account execution fence during their long transfer and may run in parallel,
+while the established teardown owner still controls admission and retirement. Lock, Sign-out,
+Remove, Wipe, Runtime close, failed open, abandoned calls, callback races, timer failure, malformed
+or duplicate reverse RPC, and Worker shutdown all cancel and drain unresolved scopes before key,
+Account, or incarnation authority retires. Focused real-Chromium coverage exercises the production
+Worker composition, registry, atomic sink, generated WebAssembly Runtime, failed-open cleanup,
+Wipe/close, and fresh reconstruction rather than substituting fake Core ports. Native generated
+shapes travel with the contract, while native production sink registries remain later-host work.
+
+The orchestrator's full `@bittery/client-runtime` check passes 480 Core tests, 45 binding tests, and
+27 generator tests, including generated native and Web drift checks; the WebAssembly run passes 9
+tests with 1 audited skip. The complete TypeScript run passes 274 tests, all 7 Chromium tests pass
+including the 3 production-sink tests, Crypto Core passes 138 tests plus 8 persisted-format vectors,
+and all 14 dependent Turbo type checks pass. Biome passes for all 20 changed non-generated
+JavaScript/TypeScript files, and `git diff --check` passes.
+
+Deliberately left open: C foreground upload, D authenticated C4b2b browser acceptance, the final Web
+cutover and transitional-writer reachability audit, removal of `idempotency_record`, native-host
+Share creation, and Ticket 30's held-SSE work. Ticket 28 remains claimed.
