@@ -1578,3 +1578,35 @@ Desktop Rust tests plus 50 Desktop Node tests, and all 14 dependent type tasks. 
 
 C does not complete Ticket 28. D authenticated C4b2b browser acceptance and the ticket's later
 cutover and cleanup work remain; Ticket 28 stays claimed.
+
+### 2026-08-30 — D authenticated real-Core browser acceptance delivered
+
+Commit `b2552167` completes the C4b2b acceptance path through the authenticated production Worker,
+generated real WebAssembly Runtime, real SRP Full sign-in and password Quick unlock ceremonies, the
+Server, and object storage. The focused cloud scenario accepts an Attachment-bearing Move, retains
+one exact durable preparation through six real manifest failures, and proves that exceeding five
+attempts cannot discard it. After Lock and Worker restart, Quick unlock resumes the same preparation.
+The exclusive startup boundary sweeps deliberately seeded orphan chunks, artifacts, provisional
+chunks, and provisional artifacts before the first exact resumed manifest request or any downstream
+preparation work can begin.
+
+The scenario invokes the actual production upload source, IndexedDB artifact executor, OPFS staging
+spool, and binary executor. It observes source download, durable artifact publication, the hash-bound
+staging upload, promotion into the one ready Operation record, exact Move dispatch, retained Server
+outcome, local receipt, and authoritative Item plus Attachment convergence in the target Vault.
+Production corrections completed both applied and rejected Move reconciliation with authoritative
+Attachment state. They also made lookup, exact replay, Item authority, and paginated Attachment
+authority share one outcome-resolution Session-renewal budget. A later-page renewal retries the exact
+cursor request, while a second 401 or unrenewable lookup parks the Account for reauthentication,
+publishes that transition idempotently, and preserves the Operation, optimistic authority, receipt
+absence, and Sync cursor.
+
+Fresh final non-writer review reported **APPROVED**. The orchestrator's independent gates pass 506
+Core tests, 45 binding tests, 30 generator tests, all 8 Chromium tests, 139 Crypto Core tests plus 9
+persisted-format vectors, 89 Desktop Rust tests plus 50 Desktop Node tests, and the targeted cloud
+Playwright scenario 1/1 in 1.7 minutes. The clean-tree root `pnpm check:ci` and
+`pnpm check:ci:rust` gates also pass.
+
+D does not complete Ticket 28. Final Web cutover and the transitional-owner reachability audit,
+`idempotency_record` removal, native host work, and Ticket 30's Runtime-owned live Sync remain open;
+Ticket 28 stays claimed.
