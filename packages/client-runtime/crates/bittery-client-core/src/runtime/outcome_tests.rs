@@ -796,6 +796,60 @@ async fn unknown_outcomes_retry_but_parsable_cross_kind_and_invalid_kind_rejecti
 }
 
 #[tokio::test]
+async fn create_vault_outcomes_parse_closed_but_cannot_match_an_accepted_runtime_operation() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness
+        .accept_existing(OrdinaryItemCase::Update.request(harness.account_id.clone()))
+        .await;
+    let operation = harness.operation().unwrap();
+
+    for body in [
+        serde_json::json!({
+            "operationId": operation.operation_id,
+            "kind": "create_vault",
+            "result": { "status": "applied", "vaultId": "vault_1" },
+        }),
+        serde_json::json!({
+            "operationId": operation.operation_id,
+            "kind": "create_vault",
+            "result": {
+                "status": "rejected",
+                "code": "vault_sharing_entitlement_denied"
+            },
+        }),
+    ] {
+        let bytes = serde_json::to_vec(&body).unwrap();
+        assert!(matches!(
+            harness
+                .runtime
+                .read_dispatch_answer(&operation, 200, &bytes),
+            super::outcome::SemanticAnswer::IdentityReused
+        ));
+    }
+
+    for malformed in [
+        serde_json::json!({
+            "operationId": operation.operation_id,
+            "kind": "create_vault",
+            "result": { "status": "applied", "itemId": "item_1", "version": 1 },
+        }),
+        serde_json::json!({
+            "operationId": operation.operation_id,
+            "kind": "create_vault",
+            "result": { "status": "rejected", "code": "vault_read_only" },
+        }),
+    ] {
+        let bytes = serde_json::to_vec(&malformed).unwrap();
+        assert!(matches!(
+            harness
+                .runtime
+                .read_dispatch_answer(&operation, 200, &bytes),
+            super::outcome::SemanticAnswer::Transient
+        ));
+    }
+}
+
+#[tokio::test]
 async fn foreign_operation_id_from_dispatch_or_lookup_fails_without_discard_or_effect() {
     for lookup in [false, true] {
         let harness = seeded_with_existing_item(false, false).await;

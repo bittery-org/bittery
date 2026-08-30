@@ -118,6 +118,10 @@ test("tagged operation results use exact camelCase wire fields", async () => {
 		generated,
 		/enum CreateShareOperationResult \{[\s\S]*#\[serde\(rename = "shareLinkId"\)\][\s\S]*share_link_id: String/,
 	);
+	assert.match(
+		generated,
+		/enum CreateVaultOperationResult \{[\s\S]*#\[serde\(rename = "vaultId"\)\][\s\S]*vault_id: String/,
+	);
 	assert.doesNotMatch(
 		generated.slice(
 			generated.indexOf("pub enum CreateShareOperationResult"),
@@ -185,6 +189,7 @@ test("the Operation outcome union is discriminated by its own tag", async () => 
 		"move_item",
 		"permanently_delete_item",
 		"create_share",
+		"create_vault",
 	]) {
 		assert.match(union, new RegExp(`#\\[serde\\(rename = "${kind}"\\)\\]`));
 	}

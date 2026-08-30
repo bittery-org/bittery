@@ -785,12 +785,21 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		response: Promise<ApiResult<OperationOutcome>>,
 	): Promise<ApiResult<ItemOperationOutcome>> {
 		const result = await response;
-		if (result.data.kind === "create_share") {
-			throw new TypeError(
-				"An Item mutation returned a Share Operation outcome.",
-			);
+		switch (result.data.kind) {
+			case "create_item":
+			case "update_item":
+			case "set_item_favorite":
+			case "trash_item":
+			case "restore_item":
+			case "move_item":
+			case "permanently_delete_item":
+				return { ...result, data: result.data };
+			case "create_share":
+			case "create_vault":
+				throw new TypeError(
+					"An Item mutation returned a non-Item Operation outcome.",
+				);
 		}
-		return { ...result, data: result.data };
 	}
 
 	type PaginatedPath = {

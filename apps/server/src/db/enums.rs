@@ -516,6 +516,7 @@ pub enum OperationKind {
     MoveItem,
     PermanentlyDeleteItem,
     CreateShare,
+    CreateVault,
 }
 
 closed_enum!(OperationKind, "operation_kind", {
@@ -527,6 +528,7 @@ closed_enum!(OperationKind, "operation_kind", {
     MoveItem => "move_item",
     PermanentlyDeleteItem => "permanently_delete_item",
     CreateShare => "create_share",
+    CreateVault => "create_vault",
 });
 
 /// Whether a retained Operation applied its effect or proved a terminal rejection.
@@ -565,6 +567,10 @@ pub enum OperationRejectionCode {
     AttachmentStateConflict,
     ShareEntitlementDenied,
     ShareLimitReached,
+    VaultIdConflict,
+    TeamMembershipRequired,
+    VaultSharingEntitlementDenied,
+    SharedVaultLimitReached,
 }
 
 closed_enum!(OperationRejectionCode, "operation_rejection_code", {
@@ -582,6 +588,10 @@ closed_enum!(OperationRejectionCode, "operation_rejection_code", {
     AttachmentStateConflict => "attachment_state_conflict",
     ShareEntitlementDenied => "share_entitlement_denied",
     ShareLimitReached => "share_limit_reached",
+    VaultIdConflict => "vault_id_conflict",
+    TeamMembershipRequired => "team_membership_required",
+    VaultSharingEntitlementDenied => "vault_sharing_entitlement_denied",
+    SharedVaultLimitReached => "shared_vault_limit_reached",
 });
 
 #[cfg(test)]

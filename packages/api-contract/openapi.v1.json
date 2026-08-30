@@ -14529,6 +14529,56 @@
         },
         "additionalProperties": false
       },
+      "CreateVaultOperationRejectionCode": {
+        "type": "string",
+        "enum": [
+          "vault_id_conflict",
+          "team_membership_required",
+          "vault_sharing_entitlement_denied",
+          "shared_vault_limit_reached"
+        ]
+      },
+      "CreateVaultOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "vaultId",
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              },
+              "vaultId": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateVaultOperationRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The closed, non-secret answer retained for Vault creation."
+      },
       "CreateVaultResponse": {
         "type": "object",
         "required": [
@@ -16973,6 +17023,28 @@
               },
               "result": {
                 "$ref": "#/components/schemas/CreateShareOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_vault"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateVaultOperationResult"
               }
             }
           }

@@ -1025,6 +1025,11 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
             };
             (operation_id, OperationKind::CreateShare, result)
         }
+        WireOperationOutcome::CreateVault { .. } => {
+            // This foundation can read the closed Server union, but no production Runtime request
+            // can accept create-Vault work until its later lifecycle slice opens that gate.
+            return SemanticAnswer::IdentityReused;
+        }
     };
     if operation_id != operation.operation_id || operation.kind != expected_kind {
         // The Operation ID is ours; the kind is not. Keeping the fingerprint independent of the

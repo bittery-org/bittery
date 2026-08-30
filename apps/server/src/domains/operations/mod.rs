@@ -48,6 +48,12 @@ pub(crate) struct CreateShareAppliedPayload {
     pub(crate) expires_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateVaultAppliedPayload {
+    pub(crate) vault_id: String,
+}
+
 /// Pins every fingerprint to this protocol, so bytes hashed under a later one can never collide.
 const OPERATION_DISCRIMINATOR: &[u8] = b"bittery.operation.v1";
 
@@ -198,9 +204,13 @@ fn item_rejection_code(
             ItemOperationRejectionCode::AttachmentStateConflict
         }
         OperationRejectionCode::ShareEntitlementDenied
-        | OperationRejectionCode::ShareLimitReached => {
+        | OperationRejectionCode::ShareLimitReached
+        | OperationRejectionCode::VaultIdConflict
+        | OperationRejectionCode::TeamMembershipRequired
+        | OperationRejectionCode::VaultSharingEntitlementDenied
+        | OperationRejectionCode::SharedVaultLimitReached => {
             return Err(AppError::internal(
-                "Stored Item Operation has a Share-only rejection",
+                "Stored Item Operation has a non-Item rejection",
             ));
         }
     })
@@ -253,6 +263,52 @@ fn create_share_rejection_code(
     })
 }
 
+fn create_vault_rejection_code(
+    code: OperationRejectionCode,
+) -> Result<CreateVaultOperationRejectionCode, AppError> {
+    Ok(match code {
+        OperationRejectionCode::VaultIdConflict => {
+            CreateVaultOperationRejectionCode::VaultIdConflict
+        }
+        OperationRejectionCode::TeamMembershipRequired => {
+            CreateVaultOperationRejectionCode::TeamMembershipRequired
+        }
+        OperationRejectionCode::VaultSharingEntitlementDenied => {
+            CreateVaultOperationRejectionCode::VaultSharingEntitlementDenied
+        }
+        OperationRejectionCode::SharedVaultLimitReached => {
+            CreateVaultOperationRejectionCode::SharedVaultLimitReached
+        }
+        _ => {
+            return Err(AppError::internal(
+                "Stored create-Vault Operation has a foreign rejection",
+            ))
+        }
+    })
+}
+
+/// The closed, non-secret answer retained for Vault creation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(crate) enum CreateVaultOperationResult {
+    Applied {
+        #[serde(rename = "vaultId")]
+        vault_id: String,
+    },
+    Rejected {
+        code: CreateVaultOperationRejectionCode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CreateVaultOperationRejectionCode {
+    VaultIdConflict,
+    TeamMembershipRequired,
+    VaultSharingEntitlementDenied,
+    SharedVaultLimitReached,
+}
+
 /// The one retained outcome shape, discriminated by Operation kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 // The field rename is spelled out per variant because the OpenAPI generator reads `rename`, not
@@ -299,6 +355,11 @@ pub(crate) enum OperationOutcome {
         operation_id: String,
         result: CreateShareOperationResult,
     },
+    CreateVault {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: CreateVaultOperationResult,
+    },
 }
 
 impl OperationOutcome {
@@ -335,6 +396,9 @@ impl OperationOutcome {
             OperationKind::CreateShare => {
                 unreachable!("Share outcomes use their non-secret applied payload")
             }
+            OperationKind::CreateVault => {
+                unreachable!("create-Vault outcomes use their Vault applied payload")
+            }
         }
     }
 
@@ -343,6 +407,16 @@ impl OperationOutcome {
         result: CreateShareOperationResult,
     ) -> Self {
         Self::CreateShare {
+            operation_id,
+            result,
+        }
+    }
+
+    pub(crate) fn new_create_vault(
+        operation_id: String,
+        result: CreateVaultOperationResult,
+    ) -> Self {
+        Self::CreateVault {
             operation_id,
             result,
         }
@@ -449,6 +523,32 @@ fn outcome_from_row(
     operation_id: &str,
     row: StoredOutcomeRow,
 ) -> Result<OperationOutcome, AppError> {
+    if row.operation_kind == OperationKind::CreateVault {
+        let result =
+            match row.result_status {
+                OperationOutcomeStatus::Applied => {
+                    let payload = row.applied_payload.ok_or_else(|| {
+                        AppError::internal("Stored applied create-Vault Operation has no payload")
+                    })?;
+                    let payload: CreateVaultAppliedPayload = serde_json::from_str(&payload)
+                        .map_err(|_| {
+                            AppError::internal("Stored create-Vault Operation payload is invalid")
+                        })?;
+                    CreateVaultOperationResult::Applied {
+                        vault_id: payload.vault_id,
+                    }
+                }
+                OperationOutcomeStatus::Rejected => CreateVaultOperationResult::Rejected {
+                    code: create_vault_rejection_code(row.rejection_code.ok_or_else(|| {
+                        AppError::internal("Stored rejected Operation has no code")
+                    })?)?,
+                },
+            };
+        return Ok(OperationOutcome::new_create_vault(
+            operation_id.to_owned(),
+            result,
+        ));
+    }
     if row.operation_kind == OperationKind::CreateShare {
         let result = match row.result_status {
             OperationOutcomeStatus::Applied => {

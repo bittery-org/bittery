@@ -1824,6 +1824,18 @@ export interface components {
             readonly name: string;
             readonly vaultType: components["schemas"]["VaultType"];
         };
+        /** @enum {string} */
+        readonly CreateVaultOperationRejectionCode: "vault_id_conflict" | "team_membership_required" | "vault_sharing_entitlement_denied" | "shared_vault_limit_reached";
+        /** @description The closed, non-secret answer retained for Vault creation. */
+        readonly CreateVaultOperationResult: {
+            /** @enum {string} */
+            readonly status: "applied";
+            readonly vaultId: string;
+        } | {
+            readonly code: components["schemas"]["CreateVaultOperationRejectionCode"];
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
         readonly CreateVaultResponse: {
             readonly vaultId: string;
         };
@@ -2388,6 +2400,11 @@ export interface components {
             readonly kind: "create_share";
             readonly operationId: string;
             readonly result: components["schemas"]["CreateShareOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "create_vault";
+            readonly operationId: string;
+            readonly result: components["schemas"]["CreateVaultOperationResult"];
         };
         /**
          * @description The Item-only rejection vocabulary. Its OpenAPI name stays stable because Client Runtime has
