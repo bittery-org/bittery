@@ -1,6 +1,7 @@
 import {
 	copyWorkerValue,
 	isWorkerReply,
+	receiveWorkerValue,
 	type WorkerChannelName,
 	type WorkerReply,
 	type WorkerRequest,
@@ -10,9 +11,10 @@ import {
 export { copyWorkerValue, WorkerRpcError } from "./wire";
 
 export interface SharedWorkerHandle {
-	postMessage(message: unknown): void;
+	postMessage(message: unknown, transfer?: Transferable[]): void;
 	terminate(): void;
 	onmessage: ((event: MessageEvent) => void) | null;
+	onmessageerror: ((event: MessageEvent) => void) | null;
 	onerror: ((event: ErrorEvent) => void) | null;
 }
 
@@ -35,6 +37,12 @@ export interface SharedWorkerOwnerDeps {
 		payload: unknown,
 		signal: AbortSignal,
 	) => Promise<unknown>;
+	handleClosingHostRequest?: (
+		payload: unknown,
+		signal: AbortSignal,
+	) => Promise<unknown>;
+	beforeWorkerTerminate?: () => Promise<void>;
+	preserveHostRequestDuringClose?: (payload: unknown) => boolean;
 }
 
 interface PendingRequest {
@@ -64,19 +72,85 @@ export function createSharedWorkerOwner(
 		resolve: () => void;
 		reject: (error: unknown) => void;
 	} | null = null;
+	let closeAcknowledgement: { error?: WorkerRpcError } | null = null;
+	let terminationCleanup: Promise<void> | null = null;
+	let closeCompletion: Promise<void> | null = null;
 	const nextIds = new Map<WorkerChannelName, number>();
 	let nextControlId = 0;
 	const pending = new Map<string, PendingRequest>();
 	const listeners = new Map<WorkerChannelName, Set<(value: unknown) => void>>();
-	const activeHostRequests = new Map<number, AbortController>();
+	const activeHostRequests = new Map<
+		number,
+		{
+			controller: AbortController;
+			preserveDuringClose: boolean;
+			target: SharedWorkerHandle;
+			request: Extract<WorkerReply, { type: "host-request" }>;
+		}
+	>();
+	const seenHostRequestIds = new Set<number>();
+	const activeHostTasks = new Set<Promise<void>>();
 
 	function key(channel: WorkerChannelName, id: number): string {
 		return `${channel}\u0000${id}`;
 	}
 
-	function abortHostRequests(): void {
-		for (const controller of activeHostRequests.values()) controller.abort();
-		activeHostRequests.clear();
+	function abortNonCleanupHostRequests(): void {
+		for (const [id, active] of activeHostRequests) {
+			if (active.preserveDuringClose) continue;
+			active.controller.abort();
+			activeHostRequests.delete(id);
+			postHostResponse(active.target, {
+				type: "host-response",
+				id: active.request.id,
+				ok: false,
+				code: "closed",
+				message: "The shared worker is closing.",
+			});
+		}
+	}
+
+	function settleAndTerminate(target: SharedWorkerHandle): Promise<void> {
+		if (terminationCleanup !== null) return terminationCleanup;
+		const cleanup = Promise.all([...activeHostTasks])
+			.then(() => deps.beforeWorkerTerminate?.())
+			.then(() => {
+				target.onmessage = null;
+				target.onmessageerror = null;
+				target.onerror = null;
+				target.terminate();
+				if (worker === target) worker = null;
+				closed = true;
+			});
+		terminationCleanup = cleanup;
+		void cleanup.catch(() => {
+			if (terminationCleanup === cleanup) terminationCleanup = null;
+		});
+		return cleanup;
+	}
+
+	function completeCloseAfterTermination(target: SharedWorkerHandle): void {
+		if (closeCompletion !== null) return;
+		const completion = settleAndTerminate(target);
+		closeCompletion = completion;
+		void completion.then(
+			() => {
+				const closing = closeRequest;
+				closeRequest = null;
+				if (closing === null) return;
+				if (failure !== null) closing.reject(failure);
+				else if (closeAcknowledgement?.error !== undefined) {
+					closing.reject(closeAcknowledgement.error);
+				} else closing.resolve();
+			},
+			(error) => {
+				if (closeCompletion === completion) closeCompletion = null;
+				closePromise = null;
+				const closing = closeRequest;
+				closeRequest = null;
+				closing?.reject(error);
+			},
+		);
 	}
 
 	function failWorker(error: WorkerRpcError): void {
@@ -87,16 +161,12 @@ export function createSharedWorkerOwner(
 			request.reject(error);
 		}
 		pending.clear();
-		abortHostRequests();
-		closeRequest?.reject(error);
-		closeRequest = null;
+		abortNonCleanupHostRequests();
 		const failedWorker = worker;
-		worker = null;
 		if (failedWorker !== null) {
-			failedWorker.onmessage = null;
-			failedWorker.onerror = null;
-			failedWorker.terminate();
-		}
+			if (closeRequest === null) void settleAndTerminate(failedWorker);
+			else completeCloseAfterTermination(failedWorker);
+		} else closeRequest?.reject(error);
 	}
 
 	function postHostResponse(
@@ -114,7 +184,7 @@ export function createSharedWorkerOwner(
 		target: SharedWorkerHandle,
 		request: Extract<WorkerReply, { type: "host-request" }>,
 	): void {
-		if (closePromise !== null || closed || failure !== null) {
+		if (closed || failure !== null) {
 			postHostResponse(target, {
 				type: "host-response",
 				id: request.id,
@@ -124,7 +194,10 @@ export function createSharedWorkerOwner(
 			});
 			return;
 		}
-		const handler = deps.handleHostRequest;
+		const handler =
+			closePromise === null && closeAcknowledgement === null
+				? deps.handleHostRequest
+				: deps.handleClosingHostRequest;
 		if (handler === undefined) {
 			postHostResponse(target, {
 				type: "host-response",
@@ -135,12 +208,41 @@ export function createSharedWorkerOwner(
 			});
 			return;
 		}
+		if (seenHostRequestIds.has(request.id)) {
+			const duplicate = activeHostRequests.get(request.id);
+			if (duplicate !== undefined) {
+				duplicate.controller.abort();
+				activeHostRequests.delete(request.id);
+			}
+			postHostResponse(target, {
+				type: "host-response",
+				id: request.id,
+				ok: false,
+				code: "invalid-input",
+				message: "Duplicate host request ids are forbidden.",
+			});
+			return;
+		}
+		seenHostRequestIds.add(request.id);
 		const controller = new AbortController();
-		activeHostRequests.set(request.id, controller);
-		void Promise.resolve()
-			.then(() => handler(copyWorkerValue(request.payload), controller.signal))
+		const active = {
+			controller,
+			preserveDuringClose: false,
+			target,
+			request,
+		};
+		activeHostRequests.set(request.id, active);
+		const operation = Promise.resolve()
+			.then(() => {
+				if (activeHostRequests.get(request.id) !== active) return;
+				const payload = receiveWorkerValue(request.payload);
+				active.preserveDuringClose =
+					deps.preserveHostRequestDuringClose?.(payload) ?? false;
+				if (activeHostRequests.get(request.id) !== active) return;
+				return handler(payload, controller.signal);
+			})
 			.then((value) => {
-				if (activeHostRequests.get(request.id) !== controller) return;
+				if (activeHostRequests.get(request.id) !== active) return;
 				const wireValue = copyWorkerValue(value);
 				activeHostRequests.delete(request.id);
 				postHostResponse(target, {
@@ -151,7 +253,7 @@ export function createSharedWorkerOwner(
 				});
 			})
 			.catch((error: unknown) => {
-				if (activeHostRequests.get(request.id) !== controller) return;
+				if (activeHostRequests.get(request.id) !== active) return;
 				activeHostRequests.delete(request.id);
 				const record = error as { code?: unknown; message?: unknown };
 				postHostResponse(target, {
@@ -165,7 +267,10 @@ export function createSharedWorkerOwner(
 							? record.message
 							: "The host request failed.",
 				});
-			});
+			})
+			.then(() => undefined);
+		activeHostTasks.add(operation);
+		void operation.finally(() => activeHostTasks.delete(operation));
 	}
 
 	function ensureWorker(): SharedWorkerHandle {
@@ -188,18 +293,23 @@ export function createSharedWorkerOwner(
 				}
 				if (reply.type === "close-ack") {
 					if (closeRequest === null || reply.id !== closeRequest.id) return;
-					const closing = closeRequest;
-					closeRequest = null;
+					if (closeAcknowledgement !== null) return;
+					const closeError = reply.ok
+						? undefined
+						: new WorkerRpcError(reply.code, reply.message);
+					closeAcknowledgement = {
+						...(closeError === undefined ? {} : { error: closeError }),
+					};
 					const completedWorker = worker;
-					worker = null;
-					if (completedWorker !== null) {
-						completedWorker.onmessage = null;
-						completedWorker.onerror = null;
-						completedWorker.terminate();
+					if (completedWorker === null) {
+						const closing = closeRequest;
+						closeRequest = null;
+						closing.reject(
+							new WorkerRpcError("closed", "The shared worker is closed."),
+						);
+						return;
 					}
-					closed = true;
-					if (reply.ok) closing.resolve();
-					else closing.reject(new WorkerRpcError(reply.code, reply.message));
+					completeCloseAfterTermination(completedWorker);
 					return;
 				}
 				if (reply.type !== "response") return;
@@ -215,6 +325,14 @@ export function createSharedWorkerOwner(
 					new WorkerRpcError(
 						"backend-failure",
 						event.message || "The shared worker failed.",
+					),
+				);
+			};
+			worker.onmessageerror = () => {
+				failWorker(
+					new WorkerRpcError(
+						"backend-failure",
+						"The shared worker message could not be deserialized.",
 					),
 				);
 			};
@@ -241,7 +359,12 @@ export function createSharedWorkerOwner(
 					payload: unknown,
 					options?: { signal?: AbortSignal },
 				) {
-					if (closed || closePromise !== null) {
+					if (failure !== null) return Promise.reject(failure);
+					if (
+						closed ||
+						closePromise !== null ||
+						closeAcknowledgement !== null
+					) {
 						return Promise.reject(
 							new WorkerRpcError("closed", "The shared worker is closed."),
 						);
@@ -313,7 +436,12 @@ export function createSharedWorkerOwner(
 		},
 		close() {
 			if (closePromise !== null) return closePromise;
-			if (failure !== null) return Promise.reject(failure);
+			if (failure !== null) {
+				const target = worker;
+				return (
+					target === null ? Promise.resolve() : settleAndTerminate(target)
+				).then(() => Promise.reject(failure));
+			}
 			if (closed) return Promise.resolve();
 			if (worker === null) {
 				closed = true;
@@ -326,25 +454,22 @@ export function createSharedWorkerOwner(
 				);
 			}
 			pending.clear();
-			abortHostRequests();
+			abortNonCleanupHostRequests();
 			const target = worker;
 			const id = nextControlId++;
 			closePromise = new Promise<void>((resolve, reject) => {
 				closeRequest = { id, resolve, reject };
 			});
+			if (closeAcknowledgement !== null) {
+				completeCloseAfterTermination(target);
+				return closePromise;
+			}
 			try {
 				target.postMessage({ type: "close", id } satisfies WorkerRequest);
 			} catch (error) {
-				failure = backendFailure(
-					error,
-					"Could not post the worker close request.",
+				failWorker(
+					backendFailure(error, "Could not post the worker close request."),
 				);
-				closeRequest?.reject(failure);
-				closeRequest = null;
-				target.onmessage = null;
-				target.onerror = null;
-				target.terminate();
-				worker = null;
 			}
 			return closePromise;
 		},

@@ -44,20 +44,27 @@ impl DeviceTimer for SystemDeviceTimer {
         use wasm_bindgen::{JsCast, JsValue};
 
         // `setTimeout` lives on the global scope of a Window and of a Worker alike, and its delay
-        // argument is a JavaScript number. A host that somehow has no timer must not wedge the
-        // dispatcher, so an unusable global simply resolves at once and the caller re-reads the
-        // durable schedule.
+        // argument is a JavaScript number. Authenticated construction validates this primitive.
+        // If hostile host mutation removes it later, park instead of turning bounded backoff into
+        // a hot loop that can lose cleanup ownership.
         let global = js_sys::global();
         let Ok(set_timeout) = js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout"))
         else {
+            std::future::pending::<()>().await;
             return;
         };
         let Ok(set_timeout) = set_timeout.dyn_into::<js_sys::Function>() else {
+            std::future::pending::<()>().await;
             return;
         };
         let delay = JsValue::from_f64(milliseconds as f64);
         let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-            let _ = set_timeout.call2(&JsValue::UNDEFINED, &resolve, &delay);
+            if set_timeout
+                .call2(&JsValue::UNDEFINED, &resolve, &delay)
+                .is_err()
+            {
+                // Leaving the Promise pending is the fail-closed result.
+            }
         });
         let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
     }

@@ -60,6 +60,78 @@ export class WorkerRpcError extends Error {
 	}
 }
 
+type PreparedWorkerValue = { value: unknown; transfer: Transferable[] };
+
+function isBinaryAttachmentDownloadSinkRequest(value: unknown): value is {
+	type: "attachmentDownloadSink";
+	runtimeIncarnation: string;
+	controlRequestJson: string;
+	binaryChunk: Uint8Array;
+} {
+	if (!isRecord(value)) return false;
+	return (
+		Object.keys(value).sort().join("\0") ===
+			["binaryChunk", "controlRequestJson", "runtimeIncarnation", "type"]
+				.sort()
+				.join("\0") &&
+		value.type === "attachmentDownloadSink" &&
+		typeof value.runtimeIncarnation === "string" &&
+		typeof value.controlRequestJson === "string" &&
+		value.binaryChunk instanceof Uint8Array
+	);
+}
+
+/** Transfer ownership for the one audited plaintext reverse-RPC shape; copy everything else. */
+export function prepareWorkerValueForPost(value: unknown): PreparedWorkerValue {
+	if (!isBinaryAttachmentDownloadSinkRequest(value)) {
+		return { value: copyWorkerValue(value), transfer: [] };
+	}
+	const source = value.binaryChunk;
+	if (!(source.buffer instanceof ArrayBuffer)) {
+		try {
+			new Uint8Array(source.buffer).fill(0);
+		} catch {
+			// Keep the rejection deterministic even if the backing store became unusable.
+		}
+		throw new WorkerRpcError(
+			"invalid-input",
+			"Attachment Download plaintext requires an owned ArrayBuffer.",
+		);
+	}
+	return {
+		value: {
+			type: value.type,
+			runtimeIncarnation: value.runtimeIncarnation,
+			controlRequestJson: value.controlRequestJson,
+			binaryChunk: source,
+		},
+		transfer: [source.buffer],
+	};
+}
+
+/** Preserve transferred ownership for the audited plaintext shape; validate/copy all others. */
+export function receiveWorkerValue(value: unknown): unknown {
+	if (!isBinaryAttachmentDownloadSinkRequest(value))
+		return copyWorkerValue(value);
+	const source = value.binaryChunk;
+	if (
+		!(source.buffer instanceof ArrayBuffer) ||
+		source.byteOffset !== 0 ||
+		source.byteLength !== source.buffer.byteLength
+	) {
+		try {
+			new Uint8Array(source.buffer).fill(0);
+		} catch {
+			// Keep the rejection deterministic even if the backing store became unusable.
+		}
+		throw new WorkerRpcError(
+			"invalid-input",
+			"Attachment Download plaintext requires a full owned ArrayBuffer view.",
+		);
+	}
+	return value;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }

@@ -1,6 +1,7 @@
 import {
 	copyWorkerValue,
 	isWorkerRequest,
+	prepareWorkerValueForPost,
 	type WorkerReply,
 	WorkerRpcError,
 } from "./wire";
@@ -10,7 +11,7 @@ export interface WorkerHostRpcScope {
 		type: "message",
 		listener: (event: { data: unknown }) => void,
 	): void;
-	postMessage(message: unknown): void;
+	postMessage(message: unknown, transfer?: Transferable[]): void;
 }
 
 export interface WorkerHostRpc {
@@ -28,22 +29,11 @@ interface PendingHostRequest {
  */
 export function createWorkerHostRpc(scope: WorkerHostRpcScope): WorkerHostRpc {
 	let nextId = 0;
-	let closed = false;
 	const pending = new Map<number, PendingHostRequest>();
 
 	scope.addEventListener("message", (event) => {
 		if (!isWorkerRequest(event.data)) return;
 		const message = event.data;
-		if (message.type === "close") {
-			closed = true;
-			const error = new WorkerRpcError(
-				"closed",
-				"The shared worker is closing.",
-			);
-			for (const request of pending.values()) request.reject(error);
-			pending.clear();
-			return;
-		}
 		if (message.type !== "host-response") return;
 		const request = pending.get(message.id);
 		if (request === undefined) return;
@@ -61,14 +51,9 @@ export function createWorkerHostRpc(scope: WorkerHostRpcScope): WorkerHostRpc {
 
 	return {
 		request<T = unknown>(payload: unknown): Promise<T> {
-			if (closed) {
-				return Promise.reject(
-					new WorkerRpcError("closed", "The shared worker is closed."),
-				);
-			}
-			let wirePayload: unknown;
+			let prepared: ReturnType<typeof prepareWorkerValueForPost>;
 			try {
-				wirePayload = copyWorkerValue(payload);
+				prepared = prepareWorkerValueForPost(payload);
 			} catch (error) {
 				return Promise.reject(error);
 			}
@@ -77,11 +62,14 @@ export function createWorkerHostRpc(scope: WorkerHostRpcScope): WorkerHostRpc {
 				pending.set(id, { resolve, reject });
 			});
 			try {
-				scope.postMessage({
-					type: "host-request",
-					id,
-					payload: wirePayload,
-				} satisfies WorkerReply);
+				scope.postMessage(
+					{
+						type: "host-request",
+						id,
+						payload: prepared.value,
+					} satisfies WorkerReply,
+					prepared.transfer,
+				);
 			} catch (error) {
 				pending.delete(id);
 				return Promise.reject(

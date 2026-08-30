@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{encrypt_with_aad, AadContext};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use tokio::sync::Semaphore;
 
@@ -55,6 +56,43 @@ impl TeardownHostCleanup for SuccessfulHostTeardown {
             }
             TeardownHostCleanupRequest::WipeDevice => TeardownHostCleanupResponse::DeviceWiped,
         })
+    }
+}
+
+struct FailingHostTeardown;
+
+#[async_trait]
+impl TeardownHostCleanup for FailingHostTeardown {
+    async fn invoke(
+        &self,
+        _request: TeardownHostCleanupRequest,
+    ) -> Result<TeardownHostCleanupResponse, RuntimeError> {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            "injected host teardown failure",
+        ))
+    }
+}
+
+struct FenceInspectingHostTeardown {
+    sink: Arc<Mutex<DownloadSinkState>>,
+    inspected: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl TeardownHostCleanup for FenceInspectingHostTeardown {
+    async fn invoke(
+        &self,
+        request: TeardownHostCleanupRequest,
+    ) -> Result<TeardownHostCleanupResponse, RuntimeError> {
+        let TeardownHostCleanupRequest::DeleteAccount { account_id } = request else {
+            panic!("Account fence inspection received Device teardown")
+        };
+        let state = self.sink.lock().unwrap();
+        assert!(state.fenced_accounts.contains(account_id.as_str()));
+        assert!(state.account_retirement_completions.is_empty());
+        self.inspected.store(true, Ordering::SeqCst);
+        Ok(TeardownHostCleanupResponse::AccountDeleted)
     }
 }
 
@@ -154,6 +192,598 @@ fn delete_attachment_request_carries_only_account_and_attachment() {
     );
 }
 
+#[test]
+fn download_attachment_request_carries_only_account_attachment_and_sink_capability() {
+    let request = RuntimeRequest::DownloadAttachment {
+        account_id: AccountId::from("account-a"),
+        attachment_id: "attachment-a".into(),
+        sink_capability_id: "sink-a".into(),
+    };
+
+    assert_eq!(
+        serde_json::to_value(request).expect("serialize Download request"),
+        serde_json::json!({
+            "type": "downloadAttachment",
+            "accountId": "account-a",
+            "attachmentId": "attachment-a",
+            "sinkCapabilityId": "sink-a",
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(RuntimeResponse::AttachmentDownloaded {
+            account_id: AccountId::from("account-a"),
+            attachment_id: "attachment-a".into(),
+        })
+        .expect("serialize Download result"),
+        serde_json::json!({
+            "type": "attachmentDownloaded",
+            "accountId": "account-a",
+            "attachmentId": "attachment-a",
+        })
+    );
+}
+
+#[tokio::test]
+async fn download_rejects_noncanonical_sink_capabilities_before_host_or_network() {
+    assert!(super::attachment::is_canonical_sink_capability_id("x"));
+    assert!(super::attachment::is_canonical_sink_capability_id(
+        &"x".repeat(128)
+    ));
+    for capability in [
+        String::new(),
+        "x".repeat(129),
+        "not canonical".into(),
+        "café".into(),
+    ] {
+        let harness = seeded_attachment().await;
+        let (transfer, sink) =
+            install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::DownloadAttachment {
+                    account_id: harness.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                    sink_capability_id: capability,
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert_eq!(
+            harness.server.download_grant_calls.load(Ordering::SeqCst),
+            0
+        );
+        assert_eq!(transfer.opens.load(Ordering::SeqCst), 0);
+        assert_eq!(sink.lock().unwrap().begins.len(), 0);
+    }
+}
+
+#[tokio::test]
+async fn download_claims_then_discards_the_capability_for_every_pre_authority_exit() {
+    for failure in [
+        "cancelled",
+        "account-missing",
+        "attachment-missing",
+        "locked",
+        "key-missing",
+    ] {
+        let harness = seeded_attachment().await;
+        let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+        let cancellation = RequestCancellation::new();
+        let account_id = if failure == "account-missing" {
+            AccountId::from("missing-account")
+        } else {
+            harness.account_id.clone()
+        };
+        let attachment_id = if failure == "attachment-missing" {
+            "missing-attachment".to_owned()
+        } else {
+            ATTACHMENT_ID.to_owned()
+        };
+        if failure == "cancelled" {
+            cancellation.cancel();
+        }
+        if failure == "locked" {
+            harness
+                .runtime
+                .mark_account_locked(&harness.account_id)
+                .await
+                .unwrap();
+        }
+        if failure == "key-missing" {
+            harness
+                .runtime
+                .live_master_unlock_keys
+                .lock()
+                .unwrap()
+                .clear();
+        }
+
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::DownloadAttachment {
+                    account_id: account_id.clone(),
+                    attachment_id: attachment_id.clone(),
+                    sink_capability_id: format!("sink-{failure}"),
+                },
+                cancellation,
+            )
+            .await
+            .unwrap_err();
+
+        let sink = sink.lock().unwrap();
+        assert_eq!(
+            sink.claims,
+            [(
+                account_id.as_str().to_owned(),
+                attachment_id.clone(),
+                format!("sink-{failure}")
+            )],
+            "{failure}"
+        );
+        assert_eq!(
+            sink.begins,
+            if failure == "cancelled" {
+                Vec::new()
+            } else {
+                vec![(
+                    account_id.as_str().to_owned(),
+                    attachment_id,
+                    format!("sink-{failure}"),
+                )]
+            },
+            "{failure}"
+        );
+        assert_eq!(sink.discards, 1, "{failure}");
+        assert!(sink.provisional.is_empty(), "{failure}");
+        assert_eq!(
+            harness.server.download_grant_calls.load(Ordering::SeqCst),
+            0,
+            "{failure}: {error:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn download_claim_and_lifecycle_registration_precede_outer_teardown_admission_wait() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let outer_writer = harness.runtime.teardown_admission.write().await;
+    let request = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "outer-admission".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+
+    for _ in 0..100 {
+        if !sink.lock().unwrap().claims.is_empty() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        sink.lock().unwrap().claims.len(),
+        1,
+        "capability ownership must be lifecycle-visible before awaiting outer admission"
+    );
+
+    request.abort();
+    drop(outer_writer);
+    let _ = request.await;
+}
+
+#[tokio::test]
+async fn close_drains_download_cleanup_while_request_is_suspended_at_outer_admission() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let (discard_started, discard_release) = {
+        let mut state = sink.lock().unwrap();
+        state.hold_discard = true;
+        (
+            Arc::clone(&state.discard_started),
+            Arc::clone(&state.discard_release),
+        )
+    };
+    let outer_writer = harness.runtime.teardown_admission.write().await;
+    let request = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "outer-close".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("Download claims before outer admission", || {
+        sink.lock().unwrap().claims.len() == 1
+    })
+    .await;
+    let close = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        async move { runtime.close().await }
+    });
+    until(
+        "close cancellation reaches provisional sink cleanup",
+        || discard_started.load(Ordering::SeqCst),
+    )
+    .await;
+    assert!(!close.is_finished());
+    discard_release.add_permits(1);
+    close.await.unwrap();
+    drop(outer_writer);
+    assert_eq!(
+        request.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    assert_eq!(sink.lock().unwrap().discards, 1);
+}
+
+#[tokio::test]
+async fn account_and_runtime_lifecycle_sweep_unbegun_download_grants() {
+    for lifecycle in ["lock", "signout", "remove", "wipe", "close"] {
+        let harness = seeded_attachment().await;
+        *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
+            Some(Arc::new(AttachmentMoveLifecycle::new(
+                Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+                Arc::new(SuccessfulAttachmentTeardown),
+            )));
+        harness
+            .runtime
+            .install_teardown_host_cleanup(Arc::new(SuccessfulHostTeardown));
+        let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+        match lifecycle {
+            "lock" => {
+                harness
+                    .runtime
+                    .mark_account_locked(&harness.account_id)
+                    .await
+                    .unwrap();
+            }
+            "signout" => {
+                harness
+                    .runtime
+                    .request(
+                        RuntimeRequest::SignOut {
+                            account_id: harness.account_id.clone(),
+                        },
+                        RequestCancellation::new(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            "remove" => {
+                harness
+                    .runtime
+                    .request(
+                        RuntimeRequest::RemoveAccount {
+                            account_id: harness.account_id.clone(),
+                        },
+                        RequestCancellation::new(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            "wipe" => {
+                harness
+                    .runtime
+                    .request(RuntimeRequest::Wipe, RequestCancellation::new())
+                    .await
+                    .unwrap();
+            }
+            "close" => harness.runtime.close().await,
+            _ => unreachable!(),
+        }
+        let sink = sink.lock().unwrap();
+        if matches!(lifecycle, "wipe" | "close") {
+            assert_eq!(sink.runtime_retirements, 1, "{lifecycle}");
+        } else {
+            assert_eq!(
+                sink.account_retirements,
+                [harness.account_id.as_str()],
+                "{lifecycle}"
+            );
+            assert_eq!(
+                sink.account_retirement_completions,
+                [harness.account_id.as_str()],
+                "{lifecycle}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn account_lifecycle_retries_registry_cleanup_and_keeps_keys_until_it_converges() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let release = {
+        let mut state = sink.lock().unwrap();
+        state.hold_account_retirement = true;
+        state.account_retirement_failures_remaining = 2;
+        Arc::clone(&state.account_retirement_release)
+    };
+    let locking = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    until("Account sink registry cleanup starts", || {
+        !sink.lock().unwrap().account_retirements.is_empty()
+    })
+    .await;
+    assert!(harness
+        .runtime
+        .has_live_master_unlock_key(&harness.account_id, &Incarnation::from(INCARNATION),));
+    let ordinary = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(create_share(&account_id), RequestCancellation::new())
+                .await
+        }
+    });
+    for _ in 0..32 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !ordinary.is_finished(),
+        "ordinary Item work must wait behind lifecycle host cleanup and backoff"
+    );
+    assert!(harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap()
+        .operations
+        .is_empty());
+    release.add_permits(3);
+    locking.await.unwrap().unwrap();
+    let ordinary = ordinary.await.unwrap().unwrap_err();
+    assert_eq!(ordinary.code, RuntimeErrorCode::AuthenticationRequired);
+    let state = sink.lock().unwrap();
+    assert_eq!(state.account_retirements.len(), 3);
+    assert!(!harness
+        .runtime
+        .has_live_master_unlock_key(&harness.account_id, &Incarnation::from(INCARNATION),));
+}
+
+#[tokio::test]
+async fn lock_signout_and_remove_serialize_one_account_retirement_through_exact_completion() {
+    let harness = seeded_attachment().await;
+    *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
+        Some(Arc::new(AttachmentMoveLifecycle::new(
+            Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+            Arc::new(SuccessfulAttachmentTeardown),
+        )));
+    harness
+        .runtime
+        .install_teardown_host_cleanup(Arc::new(SuccessfulHostTeardown));
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let release = {
+        let mut state = sink.lock().unwrap();
+        state.hold_account_retirement = true;
+        Arc::clone(&state.account_retirement_release)
+    };
+
+    let locking = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move { runtime.mark_account_locked(&account_id).await }
+    });
+    until("Lock owns the first Account retirement", || {
+        sink.lock().unwrap().account_retirements.len() == 1
+    })
+    .await;
+    let signing_out = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .retire_account_access(&account_id, AccessRetirement::SignOut)
+                .await
+        }
+    });
+    let removing = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::RemoveAccount { account_id },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    for _ in 0..32 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(sink.lock().unwrap().account_retirements.len(), 1);
+
+    release.add_permits(1);
+    until("Sign-out owns the second Account retirement", || {
+        sink.lock().unwrap().account_retirements.len() == 2
+    })
+    .await;
+    assert!(locking.is_finished());
+    assert!(!signing_out.is_finished());
+    assert!(!removing.is_finished());
+
+    release.add_permits(1);
+    until("Remove owns the third Account retirement", || {
+        sink.lock().unwrap().account_retirements.len() == 3
+    })
+    .await;
+    assert!(signing_out.is_finished());
+    assert!(!removing.is_finished());
+    release.add_permits(1);
+
+    locking.await.unwrap().unwrap();
+    assert_eq!(
+        signing_out.await.unwrap().unwrap(),
+        AccountAccessState::SignedOut
+    );
+    assert!(matches!(
+        removing.await.unwrap().unwrap(),
+        RuntimeResponse::Teardown {
+            status: TeardownStatus::Complete,
+            ..
+        }
+    ));
+    let state = sink.lock().unwrap();
+    assert_eq!(state.account_retirements.len(), 3);
+    assert_eq!(state.account_retirement_completions.len(), 3);
+    assert!(!state.fenced_accounts.contains(harness.account_id.as_str()));
+}
+
+#[tokio::test]
+async fn empty_account_access_retirement_reopens_its_download_grant_fence_after_convergence() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let missing = AccountId::from("missing-account");
+
+    assert_eq!(
+        harness
+            .runtime
+            .retire_account_access(&missing, AccessRetirement::Lock)
+            .await
+            .unwrap(),
+        AccountAccessState::SignedOut
+    );
+
+    let state = sink.lock().unwrap();
+    assert_eq!(state.account_retirements, [missing.as_str()]);
+    assert_eq!(state.account_retirement_completions, [missing.as_str()]);
+    assert!(!state.fenced_accounts.contains(missing.as_str()));
+}
+
+#[tokio::test]
+async fn remove_keeps_the_download_grant_fence_past_host_cleanup_until_core_converges() {
+    let harness = seeded_attachment().await;
+    *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
+        Some(Arc::new(AttachmentMoveLifecycle::new(
+            Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+            Arc::new(SuccessfulAttachmentTeardown),
+        )));
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let inspected = Arc::new(AtomicBool::new(false));
+    harness
+        .runtime
+        .install_teardown_host_cleanup(Arc::new(FenceInspectingHostTeardown {
+            sink: Arc::clone(&sink),
+            inspected: Arc::clone(&inspected),
+        }));
+
+    let response = harness
+        .runtime
+        .request(
+            RuntimeRequest::RemoveAccount {
+                account_id: harness.account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        response,
+        RuntimeResponse::Teardown {
+            status: TeardownStatus::Complete,
+            ..
+        }
+    ));
+    assert!(inspected.load(Ordering::SeqCst));
+    let state = sink.lock().unwrap();
+    assert_eq!(
+        state.account_retirement_completions,
+        [harness.account_id.as_str()]
+    );
+    assert!(!state.fenced_accounts.contains(harness.account_id.as_str()));
+}
+
+#[tokio::test]
+async fn incomplete_remove_keeps_the_download_grant_fence_until_a_converged_retry() {
+    let harness = seeded_attachment().await;
+    *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
+        Some(Arc::new(AttachmentMoveLifecycle::new(
+            Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+            Arc::new(SuccessfulAttachmentTeardown),
+        )));
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    harness
+        .runtime
+        .install_teardown_host_cleanup(Arc::new(FailingHostTeardown));
+
+    let first = harness
+        .runtime
+        .request(
+            RuntimeRequest::RemoveAccount {
+                account_id: harness.account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        first,
+        RuntimeResponse::Teardown {
+            status: TeardownStatus::Incomplete,
+            ..
+        }
+    ));
+    {
+        let state = sink.lock().unwrap();
+        assert!(state.fenced_accounts.contains(harness.account_id.as_str()));
+        assert!(state.account_retirement_completions.is_empty());
+    }
+
+    harness
+        .runtime
+        .install_teardown_host_cleanup(Arc::new(SuccessfulHostTeardown));
+    let retry = harness
+        .runtime
+        .request(
+            RuntimeRequest::RemoveAccount {
+                account_id: harness.account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        retry,
+        RuntimeResponse::Teardown {
+            status: TeardownStatus::Complete,
+            ..
+        }
+    ));
+    let state = sink.lock().unwrap();
+    assert_eq!(state.account_retirements.len(), 2);
+    assert_eq!(state.account_retirement_completions.len(), 1);
+    assert!(!state.fenced_accounts.contains(harness.account_id.as_str()));
+}
+
 const ATTACHMENT_ID: &str = "attachment-1";
 const ITEM_ID: &str = "item-existing";
 
@@ -171,6 +801,10 @@ struct AttachmentServer {
     unauthorized_patches: AtomicUsize,
     patch_calls: AtomicUsize,
     delete_calls: AtomicUsize,
+    download_grant_calls: AtomicUsize,
+    unauthorized_download_grants: AtomicUsize,
+    denied_download_grants: AtomicUsize,
+    download_grant_failure: AtomicBool,
     unauthorized_deletes: AtomicUsize,
     denied_deletes: AtomicUsize,
     refresh_calls: AtomicUsize,
@@ -259,6 +893,49 @@ impl SerializedHttpExecutor for AttachmentServer {
                     .unwrap(),
                 ),
             }
+        } else if request.method == "POST" && request.url.ends_with("/download-urls") {
+            self.download_grant_calls.fetch_add(1, Ordering::SeqCst);
+            if self.download_grant_failure.swap(false, Ordering::SeqCst) {
+                return Ok(json!({ "type": "networkFailure" }).to_string());
+            }
+            if self
+                .unauthorized_download_grants
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Ok(completed(401, b"{}".to_vec()).to_string());
+            }
+            if self
+                .denied_download_grants
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Ok(completed(403, b"{}".to_vec()).to_string());
+            }
+            let attachment = self.attachment.lock().unwrap().clone();
+            completed(
+                200,
+                serde_json::to_vec(&json!({
+                    "attachmentId": attachment.id,
+                    "itemId": attachment.item_id,
+                    "vaultId": attachment.vault_id,
+                    "storageKey": attachment.storage_key,
+                    "envelopeVersion": attachment.envelope_version,
+                    "uploadedBy": attachment.uploaded_by,
+                    "downloadUrl": "https://objects.example.test/attachment",
+                    "encryptedName": attachment.encrypted_name,
+                    "encryptedContentType": attachment.encrypted_content_type,
+                    "encryptionIv": attachment.encryption_iv,
+                    "encryptedContentTypeIv": attachment.encrypted_content_type_iv,
+                    "encryptionAlgorithm": attachment.encryption_algorithm,
+                    "fileSize": attachment.file_size,
+                }))
+                .unwrap(),
+            )
         } else if request.method == "DELETE" {
             self.delete_calls.fetch_add(1, Ordering::SeqCst);
             if self
@@ -416,6 +1093,334 @@ struct AttachmentHarness {
     account_id: AccountId,
     server: Arc<AttachmentServer>,
     replica: Arc<PlainReplica>,
+    timer: Arc<TestTimer>,
+}
+
+struct DownloadChunks {
+    chunks: Vec<Vec<u8>>,
+    index: usize,
+    fail_first: bool,
+}
+
+#[async_trait]
+impl AttachmentMoveDownload for DownloadChunks {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, AttachmentMoveTransferError> {
+        if self.fail_first {
+            self.fail_first = false;
+            return Err(AttachmentMoveTransferError::Transient);
+        }
+        let chunk = self.chunks.get(self.index).cloned();
+        self.index += usize::from(chunk.is_some());
+        Ok(chunk)
+    }
+}
+
+struct DownloadTransfer {
+    envelope: Mutex<Vec<u8>>,
+    opens: AtomicUsize,
+    hold_open: AtomicBool,
+    fail_open: AtomicBool,
+    fail_chunk: AtomicBool,
+    open_release: Semaphore,
+}
+
+#[async_trait]
+impl AttachmentMoveTransferPort for DownloadTransfer {
+    async fn open_source(
+        &self,
+        request: AttachmentMoveDownloadRequest,
+    ) -> Result<Box<dyn AttachmentMoveDownload>, AttachmentMoveTransferError> {
+        assert_eq!(
+            request.download_url,
+            "https://objects.example.test/attachment"
+        );
+        assert!(request.headers.is_empty());
+        self.opens.fetch_add(1, Ordering::SeqCst);
+        if self.fail_open.swap(false, Ordering::SeqCst) {
+            return Err(AttachmentMoveTransferError::Transient);
+        }
+        if self.hold_open.load(Ordering::SeqCst) {
+            self.open_release.acquire().await.unwrap().forget();
+        }
+        let envelope = self.envelope.lock().unwrap().clone();
+        let split = (envelope.len() / 3).max(1);
+        Ok(Box::new(DownloadChunks {
+            chunks: envelope.chunks(split).map(<[u8]>::to_vec).collect(),
+            index: 0,
+            fail_first: self.fail_chunk.swap(false, Ordering::SeqCst),
+        }))
+    }
+
+    async fn open_upload(
+        &self,
+        _account_id: &AccountId,
+        _operation_id: &str,
+        _grant: &AttachmentMoveUploadGrant,
+        _owner: &crate::AttachmentArtifactOwner,
+    ) -> Result<Box<dyn AttachmentMoveUpload>, AttachmentMoveTransferError> {
+        Err(AttachmentMoveTransferError::Invariant)
+    }
+}
+
+struct DownloadSinkState {
+    provisional: Vec<u8>,
+    published: Option<Vec<u8>>,
+    discards: usize,
+    claims: Vec<(String, String, String)>,
+    account_retirements: Vec<String>,
+    account_retirement_completions: Vec<String>,
+    fenced_accounts: HashSet<String>,
+    runtime_retirements: usize,
+    account_retirement_failures_remaining: usize,
+    hold_account_retirement: bool,
+    account_retirement_release: Arc<Semaphore>,
+    discard_failures_remaining: usize,
+    hold_discard: bool,
+    discard_started: Arc<AtomicBool>,
+    discard_release: Arc<Semaphore>,
+    begins: Vec<(String, String, String)>,
+    fail_write: bool,
+    fail_commit: bool,
+    fail_begin: bool,
+    hold_begin: bool,
+    begin_started: Arc<AtomicBool>,
+    begin_release: Arc<Semaphore>,
+    hold_commit: bool,
+    commit_started: Arc<AtomicBool>,
+    commit_release: Arc<Semaphore>,
+}
+
+impl Default for DownloadSinkState {
+    fn default() -> Self {
+        Self {
+            provisional: Vec::new(),
+            published: None,
+            discards: 0,
+            claims: Vec::new(),
+            account_retirements: Vec::new(),
+            account_retirement_completions: Vec::new(),
+            fenced_accounts: HashSet::new(),
+            runtime_retirements: 0,
+            account_retirement_failures_remaining: 0,
+            hold_account_retirement: false,
+            account_retirement_release: Arc::new(Semaphore::new(0)),
+            discard_failures_remaining: 0,
+            hold_discard: false,
+            discard_started: Arc::new(AtomicBool::new(false)),
+            discard_release: Arc::new(Semaphore::new(0)),
+            begins: Vec::new(),
+            fail_write: false,
+            fail_commit: false,
+            fail_begin: false,
+            hold_begin: false,
+            begin_started: Arc::new(AtomicBool::new(false)),
+            begin_release: Arc::new(Semaphore::new(0)),
+            hold_commit: false,
+            commit_started: Arc::new(AtomicBool::new(false)),
+            commit_release: Arc::new(Semaphore::new(0)),
+        }
+    }
+}
+
+struct TestDownloadSink {
+    state: Arc<Mutex<DownloadSinkState>>,
+    identity: (String, String, String),
+}
+
+#[async_trait]
+impl AttachmentDownloadSink for TestDownloadSink {
+    async fn begin(&mut self) -> Result<(), AttachmentDownloadSinkError> {
+        let (fail, hold, started, release) = {
+            let mut state = self.state.lock().unwrap();
+            state.begins.push(self.identity.clone());
+            (
+                state.fail_begin,
+                state.hold_begin,
+                Arc::clone(&state.begin_started),
+                Arc::clone(&state.begin_release),
+            )
+        };
+        if hold {
+            started.store(true, Ordering::SeqCst);
+            release.acquire().await.unwrap().forget();
+        }
+        if fail {
+            return Err(AttachmentDownloadSinkError::Sink);
+        }
+        Ok(())
+    }
+
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), AttachmentDownloadSinkError> {
+        let mut state = self.state.lock().unwrap();
+        if state.fail_write {
+            return Err(AttachmentDownloadSinkError::Sink);
+        }
+        state.provisional.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    async fn commit(&mut self) -> Result<(), AttachmentDownloadSinkError> {
+        let (hold, started, release) = {
+            let state = self.state.lock().unwrap();
+            (
+                state.hold_commit,
+                Arc::clone(&state.commit_started),
+                Arc::clone(&state.commit_release),
+            )
+        };
+        if hold {
+            started.store(true, Ordering::SeqCst);
+            release.acquire().await.unwrap().forget();
+        }
+        let mut state = self.state.lock().unwrap();
+        if state.fail_commit {
+            return Err(AttachmentDownloadSinkError::Sink);
+        }
+        state.published = Some(std::mem::take(&mut state.provisional));
+        Ok(())
+    }
+
+    async fn discard(&mut self) -> Result<(), AttachmentDownloadSinkError> {
+        let (hold, started, release) = {
+            let state = self.state.lock().unwrap();
+            (
+                state.hold_discard,
+                Arc::clone(&state.discard_started),
+                Arc::clone(&state.discard_release),
+            )
+        };
+        if hold {
+            started.store(true, Ordering::SeqCst);
+            release.acquire().await.unwrap().forget();
+        }
+        let mut state = self.state.lock().unwrap();
+        state.discards += 1;
+        if state.discard_failures_remaining > 0 {
+            state.discard_failures_remaining -= 1;
+            return Err(AttachmentDownloadSinkError::Sink);
+        }
+        state.provisional.clear();
+        Ok(())
+    }
+}
+
+struct TestDownloadSinkPort {
+    state: Arc<Mutex<DownloadSinkState>>,
+}
+
+#[async_trait]
+impl AttachmentDownloadSinkPort for TestDownloadSinkPort {
+    fn claim(
+        &self,
+        account_id: &AccountId,
+        attachment_id: &str,
+        capability_id: &str,
+    ) -> Result<Box<dyn AttachmentDownloadSink>, AttachmentDownloadSinkError> {
+        if self
+            .state
+            .lock()
+            .unwrap()
+            .fenced_accounts
+            .contains(account_id.as_str())
+        {
+            return Err(AttachmentDownloadSinkError::Cancelled);
+        }
+        let identity = (
+            account_id.as_str().into(),
+            attachment_id.into(),
+            capability_id.into(),
+        );
+        self.state.lock().unwrap().claims.push(identity.clone());
+        Ok(Box::new(TestDownloadSink {
+            state: Arc::clone(&self.state),
+            identity,
+        }))
+    }
+
+    async fn retire_account(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        let (hold, release) = {
+            let mut state = self.state.lock().unwrap();
+            state
+                .account_retirements
+                .push(account_id.as_str().to_owned());
+            state.fenced_accounts.insert(account_id.as_str().to_owned());
+            (
+                state.hold_account_retirement,
+                Arc::clone(&state.account_retirement_release),
+            )
+        };
+        if hold {
+            release.acquire().await.unwrap().forget();
+        }
+        let mut state = self.state.lock().unwrap();
+        if state.account_retirement_failures_remaining > 0 {
+            state.account_retirement_failures_remaining -= 1;
+            return Err(AttachmentDownloadSinkError::Sink);
+        }
+        Ok(())
+    }
+
+    async fn retire_runtime(&self) -> Result<(), AttachmentDownloadSinkError> {
+        self.state.lock().unwrap().runtime_retirements += 1;
+        Ok(())
+    }
+
+    async fn complete_account_retirement(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        self.state
+            .lock()
+            .unwrap()
+            .account_retirement_completions
+            .push(account_id.as_str().to_owned());
+        self.state
+            .lock()
+            .unwrap()
+            .fenced_accounts
+            .remove(account_id.as_str());
+        Ok(())
+    }
+}
+
+fn install_download(
+    harness: &AttachmentHarness,
+    plaintext: &[u8],
+) -> (Arc<DownloadTransfer>, Arc<Mutex<DownloadSinkState>>) {
+    assert_eq!(plaintext.len(), 42);
+    let encrypted = encrypt_with_aad(
+        &BASE64.encode(plaintext),
+        &[13_u8; 32],
+        &AadContext {
+            vault_id: TEST_VAULT_ID.into(),
+            entity_id: ATTACHMENT_ID.into(),
+            entity_type: "attachment_blob".into(),
+            version: 1,
+            user_id: USER.into(),
+        },
+    )
+    .unwrap();
+    let transfer = Arc::new(DownloadTransfer {
+        envelope: Mutex::new(serde_json::to_vec(&encrypted).unwrap()),
+        opens: AtomicUsize::new(0),
+        hold_open: AtomicBool::new(false),
+        fail_open: AtomicBool::new(false),
+        fail_chunk: AtomicBool::new(false),
+        open_release: Semaphore::new(0),
+    });
+    let state = Arc::new(Mutex::new(DownloadSinkState::default()));
+    harness
+        .runtime
+        .install_attachment_download(AttachmentDownloadFacade::new(
+            transfer.clone(),
+            Arc::new(TestDownloadSinkPort {
+                state: Arc::clone(&state),
+            }),
+        ));
+    (transfer, state)
 }
 
 async fn seeded_attachment() -> AttachmentHarness {
@@ -493,6 +1498,10 @@ async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarn
         unauthorized_patches: AtomicUsize::new(0),
         patch_calls: AtomicUsize::new(0),
         delete_calls: AtomicUsize::new(0),
+        download_grant_calls: AtomicUsize::new(0),
+        unauthorized_download_grants: AtomicUsize::new(0),
+        denied_download_grants: AtomicUsize::new(0),
+        download_grant_failure: AtomicBool::new(false),
         unauthorized_deletes: AtomicUsize::new(0),
         denied_deletes: AtomicUsize::new(0),
         refresh_calls: AtomicUsize::new(0),
@@ -516,13 +1525,14 @@ async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarn
     let replica = PlainReplica::new(state);
     let platform = MemoryPlatform::new();
     let clock = TestClock::new();
+    let timer = TestTimer::advancing(Arc::clone(&clock));
     let runtime = Runtime::with_test_dispatch_environment(
         replica.clone(),
         platform,
         server.clone(),
         auth_config(),
         clock.clone(),
-        TestTimer::advancing(clock),
+        timer.clone(),
     );
     runtime.replica().load(&account_id).await.unwrap().unwrap();
     runtime.unlock_account(&account_id).await.unwrap();
@@ -532,7 +1542,1017 @@ async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarn
         account_id,
         server,
         replica,
+        timer,
     }
+}
+
+#[tokio::test]
+async fn download_publishes_only_after_complete_authenticated_multichunk_transfer() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    assert_eq!(plaintext.len(), 42);
+    let (transfer, sink) = install_download(&harness, plaintext);
+
+    let response = harness
+        .runtime
+        .request(
+            RuntimeRequest::DownloadAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+                sink_capability_id: "sink-one".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response,
+        RuntimeResponse::AttachmentDownloaded {
+            account_id: harness.account_id.clone(),
+            attachment_id: ATTACHMENT_ID.into(),
+        }
+    );
+    assert_eq!(transfer.opens.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        harness.server.download_grant_calls.load(Ordering::SeqCst),
+        1
+    );
+    let sink = sink.lock().unwrap();
+    assert_eq!(sink.published.as_deref(), Some(plaintext.as_slice()));
+    assert!(sink.provisional.is_empty());
+    assert_eq!(sink.discards, 0);
+    assert_eq!(
+        sink.begins,
+        [(ACCOUNT.into(), ATTACHMENT_ID.into(), "sink-one".into(),)]
+    );
+}
+
+#[tokio::test]
+async fn download_discards_every_provisional_byte_when_ciphertext_is_corrupted() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    let (transfer, sink) = install_download(&harness, plaintext);
+    {
+        let mut envelope = transfer.envelope.lock().unwrap();
+        let position = envelope.iter().position(|byte| *byte == b'A').unwrap_or(20);
+        envelope[position] = if envelope[position] == b'A' {
+            b'B'
+        } else {
+            b'A'
+        };
+    }
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DownloadAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+                sink_capability_id: "sink-corrupt".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    let sink = sink.lock().unwrap();
+    assert_eq!(sink.published, None);
+    assert!(sink.provisional.is_empty());
+    assert_eq!(sink.discards, 1);
+}
+
+#[tokio::test]
+async fn download_discards_truncated_and_oversized_ciphertext_without_publication() {
+    for shape in ["truncated", "oversized"] {
+        let harness = seeded_attachment().await;
+        let plaintext = b"forty-two plaintext bytes for atomic sink!";
+        let (transfer, sink) = install_download(&harness, plaintext);
+        {
+            let mut envelope = transfer.envelope.lock().unwrap();
+            if shape == "truncated" {
+                let truncated_length = envelope.len() / 2;
+                envelope.truncate(truncated_length);
+            } else {
+                envelope.extend(std::iter::repeat_n(b'X', 1_024));
+            }
+        }
+
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::DownloadAttachment {
+                    account_id: harness.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                    sink_capability_id: format!("sink-{shape}"),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+        let sink = sink.lock().unwrap();
+        assert_eq!(sink.published, None);
+        assert!(sink.provisional.is_empty());
+        assert_eq!(sink.discards, 1);
+    }
+}
+
+#[tokio::test]
+async fn download_renews_once_then_fetches_one_authoritative_grant_without_replaying_bytes() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    let (transfer, sink) = install_download(&harness, plaintext);
+    harness
+        .server
+        .unauthorized_download_grants
+        .store(1, Ordering::SeqCst);
+
+    harness
+        .runtime
+        .request(
+            RuntimeRequest::DownloadAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+                sink_capability_id: "sink-renewed".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        harness.server.download_grant_calls.load(Ordering::SeqCst),
+        2
+    );
+    assert_eq!(harness.server.refresh_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(transfer.opens.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        sink.lock().unwrap().published.as_deref(),
+        Some(plaintext.as_slice())
+    );
+    let grants = harness
+        .server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.ends_with("/download-urls"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(grants.len(), 2);
+    assert!(grants
+        .iter()
+        .all(|request| request.method == "POST" && request.body.is_empty()));
+    assert!(grants[0]
+        .headers
+        .iter()
+        .any(|(name, value)| name == "Authorization" && value == &format!("Bearer {FIRST_TOKEN}")));
+    assert!(
+        grants[1]
+            .headers
+            .iter()
+            .any(|(name, value)| name == "Authorization"
+                && value == &format!("Bearer {SECOND_TOKEN}"))
+    );
+}
+
+#[tokio::test]
+async fn download_sink_write_and_commit_failures_never_publish_partial_plaintext() {
+    for failure in ["begin", "write", "commit"] {
+        let harness = seeded_attachment().await;
+        let plaintext = b"forty-two plaintext bytes for atomic sink!";
+        let (_, sink) = install_download(&harness, plaintext);
+        if failure == "begin" {
+            sink.lock().unwrap().fail_begin = true;
+        } else if failure == "write" {
+            sink.lock().unwrap().fail_write = true;
+        } else {
+            sink.lock().unwrap().fail_commit = true;
+        }
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::DownloadAttachment {
+                    account_id: harness.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                    sink_capability_id: format!("sink-{failure}"),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::SinkFailure);
+        let sink = sink.lock().unwrap();
+        assert_eq!(sink.published, None);
+        assert!(sink.provisional.is_empty());
+        assert_eq!(sink.discards, 1);
+    }
+}
+
+#[tokio::test]
+async fn lock_and_close_cancel_and_drain_a_download_while_sink_begin_is_held() {
+    for lifecycle in ["lock", "close"] {
+        let harness = seeded_attachment().await;
+        let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+        let begin_started = {
+            let mut state = sink.lock().unwrap();
+            state.hold_begin = true;
+            Arc::clone(&state.begin_started)
+        };
+        let download = {
+            let runtime = Arc::clone(&harness.runtime);
+            let account_id = harness.account_id.clone();
+            tokio::spawn(async move {
+                runtime
+                    .request(
+                        RuntimeRequest::DownloadAttachment {
+                            account_id,
+                            attachment_id: ATTACHMENT_ID.into(),
+                            sink_capability_id: format!("sink-held-begin-{lifecycle}"),
+                        },
+                        RequestCancellation::new(),
+                    )
+                    .await
+            })
+        };
+        until("Download sink begin is held", || {
+            begin_started.load(Ordering::SeqCst)
+        })
+        .await;
+        if lifecycle == "lock" {
+            harness
+                .runtime
+                .mark_account_locked(&harness.account_id)
+                .await
+                .unwrap();
+        } else {
+            harness.runtime.close().await;
+        }
+        assert_eq!(
+            download.await.unwrap().unwrap_err().code,
+            RuntimeErrorCode::Cancelled,
+            "lifecycle={lifecycle}"
+        );
+        let sink = sink.lock().unwrap();
+        assert_eq!(sink.discards, 1, "lifecycle={lifecycle}");
+        assert!(sink.published.is_none(), "lifecycle={lifecycle}");
+    }
+}
+
+#[tokio::test]
+async fn close_cancels_and_drains_a_held_sink_begin_for_an_uninstalled_account() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let begin_started = {
+        let mut state = sink.lock().unwrap();
+        state.hold_begin = true;
+        Arc::clone(&state.begin_started)
+    };
+    let download = {
+        let runtime = Arc::clone(&harness.runtime);
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id: AccountId::from("missing-account"),
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-missing-held-begin".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        })
+    };
+    until("missing Account sink begin is held", || {
+        begin_started.load(Ordering::SeqCst)
+    })
+    .await;
+    harness.runtime.close().await;
+    assert_eq!(
+        download.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    assert_eq!(sink.lock().unwrap().discards, 1);
+}
+
+#[tokio::test]
+async fn wipe_globally_drains_a_held_missing_account_sink_before_host_retirement() {
+    let harness = seeded_attachment().await;
+    *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
+        Some(Arc::new(AttachmentMoveLifecycle::new(
+            Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+            Arc::new(SuccessfulAttachmentTeardown),
+        )));
+    harness
+        .runtime
+        .install_teardown_host_cleanup(Arc::new(SuccessfulHostTeardown));
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let (begin_started, discard_started, discard_release) = {
+        let mut state = sink.lock().unwrap();
+        state.hold_begin = true;
+        state.hold_discard = true;
+        (
+            Arc::clone(&state.begin_started),
+            Arc::clone(&state.discard_started),
+            Arc::clone(&state.discard_release),
+        )
+    };
+    let download = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id: AccountId::from("arbitrary-missing-account"),
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-wipe-missing-held-begin".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("missing Account sink begin is held", || {
+        begin_started.load(Ordering::SeqCst)
+    })
+    .await;
+    let wipe = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        async move {
+            runtime
+                .request(RuntimeRequest::Wipe, RequestCancellation::new())
+                .await
+        }
+    });
+    until("Wipe cancellation reaches missing Account discard", || {
+        discard_started.load(Ordering::SeqCst)
+    })
+    .await;
+    assert_eq!(sink.lock().unwrap().runtime_retirements, 0);
+    assert!(!wipe.is_finished());
+    discard_release.add_permits(1);
+    assert_eq!(
+        download.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    wipe.await.unwrap().unwrap();
+    let sink = sink.lock().unwrap();
+    assert_eq!(sink.discards, 1);
+    assert_eq!(sink.runtime_retirements, 1);
+}
+
+#[test]
+fn idle_unresolved_foreground_scopes_are_collected_without_weakening_a_live_guard() {
+    let registry = super::foreground_attachment_lifecycle::ForegroundAttachmentRegistry::default();
+    let live = registry
+        .register_unresolved(&AccountId::from("live-account"), RequestCancellation::new())
+        .unwrap();
+    for index in 0..4_096 {
+        let guard = registry
+            .register_unresolved(
+                &AccountId::from(format!("arbitrary-{index}")),
+                RequestCancellation::new(),
+            )
+            .unwrap();
+        drop(guard);
+        assert_eq!(registry.scope_count(), 1);
+    }
+    let retirement = registry.begin_account_retirement(&AccountId::from("live-account"));
+    assert_eq!(registry.scope_count(), 1);
+    drop(live);
+    drop(retirement);
+    assert_eq!(registry.scope_count(), 0);
+}
+
+#[tokio::test]
+async fn download_http_and_binary_failures_discard_without_publication() {
+    for failure in ["http", "binary-open", "binary-chunk"] {
+        let harness = seeded_attachment().await;
+        let plaintext = b"forty-two plaintext bytes for atomic sink!";
+        let (transfer, sink) = install_download(&harness, plaintext);
+        match failure {
+            "http" => harness
+                .server
+                .download_grant_failure
+                .store(true, Ordering::SeqCst),
+            "binary-open" => transfer.fail_open.store(true, Ordering::SeqCst),
+            "binary-chunk" => transfer.fail_chunk.store(true, Ordering::SeqCst),
+            _ => unreachable!(),
+        }
+
+        let error = harness
+            .runtime
+            .request(
+                RuntimeRequest::DownloadAttachment {
+                    account_id: harness.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                    sink_capability_id: format!("sink-{failure}"),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+        let sink = sink.lock().unwrap();
+        assert_eq!(sink.published, None);
+        assert!(sink.provisional.is_empty());
+        assert_eq!(sink.discards, 1);
+    }
+}
+
+#[tokio::test]
+async fn download_grant_forbidden_is_closed_access_denied_and_still_discards_the_sink() {
+    let harness = seeded_attachment().await;
+    let (transfer, sink) =
+        install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    harness
+        .server
+        .denied_download_grants
+        .store(1, Ordering::SeqCst);
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DownloadAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+                sink_capability_id: "grant-denied".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::AccessDenied);
+    assert_eq!(transfer.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(sink.lock().unwrap().discards, 1);
+}
+
+#[tokio::test]
+async fn download_rejects_wrong_grant_authority_before_binary_or_plaintext_output() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    let (transfer, sink) = install_download(&harness, plaintext);
+    harness.server.attachment.lock().unwrap().storage_key = "foreign-storage".into();
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DownloadAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+                sink_capability_id: "sink-stale".into(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    assert_eq!(transfer.opens.load(Ordering::SeqCst), 0);
+    let sink = sink.lock().unwrap();
+    assert_eq!(sink.published, None);
+    assert_eq!(sink.discards, 1);
+}
+
+#[tokio::test]
+async fn download_cancellation_discards_the_atomic_sink_while_binary_open_is_pending() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    let (transfer, sink) = install_download(&harness, plaintext);
+    transfer.hold_open.store(true, Ordering::SeqCst);
+    let cancellation = RequestCancellation::new();
+    let task = {
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        let cancellation = cancellation.clone();
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-cancelled".into(),
+                    },
+                    cancellation,
+                )
+                .await
+        })
+    };
+    while transfer.opens.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    cancellation.cancel();
+    let error = task.await.unwrap().unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+    let sink = sink.lock().unwrap();
+    assert_eq!(sink.published, None);
+    assert!(sink.provisional.is_empty());
+    assert_eq!(sink.discards, 1);
+}
+
+#[tokio::test]
+async fn download_discard_failure_retries_the_identical_owned_sink_until_cleanup_is_confirmed() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    sink.lock().unwrap().discard_failures_remaining = 2;
+    let cancellation = RequestCancellation::new();
+    cancellation.cancel();
+
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DownloadAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+                sink_capability_id: "discard-retry-identity".into(),
+            },
+            cancellation,
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+    let sink = sink.lock().unwrap();
+    assert_eq!(sink.claims.len(), 1);
+    assert_eq!(sink.discards, 3);
+    assert!(sink.provisional.is_empty());
+}
+
+#[tokio::test]
+async fn failed_download_cleanup_backs_off_instead_of_hot_polling() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    sink.lock().unwrap().discard_failures_remaining = 1;
+    harness.timer.hold.store(true, Ordering::SeqCst);
+    let cancellation = RequestCancellation::new();
+    cancellation.cancel();
+    let request = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "cleanup-backoff".into(),
+                    },
+                    cancellation,
+                )
+                .await
+        }
+    });
+    until("first Download cleanup attempt fails", || {
+        sink.lock().unwrap().discards == 1
+    })
+    .await;
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        sink.lock().unwrap().discards,
+        1,
+        "cleanup failure must wait on a timer rather than hot-poll"
+    );
+    assert_eq!(harness.timer.requested(), [10]);
+    harness.timer.hold.store(false, Ordering::SeqCst);
+    harness.timer.released.notify_waiters();
+    assert_eq!(
+        request.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    assert_eq!(sink.lock().unwrap().discards, 2);
+}
+
+#[tokio::test]
+async fn aborted_download_future_promptly_abandons_the_begun_atomic_sink_once() {
+    let harness = seeded_attachment().await;
+    let (transfer, sink) =
+        install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    transfer.hold_open.store(true, Ordering::SeqCst);
+    let download = {
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-aborted-task".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        })
+    };
+    until("Download sink begins before task abort", || {
+        sink.lock().unwrap().begins.len() == 1
+    })
+    .await;
+    download.abort();
+    assert!(download.await.unwrap_err().is_cancelled());
+    let sink = sink.lock().unwrap();
+    assert!(sink.published.is_none());
+    assert!(sink.provisional.is_empty());
+    assert_eq!(sink.discards, 1);
+}
+
+#[tokio::test]
+async fn caller_cancellation_winning_finalization_admission_discards_without_publication() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    let cancellation = RequestCancellation::new();
+    harness
+        .runtime
+        .foreground_attachments
+        .set_before_finalization_admission_hook(Some(Arc::new({
+            let cancellation = cancellation.clone();
+            move || cancellation.cancel()
+        })));
+    let error = harness
+        .runtime
+        .request(
+            RuntimeRequest::DownloadAttachment {
+                account_id: harness.account_id.clone(),
+                attachment_id: ATTACHMENT_ID.into(),
+                sink_capability_id: "sink-cancelled-at-admission".into(),
+            },
+            cancellation,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+    let sink = sink.lock().unwrap();
+    assert!(sink.published.is_none());
+    assert_eq!(sink.discards, 1);
+}
+
+#[tokio::test]
+async fn downloads_for_one_item_run_in_parallel_without_holding_the_account_execution_fence() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    let (transfer, _) = install_download(&harness, plaintext);
+    transfer.hold_open.store(true, Ordering::SeqCst);
+    let first = {
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-parallel-one".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        })
+    };
+    let second = {
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-parallel-two".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        })
+    };
+    while transfer.opens.load(Ordering::SeqCst) < 2 {
+        tokio::task::yield_now().await;
+    }
+    transfer.hold_open.store(false, Ordering::SeqCst);
+    transfer.open_release.add_permits(2);
+    assert!(first.await.unwrap().is_ok());
+    assert!(second.await.unwrap().is_ok());
+}
+
+#[tokio::test]
+async fn lock_cancels_download_and_waits_for_atomic_sink_discard_before_retiring_keys() {
+    let harness = seeded_attachment().await;
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    let (transfer, sink) = install_download(&harness, plaintext);
+    transfer.hold_open.store(true, Ordering::SeqCst);
+    let download = {
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-lock".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        })
+    };
+    while transfer.opens.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    let lock = harness
+        .runtime
+        .request(
+            RuntimeRequest::Lock {
+                account_id: harness.account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        lock,
+        RuntimeResponse::AccessChanged {
+            account_id: harness.account_id.clone(),
+            access: AccountAccessState::Locked,
+        }
+    );
+    assert_eq!(
+        download.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    let sink = sink.lock().unwrap();
+    assert_eq!(sink.published, None);
+    assert!(sink.provisional.is_empty());
+    assert_eq!(sink.discards, 1);
+    assert!(!harness
+        .runtime
+        .has_live_master_unlock_key(&harness.account_id, &Incarnation::from(INCARNATION),));
+}
+
+#[tokio::test]
+async fn aborted_download_transfers_cleanup_ownership_that_lock_remove_and_wipe_must_drain() {
+    for lifecycle in ["lock", "remove", "wipe"] {
+        let harness = seeded_attachment().await;
+        *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
+            Some(Arc::new(AttachmentMoveLifecycle::new(
+                Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+                Arc::new(SuccessfulAttachmentTeardown),
+            )));
+        harness
+            .runtime
+            .install_teardown_host_cleanup(Arc::new(SuccessfulHostTeardown));
+        let (transfer, sink) =
+            install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+        transfer.hold_open.store(true, Ordering::SeqCst);
+        let (discard_started, discard_release) = {
+            let mut state = sink.lock().unwrap();
+            state.hold_discard = true;
+            (
+                Arc::clone(&state.discard_started),
+                Arc::clone(&state.discard_release),
+            )
+        };
+        let download = tokio::spawn({
+            let runtime = Arc::clone(&harness.runtime);
+            let account_id = harness.account_id.clone();
+            async move {
+                runtime
+                    .request(
+                        RuntimeRequest::DownloadAttachment {
+                            account_id,
+                            attachment_id: ATTACHMENT_ID.into(),
+                            sink_capability_id: format!("aborted-{lifecycle}"),
+                        },
+                        RequestCancellation::new(),
+                    )
+                    .await
+            }
+        });
+        until("Download reaches held binary open", || {
+            transfer.opens.load(Ordering::SeqCst) > 0
+        })
+        .await;
+        download.abort();
+        let _ = download.await;
+        until("aborted Download cleanup reaches the sink", || {
+            discard_started.load(Ordering::SeqCst)
+        })
+        .await;
+
+        let retirement = tokio::spawn({
+            let runtime = Arc::clone(&harness.runtime);
+            let account_id = harness.account_id.clone();
+            async move {
+                match lifecycle {
+                    "lock" => runtime
+                        .request(
+                            RuntimeRequest::Lock { account_id },
+                            RequestCancellation::new(),
+                        )
+                        .await
+                        .map(|_| ()),
+                    "remove" => runtime
+                        .request(
+                            RuntimeRequest::RemoveAccount { account_id },
+                            RequestCancellation::new(),
+                        )
+                        .await
+                        .map(|_| ()),
+                    "wipe" => runtime
+                        .request(RuntimeRequest::Wipe, RequestCancellation::new())
+                        .await
+                        .map(|_| ()),
+                    _ => unreachable!(),
+                }
+            }
+        });
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !retirement.is_finished(),
+            "{lifecycle} retired authority before abandoned sink cleanup"
+        );
+        discard_release.add_permits(1);
+        retirement.await.unwrap().unwrap();
+        assert_eq!(sink.lock().unwrap().discards, 1, "{lifecycle}");
+    }
+}
+
+#[tokio::test]
+async fn every_lifecycle_wins_precommit_admission_and_discards_without_publication() {
+    for lifecycle in 0..5 {
+        let harness = seeded_attachment().await;
+        *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
+            Some(Arc::new(AttachmentMoveLifecycle::new(
+                Arc::new(attachment_move_lifecycle::TestAccountLeasePort),
+                Arc::new(SuccessfulAttachmentTeardown),
+            )));
+        harness
+            .runtime
+            .install_teardown_host_cleanup(Arc::new(SuccessfulHostTeardown));
+        let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+        let reached = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        harness
+            .runtime
+            .foreground_attachments
+            .set_before_finalization_admission_hook(Some(Arc::new({
+                let reached = Arc::clone(&reached);
+                let release = Arc::clone(&release);
+                move || {
+                    reached.store(true, Ordering::SeqCst);
+                    while !release.load(Ordering::SeqCst) {
+                        std::thread::yield_now();
+                    }
+                }
+            })));
+        let cancellation = RequestCancellation::new();
+        let download = std::thread::spawn({
+            let runtime = Arc::clone(&harness.runtime);
+            let account_id = harness.account_id.clone();
+            let cancellation = cancellation.clone();
+            move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap()
+                    .block_on(runtime.request(
+                        RuntimeRequest::DownloadAttachment {
+                            account_id,
+                            attachment_id: ATTACHMENT_ID.into(),
+                            sink_capability_id: format!("sink-precommit-{lifecycle}"),
+                        },
+                        cancellation,
+                    ))
+            }
+        });
+        until("Download reaches finalization admission", || {
+            reached.load(Ordering::SeqCst)
+        })
+        .await;
+        let lifecycle_task = {
+            let runtime = Arc::clone(&harness.runtime);
+            let account_id = harness.account_id.clone();
+            tokio::spawn(async move {
+                match lifecycle {
+                    0 => runtime
+                        .request(
+                            RuntimeRequest::Lock { account_id },
+                            RequestCancellation::new(),
+                        )
+                        .await
+                        .map(|_| ()),
+                    1 => runtime
+                        .request(
+                            RuntimeRequest::SignOut { account_id },
+                            RequestCancellation::new(),
+                        )
+                        .await
+                        .map(|_| ()),
+                    2 => runtime
+                        .request(
+                            RuntimeRequest::RemoveAccount { account_id },
+                            RequestCancellation::new(),
+                        )
+                        .await
+                        .map(|_| ()),
+                    3 => runtime
+                        .request(RuntimeRequest::Wipe, RequestCancellation::new())
+                        .await
+                        .map(|_| ()),
+                    _ => {
+                        runtime.close().await;
+                        Ok(())
+                    }
+                }
+            })
+        };
+        until("lifecycle cancels before finalization", || {
+            cancellation.is_cancelled()
+        })
+        .await;
+        release.store(true, Ordering::SeqCst);
+        assert_eq!(
+            download.join().unwrap().unwrap_err().code,
+            RuntimeErrorCode::Cancelled,
+            "lifecycle={lifecycle}"
+        );
+        lifecycle_task.await.unwrap().unwrap();
+        let sink = sink.lock().unwrap();
+        assert!(sink.published.is_none(), "lifecycle={lifecycle}");
+        assert!(sink.provisional.is_empty(), "lifecycle={lifecycle}");
+        assert_eq!(sink.discards, 1, "lifecycle={lifecycle}");
+    }
+}
+
+#[tokio::test]
+async fn admitted_commit_is_drained_by_lock_before_key_retirement() {
+    let harness = seeded_attachment().await;
+    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
+    {
+        let mut state = sink.lock().unwrap();
+        state.hold_commit = true;
+    }
+    let (commit_started, commit_release) = {
+        let state = sink.lock().unwrap();
+        (
+            Arc::clone(&state.commit_started),
+            Arc::clone(&state.commit_release),
+        )
+    };
+    let download = {
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-admitted-commit".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        })
+    };
+    until("sink commit begins", || {
+        commit_started.load(Ordering::SeqCst)
+    })
+    .await;
+    let lock = {
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .request(
+                    RuntimeRequest::Lock { account_id },
+                    RequestCancellation::new(),
+                )
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    assert!(
+        !lock.is_finished(),
+        "Lock must drain an admitted sink commit"
+    );
+    assert!(harness
+        .runtime
+        .has_live_master_unlock_key(&harness.account_id, &Incarnation::from(INCARNATION)));
+    commit_release.add_permits(1);
+    assert!(download.await.unwrap().is_ok());
+    lock.await.unwrap().unwrap();
+    assert!(sink.lock().unwrap().published.is_some());
+    assert!(!harness
+        .runtime
+        .has_live_master_unlock_key(&harness.account_id, &Incarnation::from(INCARNATION)));
 }
 
 async fn seeded_attachment_with_unrelated_authority() -> AttachmentHarness {

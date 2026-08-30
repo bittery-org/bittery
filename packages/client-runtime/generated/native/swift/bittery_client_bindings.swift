@@ -3349,6 +3349,8 @@ public enum RuntimeRequest {
     )
     case deleteAttachment(accountId: String, attachmentId: String
     )
+    case downloadAttachment(accountId: String, attachmentId: String, sinkCapabilityId: String
+    )
 
 
 
@@ -3421,6 +3423,9 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         )
 
         case 18: return .deleteAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 19: return .downloadAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), sinkCapabilityId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3543,6 +3548,13 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
+
+        case let .downloadAttachment(accountId,attachmentId,sinkCapabilityId):
+            writeInt(&buf, Int32(19))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(attachmentId, into: &buf)
+            FfiConverterString.write(sinkCapabilityId, into: &buf)
+
         }
     }
 }
@@ -3581,6 +3593,8 @@ public enum RuntimeResponse: Equatable, Hashable {
     case attachmentRenamed(accountId: String, attachmentId: String
     )
     case attachmentDeleted(accountId: String, attachmentId: String
+    )
+    case attachmentDownloaded(accountId: String, attachmentId: String
     )
     case teardown(scope: TeardownScope, status: TeardownStatus, failures: [TeardownPhase]
     )
@@ -3626,7 +3640,10 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 7: return .attachmentDeleted(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
         )
 
-        case 8: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
+        case 8: return .attachmentDownloaded(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 9: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3681,8 +3698,14 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             FfiConverterString.write(attachmentId, into: &buf)
 
 
-        case let .teardown(scope,status,failures):
+        case let .attachmentDownloaded(accountId,attachmentId):
             writeInt(&buf, Int32(8))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(attachmentId, into: &buf)
+
+
+        case let .teardown(scope,status,failures):
+            writeInt(&buf, Int32(9))
             FfiConverterTypeTeardownScope.write(scope, into: &buf)
             FfiConverterTypeTeardownStatus.write(status, into: &buf)
             FfiConverterSequenceTypeTeardownPhase.write(failures, into: &buf)

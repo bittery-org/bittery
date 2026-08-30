@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
@@ -9,6 +10,96 @@ const combinedRoot =
 	process.env.BITTERY_COMBINED_WEB_BINDINGS_ROOT ??
 	resolve(scriptRoot, "../../crypto/wasm/generated/wasm-bindgen");
 const standaloneRoot = resolve(scriptRoot, "../generated/web");
+
+const unavailableDownloadSink = () => ({
+	invoke: async (controlRequestJson) => {
+		const type = JSON.parse(controlRequestJson).type;
+		if (type === "retireAccount" || type === "retireRuntime")
+			return '{"type":"retired"}';
+		return type === "completeAccountRetirement"
+			? '{"type":"retirementCompleted"}'
+			: '{"type":"invariantViolation"}';
+	},
+});
+
+const timerProbeRuntime = (
+	bindings,
+	downloadSink = unavailableDownloadSink(),
+) =>
+	bindings.WebClientRuntime.withConfiguredAttachmentMovePreparation(
+		async () => '{"type":"deviceState","accounts":[]}',
+		async () => '{"type":"done"}',
+		async () => '{"type":"networkFailure"}',
+		() => undefined,
+		{ invoke: async () => ({ controlResponseJson: '{"type":"deviceWiped"}' }) },
+		{
+			invoke: async () => ({ controlResponseJson: '{"type":"deviceWiped"}' }),
+			close: () => undefined,
+		},
+		{ acquire: async () => null },
+		"timer-probe",
+		"web",
+		"1.0.0",
+		() => undefined,
+		downloadSink,
+	);
+
+test("authenticated WASM construction leaves callback-liveness probing to the trusted Worker host", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+	const originalSetTimeout = globalThis.setTimeout;
+	try {
+		globalThis.setTimeout = undefined;
+		const missing = timerProbeRuntime(bindings);
+		missing.free();
+		globalThis.setTimeout = () => {
+			throw new Error("timer rejected");
+		};
+		const throwing = timerProbeRuntime(bindings);
+		throwing.free();
+	} finally {
+		globalThis.setTimeout = originalSetTimeout;
+	}
+});
+
+test("a missing or throwing WASM timer parks persistent sink cleanup after one attempt", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+	const originalSetTimeout = globalThis.setTimeout;
+	for (const replacement of [
+		undefined,
+		() => {
+			throw new Error("timer rejected");
+		},
+	]) {
+		let attempts = 0;
+		const runtime = timerProbeRuntime(bindings, {
+			invoke: async (controlRequestJson) => {
+				const type = JSON.parse(controlRequestJson).type;
+				if (type === "retireRuntime") {
+					attempts += 1;
+					return '{"type":"sinkFailure"}';
+				}
+				return '{"type":"invariantViolation"}';
+			},
+		});
+		try {
+			globalThis.setTimeout = replacement;
+			void runtime.request_json("wipe-without-timer", '{"type":"wipe"}');
+			for (let turn = 0; turn < 100; turn += 1) await Promise.resolve();
+			await delay(25);
+			assert.equal(attempts, 1);
+		} finally {
+			globalThis.setTimeout = originalSetTimeout;
+		}
+	}
+});
 
 test("one WebAssembly module exposes crypto and the Client Runtime", async () => {
 	const productionWasm = (
@@ -255,6 +346,7 @@ test("the feature-only WASM harness exercises the closed lease and transfer brid
 			(json) => {
 				configuredLifecycleError = json;
 			},
+			unavailableDownloadSink(),
 		);
 	assert.equal(harness.lifecycle_drop_probe(), 0);
 	configured.free();
@@ -523,6 +615,7 @@ test("Web teardown destroys the ciphertext spool and converges", async () => {
 				"web",
 				"1.0.0",
 				() => undefined,
+				unavailableDownloadSink(),
 			);
 		return {
 			runtime,
@@ -721,6 +814,7 @@ const teardownRuntime = (bindings, spoolInvoke) => {
 			"web",
 			"1.0.0",
 			() => undefined,
+			unavailableDownloadSink(),
 		);
 	return { runtime, spoolRequests };
 };

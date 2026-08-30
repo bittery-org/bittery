@@ -229,6 +229,12 @@ impl Runtime {
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
+        if self.account_access_retirement_is_pending(&account_id) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lifecycle retirement is pending",
+            ));
+        }
         let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;
@@ -559,6 +565,12 @@ impl Runtime {
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
+        if self.account_access_retirement_is_pending(&account_id) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lifecycle retirement is pending",
+            ));
+        }
         let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;
@@ -754,6 +766,12 @@ impl Runtime {
         let execution_lock = self.account_execution_lock(&account_id)?;
         let _execution_guard = execution_lock.lock().await;
         self.ensure_open()?;
+        if self.account_access_retirement_is_pending(&account_id) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lifecycle retirement is pending",
+            ));
+        }
         let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;

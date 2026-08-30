@@ -144,17 +144,31 @@ impl Runtime {
         // of a Lock or Sign-out that is already queued behind it.
         let pending_retirement =
             PendingAccessRetirement::new(self.account_access_retirement_intent(account_id));
+        let lifecycle_lock = self.account_lifecycle_lock(account_id)?;
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        let _admission = self.teardown_admission.read().await;
+        let lifecycle_request = match retirement {
+            AccessRetirement::Lock => RuntimeRequest::Lock {
+                account_id: account_id.clone(),
+            },
+            AccessRetirement::SignOut => RuntimeRequest::SignOut {
+                account_id: account_id.clone(),
+            },
+        };
+        self.reject_request_during_pending_teardown(&lifecycle_request)?;
         let execution_guard = execution_lock.lock().await;
         let foreground_retirement = self
             .foreground_attachments
             .begin_account_retirement(account_id);
         drop(execution_guard);
         foreground_retirement.drain().await;
-        let execution_guard = execution_lock.lock().await;
+        let _execution_guard = execution_lock.lock().await;
+        self.retire_attachment_download_account(account_id).await;
         self.ensure_open()?;
         let Some(mut snapshot) = self.replica.snapshot(account_id) else {
-            drop(execution_guard);
             self.forget_uninstalled_account_access(account_id);
+            self.complete_attachment_download_account_retirement(account_id)
+                .await;
             return Ok(AccountAccessState::SignedOut);
         };
         let access = retirement.resulting_access();
@@ -197,9 +211,7 @@ impl Runtime {
                 .insert(account_id.clone(), desired_epoch);
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
-        pending_retirement.finish();
         drop(_publication);
-        drop(execution_guard);
         if let Some(token) = invalidated_delivery {
             token.wait_for_other_threads();
         }
@@ -207,7 +219,6 @@ impl Runtime {
         // answers. Everything below is durable bookkeeping.
         self.publish_all();
 
-        let _execution_guard = execution_lock.lock().await;
         if retirement == AccessRetirement::SignOut {
             if !snapshot.share_capabilities.is_empty() {
                 snapshot = match self
@@ -234,6 +245,8 @@ impl Runtime {
                     }
                     RecomputedPlanResult::Missing => {
                         self.forget_uninstalled_account_access(account_id);
+                        self.complete_attachment_download_account_retirement(account_id)
+                            .await;
                         return Ok(AccountAccessState::SignedOut);
                     }
                 };
@@ -266,6 +279,10 @@ impl Runtime {
             .lock()
             .expect("pending lock epoch lock poisoned")
             .remove(account_id);
+        drop(_publication);
+        self.complete_attachment_download_account_retirement(account_id)
+            .await;
+        pending_retirement.finish();
         drop(foreground_retirement);
         Ok(access)
     }

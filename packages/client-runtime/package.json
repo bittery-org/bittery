@@ -72,6 +72,7 @@
 		"test:bindings:web": "./scripts/test-web-binding-harness.sh",
 		"test:chromium": "node ./scripts/test-chromium.mjs",
 		"test:binary-transfer:chromium": "node ./scripts/test-chromium.mjs binary-transfer",
+		"test:attachment-download-sink:chromium": "node ./scripts/test-chromium.mjs attachment-download-sink",
 		"check-types": "tsc --noEmit",
 		"test": "bun test src"
 	},

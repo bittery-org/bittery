@@ -299,6 +299,22 @@ test("Share result delivery and acknowledgement stay explicit and closed", () =>
 	);
 });
 
+test("Attachment Download sink capability identity is canonical and bounded", () => {
+	const request = (sinkCapabilityId) => ({
+		type: "downloadAttachment",
+		accountId: "account-1",
+		attachmentId: "attachment-1",
+		sinkCapabilityId,
+	});
+	assert.equal(validateRuntimeRequest(request("x")), true);
+	assert.equal(validateRuntimeRequest(request("x".repeat(128))), true);
+	assert.equal(validateRuntimeRequest(request("capability.A_z-9~")), true);
+	assert.equal(validateRuntimeRequest(request("")), false);
+	assert.equal(validateRuntimeRequest(request("x".repeat(129))), false);
+	assert.equal(validateRuntimeRequest(request("not canonical")), false);
+	assert.equal(validateRuntimeRequest(request("café")), false);
+});
+
 test("teardown scope and partial failures stay explicit, closed, and redacted", () => {
 	assert.equal(
 		validateRuntimeRequest({ type: "removeAccount", accountId: "account-1" }),

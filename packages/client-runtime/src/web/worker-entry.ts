@@ -10,6 +10,7 @@
 import { IndexedDbAttachmentArtifactExecutor } from "../indexeddb-attachment-artifact-executor";
 import { IndexedDbReplicaExecutor } from "../indexeddb-executor";
 import { WebAccountLeaseExecutor } from "../web-account-lease-executor";
+import { WebAttachmentDownloadSinkExecutor } from "../web-attachment-download-sink";
 import { WebBinaryTransferExecutor } from "../web-binary-transfer-executor";
 import { WebHttpTransportExecutor } from "../web-http-transport-executor";
 import { createWorkerHostRpc } from "../worker/host-rpc";
@@ -35,6 +36,8 @@ export interface WebRuntimeWorkerDeps {
 	authClient?: RuntimeAuthClientConfig;
 	/** The Crypto channel, or none. Ticket 22 deletes this branch. */
 	crypto?: WorkerChannelService;
+	/** Test-only substitution; production proves the actual Worker-global timer. */
+	deviceTimerLivenessProbe?: () => Promise<void>;
 }
 
 /** Registers every channel this Worker serves. Nothing is loaded until a request arrives. */
@@ -55,7 +58,33 @@ export function serveWebRuntimeWorker(
 			httpExecutor: new WebHttpTransportExecutor(),
 			attachmentArtifactExecutor,
 			binaryTransferExecutorFactory: () => new WebBinaryTransferExecutor(),
+			prepareAttachmentDownloadSinkRuntimeIncarnation: async (
+				runtimeIncarnation,
+			) => {
+				await hostRpc.request<string>({
+					type: "attachmentDownloadSinkRuntimeScope",
+					runtimeIncarnation,
+					phase: "prepare",
+				});
+			},
+			commitAttachmentDownloadSinkRuntimeIncarnation: async (
+				runtimeIncarnation,
+			) => {
+				await hostRpc.request<string>({
+					type: "attachmentDownloadSinkRuntimeScope",
+					runtimeIncarnation,
+					phase: "commit",
+				});
+			},
+			attachmentDownloadSinkExecutorFactory: (runtimeIncarnation) =>
+				new WebAttachmentDownloadSinkExecutor(
+					(payload) => hostRpc.request<string>(payload),
+					runtimeIncarnation,
+				),
 			accountLeaseExecutor,
+			...(deps.deviceTimerLivenessProbe === undefined
+				? {}
+				: { deviceTimerLivenessProbe: deps.deviceTimerLivenessProbe }),
 			loadWasm: deps.loadWasm,
 			...(deps.authClient === undefined ? {} : { authClient: deps.authClient }),
 		}),

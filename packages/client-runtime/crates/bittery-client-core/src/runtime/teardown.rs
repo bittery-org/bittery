@@ -135,34 +135,47 @@ impl Runtime {
 
     async fn teardown(&self, scope: TeardownScope) -> Result<RuntimeResponse, RuntimeError> {
         self.ensure_teardown_precondition(&scope)?;
-        let foreground_accounts = match &scope {
-            TeardownScope::Account { account_id } => vec![account_id.clone()],
-            TeardownScope::Device => self.known_teardown_accounts(),
+        // One Account lifecycle owns the intent through its exact host retirement and Core
+        // convergence. This mutex is outside the shared admission/catalog/execution order so a
+        // queued Lock, Sign-out, or Remove cannot borrow another lifecycle's completion.
+        let lifecycle_lock = match &scope {
+            TeardownScope::Account { account_id } => Some(self.account_lifecycle_lock(account_id)?),
+            TeardownScope::Device => None,
         };
-        let foreground_retirements = self
-            .foreground_attachments
-            .begin_accounts_retirement(&foreground_accounts);
-        for retirement in &foreground_retirements {
-            retirement.drain().await;
+        let _lifecycle_guard = match lifecycle_lock {
+            Some(lock) => Some(lock.lock_owned().await),
+            None => None,
+        };
+        let mut foreground_account_retirements = Vec::new();
+        let mut foreground_device_retirement = None;
+        match &scope {
+            TeardownScope::Account { account_id } => {
+                foreground_account_retirements = self
+                    .foreground_attachments
+                    .begin_accounts_retirement(std::slice::from_ref(account_id));
+                for retirement in &foreground_account_retirements {
+                    retirement.drain().await;
+                }
+            }
+            TeardownScope::Device => {
+                let retirement = self.foreground_attachments.begin_device_retirement();
+                retirement.drain().await;
+                foreground_device_retirement = Some(retirement);
+            }
         }
+
+        // Foreground requests own the admission reader until their cleanup finishes, so lifecycle
+        // intent must cancel and drain them before taking the writer. The writer is then held before
+        // Account execution and every host/Core retirement phase.
         let _admission = self.teardown_admission.write().await;
         self.ensure_teardown_precondition(&scope)?;
-        {
-            let _publication = self.publication.lock().expect("publication lock poisoned");
-            self.pending_teardown
-                .lock()
-                .expect("pending teardown lock poisoned")
-                .insert(&scope);
-        }
         let _catalog = self.catalog_transition.lock().await;
-
         let mut account_ids = match &scope {
             TeardownScope::Account { account_id } => vec![account_id.clone()],
             TeardownScope::Device => self.known_teardown_accounts(),
         };
         account_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         account_ids.dedup();
-
         let execution_locks: Vec<_> = account_ids
             .iter()
             .map(|account_id| {
@@ -179,6 +192,19 @@ impl Runtime {
         let mut execution_guards = Vec::with_capacity(execution_locks.len());
         for lock in &execution_locks {
             execution_guards.push(lock.lock().await);
+        }
+        match &scope {
+            TeardownScope::Account { account_id } => {
+                self.retire_attachment_download_account(account_id).await;
+            }
+            TeardownScope::Device => self.retire_all_attachment_downloads().await,
+        }
+        {
+            let _publication = self.publication.lock().expect("publication lock poisoned");
+            self.pending_teardown
+                .lock()
+                .expect("pending teardown lock poisoned")
+                .insert(&scope);
         }
 
         let invalidated = {
@@ -257,6 +283,10 @@ impl Runtime {
 
         drop(execution_guards);
         if failures.is_empty() {
+            if let TeardownScope::Account { account_id } = &scope {
+                self.complete_attachment_download_account_retirement(account_id)
+                    .await;
+            }
             let _publication = self.publication.lock().expect("publication lock poisoned");
             self.pending_teardown
                 .lock()
@@ -265,7 +295,8 @@ impl Runtime {
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all_unless_closed();
-        drop(foreground_retirements);
+        drop(foreground_account_retirements);
+        drop(foreground_device_retirement);
         Ok(RuntimeResponse::Teardown {
             scope,
             status: if failures.is_empty() {

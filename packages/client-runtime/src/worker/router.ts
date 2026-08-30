@@ -10,7 +10,7 @@ export interface WorkerRouterScope {
 		type: "message",
 		listener: (event: { data: unknown }) => void,
 	): void;
-	postMessage(message: unknown): void;
+	postMessage(message: unknown, transfer?: Transferable[]): void;
 }
 
 export interface WorkerChannelService {

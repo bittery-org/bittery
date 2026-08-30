@@ -332,6 +332,11 @@ pub enum RuntimeRequest {
         account_id: String,
         attachment_id: String,
     },
+    DownloadAttachment {
+        account_id: String,
+        attachment_id: String,
+        sink_capability_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -463,6 +468,16 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("attachment_id", attachment_id)
                 .finish(),
+            Self::DownloadAttachment {
+                account_id,
+                attachment_id,
+                ..
+            } => formatter
+                .debug_struct("DownloadAttachment")
+                .field("account_id", account_id)
+                .field("attachment_id", attachment_id)
+                .field("sink_capability", &"[redacted]")
+                .finish(),
         }
     }
 }
@@ -496,6 +511,10 @@ pub enum RuntimeResponse {
         attachment_id: String,
     },
     AttachmentDeleted {
+        account_id: String,
+        attachment_id: String,
+    },
+    AttachmentDownloaded {
         account_id: String,
         attachment_id: String,
     },
@@ -1135,6 +1154,15 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 account_id: account_id.into(),
                 attachment_id,
             },
+            RuntimeRequest::DownloadAttachment {
+                account_id,
+                attachment_id,
+                sink_capability_id,
+            } => Self::DownloadAttachment {
+                account_id: account_id.into(),
+                attachment_id,
+                sink_capability_id,
+            },
         }
     }
 }
@@ -1237,6 +1265,13 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
                 account_id,
                 attachment_id,
             } => Self::AttachmentDeleted {
+                account_id: account_id.into(),
+                attachment_id,
+            },
+            core::RuntimeResponse::AttachmentDownloaded {
+                account_id,
+                attachment_id,
+            } => Self::AttachmentDownloaded {
                 account_id: account_id.into(),
                 attachment_id,
             },
@@ -1693,6 +1728,57 @@ mod tests {
         let debug = format!("{response:?}");
         assert!(!debug.contains("storage"));
         assert!(!debug.contains("plaintext"));
+    }
+
+    #[test]
+    fn native_attachment_download_keeps_the_closed_opaque_capability_shape() {
+        for sink_capability_id in ["x".to_owned(), "x".repeat(128)] {
+            let core_request: core::RuntimeRequest = RuntimeRequest::DownloadAttachment {
+                account_id: "account-1".into(),
+                attachment_id: "attachment-1".into(),
+                sink_capability_id: sink_capability_id.clone(),
+            }
+            .into();
+            assert!(
+                matches!(core_request, core::RuntimeRequest::DownloadAttachment { sink_capability_id: actual, .. } if actual == sink_capability_id)
+            );
+        }
+        let core_request: core::RuntimeRequest = RuntimeRequest::DownloadAttachment {
+            account_id: "account-1".into(),
+            attachment_id: "attachment-1".into(),
+            sink_capability_id: "sink-opaque".into(),
+        }
+        .into();
+        assert!(matches!(
+            core_request,
+            core::RuntimeRequest::DownloadAttachment {
+                account_id,
+                attachment_id,
+                sink_capability_id,
+            } if account_id.as_str() == "account-1"
+                && attachment_id == "attachment-1"
+                && sink_capability_id == "sink-opaque"
+        ));
+        let debug = format!(
+            "{:?}",
+            RuntimeRequest::DownloadAttachment {
+                account_id: "account-1".into(),
+                attachment_id: "attachment-1".into(),
+                sink_capability_id: "sink-secret".into(),
+            }
+        );
+        assert!(!debug.contains("sink-secret"));
+
+        assert!(matches!(
+            RuntimeResponse::from(core::RuntimeResponse::AttachmentDownloaded {
+                account_id: core::AccountId::from("account-1"),
+                attachment_id: "attachment-1".into(),
+            }),
+            RuntimeResponse::AttachmentDownloaded {
+                account_id,
+                attachment_id,
+            } if account_id == "account-1" && attachment_id == "attachment-1"
+        ));
     }
 
     #[test]

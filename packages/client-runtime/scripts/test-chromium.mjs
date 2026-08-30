@@ -3,10 +3,15 @@ import { spawnSync } from "node:child_process";
 const allSuites = [
 	"tests/web-account-lease.chromium.test.ts",
 	"tests/web-binary-transfer.chromium.test.ts",
+	"tests/web-attachment-download-sink.chromium.test.ts",
 	"tests/opfs-upload-spool.chromium.test.ts",
 ];
 const selectors = new Map([
 	["binary-transfer", ["tests/web-binary-transfer.chromium.test.ts"]],
+	[
+		"attachment-download-sink",
+		["tests/web-attachment-download-sink.chromium.test.ts"],
+	],
 ]);
 const requestedSelector = process.argv.slice(2);
 const suites =
@@ -17,7 +22,9 @@ const suites =
 			: undefined;
 
 if (suites === undefined) {
-	console.error("Usage: node ./scripts/test-chromium.mjs [binary-transfer]");
+	console.error(
+		"Usage: node ./scripts/test-chromium.mjs [binary-transfer|attachment-download-sink]",
+	);
 	process.exit(2);
 }
 

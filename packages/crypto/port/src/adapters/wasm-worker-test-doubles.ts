@@ -119,6 +119,7 @@ function createCryptoWasmDouble(): CryptoWasmDouble {
 
 export class WorkerDouble implements CryptoWorkerHandle {
 	onmessage: ((event: MessageEvent) => void) | null = null;
+	onmessageerror: ((event: MessageEvent) => void) | null = null;
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	readonly calls: CryptoPortCall[] = [];
 	readonly replies: CryptoReplyObservation[] = [];

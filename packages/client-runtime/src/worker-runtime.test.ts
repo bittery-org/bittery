@@ -7,6 +7,20 @@ import {
 
 /** Lets every pending microtask run, so anything that was going to start has started. */
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const authenticatedDownloadSinkPorts = {
+	prepareAttachmentDownloadSinkRuntimeIncarnation: async () => undefined,
+	attachmentDownloadSinkExecutorFactory: () => ({
+		invoke: async (request: string) =>
+			JSON.stringify({
+				type:
+					JSON.parse(request).type === "retireRuntime"
+						? "retired"
+						: "discarded",
+			}),
+	}),
+	commitAttachmentDownloadSinkRuntimeIncarnation: async () => undefined,
+	deviceTimerLivenessProbe: async () => undefined,
+};
 
 class RuntimeDouble {
 	readonly cancelled: string[] = [];
@@ -181,6 +195,15 @@ describe("Runtime worker service", () => {
 
 	test("authenticated production uses the Attachment preparation constructor and fixed ports", async () => {
 		const runtime = new RuntimeDouble();
+		const readiness: string[] = [];
+		runtime.open = async () => {
+			runtime.openCalls += 1;
+			readiness.push("open");
+		};
+		runtime.request_json = async () => {
+			readiness.push("request");
+			return "{}";
+		};
 		const configured: unknown[] = [];
 		let legacyConfiguredCalls = 0;
 		let constructorThis: unknown;
@@ -199,6 +222,16 @@ describe("Runtime worker service", () => {
 			attachmentArtifactExecutor: artifactExecutor,
 			binaryTransferExecutorFactory: () => binaryExecutor,
 			accountLeaseExecutor,
+			...authenticatedDownloadSinkPorts,
+			runtimeIncarnationIdentity: () => "runtime-fixed",
+			prepareAttachmentDownloadSinkRuntimeIncarnation: async (identity) => {
+				expect(identity).toBe("runtime-fixed");
+				readiness.push("prepare");
+			},
+			commitAttachmentDownloadSinkRuntimeIncarnation: async (identity) => {
+				expect(identity).toBe("runtime-fixed");
+				readiness.push("activate");
+			},
 			authClient: {
 				clientId: "bittery-web",
 				platform: "web",
@@ -226,6 +259,7 @@ describe("Runtime worker service", () => {
 							version: string,
 							lifecycleError: unknown,
 						) {
+							readiness.push("construct");
 							constructorThis = this;
 							configured.push(
 								artifact,
@@ -257,6 +291,207 @@ describe("Runtime worker service", () => {
 		expect(configured[6]).toBeFunction();
 		expect(legacyConfiguredCalls).toBe(0);
 		expect(constructorThis).toBeDefined();
+		expect(readiness).toEqual([
+			"prepare",
+			"construct",
+			"open",
+			"activate",
+			"request",
+		]);
+	});
+
+	for (const missing of ["factory", "activation"] as const) {
+		test(`authenticated construction rejects a missing Download sink ${missing} before Runtime construction`, async () => {
+			const runtime = new RuntimeDouble();
+			let constructions = 0;
+			const service = createRuntimeWorkerService({
+				executor: { invoke: async () => "{}" },
+				platformStorageExecutor: { invoke: async () => "{}" },
+				httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+				attachmentArtifactExecutor: {
+					invoke: async () => ({ controlResponseJson: "{}" }),
+				},
+				binaryTransferExecutorFactory: () => ({
+					invoke: async () => ({ controlResponseJson: "{}" }),
+					close: () => undefined,
+				}),
+				accountLeaseExecutor: { acquire: async () => null },
+				...(missing === "factory"
+					? {
+							commitAttachmentDownloadSinkRuntimeIncarnation: async () =>
+								undefined,
+						}
+					: {
+							attachmentDownloadSinkExecutorFactory: () => ({
+								invoke: async () => "{}",
+							}),
+						}),
+				authClient: { clientId: "client", platform: "web", version: "1" },
+				loadWasm: async () => ({
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation: () => {
+							constructions += 1;
+							return runtime;
+						},
+					},
+				}),
+			});
+			await expect(
+				service.request(
+					{ type: "request", requestId: missing, requestJson: "{}" },
+					new AbortController().signal,
+					() => undefined,
+				),
+			).rejects.toMatchObject({
+				code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+			});
+			expect(constructions).toBe(0);
+			expect(runtime.openCalls).toBe(0);
+			expect(runtime.closeCalls).toBe(0);
+		});
+	}
+
+	test("authenticated constructor failure closes the created binary executor before any open or request", async () => {
+		const runtime = new RuntimeDouble();
+		let binaryCloses = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => {
+					binaryCloses += 1;
+				},
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			loadWasm: async () => ({
+				WebClientRuntime: {
+					withExecutors: () => runtime,
+					withConfiguredAttachmentMovePreparation: () => {
+						throw new Error("timer unavailable");
+					},
+				},
+			}),
+		});
+		await expect(
+			service.request(
+				{ type: "request", requestId: "construction", requestJson: "{}" },
+				new AbortController().signal,
+				() => undefined,
+			),
+		).rejects.toMatchObject({ code: "ATTACHMENT_MOVE_PREPARATION_FAILED" });
+		expect(binaryCloses).toBe(1);
+		expect(runtime.openCalls).toBe(0);
+		expect(runtime.requests).toHaveLength(0);
+	});
+
+	test("failed sink activation closes the unexposed Runtime and retries cleanup with a fresh scope", async () => {
+		const runtimes = [new RuntimeDouble(), new RuntimeDouble()];
+		const activations: string[] = [];
+		const lifecycle: string[] = [];
+		const pending = new Set<string>();
+		let loads = 0;
+		let identities = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel: () => undefined },
+			attachmentArtifactExecutor: {
+				invoke: async () => ({ controlResponseJson: "{}" }),
+			},
+			binaryTransferExecutorFactory: () => ({
+				invoke: async () => ({ controlResponseJson: "{}" }),
+				close: () => undefined,
+			}),
+			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
+			prepareAttachmentDownloadSinkRuntimeIncarnation: async (identity) => {
+				pending.add(identity);
+				lifecycle.push(`prepare:${identity}`);
+			},
+			attachmentDownloadSinkExecutorFactory: (identity) => ({
+				invoke: async (request) => {
+					if (
+						JSON.parse(request).type !== "retireRuntime" ||
+						!pending.has(identity)
+					)
+						return '{"type":"invariantViolation"}';
+					pending.delete(identity);
+					lifecycle.push(`retire:${identity}`);
+					return '{"type":"retired"}';
+				},
+			}),
+			authClient: { clientId: "client", platform: "web", version: "1" },
+			runtimeIncarnationIdentity: () => `scope-${++identities}`,
+			commitAttachmentDownloadSinkRuntimeIncarnation: async (identity) => {
+				activations.push(identity);
+				lifecycle.push(`commit:${identity}`);
+				if (activations.length === 1) throw new Error("discard failed");
+				pending.delete(identity);
+			},
+			loadWasm: async () => {
+				const runtime = runtimes[loads++];
+				if (runtime === undefined) throw new Error("unexpected reconstruction");
+				return {
+					WebClientRuntime: {
+						withExecutors: () => runtime,
+						withConfiguredAttachmentMovePreparation(
+							_replica: unknown,
+							_platform: unknown,
+							_http: unknown,
+							_cancel: unknown,
+							_artifact: unknown,
+							_binary: unknown,
+							_lease: unknown,
+							_client: unknown,
+							_platformName: unknown,
+							_version: unknown,
+							_lifecycle: unknown,
+							sink: { invoke(request: string): Promise<string> },
+						) {
+							runtime.close = async () => {
+								runtime.closeCalls += 1;
+								await sink.invoke('{"type":"retireRuntime"}');
+							};
+							return runtime;
+						},
+					},
+				} as unknown as RuntimeWasm;
+			},
+		});
+		const command = {
+			type: "request" as const,
+			requestId: "download",
+			requestJson: "{}",
+		};
+		await expect(
+			service.request(command, new AbortController().signal, () => undefined),
+		).rejects.toMatchObject({ code: "ATTACHMENT_MOVE_PREPARATION_FAILED" });
+		expect(runtimes[0]?.requests).toHaveLength(0);
+		expect(runtimes[0]?.closeCalls).toBe(1);
+		await service.request(
+			command,
+			new AbortController().signal,
+			() => undefined,
+		);
+		expect(activations).toEqual(["scope-1", "scope-2"]);
+		expect(lifecycle).toEqual([
+			"prepare:scope-1",
+			"commit:scope-1",
+			"retire:scope-1",
+			"prepare:scope-2",
+			"commit:scope-2",
+		]);
+		expect(pending.size).toBe(0);
+		expect(identities).toBe(2);
+		expect(runtimes[1]?.requests).toHaveLength(1);
 	});
 
 	test("closes a failed preparation runner, surfaces one stable error, and reconstructs", async () => {
@@ -275,6 +510,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => {
 				const runtime = runtimes[loads++];
@@ -372,6 +608,7 @@ describe("Runtime worker service", () => {
 				return binary;
 			},
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => ({
 				WebClientRuntime: {
@@ -449,6 +686,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => {
 				const runtime = loads++ === 0 ? failed : replacement;
@@ -537,6 +775,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: () => {
 				const runtime = loads++ === 0 ? failed : replacement;
@@ -601,6 +840,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => ({
 				WebClientRuntime: {
@@ -656,6 +896,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => ({
 				WebClientRuntime: {
@@ -718,6 +959,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => {
 				loads += 1;
@@ -800,6 +1042,7 @@ describe("Runtime worker service", () => {
 			throw new Error("close leaked credential=close-secret");
 		};
 		let loads = 0;
+		let activations = 0;
 		const service = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
 			platformStorageExecutor: { invoke: async () => "{}" },
@@ -812,6 +1055,10 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
+			commitAttachmentDownloadSinkRuntimeIncarnation: async () => {
+				activations += 1;
+			},
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => {
 				loads += 1;
@@ -851,6 +1098,7 @@ describe("Runtime worker service", () => {
 		expect(runtime.openCalls).toBe(1);
 		expect(runtime.closeCalls).toBe(1);
 		expect(loads).toBe(1);
+		expect(activations).toBe(0);
 	});
 
 	test("close racing authenticated open and cleanup rejection stays terminal and redacted", async () => {
@@ -884,6 +1132,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => {
 				loads += 1;
@@ -1280,6 +1529,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () =>
 				({
@@ -1451,6 +1701,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () =>
 				({
@@ -1509,6 +1760,7 @@ describe("Runtime worker service", () => {
 				close: () => undefined,
 			}),
 			accountLeaseExecutor: { acquire: async () => null },
+			...authenticatedDownloadSinkPorts,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () =>
 				({

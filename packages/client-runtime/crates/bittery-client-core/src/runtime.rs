@@ -4,6 +4,10 @@ mod attachment_tests;
 #[cfg(test)]
 pub(crate) use attachment_move_lifecycle::live_artifact_owners;
 mod attachment;
+pub use attachment::{
+    AttachmentDownloadFacade, AttachmentDownloadSink, AttachmentDownloadSinkError,
+    AttachmentDownloadSinkPort,
+};
 #[cfg(test)]
 mod attachment_move_lifecycle_tests;
 #[allow(
@@ -516,8 +520,10 @@ pub struct Runtime {
     waiting_reasons: Mutex<HashMap<AccountId, AccountWaitingReason>>,
     delivery_tokens: Mutex<HashMap<AccountId, (DeliveryGeneration, Arc<DeliveryToken>)>>,
     account_execution_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
+    account_lifecycle_locks: Mutex<HashMap<AccountId, Arc<tokio::sync::Mutex<()>>>>,
     item_mutation_locks: Mutex<ItemMutationLocks>,
     foreground_attachments: foreground_attachment_lifecycle::ForegroundAttachmentRegistry,
+    attachment_download: Mutex<Option<AttachmentDownloadFacade>>,
     clock: Arc<dyn Clock>,
     device_timer: Arc<dyn DeviceTimer>,
     /// Wakes the dispatcher when something that can change eligibility happened: work was
@@ -906,9 +912,11 @@ impl Runtime {
             waiting_reasons: Mutex::new(HashMap::new()),
             delivery_tokens: Mutex::new(HashMap::new()),
             account_execution_locks: Mutex::new(HashMap::new()),
+            account_lifecycle_locks: Mutex::new(HashMap::new()),
             item_mutation_locks: Mutex::new(HashMap::new()),
             foreground_attachments:
                 foreground_attachment_lifecycle::ForegroundAttachmentRegistry::default(),
+            attachment_download: Mutex::new(None),
             clock,
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
@@ -967,6 +975,14 @@ impl Runtime {
             .teardown_host_cleanup
             .lock()
             .expect("teardown host cleanup lock poisoned") = cleanup;
+    }
+
+    #[doc(hidden)]
+    pub fn install_attachment_download(&self, facade: AttachmentDownloadFacade) {
+        *self
+            .attachment_download
+            .lock()
+            .expect("Attachment Download facade lock poisoned") = Some(facade);
     }
 
     /// Runs the one core-owned preparation scheduler until the Runtime closes.
@@ -1221,6 +1237,24 @@ impl Runtime {
             RuntimeRequest::Wipe => {
                 return self.wipe_device().await;
             }
+            RuntimeRequest::Lock { account_id } => {
+                return self
+                    .retire_account_access(account_id, AccessRetirement::Lock)
+                    .await
+                    .map(|access| RuntimeResponse::AccessChanged {
+                        account_id: account_id.clone(),
+                        access,
+                    });
+            }
+            RuntimeRequest::SignOut { account_id } => {
+                return self
+                    .retire_account_access(account_id, AccessRetirement::SignOut)
+                    .await
+                    .map(|access| RuntimeResponse::AccessChanged {
+                        account_id: account_id.clone(),
+                        access,
+                    });
+            }
             _ => {}
         }
         if let RuntimeRequest::RenameAttachment {
@@ -1263,6 +1297,20 @@ impl Runtime {
                     teardown_admission,
                 )
                 .await;
+        }
+        if let RuntimeRequest::DownloadAttachment {
+            account_id,
+            attachment_id,
+            sink_capability_id,
+        } = &request
+        {
+            let prepared = self.prepare_attachment_download(
+                account_id.clone(),
+                attachment_id.clone(),
+                sink_capability_id.clone(),
+                cancellation.clone(),
+            )?;
+            return self.download_attachment(prepared, cancellation).await;
         }
         let _admission = self.teardown_admission.read().await;
         self.reject_request_during_pending_teardown(&request)?;
@@ -1464,14 +1512,9 @@ impl Runtime {
             // Retiring access is the one request a caller cannot take back. Cancellation is
             // never consulted, and the accepted Operations this Account already owes stay
             // durable: signing out is not a cancellation of committed Server work.
-            RuntimeRequest::Lock { account_id } => self
-                .retire_account_access(&account_id, AccessRetirement::Lock)
-                .await
-                .map(|access| RuntimeResponse::AccessChanged { account_id, access }),
-            RuntimeRequest::SignOut { account_id } => self
-                .retire_account_access(&account_id, AccessRetirement::SignOut)
-                .await
-                .map(|access| RuntimeResponse::AccessChanged { account_id, access }),
+            RuntimeRequest::Lock { .. } | RuntimeRequest::SignOut { .. } => {
+                unreachable!("Account lifecycle requests are handled before ordinary admission")
+            }
             RuntimeRequest::DeleteServerAccount {
                 account_id,
                 confirm_email,
@@ -1590,6 +1633,9 @@ impl Runtime {
             ),
             RuntimeRequest::DeleteAttachment { .. } => unreachable!(
                 "Delete is handled before ordinary admission so callback delivery can release it"
+            ),
+            RuntimeRequest::DownloadAttachment { .. } => unreachable!(
+                "Download is handled before ordinary admission so sink cleanup can release it"
             ),
             // Teardown returns before ordinary admission. A Runtime bug must not abort the host,
             // so this reports an error rather than panicking on the request path.
@@ -1740,6 +1786,7 @@ impl Runtime {
         } else {
             self.wake_dispatch();
             self.foreground_attachments.fence_all_and_drain().await;
+            self.retire_all_attachment_downloads().await;
             let _catalog_guard = self.catalog_transition.lock().await;
             let mut execution_locks: Vec<_> = self
                 .account_execution_locks
@@ -1857,6 +1904,20 @@ impl Runtime {
             .expect("Account execution lock map poisoned");
         self.ensure_open()?;
         Ok(locks
+            .entry(account_id.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone())
+    }
+
+    fn account_lifecycle_lock(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Arc<tokio::sync::Mutex<()>>, RuntimeError> {
+        self.ensure_not_closed()?;
+        Ok(self
+            .account_lifecycle_locks
+            .lock()
+            .expect("Account lifecycle lock map poisoned")
             .entry(account_id.clone())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone())

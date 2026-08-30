@@ -5,7 +5,10 @@
 
 use super::*;
 use crate::{
-    auth_http::{AttachmentDeleteAnswer, AttachmentRenameAnswer, AuthenticatedOutcome},
+    auth_http::{
+        AttachmentDeleteAnswer, AttachmentDownloadGrant, AttachmentDownloadGrantAnswer,
+        AttachmentRenameAnswer, AuthenticatedOutcome,
+    },
     platform_storage::CurrentSessionDocument,
     replica::{
         AuthorityAttachmentRecord, AuthorityItemRecord, AuthorityVaultRole,
@@ -15,11 +18,547 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{
+    attachment_move::{
+        AttachmentBlobDecryptor, AttachmentBlobScope, AttachmentEnvelopeScanner,
+        MAX_ATTACHMENT_ENVELOPE_INPUT_CHUNK,
+    },
     decrypt_vault_key_with_muk, decrypt_with_aad, encrypt_with_aad, AadContext, EncryptedData,
     WrappedVaultKeyData,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachmentDownloadSinkError {
+    Sink,
+    Cancelled,
+    Invariant,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait::async_trait]
+pub trait AttachmentDownloadSink: Send {
+    async fn begin(&mut self) -> Result<(), AttachmentDownloadSinkError>;
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), AttachmentDownloadSinkError>;
+    async fn commit(&mut self) -> Result<(), AttachmentDownloadSinkError>;
+    async fn discard(&mut self) -> Result<(), AttachmentDownloadSinkError>;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[async_trait::async_trait(?Send)]
+pub trait AttachmentDownloadSink {
+    async fn begin(&mut self) -> Result<(), AttachmentDownloadSinkError>;
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), AttachmentDownloadSinkError>;
+    async fn commit(&mut self) -> Result<(), AttachmentDownloadSinkError>;
+    async fn discard(&mut self) -> Result<(), AttachmentDownloadSinkError>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait::async_trait]
+pub trait AttachmentDownloadSinkPort: Send + Sync {
+    fn claim(
+        &self,
+        account_id: &AccountId,
+        attachment_id: &str,
+        capability_id: &str,
+    ) -> Result<Box<dyn AttachmentDownloadSink>, AttachmentDownloadSinkError>;
+
+    async fn retire_account(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError>;
+
+    async fn complete_account_retirement(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError>;
+
+    async fn retire_runtime(&self) -> Result<(), AttachmentDownloadSinkError>;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[async_trait::async_trait(?Send)]
+pub trait AttachmentDownloadSinkPort {
+    fn claim(
+        &self,
+        account_id: &AccountId,
+        attachment_id: &str,
+        capability_id: &str,
+    ) -> Result<Box<dyn AttachmentDownloadSink>, AttachmentDownloadSinkError>;
+
+    async fn retire_account(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError>;
+
+    async fn complete_account_retirement(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError>;
+
+    async fn retire_runtime(&self) -> Result<(), AttachmentDownloadSinkError>;
+}
+
+#[derive(Clone)]
+pub struct AttachmentDownloadFacade {
+    transfer: Arc<dyn AttachmentMoveTransferPort>,
+    sinks: Arc<dyn AttachmentDownloadSinkPort>,
+}
+
+struct AttachmentDownloadSinkOwner {
+    sink: Option<Box<dyn AttachmentDownloadSink>>,
+    lifecycle: Option<super::foreground_attachment_lifecycle::ForegroundAttachmentGuard>,
+    timer: Arc<dyn crate::device_timer::DeviceTimer>,
+}
+
+impl AttachmentDownloadSinkOwner {
+    fn new(
+        sink: Box<dyn AttachmentDownloadSink>,
+        lifecycle: super::foreground_attachment_lifecycle::ForegroundAttachmentGuard,
+        timer: Arc<dyn crate::device_timer::DeviceTimer>,
+    ) -> Self {
+        Self {
+            sink: Some(sink),
+            lifecycle: Some(lifecycle),
+            timer,
+        }
+    }
+
+    async fn begin(&mut self) -> Result<(), AttachmentDownloadSinkError> {
+        self.sink
+            .as_mut()
+            .expect("Download sink owner is armed")
+            .begin()
+            .await
+    }
+
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), AttachmentDownloadSinkError> {
+        self.sink
+            .as_mut()
+            .expect("Download sink owner is armed")
+            .write(bytes)
+            .await
+    }
+
+    async fn commit(&mut self) -> Result<(), AttachmentDownloadSinkError> {
+        let result = self
+            .sink
+            .as_mut()
+            .expect("Download sink owner is armed")
+            .commit()
+            .await;
+        if result.is_ok() {
+            self.sink.take();
+            self.lifecycle.take();
+        }
+        result
+    }
+
+    async fn discard_until_clean(&mut self) {
+        let mut failure_count = 0_u32;
+        loop {
+            if self
+                .sink
+                .as_mut()
+                .expect("Download sink owner is armed")
+                .discard()
+                .await
+                .is_ok()
+            {
+                self.sink.take();
+                self.lifecycle.take();
+                return;
+            }
+            wait_for_download_cleanup_retry(self.timer.as_ref(), failure_count).await;
+            failure_count = failure_count.saturating_add(1);
+        }
+    }
+
+    fn lifecycle(&self) -> &super::foreground_attachment_lifecycle::ForegroundAttachmentGuard {
+        self.lifecycle
+            .as_ref()
+            .expect("Download sink owner has lifecycle ownership")
+    }
+}
+
+impl Drop for AttachmentDownloadSinkOwner {
+    fn drop(&mut self) {
+        if let (Some(sink), Some(lifecycle)) = (self.sink.take(), self.lifecycle.take()) {
+            spawn_download_cleanup(sink, lifecycle, Arc::clone(&self.timer));
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_download_cleanup(
+    mut sink: Box<dyn AttachmentDownloadSink>,
+    lifecycle: super::foreground_attachment_lifecycle::ForegroundAttachmentGuard,
+    timer: Arc<dyn crate::device_timer::DeviceTimer>,
+) {
+    tokio::spawn(async move {
+        let mut failure_count = 0_u32;
+        while sink.discard().await.is_err() {
+            wait_for_download_cleanup_retry(timer.as_ref(), failure_count).await;
+            failure_count = failure_count.saturating_add(1);
+        }
+        drop(lifecycle);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_download_cleanup(
+    mut sink: Box<dyn AttachmentDownloadSink>,
+    lifecycle: super::foreground_attachment_lifecycle::ForegroundAttachmentGuard,
+    timer: Arc<dyn crate::device_timer::DeviceTimer>,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut failure_count = 0_u32;
+        while sink.discard().await.is_err() {
+            wait_for_download_cleanup_retry(timer.as_ref(), failure_count).await;
+            failure_count = failure_count.saturating_add(1);
+        }
+        drop(lifecycle);
+    });
+}
+
+async fn wait_for_download_cleanup_retry(
+    timer: &dyn crate::device_timer::DeviceTimer,
+    failure_count: u32,
+) {
+    let exponent = failure_count.min(7);
+    timer.sleep_ms(10_u64 << exponent).await;
+}
+
+pub(super) struct PreparedAttachmentDownload {
+    account_id: AccountId,
+    attachment_id: String,
+    sink_capability_id: String,
+    facade: AttachmentDownloadFacade,
+    sink: AttachmentDownloadSinkOwner,
+}
+
+impl AttachmentDownloadFacade {
+    pub fn new(
+        transfer: Arc<dyn AttachmentMoveTransferPort>,
+        sinks: Arc<dyn AttachmentDownloadSinkPort>,
+    ) -> Self {
+        Self { transfer, sinks }
+    }
+}
+
 impl Runtime {
+    pub(super) async fn retire_attachment_download_account(&self, account_id: &AccountId) {
+        let sinks = self
+            .attachment_download
+            .lock()
+            .expect("Attachment Download facade lock poisoned")
+            .as_ref()
+            .map(|facade| Arc::clone(&facade.sinks));
+        let Some(sinks) = sinks else { return };
+        let mut failure_count = 0_u32;
+        while sinks.retire_account(account_id).await.is_err() {
+            wait_for_download_cleanup_retry(self.device_timer.as_ref(), failure_count).await;
+            failure_count = failure_count.saturating_add(1);
+        }
+    }
+
+    pub(super) async fn complete_attachment_download_account_retirement(
+        &self,
+        account_id: &AccountId,
+    ) {
+        let sinks = self
+            .attachment_download
+            .lock()
+            .expect("Attachment Download facade lock poisoned")
+            .as_ref()
+            .map(|facade| Arc::clone(&facade.sinks));
+        let Some(sinks) = sinks else { return };
+        let mut failure_count = 0_u32;
+        while sinks.complete_account_retirement(account_id).await.is_err() {
+            wait_for_download_cleanup_retry(self.device_timer.as_ref(), failure_count).await;
+            failure_count = failure_count.saturating_add(1);
+        }
+    }
+
+    pub(super) async fn retire_all_attachment_downloads(&self) {
+        let sinks = self
+            .attachment_download
+            .lock()
+            .expect("Attachment Download facade lock poisoned")
+            .as_ref()
+            .map(|facade| Arc::clone(&facade.sinks));
+        let Some(sinks) = sinks else { return };
+        let mut failure_count = 0_u32;
+        while sinks.retire_runtime().await.is_err() {
+            wait_for_download_cleanup_retry(self.device_timer.as_ref(), failure_count).await;
+            failure_count = failure_count.saturating_add(1);
+        }
+    }
+
+    pub(super) fn prepare_attachment_download(
+        &self,
+        account_id: AccountId,
+        attachment_id: String,
+        sink_capability_id: String,
+        cancellation: RequestCancellation,
+    ) -> Result<PreparedAttachmentDownload, RuntimeError> {
+        if !is_canonical_sink_capability_id(&sink_capability_id) {
+            return Err(invariant("Attachment Download sink capability is invalid"));
+        }
+        let facade = self
+            .attachment_download
+            .lock()
+            .expect("Attachment Download facade lock poisoned")
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::SinkFailure,
+                    "Attachment Download sink is unavailable",
+                )
+            })?;
+        let lifecycle = self
+            .foreground_attachments
+            .register_unresolved(&account_id, cancellation)?;
+        let sink = facade
+            .sinks
+            .claim(&account_id, &attachment_id, &sink_capability_id)
+            .map_err(sink_error)?;
+        Ok(PreparedAttachmentDownload {
+            account_id,
+            attachment_id,
+            sink_capability_id,
+            facade,
+            sink: AttachmentDownloadSinkOwner::new(sink, lifecycle, Arc::clone(&self.device_timer)),
+        })
+    }
+
+    pub(super) async fn download_attachment(
+        &self,
+        mut prepared: PreparedAttachmentDownload,
+        cancellation: RequestCancellation,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        let account_id = prepared.account_id.clone();
+        let attachment_id = prepared.attachment_id.clone();
+        let sink_capability_id = prepared.sink_capability_id.clone();
+        let facade = prepared.facade.clone();
+        let teardown_admission = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                prepared.sink.discard_until_clean().await;
+                return Err(cancelled());
+            }
+            guard = self.teardown_admission.read() => guard,
+        };
+
+        let transfer = async {
+			self.reject_request_during_pending_teardown(&RuntimeRequest::DownloadAttachment {
+				account_id: account_id.clone(),
+				attachment_id: attachment_id.clone(),
+				sink_capability_id: sink_capability_id.clone(),
+			})?;
+			let claimed_snapshot = self.require_snapshot(&account_id);
+			tokio::select! {
+				biased;
+				result = prepared.sink.begin() => result.map_err(sink_error)?,
+				() = cancellation.cancelled() => return Err(cancelled()),
+			}
+			let execution_lock = self.account_execution_lock(&account_id)?;
+			let execution_guard = tokio::select! {
+				biased;
+				() = cancellation.cancelled() => return Err(cancelled()),
+				guard = execution_lock.lock() => guard,
+			};
+			self.ensure_attachment_admission(&account_id, &cancellation)?;
+			let snapshot = self.require_snapshot(&account_id)?;
+			if let Ok(claimed_snapshot) = &claimed_snapshot {
+				if claimed_snapshot.incarnation != snapshot.incarnation {
+					return Err(retryable("Account authority changed during sink begin"));
+				}
+			}
+			drop(execution_guard);
+			if snapshot.failure.is_some() {
+				return Err(RuntimeError::new(
+					RuntimeErrorCode::AccountFailed,
+					"the selected Account module has failed",
+				));
+			}
+			let (source, vault) = attachment_and_vault(&snapshot, &attachment_id)?;
+			let attachment_key = open_attachment_key(self, &snapshot, &source, &vault)?;
+            let metadata = self
+                .platform_storage
+                .load_account_metadata(&account_id, &snapshot.incarnation)
+                .await
+                .map_err(|_| retryable("Account metadata could not be loaded"))?
+                .ok_or_else(authentication_required)?;
+            if metadata.user_id != snapshot.user_id {
+                return Err(invariant("Account metadata authority changed"));
+            }
+            let mut session = self
+                .platform_storage
+                .load_current_session(&account_id, &snapshot.incarnation)
+                .await
+                .map_err(|_| retryable("Session could not be loaded"))?
+                .ok_or_else(authentication_required)?;
+            let auth_config = self.auth_client_config.clone().ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationUnavailable,
+                    "authentication is not configured for this Runtime",
+                )
+            })?;
+            let http = AuthHttpClient::new(
+                &self.http_transport,
+                &metadata.normalized_server_url,
+                metadata.insecure_transport_confirmed,
+                auth_config,
+            )?;
+            let mut renewed = false;
+            let mut answer = http
+                .create_attachment_download_grant(
+                    session.token.as_ref(),
+                    &attachment_id,
+                    cancellation.clone(),
+                )
+                .await?;
+            if matches!(answer, AuthenticatedOutcome::ReauthenticationRequired) {
+                renew_once(
+                    self,
+                    &account_id,
+                    &http,
+                    &mut session,
+                    &mut renewed,
+                    cancellation.clone(),
+                )
+                .await?;
+                answer = http
+                    .create_attachment_download_grant(
+                        session.token.as_ref(),
+                        &attachment_id,
+                        cancellation.clone(),
+                    )
+                    .await?;
+            }
+            let grant = match answer {
+                AuthenticatedOutcome::Ok(answer) => validate_download_grant(answer, &source)?,
+                AuthenticatedOutcome::Transient => {
+                    return Err(retryable("Attachment download grant failed"));
+                }
+                AuthenticatedOutcome::ReauthenticationRequired => {
+                    self.mark_reauthentication_required(&account_id);
+                    return Err(authentication_required());
+                }
+            };
+            let max_response_bytes = attachment_response_bound(source.file_size)?;
+            let request = || AttachmentMoveDownloadRequest {
+                download_url: grant.download_url.clone(),
+                headers: Vec::new(),
+                max_response_bytes,
+                max_chunk_bytes: MAX_ATTACHMENT_ENVELOPE_INPUT_CHUNK as u32,
+            };
+            let mut first = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return Err(cancelled()),
+                value = facade.transfer.open_source(request()) => value.map_err(download_transfer_error)?,
+            };
+            let mut scanner = AttachmentEnvelopeScanner::new();
+            loop {
+                let chunk = tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => return Err(cancelled()),
+                    value = first.next_chunk() => value.map_err(download_transfer_error)?,
+                };
+                let Some(chunk) = chunk else { break };
+                scanner
+                    .push(&chunk)
+                    .map_err(|_| retryable("Attachment ciphertext is invalid"))?;
+            }
+            let scan = scanner
+                .finish()
+                .map_err(|_| retryable("Attachment ciphertext is invalid"))?;
+            let mut decryptor = AttachmentBlobDecryptor::new(
+                scan,
+                *attachment_key,
+                AttachmentBlobScope::new(
+                    source.vault_id.clone(),
+                    source.id.clone(),
+                    source.uploaded_by.clone(),
+                ),
+            )
+            .map_err(|_| invariant("Attachment decryptor could not be created"))?;
+            let mut second = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return Err(cancelled()),
+                value = facade.transfer.open_source(request()) => value.map_err(download_transfer_error)?,
+            };
+            let mut plaintext_bytes = 0_u64;
+            loop {
+                let chunk = tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => return Err(cancelled()),
+                    value = second.next_chunk() => value.map_err(download_transfer_error)?,
+                };
+                let Some(chunk) = chunk else { break };
+                let plaintext = Zeroizing::new(
+                    decryptor
+                        .push(&chunk)
+                        .map_err(|_| retryable("Attachment ciphertext authentication failed"))?,
+                );
+                plaintext_bytes = plaintext_bytes
+                    .checked_add(plaintext.len() as u64)
+                    .ok_or_else(|| size_rejected("Attachment plaintext is too large"))?;
+                if plaintext_bytes > source.file_size as u64 {
+                    return Err(size_rejected("Attachment plaintext exceeds its authority"));
+                }
+                if !plaintext.is_empty() {
+                    prepared.sink.write(&plaintext).await.map_err(sink_error)?;
+                }
+            }
+            let final_plaintext = Zeroizing::new(
+                decryptor
+                    .finish()
+                    .map_err(|_| retryable("Attachment ciphertext authentication failed"))?,
+            );
+            plaintext_bytes = plaintext_bytes
+                .checked_add(final_plaintext.len() as u64)
+                .ok_or_else(|| size_rejected("Attachment plaintext is too large"))?;
+            if plaintext_bytes != source.file_size as u64 {
+                return Err(retryable("Attachment plaintext length is not authoritative"));
+            }
+            if !final_plaintext.is_empty() {
+                prepared.sink.write(&final_plaintext).await.map_err(sink_error)?;
+            }
+            Ok(())
+        }
+        .await;
+
+        let result = match transfer {
+            Ok(())
+                if self
+                    .foreground_attachments
+                    .admit_finalization(prepared.sink.lifecycle(), &cancellation) =>
+            {
+                match prepared.sink.commit().await {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        prepared.sink.discard_until_clean().await;
+                        Err(sink_error(error))
+                    }
+                }
+            }
+            Ok(()) => {
+                prepared.sink.discard_until_clean().await;
+                Err(cancelled())
+            }
+            Err(error) => {
+                prepared.sink.discard_until_clean().await;
+                Err(error)
+            }
+        };
+        drop(teardown_admission);
+        result?;
+        Ok(RuntimeResponse::AttachmentDownloaded {
+            account_id,
+            attachment_id,
+        })
+    }
+
     pub(super) async fn delete_attachment(
         &self,
         account_id: AccountId,
@@ -454,6 +993,14 @@ impl Runtime {
     }
 }
 
+pub(super) fn is_canonical_sink_capability_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'~' | b'-'))
+}
+
 fn item_has_optimistic_owner(snapshot: &crate::replica::ReplicaSnapshot, item_id: &str) -> bool {
     snapshot
         .operations
@@ -825,6 +1372,159 @@ fn encrypt_attachment_name(
         encryption_iv: encrypted.iv,
         encryption_algorithm: encrypted.algorithm,
     })
+}
+
+fn open_attachment_key(
+    runtime: &Runtime,
+    snapshot: &crate::replica::ReplicaSnapshot,
+    attachment: &AuthorityAttachmentRecord,
+    vault: &crate::replica::AuthorityVaultRecord,
+) -> Result<Zeroizing<[u8; 32]>, RuntimeError> {
+    let muk = runtime
+        .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+        .ok_or_else(authentication_required)?;
+    let wrapped: WrappedVaultKeyData = serde_json::from_str(&vault.encrypted_vault_key)
+        .map_err(|_| invariant("Vault key authority is malformed"))?;
+    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != snapshot.user_id {
+        return Err(invariant(
+            "Vault key authority scope does not match the Account",
+        ));
+    }
+    let vault_key = Zeroizing::new(
+        decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk.as_slice(), &wrapped.context)
+            .map_err(|_| invariant("Vault key could not be opened"))?,
+    );
+    let scope = AadContext {
+        vault_id: attachment.vault_id.clone(),
+        entity_id: attachment.id.clone(),
+        entity_type: "attachment_key".into(),
+        version: attachment.envelope_version as u64,
+        user_id: attachment.uploaded_by.clone(),
+    };
+    let mut encoded_key = decrypt_with_aad(
+        &EncryptedData {
+            ciphertext: attachment.encrypted_attachment_key.clone(),
+            iv: attachment.attachment_key_iv.clone(),
+            algorithm: attachment.attachment_key_algorithm.clone(),
+        },
+        &vault_key,
+        &scope,
+    )
+    .map_err(|_| invariant("Attachment key could not be opened"))?;
+    let decoded = Zeroizing::new(
+        BASE64
+            .decode(encoded_key.as_bytes())
+            .map_err(|_| invariant("Attachment key is malformed"))?,
+    );
+    encoded_key.zeroize();
+    if decoded.len() != 32 {
+        return Err(invariant("Attachment key has an invalid length"));
+    }
+    let mut key = [0_u8; 32];
+    key.copy_from_slice(&decoded);
+    Ok(Zeroizing::new(key))
+}
+
+fn validate_download_grant(
+    answer: AttachmentDownloadGrantAnswer,
+    source: &AuthorityAttachmentRecord,
+) -> Result<AttachmentDownloadGrant, RuntimeError> {
+    let grant = match answer {
+        AttachmentDownloadGrantAnswer::Grant(grant) => *grant,
+        AttachmentDownloadGrantAnswer::StaleAuthority => {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthorityMissing,
+                "Attachment authority is missing",
+            ));
+        }
+        AttachmentDownloadGrantAnswer::AccessDenied => {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Attachment Download was denied",
+            ));
+        }
+    };
+    if grant.attachment_id != source.id
+        || grant.item_id != source.item_id
+        || grant.vault_id != source.vault_id
+        || grant.storage_key != source.storage_key
+        || grant.envelope_version != source.envelope_version
+        || grant.uploaded_by != source.uploaded_by
+        || grant.encrypted_name != source.encrypted_name
+        || grant.encrypted_content_type != source.encrypted_content_type
+        || grant.encryption_iv != source.encryption_iv
+        || grant.encrypted_content_type_iv != source.encrypted_content_type_iv
+        || grant.encryption_algorithm != source.encryption_algorithm
+        || grant.file_size != source.file_size
+    {
+        return Err(retryable("Attachment download grant authority is stale"));
+    }
+    let url = url::Url::parse(&grant.download_url)
+        .map_err(|_| invariant("Attachment download grant URL is invalid"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(invariant("Attachment download grant URL is invalid"));
+    }
+    Ok(grant)
+}
+
+fn attachment_response_bound(file_size: i32) -> Result<u64, RuntimeError> {
+    let plaintext = u64::try_from(file_size)
+        .map_err(|_| size_rejected("Attachment size authority is invalid"))?;
+    let encoded_plaintext = base64_length(plaintext)?;
+    let ciphertext = encoded_plaintext
+        .checked_add(16)
+        .ok_or_else(|| size_rejected("Attachment size is too large"))?;
+    let encoded_ciphertext = base64_length(ciphertext)?;
+    let fixed = (r#"{"ciphertext":""#.len()
+        + r#"","iv":""#.len()
+        + 16
+        + r#"","algorithm":"AES-GCM-AAD-V1"}"#.len()) as u64;
+    encoded_ciphertext
+        .checked_add(fixed)
+        .ok_or_else(|| size_rejected("Attachment size is too large"))
+}
+
+fn base64_length(length: u64) -> Result<u64, RuntimeError> {
+    length
+        .checked_add(2)
+        .and_then(|value| value.checked_div(3))
+        .and_then(|groups| groups.checked_mul(4))
+        .ok_or_else(|| size_rejected("Attachment size is too large"))
+}
+
+fn download_transfer_error(error: AttachmentMoveTransferError) -> RuntimeError {
+    match error {
+        AttachmentMoveTransferError::Transient | AttachmentMoveTransferError::Busy => {
+            retryable("Attachment binary download failed")
+        }
+        AttachmentMoveTransferError::StaleAuthority => {
+            retryable("Attachment binary authority is stale")
+        }
+        AttachmentMoveTransferError::Invariant => {
+            invariant("Attachment binary executor violated its contract")
+        }
+    }
+}
+
+fn sink_error(error: AttachmentDownloadSinkError) -> RuntimeError {
+    match error {
+        AttachmentDownloadSinkError::Sink => RuntimeError::new(
+            RuntimeErrorCode::SinkFailure,
+            "Attachment download sink failed",
+        ),
+        AttachmentDownloadSinkError::Cancelled => cancelled(),
+        AttachmentDownloadSinkError::Invariant => {
+            invariant("Attachment download sink violated its contract")
+        }
+    }
+}
+
+fn invariant(message: &str) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
+}
+
+fn size_rejected(message: &str) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::SizeRejected, message)
 }
 
 fn authority_attachment_from_dto(attachment: VaultAttachmentResponse) -> AuthorityAttachmentRecord {

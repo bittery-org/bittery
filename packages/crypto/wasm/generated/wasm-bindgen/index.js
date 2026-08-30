@@ -216,6 +216,7 @@ export class WebClientRuntime {
    * @param {string} platform
    * @param {string} version
    * @param {Function} lifecycle_error
+   * @param {any} download_sink_executor
    * @returns {WebClientRuntime}
    */
   static withConfiguredAttachmentMovePreparation(
@@ -230,6 +231,7 @@ export class WebClientRuntime {
     platform,
     version,
     lifecycle_error,
+    download_sink_executor,
   ) {
     const ptr0 = passStringToWasm0(
       client_id,
@@ -264,6 +266,7 @@ export class WebClientRuntime {
       ptr2,
       len2,
       lifecycle_error,
+      download_sink_executor,
     );
     if (ret[2]) {
       throw takeFromExternrefTable0(ret[1]);

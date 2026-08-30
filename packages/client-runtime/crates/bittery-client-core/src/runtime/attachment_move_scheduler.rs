@@ -230,6 +230,11 @@ impl TransferAdapter {
             AttachmentDownloadGrantAnswer::StaleAuthority => {
                 return Err(PreparationTransportError::StaleAuthority);
             }
+            // Ordinary foreground Download exposes this closed denial. An already accepted Move
+            // remains durable and retryable because caller-visible denial cannot terminate it.
+            AttachmentDownloadGrantAnswer::AccessDenied => {
+                return Err(PreparationTransportError::Transient);
+            }
         };
         if grant.attachment_id != source.id
             || grant.item_id != source.item_id

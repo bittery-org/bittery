@@ -37,6 +37,7 @@ export class WebClientRuntime {
     platform: string,
     version: string,
     lifecycle_error: Function,
+    download_sink_executor: any,
   ): WebClientRuntime;
   static withConfiguredExecutors(
     replica_invoke: Function,
@@ -1956,6 +1957,7 @@ export interface InitOutput {
     l: number,
     m: number,
     n: any,
+    o: any,
   ) => [number, number, number];
   readonly webclientruntime_withConfiguredExecutors: (
     a: any,

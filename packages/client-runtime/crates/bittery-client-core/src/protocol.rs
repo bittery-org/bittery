@@ -203,6 +203,19 @@ pub enum RuntimeRequest {
         account_id: AccountId,
         attachment_id: String,
     },
+    DownloadAttachment {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        attachment_id: String,
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(length(min = 1, max = 128), regex(pattern = "^[A-Za-z0-9._~-]+$"))
+        )]
+        sink_capability_id: String,
+    },
 }
 
 impl fmt::Debug for RuntimeRequest {
@@ -334,6 +347,16 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("attachment_id", attachment_id)
                 .finish(),
+            Self::DownloadAttachment {
+                account_id,
+                attachment_id,
+                ..
+            } => formatter
+                .debug_struct("DownloadAttachment")
+                .field("account_id", account_id)
+                .field("attachment_id", attachment_id)
+                .field("sink_capability", &"[redacted]")
+                .finish(),
         }
     }
 }
@@ -357,7 +380,8 @@ impl RuntimeRequest {
             | Self::CreateShare { account_id, .. }
             | Self::AcknowledgeShareResult { account_id, .. }
             | Self::RenameAttachment { account_id, .. }
-            | Self::DeleteAttachment { account_id, .. } => Some(account_id),
+            | Self::DeleteAttachment { account_id, .. }
+            | Self::DownloadAttachment { account_id, .. } => Some(account_id),
         }
     }
 }
@@ -546,6 +570,14 @@ pub enum RuntimeResponse {
         attachment_id: String,
     },
     AttachmentDeleted {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        attachment_id: String,
+    },
+    AttachmentDownloaded {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
             schemars(with = "String")

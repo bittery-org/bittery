@@ -66,6 +66,10 @@ export interface BinaryTransferExecutor extends AttachmentArtifactExecutor {
 	close(): void;
 }
 
+export interface AttachmentDownloadSinkExecutor {
+	invoke(controlRequestJson: string, binaryChunk?: Uint8Array): Promise<string>;
+}
+
 export interface AccountLeaseExecutor {
 	acquire(accountId: string): Promise<unknown | null>;
 }
@@ -106,6 +110,7 @@ export interface RuntimeWasm {
 			platform: string,
 			version: string,
 			lifecycleError: (errorJson: string) => void,
+			downloadSinkExecutor: AttachmentDownloadSinkExecutor,
 		): WebClientRuntimeLike;
 	};
 }
@@ -125,6 +130,18 @@ export interface RuntimeWorkerServiceDeps {
 	httpExecutor: HttpExecutor;
 	attachmentArtifactExecutor?: AttachmentArtifactExecutor;
 	binaryTransferExecutorFactory?: () => BinaryTransferExecutor;
+	attachmentDownloadSinkExecutorFactory?: (
+		runtimeIncarnation: string,
+	) => AttachmentDownloadSinkExecutor;
+	prepareAttachmentDownloadSinkRuntimeIncarnation?: (
+		runtimeIncarnation: string,
+	) => Promise<void>;
+	commitAttachmentDownloadSinkRuntimeIncarnation?: (
+		runtimeIncarnation: string,
+	) => Promise<void>;
+	runtimeIncarnationIdentity?: () => string;
+	/** Trusted host probe; production uses the Worker-global timer and MessageChannel task source. */
+	deviceTimerLivenessProbe?: (signal: AbortSignal) => Promise<void>;
 	accountLeaseExecutor?: AccountLeaseExecutor;
 	loadWasm(): Promise<RuntimeWasm>;
 	authClient?: RuntimeAuthClientConfig;
@@ -157,6 +174,40 @@ function attachmentPreparationFailed(): Error {
 		new Error("Attachment Move preparation lifecycle failed."),
 		{ code: "ATTACHMENT_MOVE_PREPARATION_FAILED" },
 	);
+}
+
+/** Proves callback liveness without imposing a host-speed deadline. */
+export function probeSystemDeviceTimerLiveness(
+	signal: AbortSignal,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const Timer = globalThis.setTimeout;
+		if (typeof Timer !== "function") {
+			reject(new Error("Device timer is unavailable"));
+			return;
+		}
+		let settled = false;
+		let handle: ReturnType<typeof setTimeout> | undefined;
+		const finish = (error?: Error) => {
+			if (settled) return;
+			settled = true;
+			signal.removeEventListener("abort", abort);
+			if (handle !== undefined) globalThis.clearTimeout(handle);
+			if (error === undefined) resolve();
+			else reject(error);
+		};
+		const abort = () => finish(new Error("Device timer probe was cancelled"));
+		if (signal.aborted) {
+			abort();
+			return;
+		}
+		signal.addEventListener("abort", abort, { once: true });
+		try {
+			handle = Timer(() => finish(), 0);
+		} catch {
+			finish(new Error("Device timer is unavailable"));
+		}
+	});
 }
 
 function hasExactKeys(
@@ -235,6 +286,7 @@ export function createRuntimeWorkerService(
 	let lifecycleFailure: Error | undefined;
 	let terminalFailure: Error | undefined;
 	let closing = false;
+	let startupAbort: AbortController | undefined;
 	/**
 	 * Device wipes that were accepted but have not taken their hold on the Runtime yet.
 	 *
@@ -291,6 +343,8 @@ export function createRuntimeWorkerService(
 			});
 		}
 		if (runtimeTask !== undefined) return runtimeTask;
+		const startup = new AbortController();
+		startupAbort = startup;
 		let started!: Promise<RuntimeIncarnation>;
 		started = deps.loadWasm().then(async ({ WebClientRuntime }) => {
 			const replicaInvoke = deps.executor.invoke.bind(deps.executor);
@@ -300,6 +354,7 @@ export function createRuntimeWorkerService(
 			const httpInvoke = deps.httpExecutor.invoke.bind(deps.httpExecutor);
 			const httpCancel = deps.httpExecutor.cancel.bind(deps.httpExecutor);
 			let created: WebClientRuntimeLike;
+			let attachmentDownloadRuntimeIncarnation: string | undefined;
 			let closeCreatedTask: Promise<void> | undefined;
 			const closeCreated = (): Promise<void> => {
 				closeCreatedTask ??= Promise.resolve().then(() => created.close());
@@ -308,49 +363,105 @@ export function createRuntimeWorkerService(
 			let lifecycleFailed = false;
 			let incarnation: RuntimeIncarnation | undefined;
 			if (deps.authClient !== undefined) {
+				const runtimeIncarnation =
+					deps.runtimeIncarnationIdentity?.() ?? globalThis.crypto.randomUUID();
+				attachmentDownloadRuntimeIncarnation = runtimeIncarnation;
+				if (
+					runtimeIncarnation.length === 0 ||
+					runtimeIncarnation.length > 128 ||
+					!/^[A-Za-z0-9._~-]+$/.test(runtimeIncarnation)
+				)
+					throw attachmentPreparationFailed();
 				const createConfiguredRuntime =
 					WebClientRuntime.withConfiguredAttachmentMovePreparation;
 				if (
 					createConfiguredRuntime === undefined ||
 					deps.attachmentArtifactExecutor === undefined ||
 					deps.binaryTransferExecutorFactory === undefined ||
-					deps.accountLeaseExecutor === undefined
+					deps.accountLeaseExecutor === undefined ||
+					deps.attachmentDownloadSinkExecutorFactory === undefined ||
+					deps.prepareAttachmentDownloadSinkRuntimeIncarnation === undefined ||
+					deps.commitAttachmentDownloadSinkRuntimeIncarnation === undefined
 				) {
 					throw attachmentPreparationFailed();
 				}
-				created = createConfiguredRuntime.call(
-					WebClientRuntime,
-					replicaInvoke,
-					platformInvoke,
-					httpInvoke,
-					httpCancel,
-					deps.attachmentArtifactExecutor,
-					deps.binaryTransferExecutorFactory(),
-					deps.accountLeaseExecutor,
-					deps.authClient.clientId,
-					deps.authClient.platform,
-					deps.authClient.version,
-					() => {
-						if (lifecycleFailed || closing) return;
-						lifecycleFailed = true;
-						if (incarnation !== undefined) incarnation.failed = true;
-						const failure = attachmentPreparationFailed();
-						lifecycleFailure = failure;
-						let barrier!: Promise<void>;
-						barrier = closeCreated().then(
-							() => {
-								if (runtimeTask === started) runtimeTask = undefined;
-								if (restartBarrier === barrier) restartBarrier = undefined;
-							},
-							() => {
-								terminalFailure = failure;
-								throw failure;
-							},
-						);
-						restartBarrier = barrier;
-						void barrier.catch(() => undefined);
-					},
-				);
+				let downloadSinkExecutor: AttachmentDownloadSinkExecutor;
+				let binaryTransferExecutor: BinaryTransferExecutor;
+				try {
+					binaryTransferExecutor = deps.binaryTransferExecutorFactory();
+				} catch {
+					throw attachmentPreparationFailed();
+				}
+				try {
+					downloadSinkExecutor =
+						deps.attachmentDownloadSinkExecutorFactory(runtimeIncarnation);
+				} catch {
+					binaryTransferExecutor.close();
+					throw attachmentPreparationFailed();
+				}
+				try {
+					await deps.prepareAttachmentDownloadSinkRuntimeIncarnation(
+						runtimeIncarnation,
+					);
+				} catch {
+					binaryTransferExecutor.close();
+					throw attachmentPreparationFailed();
+				}
+				const abortPendingScope = async (): Promise<void> => {
+					const response = await downloadSinkExecutor.invoke(
+						'{"type":"retireRuntime"}',
+					);
+					if (response !== '{"type":"retired"}')
+						throw attachmentPreparationFailed();
+				};
+				try {
+					await (deps.deviceTimerLivenessProbe?.(startup.signal) ??
+						probeSystemDeviceTimerLiveness(startup.signal));
+				} catch {
+					binaryTransferExecutor.close();
+					await abortPendingScope().catch(() => undefined);
+					throw attachmentPreparationFailed();
+				}
+				try {
+					created = createConfiguredRuntime.call(
+						WebClientRuntime,
+						replicaInvoke,
+						platformInvoke,
+						httpInvoke,
+						httpCancel,
+						deps.attachmentArtifactExecutor,
+						binaryTransferExecutor,
+						deps.accountLeaseExecutor,
+						deps.authClient.clientId,
+						deps.authClient.platform,
+						deps.authClient.version,
+						() => {
+							if (lifecycleFailed || closing) return;
+							lifecycleFailed = true;
+							if (incarnation !== undefined) incarnation.failed = true;
+							const failure = attachmentPreparationFailed();
+							lifecycleFailure = failure;
+							let barrier!: Promise<void>;
+							barrier = closeCreated().then(
+								() => {
+									if (runtimeTask === started) runtimeTask = undefined;
+									if (restartBarrier === barrier) restartBarrier = undefined;
+								},
+								() => {
+									terminalFailure = failure;
+									throw failure;
+								},
+							);
+							restartBarrier = barrier;
+							void barrier.catch(() => undefined);
+						},
+						downloadSinkExecutor,
+					);
+				} catch {
+					binaryTransferExecutor.close();
+					await abortPendingScope().catch(() => undefined);
+					throw attachmentPreparationFailed();
+				}
 			} else {
 				created = WebClientRuntime.withExecutors(
 					replicaInvoke,
@@ -410,9 +521,32 @@ export function createRuntimeWorkerService(
 				return incarnation;
 			}
 			if (lifecycleFailed) return await rejectLifecycleFailure();
+			if (attachmentDownloadRuntimeIncarnation !== undefined) {
+				try {
+					await deps.commitAttachmentDownloadSinkRuntimeIncarnation?.(
+						attachmentDownloadRuntimeIncarnation,
+					);
+				} catch {
+					const failure = attachmentPreparationFailed();
+					try {
+						await closeCreated();
+					} catch {
+						terminalFailure = failure;
+					}
+					throw failure;
+				}
+			}
 			return incarnation;
 		});
 		runtimeTask = started;
+		void started.then(
+			() => {
+				if (startupAbort === startup) startupAbort = undefined;
+			},
+			() => {
+				if (startupAbort === startup) startupAbort = undefined;
+			},
+		);
 		void started.catch(() => {
 			if (runtimeTask === started && terminalFailure === undefined) {
 				runtimeTask = undefined;
@@ -516,6 +650,7 @@ export function createRuntimeWorkerService(
 		close() {
 			if (closeTask === undefined) {
 				closing = true;
+				startupAbort?.abort();
 				closeTask =
 					terminalFailure === undefined
 						? restartBarrier !== undefined

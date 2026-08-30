@@ -9,6 +9,20 @@
  * which is what lets the Web build prerender its HTML without a Worker global.
  */
 
+import {
+	commitWebAttachmentDownloadRuntimeIncarnation,
+	isAttachmentDownloadSinkCleanupHostRequest,
+	isAttachmentDownloadSinkHostRequest,
+	isAttachmentDownloadSinkRuntimeScopeRequest,
+	prepareWebAttachmentDownloadRuntimeIncarnation,
+	WebAttachmentDownloadSinkRegistry,
+} from "../web-attachment-download-sink";
+
+export type {
+	AtomicAttachmentDownloadSink,
+	AttachmentDownloadSinkGrant,
+} from "../web-attachment-download-sink";
+
 import { WebPlatformStorageHost } from "../web-platform-storage-host";
 import {
 	createSharedWorkerOwner,
@@ -45,6 +59,7 @@ export interface WebClientRuntime {
 	normalizeAccountEmail(value: string): Promise<string>;
 	/** The Crypto channel. The host wraps it in a `CryptoPort`; ticket 22 removes it. */
 	cryptoChannel: WorkerRpcChannel;
+	attachmentDownloads: WebAttachmentDownloadSinkRegistry;
 	workerOwner: SharedWorkerOwner;
 	close(): Promise<void>;
 }
@@ -53,20 +68,82 @@ export function createWebClientRuntime(
 	deps: WebClientRuntimeDeps,
 ): WebClientRuntime {
 	const platformStorage = new WebPlatformStorageHost();
+	const attachmentDownloads = new WebAttachmentDownloadSinkRegistry();
+	const fallbackHostRequest =
+		deps.handleHostRequest ?? platformStorage.invoke.bind(platformStorage);
 	const workerOwner = createSharedWorkerOwner({
 		createWorker: deps.createWorker,
-		handleHostRequest:
-			deps.handleHostRequest ?? platformStorage.invoke.bind(platformStorage),
+		handleHostRequest: (payload, signal) => {
+			if (isAttachmentDownloadSinkRuntimeScopeRequest(payload)) {
+				const transition =
+					payload.phase === "prepare"
+						? prepareWebAttachmentDownloadRuntimeIncarnation
+						: commitWebAttachmentDownloadRuntimeIncarnation;
+				return transition(attachmentDownloads, payload.runtimeIncarnation).then(
+					() => payload.phase,
+				);
+			}
+			if (isAttachmentDownloadSinkHostRequest(payload)) {
+				if (signal.aborted)
+					return Promise.reject(new Error("Sink request cancelled"));
+				return attachmentDownloads.invoke(
+					payload.controlRequestJson,
+					payload.binaryChunk,
+					payload.runtimeIncarnation,
+				);
+			}
+			return fallbackHostRequest(payload, signal);
+		},
+		handleClosingHostRequest: (payload, signal) => {
+			if (isAttachmentDownloadSinkRuntimeScopeRequest(payload)) {
+				const transition =
+					payload.phase === "prepare"
+						? prepareWebAttachmentDownloadRuntimeIncarnation
+						: commitWebAttachmentDownloadRuntimeIncarnation;
+				return transition(attachmentDownloads, payload.runtimeIncarnation).then(
+					() => payload.phase,
+				);
+			}
+			if (
+				!isAttachmentDownloadSinkCleanupHostRequest(payload) ||
+				signal.aborted
+			)
+				return Promise.reject(new Error("Host request is fenced by close"));
+			return attachmentDownloads.invoke(
+				payload.controlRequestJson,
+				undefined,
+				payload.runtimeIncarnation,
+			);
+		},
+		beforeWorkerTerminate: () => attachmentDownloads.drainClose(),
+		preserveHostRequestDuringClose: (payload) =>
+			isAttachmentDownloadSinkHostRequest(payload) ||
+			isAttachmentDownloadSinkRuntimeScopeRequest(payload),
 	});
-	const runtime = createWorkerRuntime(
-		workerOwner.channel("runtime"),
-		workerOwner.close,
-	);
+	let closeTask: Promise<void> | undefined;
+	const close = (): Promise<void> => {
+		attachmentDownloads.beginClose();
+		if (closeTask !== undefined) return closeTask;
+		const closing = workerOwner.close().then(
+			() => attachmentDownloads.drainClose(),
+			async (error) => {
+				await attachmentDownloads.drainClose();
+				throw error;
+			},
+		);
+		closeTask = closing;
+		void closing.catch(() => {
+			if (closeTask === closing) closeTask = undefined;
+		});
+		return closing;
+	};
+	const runtime = createWorkerRuntime(workerOwner.channel("runtime"), close);
 	return {
 		workerOwner,
+		attachmentDownloads,
 		cryptoChannel: workerOwner.channel("crypto"),
 		runtime,
 		normalizeAccountEmail: runtime.normalizeAccountEmail,
-		close: workerOwner.close,
+		close,
 	};
 }

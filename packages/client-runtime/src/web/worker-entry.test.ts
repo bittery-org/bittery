@@ -20,6 +20,23 @@ class ScopeDouble implements WebRuntimeWorkerScope {
 
 	postMessage(message: unknown): void {
 		this.posts.push(message);
+		if (
+			typeof message === "object" &&
+			message !== null &&
+			(message as { type?: unknown }).type === "host-request" &&
+			(message as { payload?: { type?: unknown } }).payload?.type ===
+				"attachmentDownloadSinkRuntimeScope"
+		) {
+			const id = (message as { id: number }).id;
+			queueMicrotask(() =>
+				this.dispatch({
+					type: "host-response",
+					id,
+					ok: true,
+					value: "activated",
+				}),
+			);
+		}
 	}
 
 	dispatch(data: unknown): void {
@@ -44,6 +61,7 @@ describe("Web Runtime Worker composition", () => {
 		const runtime = new RuntimeDouble();
 		let ports: unknown[] = [];
 		serveWebRuntimeWorker(scope, {
+			deviceTimerLivenessProbe: async () => undefined,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () =>
 				({
@@ -57,8 +75,13 @@ describe("Web Runtime Worker composition", () => {
 							artifact: unknown,
 							binary: unknown,
 							lease: unknown,
+							_clientId: string,
+							_platform: string,
+							_version: string,
+							_lifecycleError: (errorJson: string) => void,
+							downloadSink: unknown,
 						) {
-							ports = [artifact, binary, lease];
+							ports = [artifact, binary, lease, downloadSink];
 							return runtime;
 						},
 					},
@@ -78,6 +101,9 @@ describe("Web Runtime Worker composition", () => {
 		expect(ports[0]).toBeInstanceOf(IndexedDbAttachmentArtifactExecutor);
 		expect(ports[1]).toBeInstanceOf(WebBinaryTransferExecutor);
 		expect(Reflect.ownKeys(ports[2] ?? {})).toEqual(["acquire"]);
+		expect(
+			Object.getOwnPropertyNames(Object.getPrototypeOf(ports[3] ?? {})),
+		).toEqual(["constructor", "invoke"]);
 	});
 
 	test("reconstruction replaces the concrete binary executor closed by the prior wrapper", async () => {
@@ -87,6 +113,7 @@ describe("Web Runtime Worker composition", () => {
 		const runtimes = [new RuntimeDouble(), new RuntimeDouble()];
 		let loads = 0;
 		serveWebRuntimeWorker(scope, {
+			deviceTimerLivenessProbe: async () => undefined,
 			authClient: { clientId: "client", platform: "web", version: "1" },
 			loadWasm: async () => {
 				const runtime = runtimes[loads++];
@@ -148,6 +175,33 @@ describe("Web Runtime Worker composition", () => {
 		expect((await response(3)).ok).toBe(true);
 
 		expect(binaries).toHaveLength(2);
+		const runtimeScopes = scope.posts
+			.filter(
+				(post) =>
+					typeof post === "object" &&
+					post !== null &&
+					(post as { type?: unknown }).type === "host-request" &&
+					(post as { payload?: { type?: unknown } }).payload?.type ===
+						"attachmentDownloadSinkRuntimeScope",
+			)
+			.map(
+				(post) =>
+					(
+						post as {
+							payload: { runtimeIncarnation: string; phase: string };
+						}
+					).payload,
+			);
+		expect(runtimeScopes.map(({ phase }) => phase)).toEqual([
+			"prepare",
+			"commit",
+			"prepare",
+			"commit",
+		]);
+		expect(
+			new Set(runtimeScopes.map(({ runtimeIncarnation }) => runtimeIncarnation))
+				.size,
+		).toBe(2);
 		expect(binaries[1]).not.toBe(binaries[0]);
 		await expect(
 			binaries[0]?.invoke('{"type":"cancelTransfer","transferId":"old"}'),

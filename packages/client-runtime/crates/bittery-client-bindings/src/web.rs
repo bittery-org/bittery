@@ -272,6 +272,7 @@ impl WebClientRuntime {
         platform: String,
         version: String,
         lifecycle_error: js_sys::Function,
+        download_sink_executor: JsValue,
     ) -> Result<Self, JsValue> {
         let platform = client_platform(&platform)?;
         let config = core::AuthClientConfig::new(client_id, platform, version)
@@ -292,6 +293,7 @@ impl WebClientRuntime {
             binary_executor,
             lease_executor,
             lifecycle_error,
+            download_sink_executor,
         )?;
         Ok(Self::from_inner_with_attachment_move_resources(
             inner, resources,

@@ -127,6 +127,7 @@ pub(crate) struct AttachmentDownloadGrant {
 pub(crate) enum AttachmentDownloadGrantAnswer {
     Grant(Box<AttachmentDownloadGrant>),
     StaleAuthority,
+    AccessDenied,
 }
 
 pub(crate) enum AttachmentRenameAnswer {
@@ -796,11 +797,14 @@ impl<'transport> AuthHttpClient<'transport> {
             HttpResponse::Completed { status: 404, .. } => Ok(AuthenticatedOutcome::Ok(
                 AttachmentDownloadGrantAnswer::StaleAuthority,
             )),
+            HttpResponse::Completed { status: 403, .. } => Ok(AuthenticatedOutcome::Ok(
+                AttachmentDownloadGrantAnswer::AccessDenied,
+            )),
             HttpResponse::Completed { status: 401, .. } => {
                 Ok(AuthenticatedOutcome::ReauthenticationRequired)
             }
             HttpResponse::Completed {
-                status: 403 | 408 | 425 | 429 | 500..=599,
+                status: 408 | 425 | 429 | 500..=599,
                 ..
             }
             | HttpResponse::NetworkFailure
@@ -1976,7 +1980,7 @@ mod tests {
             ),
             (
                 completed(403, "application/problem+json", json!({})),
-                "transient",
+                "denied",
             ),
             (
                 completed(408, "application/problem+json", json!({})),
@@ -2020,6 +2024,10 @@ mod tests {
                 (
                     "stale",
                     AuthenticatedOutcome::Ok(AttachmentDownloadGrantAnswer::StaleAuthority),
+                )
+                | (
+                    "denied",
+                    AuthenticatedOutcome::Ok(AttachmentDownloadGrantAnswer::AccessDenied),
                 )
                 | ("reauth", AuthenticatedOutcome::ReauthenticationRequired)
                 | ("transient", AuthenticatedOutcome::Transient) => {}

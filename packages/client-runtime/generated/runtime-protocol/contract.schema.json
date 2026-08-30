@@ -1036,6 +1036,34 @@
             "accountId",
             "attachmentId"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "sinkCapabilityId": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            },
+            "type": {
+              "type": "string",
+              "const": "downloadAttachment"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId",
+            "sinkCapabilityId"
+          ]
         }
       ]
     },
@@ -1190,6 +1218,27 @@
             "type": {
               "type": "string",
               "const": "attachmentDeleted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "attachmentDownloaded"
             }
           },
           "additionalProperties": false,

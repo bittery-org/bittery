@@ -5677,6 +5677,17 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class DownloadAttachment(
+        val `accountId`: kotlin.String,
+        val `attachmentId`: kotlin.String,
+        val `sinkCapabilityId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
 
 
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
@@ -5827,6 +5838,15 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.DownloadAttachment -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`attachmentId`,
+        this.`sinkCapabilityId`
+    )
+
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
@@ -5917,6 +5937,11 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterTypeAttachmentName.read(buf),
                 )
             18 -> RuntimeRequest.DeleteAttachment(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            19 -> RuntimeRequest.DownloadAttachment(
+                FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
@@ -6074,6 +6099,15 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterString.allocationSize(value.`attachmentId`)
             )
         }
+        is RuntimeRequest.DownloadAttachment -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`attachmentId`)
+                + FfiConverterString.allocationSize(value.`sinkCapabilityId`)
+            )
+        }
     }
 
     override fun write(value: RuntimeRequest, buf: ByteBuffer) {
@@ -6191,6 +6225,13 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
+            is RuntimeRequest.DownloadAttachment -> {
+                buf.putInt(19)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`attachmentId`, buf)
+                FfiConverterString.write(value.`sinkCapabilityId`, buf)
+                Unit
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
@@ -6273,6 +6314,16 @@ sealed class RuntimeResponse {
         companion object
     }
 
+    data class AttachmentDownloaded(
+        val `accountId`: kotlin.String,
+        val `attachmentId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
     data class Teardown(
         val `scope`: uniffi.bittery_client_bindings.TeardownScope,
         val `status`: uniffi.bittery_client_bindings.TeardownStatus,
@@ -6330,7 +6381,11 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            8 -> RuntimeResponse.Teardown(
+            8 -> RuntimeResponse.AttachmentDownloaded(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            9 -> RuntimeResponse.Teardown(
                 FfiConverterTypeTeardownScope.read(buf),
                 FfiConverterTypeTeardownStatus.read(buf),
                 FfiConverterSequenceTypeTeardownPhase.read(buf),
@@ -6398,6 +6453,14 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 + FfiConverterString.allocationSize(value.`attachmentId`)
             )
         }
+        is RuntimeResponse.AttachmentDownloaded -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`attachmentId`)
+            )
+        }
         is RuntimeResponse.Teardown -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -6455,8 +6518,14 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
-            is RuntimeResponse.Teardown -> {
+            is RuntimeResponse.AttachmentDownloaded -> {
                 buf.putInt(8)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`attachmentId`, buf)
+                Unit
+            }
+            is RuntimeResponse.Teardown -> {
+                buf.putInt(9)
                 FfiConverterTypeTeardownScope.write(value.`scope`, buf)
                 FfiConverterTypeTeardownStatus.write(value.`status`, buf)
                 FfiConverterSequenceTypeTeardownPhase.write(value.`failures`, buf)

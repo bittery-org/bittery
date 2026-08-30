@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import {
+	isAttachmentDownloadSinkHostRequest,
+	isAttachmentDownloadSinkRuntimeScopeRequest,
+} from "../web-attachment-download-sink";
 import { createWorkerHostRpc, type WorkerHostRpc } from "./host-rpc";
 import { createSharedWorkerOwner, type SharedWorkerHandle } from "./owner";
 import {
@@ -6,6 +10,7 @@ import {
 	type WorkerChannelService,
 	type WorkerRouterScope,
 } from "./router";
+import { prepareWorkerValueForPost } from "./wire";
 
 /** Stands in for a `KeyRef`: an opaque token whose prototype is not `Object.prototype`. */
 class OpaqueTokenDouble {}
@@ -18,10 +23,16 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 class MultiplexWorkerDouble implements SharedWorkerHandle {
 	onmessage: ((event: MessageEvent) => void) | null = null;
+	onmessageerror: ((event: MessageEvent) => void) | null = null;
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	terminateCalls = 0;
+	onTerminate: (() => void) | null = null;
+	onPostToMain: ((message: unknown) => void) | null = null;
+	onPostToWorker: ((message: unknown) => void) | null = null;
 	nextPostFailure: Error | null = null;
 	readonly requests: Array<{ channel: string; id: number }> = [];
 	readonly host: WorkerHostRpc;
@@ -38,8 +49,9 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 			addEventListener: (_type, listener) => {
 				this.listeners.add(listener);
 			},
-			postMessage: (message) => {
-				const copy = structuredClone(message);
+			postMessage: (message, transfer) => {
+				const copy = structuredClone(message, { transfer });
+				this.onPostToMain?.(copy);
 				queueMicrotask(() =>
 					this.onmessage?.(new MessageEvent("message", { data: copy })),
 				);
@@ -52,13 +64,14 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 		);
 	}
 
-	postMessage(message: unknown): void {
+	postMessage(message: unknown, transfer?: Transferable[]): void {
 		if (this.nextPostFailure !== null) {
 			const failure = this.nextPostFailure;
 			this.nextPostFailure = null;
 			throw failure;
 		}
-		const copy = structuredClone(message);
+		const copy = structuredClone(message, { transfer });
+		this.onPostToWorker?.(copy);
 		if (
 			typeof copy === "object" &&
 			copy !== null &&
@@ -74,10 +87,15 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 
 	terminate(): void {
 		this.terminateCalls += 1;
+		this.onTerminate?.();
 	}
 
 	fail(message: string): void {
 		this.onerror?.(new ErrorEvent("error", { message }));
+	}
+
+	failMessage(): void {
+		this.onmessageerror?.(new MessageEvent("messageerror"));
 	}
 
 	emitToMain(message: unknown): void {
@@ -90,6 +108,244 @@ class MultiplexWorkerDouble implements SharedWorkerHandle {
 }
 
 describe("shared worker RPC", () => {
+	test("transfers the exact Attachment Download plaintext chunk out of the Worker", async () => {
+		let workerReference: Uint8Array | undefined;
+		let hostReference: Uint8Array | undefined;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					workerReference = new Uint8Array([1, 2, 3]);
+					return host.request<string>({
+						type: "attachmentDownloadSink",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"write","capabilityId":"x"}',
+						binaryChunk: workerReference,
+					});
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (payload) => {
+				hostReference = (payload as { binaryChunk: Uint8Array }).binaryChunk;
+				return "written";
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("written");
+		expect(workerReference?.byteLength).toBe(0);
+		expect(hostReference).toEqual(new Uint8Array([1, 2, 3]));
+	});
+
+	test("rejects a transferred partial plaintext view before invoking the host", async () => {
+		let workerBacking: Uint8Array | undefined;
+		let hostCalls = 0;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => {
+					workerBacking = new Uint8Array([9, 1, 2, 8]);
+					const partial = new Uint8Array(workerBacking.buffer, 1, 2);
+					return host.request<string>({
+						type: "attachmentDownloadSink",
+						runtimeIncarnation: "runtime-one",
+						controlRequestJson: '{"type":"write","capabilityId":"x"}',
+						binaryChunk: partial,
+					});
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostCalls += 1;
+				return "must-not-run";
+			},
+		});
+		await expect(
+			owner.channel("runtime").request<string>({}),
+		).rejects.toMatchObject({ code: "invalid-input" });
+		expect(workerBacking?.byteLength).toBe(0);
+		expect(hostCalls).toBe(0);
+	});
+
+	test("rejects SharedArrayBuffer plaintext and wipes every retained alias", () => {
+		const backing = new Uint8Array(new SharedArrayBuffer(4));
+		backing.set([9, 1, 2, 8]);
+		const partial = new Uint8Array(backing.buffer, 1, 2);
+		expect(() =>
+			prepareWorkerValueForPost({
+				type: "attachmentDownloadSink",
+				runtimeIncarnation: "runtime-one",
+				controlRequestJson: '{"type":"write","capabilityId":"x"}',
+				binaryChunk: partial,
+			}),
+		).toThrow("owned ArrayBuffer");
+		expect(Array.from(backing)).toEqual([0, 0, 0, 0]);
+	});
+
+	test("malformed reverse RPC is settled once without escaping the message boundary", async () => {
+		const worker = new MultiplexWorkerDouble({
+			runtime: { request: async () => "ready" },
+		});
+		const responses: unknown[] = [];
+		worker.onPostToWorker = (message) => {
+			if ((message as { type?: unknown }).type === "host-response") {
+				responses.push(message);
+			}
+		};
+		let hostCalls = 0;
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostCalls += 1;
+				return "must-not-run";
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("ready");
+
+		expect(() =>
+			worker.emitToMain({ type: "host-request", id: 41, payload: new Map() }),
+		).not.toThrow();
+		await flush();
+
+		expect(hostCalls).toBe(0);
+		expect(responses).toEqual([
+			{
+				type: "host-response",
+				id: 41,
+				ok: false,
+				code: "invalid-input",
+				message: "The worker boundary accepts only plain data and byte arrays.",
+			},
+		]);
+		await owner.close();
+	});
+
+	test("a throwing reverse-RPC preservation classifier fails closed without invoking the host", async () => {
+		const worker = new MultiplexWorkerDouble({
+			runtime: { request: async () => "ready" },
+		});
+		const responses: unknown[] = [];
+		worker.onPostToWorker = (message) => {
+			if ((message as { type?: unknown }).type === "host-response") {
+				responses.push(message);
+			}
+		};
+		let hostCalls = 0;
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostCalls += 1;
+				return "must-not-run";
+			},
+			preserveHostRequestDuringClose: () => {
+				throw new Error("classifier escaped");
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("ready");
+
+		expect(() =>
+			worker.emitToMain({ type: "host-request", id: 42, payload: {} }),
+		).not.toThrow();
+		await flush();
+
+		expect(hostCalls).toBe(0);
+		expect(responses).toEqual([
+			expect.objectContaining({
+				type: "host-response",
+				id: 42,
+				ok: false,
+				code: "backend-failure",
+			}),
+		]);
+		await owner.close();
+	});
+
+	test("malformed reverse RPC during close settles and cannot delay exact termination", async () => {
+		const releaseClose = deferred<void>();
+		const worker = new MultiplexWorkerDouble({
+			runtime: {
+				request: async () => "ready",
+				close: async () => releaseClose.promise,
+			},
+		});
+		const responses: unknown[] = [];
+		let closeAcks = 0;
+		worker.onPostToWorker = (message) => {
+			if ((message as { type?: unknown }).type === "host-response") {
+				responses.push(message);
+			}
+		};
+		worker.onPostToMain = (message) => {
+			if ((message as { type?: unknown }).type === "close-ack") closeAcks += 1;
+		};
+		let closingHostCalls = 0;
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleClosingHostRequest: async () => {
+				closingHostCalls += 1;
+				return "must-not-run";
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("ready");
+		const close = owner.close();
+
+		expect(() =>
+			worker.emitToMain({ type: "host-request", id: 43, payload: new Map() }),
+		).not.toThrow();
+		await flush();
+		expect(responses).toEqual([
+			expect.objectContaining({ id: 43, ok: false, code: "invalid-input" }),
+		]);
+		expect(closingHostCalls).toBe(0);
+		expect(worker.terminateCalls).toBe(0);
+
+		releaseClose.resolve();
+		await close;
+		expect(closeAcks).toBe(1);
+		expect(worker.terminateCalls).toBe(1);
+		expect(owner.close()).toBe(close);
+	});
+
+	test("duplicate reverse-RPC ids receive one failure and never overwrite active host work", async () => {
+		const hostStarted = deferred<void>();
+		const releaseHost = deferred<void>();
+		const worker = new MultiplexWorkerDouble({
+			runtime: { request: async () => "ready" },
+		});
+		const responses: unknown[] = [];
+		worker.onPostToWorker = (message) => {
+			if ((message as { type?: unknown }).type === "host-response") {
+				responses.push(message);
+			}
+		};
+		let hostCalls = 0;
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (_payload, signal) => {
+				hostCalls += 1;
+				hostStarted.resolve();
+				await releaseHost.promise;
+				return signal.aborted ? "aborted" : "must-not-settle";
+			},
+		});
+		expect(await owner.channel("runtime").request<string>({})).toBe("ready");
+		worker.emitToMain({ type: "host-request", id: 44, payload: { call: 1 } });
+		await hostStarted.promise;
+
+		expect(() =>
+			worker.emitToMain({ type: "host-request", id: 44, payload: { call: 2 } }),
+		).not.toThrow();
+		await Promise.resolve();
+		expect(hostCalls).toBe(1);
+		expect(responses).toEqual([
+			expect.objectContaining({ id: 44, ok: false, code: "invalid-input" }),
+		]);
+
+		releaseHost.resolve();
+		await owner.close();
+		expect(responses).toHaveLength(1);
+		expect(worker.terminateCalls).toBe(1);
+	});
 	test("channel subscriptions receive clone-safe notifications until detached", async () => {
 		const worker = new MultiplexWorkerDouble({
 			runtime: {
@@ -278,6 +534,316 @@ describe("shared worker RPC", () => {
 		expect(serviceCloseCalls).toBe(1);
 		expect(worker.terminateCalls).toBe(1);
 		await owner.close();
+		expect(worker.terminateCalls).toBe(1);
+	});
+
+	test("close keeps cleanup reverse RPC alive and drains host state before Worker termination", async () => {
+		const events: string[] = [];
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () => "ready",
+				close: async () => {
+					events.push("runtime-close");
+					await host.request({ type: "cleanup" });
+					events.push("discard-drained");
+				},
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => "normal",
+			handleClosingHostRequest: async (payload) => {
+				expect(payload).toEqual({ type: "cleanup" });
+				events.push("discard");
+				return "discarded";
+			},
+			preserveHostRequestDuringClose: () => true,
+			beforeWorkerTerminate: async () => {
+				events.push("registry-drained");
+			},
+		});
+		await owner.channel("runtime").request({});
+		await owner.close();
+		expect(events).toEqual([
+			"runtime-close",
+			"discard",
+			"discard-drained",
+			"registry-drained",
+		]);
+		expect(worker.terminateCalls).toBe(1);
+	});
+
+	for (const failureKind of ["messageerror", "error"] as const) {
+		test(`a ${failureKind} after close ACK overrides provisional success while preserved host cleanup drains`, async () => {
+			const hostStarted = deferred<void>();
+			const releaseHost = deferred<void>();
+			const workerCloseStarted = deferred<void>();
+			const closeAckPosted = deferred<void>();
+			const events: string[] = [];
+			const worker = new MultiplexWorkerDouble((host) => ({
+				runtime: {
+					request: async () => host.request({ type: "preserved-cleanup" }),
+					close: async () => workerCloseStarted.resolve(),
+				},
+			}));
+			worker.onTerminate = () => events.push("terminated");
+			worker.onPostToMain = (message) => {
+				if ((message as { type?: unknown }).type === "close-ack") {
+					closeAckPosted.resolve();
+				}
+			};
+			const owner = createSharedWorkerOwner({
+				createWorker: () => worker,
+				handleHostRequest: async () => {
+					hostStarted.resolve();
+					await releaseHost.promise;
+					events.push("host-drained");
+					return "done";
+				},
+				preserveHostRequestDuringClose: () => true,
+				beforeWorkerTerminate: async () => {
+					events.push("before-terminate");
+				},
+			});
+			const request = owner.channel("runtime").request({});
+			void request.catch(() => undefined);
+			await hostStarted.promise;
+
+			const close = owner.close();
+			void close.catch(() => undefined);
+			expect(owner.close()).toBe(close);
+			await workerCloseStarted.promise;
+			await closeAckPosted.promise;
+			await Promise.resolve();
+			expect(worker.terminateCalls).toBe(0);
+
+			if (failureKind === "messageerror") worker.failMessage();
+			else worker.fail("worker failed after close ACK");
+			worker.emitToMain({ type: "close-ack", id: 0, ok: true });
+			worker.fail("duplicate worker failure");
+			expect(owner.close()).toBe(close);
+			expect(worker.terminateCalls).toBe(0);
+
+			releaseHost.resolve();
+			await expect(close).rejects.toMatchObject({ code: "backend-failure" });
+			expect(events).toEqual([
+				"host-drained",
+				"before-terminate",
+				"terminated",
+			]);
+			expect(worker.terminateCalls).toBe(1);
+			await expect(owner.close()).rejects.toMatchObject({
+				code: "backend-failure",
+			});
+			expect(worker.terminateCalls).toBe(1);
+		});
+	}
+
+	test("a cleanup failure retains the Worker until an identical close retry drains", async () => {
+		let cleanups = 0;
+		const worker = new MultiplexWorkerDouble({
+			runtime: { request: async () => "ready", close: async () => undefined },
+		});
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			beforeWorkerTerminate: async () => {
+				cleanups += 1;
+				if (cleanups === 1) throw new Error("registry cleanup failed");
+			},
+		});
+		await owner.channel("runtime").request({});
+		await expect(owner.close()).rejects.toThrow("registry cleanup failed");
+		expect(worker.terminateCalls).toBe(0);
+		await expect(owner.channel("runtime").request({})).rejects.toMatchObject({
+			code: "closed",
+		});
+		await expect(owner.close()).resolves.toBeUndefined();
+		expect(cleanups).toBe(2);
+		expect(worker.terminateCalls).toBe(1);
+	});
+
+	test("a Worker crash automatically fences and drains main-thread ownership", async () => {
+		const drained = deferred<void>();
+		const worker = new MultiplexWorkerDouble({
+			runtime: { request: async () => "ready" },
+		});
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			beforeWorkerTerminate: async () => drained.resolve(),
+		});
+		await owner.channel("runtime").request({});
+		worker.fail("worker crashed");
+		await drained.promise;
+		await expect(owner.close()).rejects.toMatchObject({
+			code: "backend-failure",
+		});
+		expect(worker.terminateCalls).toBe(1);
+	});
+
+	test("a close post failure drains held preserved host work before terminating once", async () => {
+		const hostStarted = deferred<void>();
+		const releaseHost = deferred<void>();
+		const events: string[] = [];
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async () =>
+					host.request({ type: "attachmentDownloadSinkRuntimeScope" }),
+			},
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async () => {
+				hostStarted.resolve();
+				await releaseHost.promise;
+				events.push("host-drained");
+				return "done";
+			},
+			preserveHostRequestDuringClose: () => true,
+			beforeWorkerTerminate: async () => {
+				events.push("before-terminate");
+			},
+		});
+		const request = owner.channel("runtime").request({});
+		void request.catch(() => undefined);
+		await hostStarted.promise;
+		worker.nextPostFailure = new Error("close post failed");
+		let closeSettled = false;
+		const close = owner.close().catch((error: unknown) => {
+			closeSettled = true;
+			return error;
+		});
+		await Promise.resolve();
+		expect(closeSettled).toBe(false);
+		expect(worker.terminateCalls).toBe(0);
+		releaseHost.resolve();
+		await expect(close).resolves.toMatchObject({ code: "backend-failure" });
+		expect(events).toEqual(["host-drained", "before-terminate"]);
+		expect(worker.terminateCalls).toBe(1);
+		await expect(owner.close()).rejects.toMatchObject({
+			code: "backend-failure",
+		});
+		expect(worker.terminateCalls).toBe(1);
+	});
+
+	test("general Worker failure waits for a non-cooperative host handler before terminating", async () => {
+		const hostStarted = deferred<void>();
+		const releaseHost = deferred<void>();
+		const events: string[] = [];
+		let aborted = false;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: { request: async () => host.request({ type: "ordinary" }) },
+		}));
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (_payload, signal) => {
+				hostStarted.resolve();
+				signal.addEventListener("abort", () => {
+					aborted = true;
+				});
+				await releaseHost.promise;
+				events.push("handler-released");
+				return "late";
+			},
+			beforeWorkerTerminate: async () => {
+				events.push("before-terminate");
+			},
+		});
+		const request = owner.channel("runtime").request({});
+		await hostStarted.promise;
+		worker.fail("general failure");
+		await expect(request).rejects.toMatchObject({ code: "backend-failure" });
+		expect(aborted).toBe(true);
+		expect(worker.terminateCalls).toBe(0);
+		releaseHost.resolve();
+		await expect(owner.close()).rejects.toMatchObject({
+			code: "backend-failure",
+		});
+		expect(events).toEqual(["handler-released", "before-terminate"]);
+		expect(worker.terminateCalls).toBe(1);
+	});
+
+	test("Worker message deserialization failure settles and drains ownership exactly once across concurrent shutdown", async () => {
+		const pendingReply = deferred<unknown>();
+		const preservedStarted = deferred<void>();
+		const ordinaryStarted = deferred<void>();
+		const releasePreserved = deferred<void>();
+		const releaseOrdinary = deferred<void>();
+		const events: string[] = [];
+		let ordinaryAborted = false;
+		const worker = new MultiplexWorkerDouble((host) => ({
+			runtime: {
+				request: async (payload) => {
+					const kind = (payload as { kind: string }).kind;
+					if (kind === "pending") return pendingReply.promise;
+					return host.request({ kind });
+				},
+			},
+		}));
+		worker.onTerminate = () => events.push("terminated");
+		const owner = createSharedWorkerOwner({
+			createWorker: () => worker,
+			handleHostRequest: async (payload, signal) => {
+				const kind = (payload as { kind: string }).kind;
+				if (kind === "preserved") {
+					preservedStarted.resolve();
+					await releasePreserved.promise;
+					events.push("preserved-drained");
+					return "preserved";
+				}
+				ordinaryStarted.resolve();
+				signal.addEventListener("abort", () => {
+					ordinaryAborted = true;
+				});
+				await releaseOrdinary.promise;
+				events.push("ordinary-drained");
+				return "ordinary";
+			},
+			preserveHostRequestDuringClose: (payload) =>
+				(payload as { kind?: string }).kind === "preserved",
+			beforeWorkerTerminate: async () => {
+				events.push("before-terminate");
+			},
+		});
+		const requests = [
+			owner.channel("runtime").request({ kind: "pending" }),
+			owner.channel("runtime").request({ kind: "preserved" }),
+			owner.channel("runtime").request({ kind: "ordinary" }),
+		];
+		for (const request of requests) void request.catch(() => undefined);
+		await Promise.all([preservedStarted.promise, ordinaryStarted.promise]);
+
+		worker.failMessage();
+		await Promise.resolve();
+		for (const request of requests) {
+			await expect(request).rejects.toMatchObject({ code: "backend-failure" });
+		}
+		expect(ordinaryAborted).toBe(true);
+		expect(worker.terminateCalls).toBe(0);
+		expect(worker.onmessage).not.toBeNull();
+		expect(worker.onmessageerror).not.toBeNull();
+		expect(worker.onerror).not.toBeNull();
+		const close = owner.close();
+		void close.catch(() => undefined);
+		worker.fail("concurrent worker error");
+
+		releasePreserved.resolve();
+		await Promise.resolve();
+		expect(worker.terminateCalls).toBe(0);
+		releaseOrdinary.resolve();
+		await expect(close).rejects.toMatchObject({ code: "backend-failure" });
+		expect(events).toEqual([
+			"preserved-drained",
+			"ordinary-drained",
+			"before-terminate",
+			"terminated",
+		]);
+		expect(worker.terminateCalls).toBe(1);
+		expect(worker.onmessage).toBeNull();
+		expect(worker.onmessageerror).toBeNull();
+		expect(worker.onerror).toBeNull();
+		pendingReply.resolve("too late");
+		await Promise.resolve();
+		expect(events.at(-1)).toBe("terminated");
 		expect(worker.terminateCalls).toBe(1);
 	});
 
@@ -531,6 +1097,119 @@ describe("shared worker RPC", () => {
 		await hostAborted.promise;
 		await close;
 	});
+
+	for (const scenario of [
+		{
+			name: "sink scope prepare",
+			payload: {
+				type: "attachmentDownloadSinkRuntimeScope",
+				runtimeIncarnation: "runtime-one",
+				phase: "prepare",
+			},
+			preserve: true,
+		},
+		{
+			name: "sink scope commit",
+			payload: {
+				type: "attachmentDownloadSinkRuntimeScope",
+				runtimeIncarnation: "runtime-one",
+				phase: "commit",
+			},
+			preserve: true,
+		},
+		{
+			name: "sink lifecycle abort",
+			payload: {
+				type: "attachmentDownloadSink",
+				runtimeIncarnation: "runtime-one",
+				controlRequestJson: '{"type":"retireRuntime"}',
+			},
+			preserve: true,
+		},
+		{
+			name: "Account retirement completion",
+			payload: {
+				type: "attachmentDownloadSink",
+				runtimeIncarnation: "runtime-one",
+				controlRequestJson:
+					'{"type":"completeAccountRetirement","accountId":"account-one"}',
+			},
+			preserve: true,
+		},
+		{
+			name: "platform metadata",
+			payload: { type: "get", area: "devicePlain", key: "catalog" },
+			preserve: false,
+		},
+		{
+			name: "Session transport",
+			payload: { type: "http", dispatchId: "session-refresh" },
+			preserve: false,
+		},
+	] as const) {
+		test(`close settles and drains reverse RPC during ${scenario.name}`, async () => {
+			const hostStarted = deferred<void>();
+			const handlerStarted = deferred<void>();
+			const workerHostSettled = deferred<void>();
+			const releaseHost = deferred<void>();
+			let hostWait: Promise<unknown> | undefined;
+			let observedCode: string | undefined;
+			let aborted = false;
+			let mutatedAfterClose = false;
+			const worker = new MultiplexWorkerDouble((host) => ({
+				runtime: {
+					request: async () => {
+						hostWait = host.request(scenario.payload);
+						hostStarted.resolve();
+						return hostWait;
+					},
+					close: async () => {
+						try {
+							await hostWait;
+						} catch (error) {
+							observedCode = (error as { code?: string }).code;
+						} finally {
+							workerHostSettled.resolve();
+						}
+					},
+				},
+			}));
+			const owner = createSharedWorkerOwner({
+				createWorker: () => worker,
+				handleHostRequest: async (_payload, signal) => {
+					handlerStarted.resolve();
+					signal.addEventListener("abort", () => {
+						aborted = true;
+					});
+					await releaseHost.promise;
+					if (!signal.aborted) mutatedAfterClose = true;
+					return "settled";
+				},
+				preserveHostRequestDuringClose: (payload) =>
+					isAttachmentDownloadSinkHostRequest(payload) ||
+					isAttachmentDownloadSinkRuntimeScopeRequest(payload),
+			});
+			const request = owner.channel("runtime").request({});
+			void request.catch(() => undefined);
+			await hostStarted.promise;
+			await handlerStarted.promise;
+			let closeSettled = false;
+			const close = owner.close().then(() => {
+				closeSettled = true;
+			});
+			await Promise.resolve();
+			expect(closeSettled).toBe(false);
+			expect(aborted).toBe(!scenario.preserve);
+			if (!scenario.preserve) {
+				await workerHostSettled.promise;
+				expect(observedCode).toBe("closed");
+			}
+			releaseHost.resolve();
+			await close;
+			expect(worker.terminateCalls).toBe(1);
+			expect(mutatedAfterClose).toBe(scenario.preserve);
+		});
+	}
 
 	test("a worker crash aborts pending main-thread host work", async () => {
 		const hostStarted = deferred<void>();

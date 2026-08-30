@@ -72,13 +72,13 @@ pub use platform_storage::SerializedPlatformStorageExecutor;
 pub use protocol::runtime_protocol_contract_schema;
 pub use protocol::{
     AccountAccessState, AccountDisplayIdentity, AccountId, AccountStatus, AccountWaitingReason,
-    AttachmentProjection, CreateShareDraft, CustomFieldKind, ItemProjectionStatus, ItemsProjection,
-    LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest, ObservationSink,
-    PendingShareResult, PendingShareResultsProjection, RequestCancellation, RuntimeError,
-    RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest, RuntimeResponse,
-    RuntimeStatusProjection, ServerAccountDeletionOutcome, ShareAccessMode, ShareExpiration,
-    TeardownPhase, TeardownScope, TeardownStatus, VaultProjection, VaultProjectionRole,
-    VaultProjectionType,
+    AttachmentProjection, CreateShareDraft, CustomFieldKind, Incarnation, ItemProjectionStatus,
+    ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest,
+    ObservationSink, PendingShareResult, PendingShareResultsProjection, RequestCancellation,
+    RuntimeError, RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest,
+    RuntimeResponse, RuntimeStatusProjection, ServerAccountDeletionOutcome, ShareAccessMode,
+    ShareExpiration, TeardownPhase, TeardownScope, TeardownStatus, VaultProjection,
+    VaultProjectionRole, VaultProjectionType,
 };
 
 #[cfg(feature = "persistence-contract-schema")]
@@ -94,10 +94,12 @@ pub use replica::SerializedReplicaExecutor;
 pub use replica::SqliteReplica;
 #[doc(hidden)]
 pub use runtime::{
-    AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort, AttachmentMoveDownload,
-    AttachmentMoveDownloadRequest, AttachmentMovePreparationFacade, AttachmentMoveTransferError,
-    AttachmentMoveTransferPort, AttachmentMoveUpload, AttachmentMoveUploadGrant,
-    TeardownHostCleanup, TeardownHostCleanupRequest, TeardownHostCleanupResponse,
+    AttachmentDownloadFacade, AttachmentDownloadSink, AttachmentDownloadSinkError,
+    AttachmentDownloadSinkPort, AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort,
+    AttachmentMoveDownload, AttachmentMoveDownloadRequest, AttachmentMovePreparationFacade,
+    AttachmentMoveTransferError, AttachmentMoveTransferPort, AttachmentMoveUpload,
+    AttachmentMoveUploadGrant, TeardownHostCleanup, TeardownHostCleanupRequest,
+    TeardownHostCleanupResponse,
 };
 pub use runtime::{ObservationHandle, Runtime};
 

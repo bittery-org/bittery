@@ -57,6 +57,10 @@ accountId: string
 attachmentId: string
 type: "attachmentDeleted"
 } | {
+accountId: string
+attachmentId: string
+type: "attachmentDownloaded"
+} | {
 /**
  * @maxItems 4
  */
@@ -170,6 +174,11 @@ type: "renameAttachment"
 accountId: string
 attachmentId: string
 type: "deleteAttachment"
+} | {
+accountId: string
+attachmentId: string
+sinkCapabilityId: string
+type: "downloadAttachment"
 })
 export type ShareAccessMode = ("anyone" | "email-restricted")
 export type ShareExpiration = ("1hour" | "1day" | "7days" | "14days" | "30days")

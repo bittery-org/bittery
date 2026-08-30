@@ -186,7 +186,7 @@ mod wasm {
     };
     use async_trait::async_trait;
     use bittery_client_core as core;
-    use js_sys::{Function, Promise, Reflect};
+    use js_sys::{Function, Promise, Reflect, Uint8Array};
     use std::{
         cell::{Cell, RefCell},
         collections::HashMap,
@@ -206,6 +206,234 @@ mod wasm {
             BinaryTransferFailure::Cancelled => TransferFailureClass::Cancelled,
             BinaryTransferFailure::Invariant => TransferFailureClass::Invariant,
         })
+    }
+
+    #[derive(serde::Serialize)]
+    #[serde(
+        tag = "type",
+        rename_all = "camelCase",
+        rename_all_fields = "camelCase"
+    )]
+    enum SinkControl<'a> {
+        Begin {
+            account_id: &'a str,
+            attachment_id: &'a str,
+            capability_id: &'a str,
+            request_scope: &'a str,
+        },
+        Write {
+            capability_id: &'a str,
+        },
+        Commit {
+            capability_id: &'a str,
+        },
+        Discard {
+            capability_id: &'a str,
+        },
+        RetireAccount {
+            account_id: &'a str,
+        },
+        CompleteAccountRetirement {
+            account_id: &'a str,
+        },
+        RetireRuntime,
+    }
+
+    #[derive(serde::Deserialize, PartialEq, Eq)]
+    #[serde(tag = "type", rename_all = "camelCase")]
+    enum SinkAnswer {
+        Begun,
+        Written,
+        Committed,
+        Discarded,
+        Retired,
+        RetirementCompleted,
+        SinkFailure,
+        Cancelled,
+        InvariantViolation,
+    }
+
+    #[derive(Clone)]
+    struct JsAttachmentDownloadSinkPort {
+        executor: JsValue,
+    }
+
+    impl JsAttachmentDownloadSinkPort {
+        fn new(executor: JsValue) -> Result<Self, JsValue> {
+            validate_exact_surface(&executor, &["invoke"])?;
+            Ok(Self { executor })
+        }
+
+        async fn invoke(
+            &self,
+            request: SinkControl<'_>,
+            bytes: Option<&[u8]>,
+        ) -> Result<SinkAnswer, core::AttachmentDownloadSinkError> {
+            let invoke = function(&self.executor, "invoke")
+                .map_err(|_| core::AttachmentDownloadSinkError::Invariant)?;
+            let request = serde_json::to_string(&request)
+                .map_err(|_| core::AttachmentDownloadSinkError::Invariant)?;
+            let binary = bytes
+                .map(Uint8Array::from)
+                .map(JsValue::from)
+                .unwrap_or(JsValue::UNDEFINED);
+            let value = invoke
+                .call2(&self.executor, &JsValue::from_str(&request), &binary)
+                .map_err(|_| core::AttachmentDownloadSinkError::Sink)?
+                .dyn_into::<Promise>()
+                .map_err(|_| core::AttachmentDownloadSinkError::Invariant)?;
+            let answer = JsFuture::from(value)
+                .await
+                .map_err(|_| core::AttachmentDownloadSinkError::Sink)?
+                .as_string()
+                .ok_or(core::AttachmentDownloadSinkError::Invariant)?;
+            let answer: SinkAnswer = serde_json::from_str(&answer)
+                .map_err(|_| core::AttachmentDownloadSinkError::Invariant)?;
+            match answer {
+                SinkAnswer::SinkFailure => Err(core::AttachmentDownloadSinkError::Sink),
+                SinkAnswer::Cancelled => Err(core::AttachmentDownloadSinkError::Cancelled),
+                SinkAnswer::InvariantViolation => Err(core::AttachmentDownloadSinkError::Invariant),
+                answer => Ok(answer),
+            }
+        }
+    }
+
+    struct JsAttachmentDownloadSink {
+        port: Arc<JsAttachmentDownloadSinkPort>,
+        account_id: String,
+        attachment_id: String,
+        capability_id: String,
+    }
+
+    #[async_trait(?Send)]
+    impl core::AttachmentDownloadSink for JsAttachmentDownloadSink {
+        async fn begin(&mut self) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .port
+                .invoke(
+                    SinkControl::Begin {
+                        account_id: &self.account_id,
+                        attachment_id: &self.attachment_id,
+                        capability_id: &self.capability_id,
+                        request_scope: &self.capability_id,
+                    },
+                    None,
+                )
+                .await?
+            {
+                SinkAnswer::Begun => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+
+        async fn write(&mut self, bytes: &[u8]) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .port
+                .invoke(
+                    SinkControl::Write {
+                        capability_id: &self.capability_id,
+                    },
+                    Some(bytes),
+                )
+                .await?
+            {
+                SinkAnswer::Written => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+
+        async fn commit(&mut self) -> Result<(), core::AttachmentDownloadSinkError> {
+            let answer = self
+                .port
+                .invoke(
+                    SinkControl::Commit {
+                        capability_id: &self.capability_id,
+                    },
+                    None,
+                )
+                .await?;
+            match answer {
+                SinkAnswer::Committed => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+
+        async fn discard(&mut self) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .port
+                .invoke(
+                    SinkControl::Discard {
+                        capability_id: &self.capability_id,
+                    },
+                    None,
+                )
+                .await?
+            {
+                SinkAnswer::Discarded => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl core::AttachmentDownloadSinkPort for JsAttachmentDownloadSinkPort {
+        fn claim(
+            &self,
+            account_id: &core::AccountId,
+            attachment_id: &str,
+            capability_id: &str,
+        ) -> Result<Box<dyn core::AttachmentDownloadSink>, core::AttachmentDownloadSinkError>
+        {
+            Ok(Box::new(JsAttachmentDownloadSink {
+                port: Arc::new(self.clone()),
+                account_id: account_id.as_str().to_owned(),
+                attachment_id: attachment_id.to_owned(),
+                capability_id: capability_id.to_owned(),
+            }))
+        }
+
+        async fn retire_account(
+            &self,
+            account_id: &core::AccountId,
+        ) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .invoke(
+                    SinkControl::RetireAccount {
+                        account_id: account_id.as_str(),
+                    },
+                    None,
+                )
+                .await?
+            {
+                SinkAnswer::Retired => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+
+        async fn complete_account_retirement(
+            &self,
+            account_id: &core::AccountId,
+        ) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .invoke(
+                    SinkControl::CompleteAccountRetirement {
+                        account_id: account_id.as_str(),
+                    },
+                    None,
+                )
+                .await?
+            {
+                SinkAnswer::RetirementCompleted => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+
+        async fn retire_runtime(&self) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self.invoke(SinkControl::RetireRuntime, None).await? {
+                SinkAnswer::Retired => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
     }
 
     pub(crate) struct JsAttachmentMoveTransferPort {
@@ -691,16 +919,22 @@ mod wasm {
         binary_executor: JsValue,
         lease_executor: JsValue,
         lifecycle_error: Function,
+        download_sink_executor: JsValue,
     ) -> Result<(Arc<core::Runtime>, WebAttachmentMoveResources), JsValue> {
         let artifacts = Arc::new(JsAttachmentArtifactStore::new(artifact_executor)?);
         let (provisional, published) = shared_artifact_ports(artifacts);
         let binary = Arc::new(JsBinaryTransferExecutor::new(binary_executor)?);
         let transfer: Arc<dyn core::AttachmentMoveTransferPort> =
             Arc::new(JsAttachmentMoveTransferPort::new(Arc::clone(&binary))?);
+        let download_sink_port: Arc<dyn core::AttachmentDownloadSinkPort> =
+            Arc::new(JsAttachmentDownloadSinkPort::new(download_sink_executor)?);
         let leases = Arc::new(JsAttachmentMoveAccountLeasePort::new(lease_executor)?);
         let lease_port: Arc<dyn core::AttachmentMoveAccountLeasePort> = leases.clone();
-        let preparation =
-            core::AttachmentMovePreparationFacade::new(provisional, published, transfer);
+        let preparation = core::AttachmentMovePreparationFacade::new(
+            provisional,
+            published,
+            Arc::clone(&transfer),
+        );
         let runtime =
             core::Runtime::with_configured_serialized_executors_and_attachment_move_preparation(
                 replica,
@@ -711,6 +945,10 @@ mod wasm {
                 lease_port,
             );
         runtime.install_teardown_host_cleanup(Arc::new(JsSpoolTeardown(Arc::clone(&binary))));
+        runtime.install_attachment_download(core::AttachmentDownloadFacade::new(
+            transfer,
+            download_sink_port,
+        ));
         let lifecycle = PreparationLifecycleTask::start(Arc::clone(&runtime), lifecycle_error);
         Ok((
             runtime,

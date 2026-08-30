@@ -66,6 +66,147 @@ pub struct AttachmentEnvelopeScanner {
     envelope_hash: Sha256,
 }
 
+/// Bounded-memory second-pass decoder for the unchanged Attachment blob envelope.
+///
+/// Bytes returned by [`push`](Self::push) are unauthenticated until [`finish`](Self::finish)
+/// succeeds. Callers must therefore write them only to an atomic provisional sink.
+pub struct AttachmentBlobDecryptor {
+    parser: Option<EnvelopeParser>,
+    source: Option<GcmStream>,
+    source_tag: [u8; TAG_LENGTH],
+    source_tag_len: usize,
+    scanned_iv: [u8; IV_LENGTH],
+    expected_envelope_hash: [u8; 32],
+    envelope_hash: Sha256,
+    plaintext_base64: PlaintextBase64Decoder,
+}
+
+impl AttachmentBlobDecryptor {
+    pub fn new(
+        scan: AttachmentEnvelopeScan,
+        source_key: [u8; 32],
+        source_scope: AttachmentBlobScope,
+    ) -> Result<Self, AttachmentMoveCryptoError> {
+        let source_key = Zeroizing::new(source_key);
+        let source_aad = Zeroizing::new(source_scope.aad_bytes()?);
+        Ok(Self {
+            parser: Some(EnvelopeParser::new()),
+            source: Some(GcmStream::new(&source_key, scan.source_iv, &source_aad)?),
+            source_tag: [0; TAG_LENGTH],
+            source_tag_len: 0,
+            scanned_iv: scan.source_iv,
+            expected_envelope_hash: scan.envelope_hash,
+            envelope_hash: Sha256::new(),
+            plaintext_base64: PlaintextBase64Decoder::default(),
+        })
+    }
+
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<u8>, AttachmentMoveCryptoError> {
+        if bytes.len() > MAX_ATTACHMENT_ENVELOPE_INPUT_CHUNK {
+            return Err(AttachmentMoveCryptoError::InputChunkTooLarge);
+        }
+        self.envelope_hash.update(bytes);
+        let decoded = self
+            .parser
+            .as_mut()
+            .ok_or(AttachmentMoveCryptoError::InvalidEnvelope)?
+            .push(bytes)?;
+        let mut output = Vec::with_capacity(decoded.len());
+        for byte in decoded {
+            if self.source_tag_len < TAG_LENGTH {
+                self.source_tag[self.source_tag_len] = byte;
+                self.source_tag_len += 1;
+                continue;
+            }
+            let ciphertext = self.source_tag[0];
+            self.source_tag.copy_within(1.., 0);
+            self.source_tag[TAG_LENGTH - 1] = byte;
+            let Some(source) = self.source.as_mut() else {
+                output.zeroize();
+                return Err(AttachmentMoveCryptoError::InvalidEnvelope);
+            };
+            let mut encoded_plaintext = match source.decrypt_byte(ciphertext) {
+                Ok(value) => value,
+                Err(error) => {
+                    output.zeroize();
+                    return Err(error);
+                }
+            };
+            let result = self.plaintext_base64.push(encoded_plaintext, &mut output);
+            encoded_plaintext.zeroize();
+            if let Err(error) = result {
+                output.zeroize();
+                return Err(error);
+            }
+        }
+        Ok(output)
+    }
+
+    pub fn finish(mut self) -> Result<Vec<u8>, AttachmentMoveCryptoError> {
+        let metadata = self
+            .parser
+            .take()
+            .ok_or(AttachmentMoveCryptoError::InvalidEnvelope)?
+            .finish()?;
+        let envelope_hash: [u8; 32] = self.envelope_hash.clone().finalize().into();
+        if metadata.iv != self.scanned_iv
+            || envelope_hash
+                .ct_eq(&self.expected_envelope_hash)
+                .unwrap_u8()
+                != 1
+            || self.source_tag_len != TAG_LENGTH
+        {
+            return Err(AttachmentMoveCryptoError::InvalidEnvelope);
+        }
+        let actual_tag = Zeroizing::new(
+            self.source
+                .take()
+                .ok_or(AttachmentMoveCryptoError::InvalidEnvelope)?
+                .finish()?,
+        );
+        if actual_tag.ct_eq(&self.source_tag).unwrap_u8() != 1 {
+            self.source_tag.zeroize();
+            return Err(AttachmentMoveCryptoError::AuthenticationFailed);
+        }
+        self.source_tag.zeroize();
+        self.plaintext_base64.finish()
+    }
+
+    fn zeroize_sensitive_state(&mut self) {
+        self.source_tag.zeroize();
+        self.source_tag_len = 0;
+    }
+}
+
+impl Drop for AttachmentBlobDecryptor {
+    fn drop(&mut self) {
+        self.zeroize_sensitive_state();
+    }
+}
+
+struct PlaintextBase64Decoder {
+    inner: Base64Decoder,
+}
+
+impl Default for PlaintextBase64Decoder {
+    fn default() -> Self {
+        Self {
+            inner: Base64Decoder::new(),
+        }
+    }
+}
+
+impl PlaintextBase64Decoder {
+    fn push(&mut self, byte: u8, output: &mut Vec<u8>) -> Result<(), AttachmentMoveCryptoError> {
+        self.inner.push(byte, output)
+    }
+
+    fn finish(&mut self) -> Result<Vec<u8>, AttachmentMoveCryptoError> {
+        self.inner.finish()?;
+        Ok(Vec::new())
+    }
+}
+
 impl AttachmentEnvelopeScanner {
     pub fn new() -> Self {
         Self {
@@ -1020,9 +1161,11 @@ impl Base64Decoder {
         self.quartet[self.len] = byte;
         self.len += 1;
         if self.len == 4 {
-            let decoded = BASE64
-                .decode(self.quartet)
-                .map_err(|_| AttachmentMoveCryptoError::InvalidEnvelope)?;
+            let decoded = Zeroizing::new(
+                BASE64
+                    .decode(self.quartet)
+                    .map_err(|_| AttachmentMoveCryptoError::InvalidEnvelope)?,
+            );
             if BASE64.encode(&decoded).as_bytes() != self.quartet {
                 return Err(AttachmentMoveCryptoError::InvalidEnvelope);
             }
@@ -1047,6 +1190,14 @@ impl Base64Decoder {
         } else {
             Err(AttachmentMoveCryptoError::InvalidEnvelope)
         }
+    }
+}
+
+impl Drop for Base64Decoder {
+    fn drop(&mut self) {
+        self.quartet.zeroize();
+        self.len = 0;
+        self.decoded_count = 0;
     }
 }
 
@@ -1145,9 +1296,9 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveCryptoError,
-        AttachmentMoveTranscryptor, AttachmentPublicationIdentity, GcmStream, MoveTargetNonce,
-        ATTACHMENT_ENCRYPTION_ALGORITHM, MAX_GCM_TEXT_LENGTH,
+        AttachmentBlobDecryptor, AttachmentBlobScope, AttachmentEnvelopeScanner,
+        AttachmentMoveCryptoError, AttachmentMoveTranscryptor, AttachmentPublicationIdentity,
+        GcmStream, MoveTargetNonce, ATTACHMENT_ENCRYPTION_ALGORITHM, MAX_GCM_TEXT_LENGTH,
     };
     use aes_gcm::{
         aead::{Aead, KeyInit, Payload},
@@ -1204,6 +1355,63 @@ mod tests {
             scanner.push(&envelope[offset..]).unwrap();
         }
         scanner.finish().unwrap()
+    }
+
+    #[test]
+    fn attachment_blob_decryptor_streams_raw_bytes_but_authenticates_before_publication() {
+        let raw = b"raw attachment bytes, including \0 and \xff";
+        let encoded = BASE64.encode(raw);
+        let source = envelope(encoded.as_bytes(), &SOURCE_KEY, SOURCE_IV, "vault-a");
+        let scan = scan_chunks(&source, &[1, 7, 19]);
+        let mut decryptor =
+            AttachmentBlobDecryptor::new(scan, SOURCE_KEY, scope("vault-a")).unwrap();
+        let mut decoded = Vec::new();
+        for chunk in source.chunks(11) {
+            decoded.extend(decryptor.push(chunk).unwrap());
+        }
+        decoded.extend(decryptor.finish().unwrap());
+        assert_eq!(decoded, raw);
+
+        let scan = scan_chunks(&source, &[source.len()]);
+        let mut corrupted = source.clone();
+        let position = br#"{"ciphertext":""#.len() + 5;
+        corrupted[position] = if corrupted[position] == b'A' {
+            b'B'
+        } else {
+            b'A'
+        };
+        let mut decryptor =
+            AttachmentBlobDecryptor::new(scan, SOURCE_KEY, scope("vault-a")).unwrap();
+        let mut provisional = Vec::new();
+        for chunk in corrupted.chunks(13) {
+            provisional.extend(decryptor.push(chunk).unwrap_or_default());
+        }
+        assert!(!provisional.is_empty());
+        assert!(matches!(
+            decryptor.finish(),
+            Err(AttachmentMoveCryptoError::InvalidEnvelope
+                | AttachmentMoveCryptoError::AuthenticationFailed)
+        ));
+    }
+
+    #[test]
+    fn attachment_blob_decryptor_drop_cleanup_wipes_retained_authentication_state() {
+        let raw = b"plaintext retained only in provisional output";
+        let source = envelope(
+            BASE64.encode(raw).as_bytes(),
+            &SOURCE_KEY,
+            SOURCE_IV,
+            "vault-a",
+        );
+        let scan = scan_chunks(&source, &[source.len()]);
+        let mut decryptor =
+            AttachmentBlobDecryptor::new(scan, SOURCE_KEY, scope("vault-a")).unwrap();
+        let prefix = &source[..source.len() - 8];
+        let _ = decryptor.push(prefix);
+        assert!(decryptor.source_tag.iter().any(|byte| *byte != 0));
+        decryptor.zeroize_sensitive_state();
+        assert_eq!(decryptor.source_tag, [0; 16]);
+        assert_eq!(decryptor.source_tag_len, 0);
     }
 
     fn transcrypt_chunks(source: &[u8], chunks: &[usize]) -> Vec<u8> {
