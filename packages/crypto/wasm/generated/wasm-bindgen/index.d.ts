@@ -1641,12 +1641,26 @@ export interface InitOutput {
     d: number,
   ) => void;
   readonly ffi_bittery_client_bindings_uniffi_contract_version: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_address_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_attachmentuploadmetadata_new: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_authenticatoritemdata_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_creditcarditemdata_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_customfield_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_identityitemdata_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_loginitemdata_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_passkey_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_passwordhistoryentry_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_phonenumber_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_securenoteitemdata_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_func_normalize_account_email: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_address_city: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_address_country: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_address_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_address_state: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_address_street: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_address_zip: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type: () => number;
@@ -1656,36 +1670,124 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_id: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_label: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_logincustomfield_value: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_notes: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_password: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_status: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_tags: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
-  readonly uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_linked_item_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_notes: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_tags: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_title: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_account_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_algorithm: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_digits: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_issuer: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_period: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_secret: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_billing_address: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_card_number: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_cardholder_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_cvv: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_expiry_date: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_notes: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_tags: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_title: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_account_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_algorithm: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_digits: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_issuer: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_period: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_secret: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_customfield_field_type: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_customfield_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_customfield_label: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_customfield_value: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_addresses: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_date_of_birth: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_drivers_license: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_email: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_first_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_last_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_middle_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_notes: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_passport_number: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_phone_numbers: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_ssn: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_tags: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_title: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_account_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_algorithm: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_digits: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_issuer: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_period: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_secret: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_account_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_attachments: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_created_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_data: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_deleted_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_favorite: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_item_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_status: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_updated_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_vault_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_note: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_notes: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_passkeys: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_password: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_password_history: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_tags: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_title: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_account_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_algorithm: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_digits: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_issuer: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_period: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_secret: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_url: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_urls: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_loginitemdata_username: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_algorithm: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_created_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_credential_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_last_used_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_private_key: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_public_key: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_rp_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_rp_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_sign_count: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_status: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_status_updated_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_transports: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_user_display_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_user_handle: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_user_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passwordhistoryentry_changed_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_passwordhistoryentry_password: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_item_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
-  readonly uniffi_bittery_client_bindings_fn_clone_attachmentname: (
+  readonly uniffi_bittery_client_bindings_checksum_method_phonenumber_id: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_phonenumber_label: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_phonenumber_number: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_note: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_notes: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_tags: () => number;
+  readonly uniffi_bittery_client_bindings_fn_clone_address: (
     a: bigint,
     b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_address_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
   ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_constructor_attachmentname_new: (
     a: number,
@@ -1696,14 +1798,7 @@ export interface InitOutput {
     b: number,
     c: number,
   ) => bigint;
-  readonly uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new: (
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    e: number,
-  ) => bigint;
-  readonly uniffi_bittery_client_bindings_fn_constructor_loginitemdraft_new: (
+  readonly uniffi_bittery_client_bindings_fn_constructor_authenticatoritemdata_new: (
     a: number,
     b: number,
     c: number,
@@ -1714,7 +1809,119 @@ export interface InitOutput {
     h: number,
     i: number,
     j: number,
+    k: number,
+    l: number,
   ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_creditcarditemdata_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+    i: number,
+    j: number,
+    k: number,
+    l: number,
+    m: number,
+    n: number,
+    o: number,
+    p: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_customfield_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_identityitemdata_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+    i: number,
+    j: number,
+    k: number,
+    l: number,
+    m: number,
+    n: number,
+    o: number,
+    p: number,
+    q: number,
+    r: number,
+    s: number,
+    t: number,
+    u: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_loginitemdata_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+    i: number,
+    j: number,
+    k: number,
+    l: number,
+    m: number,
+    n: number,
+    o: number,
+    p: number,
+    q: number,
+    r: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_passkey_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+    i: number,
+    j: number,
+    k: number,
+    l: number,
+    m: number,
+    n: number,
+    o: number,
+    p: number,
+    q: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_passwordhistoryentry_new: (
+    a: number,
+    b: number,
+    c: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_phonenumber_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_securenoteitemdata_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_free_address: (
+    a: bigint,
+    b: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_attachmentname: (
     a: bigint,
     b: number,
@@ -1727,15 +1934,31 @@ export interface InitOutput {
     a: bigint,
     b: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_free_logincustomfield: (
+  readonly uniffi_bittery_client_bindings_fn_free_authenticatoritemdata: (
     a: bigint,
     b: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_free_loginitemdraft: (
+  readonly uniffi_bittery_client_bindings_fn_free_creditcarditemdata: (
     a: bigint,
     b: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_free_loginitemprojection: (
+  readonly uniffi_bittery_client_bindings_fn_free_customfield: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_identityitemdata: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_itemprojection: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_loginitemdata: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_passkey: (
     a: bigint,
     b: number,
   ) => void;
@@ -1743,9 +1966,47 @@ export interface InitOutput {
     a: bigint,
     b: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_phonenumber: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_securenoteitemdata: (
+    a: bigint,
+    b: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_func_normalize_account_email: (
     a: number,
     b: number,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_address_city: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_address_country: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_address_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_address_state: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_address_street: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_address_zip: (
+    a: number,
+    b: bigint,
     c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id: (
@@ -1792,111 +2053,474 @@ export interface InitOutput {
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_logincustomfield_field_type: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_custom_fields: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_logincustomfield_id: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_linked_item_id: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_logincustomfield_label: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_notes: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_logincustomfield_value: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_tags: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_account_id: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_title: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_account_name: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_algorithm: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_digits: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_issuer: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite: (
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_period: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_secret: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_billing_address: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_card_number: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_cardholder_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_custom_fields: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_cvv: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_expiry_date: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_notes: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_tags: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_title: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_account_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_algorithm: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_digits: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_issuer: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_period: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_secret: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_customfield_field_type: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_customfield_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_customfield_label: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_customfield_value: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_addresses: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_custom_fields: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_date_of_birth: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_drivers_license: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_email: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_first_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_last_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_middle_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_notes: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_passport_number: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_phone_numbers: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_ssn: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_tags: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_title: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_account_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_algorithm: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_digits: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_issuer: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_period: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_secret: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_account_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_attachments: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_created_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_data: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_deleted_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_favorite: (
     a: bigint,
     b: number,
   ) => number;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_item_id: (
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_item_id: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_note: (
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_status: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_notes: (
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_updated_at: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_password: (
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_vault_id: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_status: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_custom_fields: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_tags: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_note: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_title: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_notes: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_passkeys: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_url: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_password: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_urls: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_password_history: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_username: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_tags: (
     a: number,
     b: bigint,
     c: number,
   ) => void;
-  readonly uniffi_bittery_client_bindings_fn_method_loginitemprojection_vault_id: (
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_title: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_account_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_algorithm: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_digits: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_issuer: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_period: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_secret: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_url: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_urls: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_loginitemdata_username: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_algorithm: (
+    a: bigint,
+    b: number,
+  ) => number;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_created_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_credential_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_last_used_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_private_key: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_public_key: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_rp_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_rp_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_sign_count: (
+    a: bigint,
+    b: number,
+  ) => number;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_status: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_status_reason: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_status_updated_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_transports: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_user_display_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_user_handle: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passkey_user_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passwordhistoryentry_changed_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_passwordhistoryentry_password: (
     a: number,
     b: bigint,
     c: number,
@@ -1922,6 +2546,46 @@ export interface InitOutput {
     c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_url: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_phonenumber_id: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_phonenumber_label: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_phonenumber_number: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_securenoteitemdata_custom_fields: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_securenoteitemdata_note: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_securenoteitemdata_notes: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_securenoteitemdata_tags: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_securenoteitemdata_title: (
     a: number,
     b: bigint,
     c: number,
@@ -1992,6 +2656,10 @@ export interface InitOutput {
     d: any,
   ) => number;
   readonly webclientruntime_withReplicaExecutor: (a: any) => number;
+  readonly uniffi_bittery_client_bindings_fn_clone_attachmentname: (
+    a: bigint,
+    b: number,
+  ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
     a: bigint,
     b: number,
@@ -2000,15 +2668,35 @@ export interface InitOutput {
     a: bigint,
     b: number,
   ) => bigint;
-  readonly uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
+  readonly uniffi_bittery_client_bindings_fn_clone_authenticatoritemdata: (
     a: bigint,
     b: number,
   ) => bigint;
-  readonly uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
+  readonly uniffi_bittery_client_bindings_fn_clone_creditcarditemdata: (
     a: bigint,
     b: number,
   ) => bigint;
-  readonly uniffi_bittery_client_bindings_fn_clone_loginitemprojection: (
+  readonly uniffi_bittery_client_bindings_fn_clone_customfield: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_identityitemdata: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_itemprojection: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_loginitemdata: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_passkey: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_passwordhistoryentry: (
     a: bigint,
     b: number,
   ) => bigint;
@@ -2016,10 +2704,20 @@ export interface InitOutput {
     a: bigint,
     b: number,
   ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_phonenumber: (
+    a: bigint,
+    b: number,
+  ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_clone_secretstring: (
     a: bigint,
     b: number,
   ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_securenoteitemdata: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_checksum_method_passkey_status_reason: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_title: () => number;
   readonly ffi_bittery_client_bindings_rust_future_free_f32: (
     a: bigint,
   ) => void;
@@ -2090,6 +2788,10 @@ export interface InitOutput {
     a: bigint,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_secretstring: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_passwordhistoryentry: (
     a: bigint,
     b: number,
   ) => void;

@@ -802,6 +802,81 @@ fn bootstrap_history() -> Result<History, RuntimeError> {
     Ok(history.finish())
 }
 
+fn five_category_authority_history() -> Result<History, RuntimeError> {
+    let mut history = HistoryBuilder::new(
+        "five-category-item-authority",
+        &[
+            "closed Item categories",
+            "encrypted authority persistence",
+            "atomic Bootstrap promotion",
+        ],
+        &["account-categories"],
+    );
+    history.install("install category Account", "account-categories", "first")?;
+    history.begin_bootstrap(
+        "begin category generation",
+        BeginBootstrapPlan {
+            guard: guard("account-categories", 0, 0),
+            generation_id: BootstrapGenerationId("generation-1".to_owned()),
+        },
+    )?;
+    history.stage_bootstrap(
+        "stage category Vault",
+        stage_page(
+            "account-categories",
+            1,
+            0,
+            BootstrapPageCursor::VaultsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "category-vault",
+        ),
+    )?;
+    let categories = [
+        ("category-login", AuthorityItemCategory::Login),
+        ("category-secure-note", AuthorityItemCategory::SecureNote),
+        ("category-credit-card", AuthorityItemCategory::CreditCard),
+        ("category-identity", AuthorityItemCategory::Identity),
+        ("category-authenticator", AuthorityItemCategory::Totp),
+    ];
+    let category_count = categories.len();
+    for (index, (item_id, category)) in categories.into_iter().enumerate() {
+        let request_cursor = if index == 0 {
+            BootstrapPageCursor::ItemsInitial
+        } else {
+            BootstrapPageCursor::ItemsAfter {
+                cursor: format!("category-page-{index}"),
+            }
+        };
+        let continuation = if index + 1 == category_count {
+            BootstrapContinuation::Final
+        } else {
+            BootstrapContinuation::More {
+                next_cursor: format!("category-page-{}", index + 1),
+            }
+        };
+        let mut plan = stage_page(
+            "account-categories",
+            1,
+            index as u64,
+            request_cursor,
+            SyncCursor::CapturedEmpty,
+            continuation,
+            item_id,
+        );
+        plan.items[0].category = category;
+        history.stage_bootstrap(&format!("stage {item_id}"), plan)?;
+    }
+    history.promote_bootstrap(
+        "promote five-category authority atomically",
+        PromoteBootstrapPlan {
+            guard: guard("account-categories", 1, 0),
+            generation_id: BootstrapGenerationId("generation-1".to_owned()),
+        },
+    )?;
+    Ok(history.finish())
+}
+
 fn ready_operation_history(history: &mut HistoryBuilder) -> Result<(), RuntimeError> {
     history.install("install Operation Account", "account-operations", "first")?;
     history.begin_bootstrap(
@@ -1265,6 +1340,7 @@ fn build_corpus() -> Result<Corpus, RuntimeError> {
             installation_history()?,
             deletion_history()?,
             bootstrap_history()?,
+            five_category_authority_history()?,
             operation_history()?,
             ordinary_item_reconciliation_history()?,
         ],

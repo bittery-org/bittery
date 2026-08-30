@@ -72,13 +72,15 @@ pub use platform_storage::SerializedPlatformStorageExecutor;
 pub use protocol::runtime_protocol_contract_schema;
 pub use protocol::{
     AccountAccessState, AccountDisplayIdentity, AccountId, AccountStatus, AccountWaitingReason,
-    AttachmentProjection, CreateShareDraft, CustomFieldKind, Incarnation, ItemProjectionStatus,
-    ItemsProjection, LoginCustomField, LoginItemDraft, LoginItemProjection, ObservationRequest,
-    ObservationSink, PendingShareResult, PendingShareResultsProjection, RequestCancellation,
+    Address, AttachmentProjection, AuthenticatorItemData, CreateShareDraft, CreditCardItemData,
+    CustomField, CustomFieldKind, IdentityItemData, Incarnation, ItemCategory, ItemDraft,
+    ItemProjection, ItemProjectionStatus, ItemsProjection, LoginItemData, ObservationRequest,
+    ObservationSink, Passkey, PasskeyStatus, PasskeyStatusReason, PasswordHistoryEntry,
+    PendingShareResult, PendingShareResultsProjection, PhoneNumber, RequestCancellation,
     RuntimeError, RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest,
-    RuntimeResponse, RuntimeStatusProjection, ServerAccountDeletionOutcome, ShareAccessMode,
-    ShareExpiration, TeardownPhase, TeardownScope, TeardownStatus, VaultProjection,
-    VaultProjectionRole, VaultProjectionType,
+    RuntimeResponse, RuntimeStatusProjection, SecureNoteItemData, ServerAccountDeletionOutcome,
+    ShareAccessMode, ShareExpiration, TeardownPhase, TeardownScope, TeardownStatus, TotpAlgorithm,
+    TotpDigits, VaultProjection, VaultProjectionRole, VaultProjectionType,
 };
 
 #[cfg(feature = "persistence-contract-schema")]

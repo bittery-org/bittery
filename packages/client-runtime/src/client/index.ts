@@ -8,7 +8,6 @@
 import type {
 	CreateShareDraft,
 	ItemsProjection,
-	LoginItemDraft,
 	ObservationRequest,
 	PendingShareResultsProjection,
 	RuntimeOutcome,
@@ -29,6 +28,24 @@ import {
 } from "./session";
 import type { RuntimeStore, Subscribable } from "./store";
 import { RuntimeRequestError, type RuntimeTransport } from "./transport";
+
+export type {
+	Address,
+	AuthenticatorItemData,
+	CreditCardItemData,
+	IdentityItemData,
+	ItemDraft,
+	ItemProjection,
+	LoginItemData,
+	Passkey,
+	PasskeyStatus,
+	PasskeyStatusReason,
+	PasswordHistoryEntry,
+	PhoneNumber,
+	SecureNoteItemData,
+	TotpAlgorithm,
+	TotpDigits,
+} from "../../generated/runtime-protocol/contract";
 
 export { DEFAULT_RELEASE_GRACE_MS, type Schedule } from "./registry";
 export {
@@ -84,11 +101,14 @@ export type QuickUnlockInput = Omit<
 	Extract<RuntimeRequest, { type: "quickUnlock" }>,
 	"type"
 >;
-export interface CreateLoginItemInput {
-	accountId: string;
-	vaultId: string;
-	draft: LoginItemDraft;
-}
+export type CreateItemInput = Omit<
+	Extract<RuntimeRequest, { type: "createItem" }>,
+	"type"
+>;
+export type UpdateItemInput = Omit<
+	Extract<RuntimeRequest, { type: "updateItem" }>,
+	"type"
+>;
 export interface CreateShareInput {
 	accountId: string;
 	itemId: string;
@@ -163,8 +183,12 @@ export interface RuntimeClient {
 	): Promise<RuntimeServerAccountDeletion>;
 	/** Destroys every Account and all Runtime state on this Device. Irreversible. */
 	wipe(options?: RuntimeCallOptions): Promise<RuntimeTeardown>;
-	createLoginItem(
-		input: CreateLoginItemInput,
+	createItem(
+		input: CreateItemInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	updateItem(
+		input: UpdateItemInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeAccepted>;
 	createShare(
@@ -304,9 +328,17 @@ export function createRuntimeClient(
 				await call({ type: "wipe" }, "teardown", callOptions),
 			);
 		},
-		async createLoginItem(input, callOptions) {
+		async createItem(input, callOptions) {
 			const { operationId, itemId, replicaRevision } = await call(
-				{ type: "createLoginItem", ...input },
+				{ type: "createItem", ...input },
+				"accepted",
+				callOptions,
+			);
+			return { operationId, itemId, replicaRevision };
+		},
+		async updateItem(input, callOptions) {
+			const { operationId, itemId, replicaRevision } = await call(
+				{ type: "updateItem", ...input },
 				"accepted",
 				callOptions,
 			);

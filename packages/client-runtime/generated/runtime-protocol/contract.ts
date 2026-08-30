@@ -97,7 +97,27 @@ value: PendingShareResultsProjection
 type: "runtimeStatus"
 value: RuntimeStatusProjection
 })
+export type ItemDraft = ({
+category: "login"
+data: LoginItemData
+} | {
+category: "secure-note"
+data: SecureNoteItemData
+} | {
+category: "credit-card"
+data: CreditCardItemData
+} | {
+category: "identity"
+data: IdentityItemData
+} | {
+category: "authenticator"
+data: AuthenticatorItemData
+})
 export type CustomFieldKind = ("text" | "password" | "email" | "url")
+export type PasskeyStatus = ("active" | "suspect")
+export type PasskeyStatusReason = ("manual" | "unknown-credential" | "signing-error" | "other")
+export type TotpAlgorithm = ("SHA1" | "SHA256" | "SHA512")
+export type TotpDigits = (6 | 7 | 8)
 export type ItemProjectionStatus = ("pending" | "authoritative" | "failed")
 export type VaultProjectionType = ("personal" | "team")
 export type AccountWaitingReason = "reauthenticationRequired"
@@ -130,14 +150,14 @@ type: "deleteServerAccount"
 type: "wipe"
 } | {
 accountId: string
-draft: LoginItemDraft
-type: "createLoginItem"
+draft: ItemDraft
+type: "createItem"
 vaultId: string
 } | {
 accountId: string
-draft: LoginItemDraft
+draft: ItemDraft
 itemId: string
-type: "updateLoginItem"
+type: "updateItem"
 } | {
 accountId: string
 favorite: boolean
@@ -207,7 +227,7 @@ message: string
 }
 export interface ItemsProjection {
 accountId: string
-items: LoginItemProjection[]
+items: ItemProjection[]
 replicaRevision: string
 /**
  * The Vaults these Items live in, so a host can name one and can tell a reader from a
@@ -216,24 +236,16 @@ replicaRevision: string
  */
 vaults: VaultProjection[]
 }
-export interface LoginItemProjection {
+export interface ItemProjection {
 accountId: string
 attachments?: AttachmentProjection[]
 createdAt: string
-customFields?: LoginCustomField[]
+data: ItemDraft
 deletedAt?: (string | null)
 favorite: boolean
 itemId: string
-note?: (string | null)
-notes?: (string | null)
-password?: (string | null)
 status: ItemProjectionStatus
-tags?: string[]
-title: string
 updatedAt: string
-url?: (string | null)
-urls?: string[]
-username?: (string | null)
 vaultId: string
 }
 export interface AttachmentProjection {
@@ -247,11 +259,124 @@ name: string
 uploadedBy: string
 vaultId: string
 }
-export interface LoginCustomField {
+export interface LoginItemData {
+customFields?: CustomField[]
+note?: (string | null)
+notes?: (string | null)
+passkeys?: Passkey[]
+password?: (string | null)
+passwordHistory?: PasswordHistoryEntry[]
+tags?: string[]
+title: string
+totpAccountName?: (string | null)
+totpAlgorithm?: (TotpAlgorithm | null)
+totpDigits?: (TotpDigits | null)
+totpIssuer?: (string | null)
+totpPeriod?: (number | null)
+totpSecret?: (string | null)
+url?: (string | null)
+urls?: string[]
+username?: (string | null)
+}
+export interface CustomField {
 id: string
 label: string
 type: CustomFieldKind
 value: string
+}
+export interface Passkey {
+algorithm: number
+createdAt: string
+credentialId: string
+lastUsedAt?: (string | null)
+privateKey: string
+publicKey: string
+rpId: string
+rpName: string
+signCount: number
+status?: (PasskeyStatus | null)
+statusReason?: (PasskeyStatusReason | null)
+statusUpdatedAt?: (string | null)
+transports: string[]
+userDisplayName: string
+userHandle: string
+userName: string
+}
+export interface PasswordHistoryEntry {
+changedAt: string
+password: string
+}
+export interface SecureNoteItemData {
+customFields?: CustomField[]
+note: string
+notes?: (string | null)
+tags?: string[]
+title: string
+}
+export interface CreditCardItemData {
+billingAddress?: (string | null)
+cardNumber?: (string | null)
+cardholderName?: (string | null)
+customFields?: CustomField[]
+cvv?: (string | null)
+expiryDate?: (string | null)
+notes?: (string | null)
+tags?: string[]
+title: string
+totpAccountName?: (string | null)
+totpAlgorithm?: (TotpAlgorithm | null)
+totpDigits?: (TotpDigits | null)
+totpIssuer?: (string | null)
+totpPeriod?: (number | null)
+totpSecret?: (string | null)
+}
+export interface IdentityItemData {
+addresses?: Address[]
+customFields?: CustomField[]
+dateOfBirth?: (string | null)
+driversLicense?: (string | null)
+email?: (string | null)
+firstName?: (string | null)
+lastName?: (string | null)
+middleName?: (string | null)
+notes?: (string | null)
+passportNumber?: (string | null)
+phoneNumbers?: PhoneNumber[]
+ssn?: (string | null)
+tags?: string[]
+title: string
+totpAccountName?: (string | null)
+totpAlgorithm?: (TotpAlgorithm | null)
+totpDigits?: (TotpDigits | null)
+totpIssuer?: (string | null)
+totpPeriod?: (number | null)
+totpSecret?: (string | null)
+}
+export interface Address {
+city: string
+country: string
+id: string
+state: string
+street: string
+zip: string
+}
+export interface PhoneNumber {
+id: string
+label: string
+number: string
+}
+export interface AuthenticatorItemData {
+customFields?: CustomField[]
+linkedItemId?: (string | null)
+notes?: (string | null)
+tags?: string[]
+title: string
+totpAccountName?: (string | null)
+totpAlgorithm?: (TotpAlgorithm | null)
+totpDigits?: (TotpDigits | null)
+totpIssuer?: (string | null)
+totpPeriod?: (number | null)
+totpSecret: string
 }
 /**
  * One Vault as an Items reader needs it: enough to label it and to know what may be written.
@@ -301,17 +426,6 @@ waitingReason?: (AccountWaitingReason | null)
  */
 export interface AccountDisplayIdentity {
 email: string
-}
-export interface LoginItemDraft {
-customFields?: LoginCustomField[]
-note?: (string | null)
-notes?: (string | null)
-password?: (string | null)
-tags?: string[]
-title: string
-url?: (string | null)
-urls?: string[]
-username?: (string | null)
 }
 export interface CreateShareDraft {
 accessMode: ShareAccessMode

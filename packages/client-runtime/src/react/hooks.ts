@@ -5,7 +5,7 @@ import type {
 	RuntimeStatusProjection,
 } from "../../generated/runtime-protocol/contract";
 import {
-	type CreateLoginItemInput,
+	type CreateItemInput,
 	IDLE_SNAPSHOT,
 	LOADING_SESSION,
 	type QuickUnlockInput,
@@ -109,13 +109,13 @@ export function useRuntimeLock(): UseMutationResult<
 	});
 }
 
-export function useCreateLoginItem(): UseMutationResult<
+export function useCreateItem(): UseMutationResult<
 	RuntimeAccepted,
 	Error,
-	CreateLoginItemInput
+	CreateItemInput
 > {
 	const client = useRuntimeClient();
 	return useMutation({
-		mutationFn: (input: CreateLoginItemInput) => client.createLoginItem(input),
+		mutationFn: (input: CreateItemInput) => client.createItem(input),
 	});
 }

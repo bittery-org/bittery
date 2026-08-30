@@ -40,7 +40,7 @@ impl ExistingDispatchCase {
 
     fn request(self, account_id: AccountId) -> RuntimeRequest {
         match self {
-            Self::Update => RuntimeRequest::UpdateLoginItem {
+            Self::Update => RuntimeRequest::UpdateItem {
                 account_id,
                 item_id: "item-existing".into(),
                 draft: draft(),

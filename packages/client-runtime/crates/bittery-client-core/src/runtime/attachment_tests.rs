@@ -1837,11 +1837,80 @@ fn install_download(
     (transfer, state)
 }
 
+#[tokio::test]
+async fn attachment_authority_accepts_every_closed_item_category() {
+    for (category, server_category, plaintext) in [
+        (
+            AuthorityItemCategory::Login,
+            "login",
+            json!({"title":"Login"}),
+        ),
+        (
+            AuthorityItemCategory::SecureNote,
+            "secure-note",
+            json!({"title":"Note","note":"Body"}),
+        ),
+        (
+            AuthorityItemCategory::CreditCard,
+            "credit-card",
+            json!({"title":"Card"}),
+        ),
+        (
+            AuthorityItemCategory::Identity,
+            "identity",
+            json!({"title":"Identity"}),
+        ),
+        (
+            AuthorityItemCategory::Totp,
+            "totp",
+            json!({"title":"Authenticator","totpSecret":"secret"}),
+        ),
+    ] {
+        let harness = seeded_attachment_for_category(
+            AuthorityVaultRole::Owner,
+            category,
+            server_category,
+            plaintext,
+        )
+        .await;
+        assert!(matches!(
+            harness
+                .runtime
+                .request(
+                    RuntimeRequest::RenameAttachment {
+                        account_id: harness.account_id.clone(),
+                        attachment_id: ATTACHMENT_ID.into(),
+                        name: "renamed.txt".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+            RuntimeResponse::AttachmentRenamed { .. }
+        ));
+    }
+}
+
 async fn seeded_attachment() -> AttachmentHarness {
     seeded_attachment_with_role(AuthorityVaultRole::Owner).await
 }
 
 async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarness {
+    seeded_attachment_for_category(
+        role,
+        AuthorityItemCategory::Login,
+        "login",
+        serde_json::from_str(&super::create::item_plaintext(&draft()).unwrap()).unwrap(),
+    )
+    .await
+}
+
+async fn seeded_attachment_for_category(
+    role: AuthorityVaultRole,
+    category: AuthorityItemCategory,
+    server_category: &str,
+    plaintext: Value,
+) -> AttachmentHarness {
     let account_id = AccountId::from(ACCOUNT);
     let state = InMemoryReplica::default();
     state
@@ -1852,7 +1921,7 @@ async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarn
         )
         .unwrap();
     let item_ciphertext = encrypt_with_aad(
-        &serde_json::to_string(&draft()).unwrap(),
+        &serde_json::to_string(&plaintext).unwrap(),
         &TEST_VAULT_KEY,
         &AadContext {
             vault_id: TEST_VAULT_ID.into(),
@@ -1873,7 +1942,7 @@ async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarn
             vec![AuthorityItemRecord {
                 id: ITEM_ID.into(),
                 vault_id: TEST_VAULT_ID.into(),
-                category: AuthorityItemCategory::Login,
+                category,
                 favorite: false,
                 encrypted_data: item_ciphertext.ciphertext.clone(),
                 encryption_iv: item_ciphertext.iv.clone(),
@@ -1894,9 +1963,11 @@ async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarn
         item: StoredItem {
             id: ITEM_ID.into(),
             vault_id: TEST_VAULT_ID.into(),
+            category: server_category.into(),
             encrypted_data: item_ciphertext.ciphertext,
             encryption_iv: item_ciphertext.iv,
             encryption_algorithm: item_ciphertext.algorithm,
+            encryption_version: 1,
             version: 1,
             favorite: false,
             deleted_at: None,
@@ -3785,7 +3856,7 @@ async fn seeded_attachment_with_unrelated_authority() -> AttachmentHarness {
 
     let other_item_id = "item-unrelated";
     let other_item_ciphertext = encrypt_with_aad(
-        &serde_json::to_string(&draft()).unwrap(),
+        &super::create::item_plaintext(&draft()).unwrap(),
         &TEST_VAULT_KEY,
         &AadContext {
             vault_id: TEST_VAULT_ID.into(),
@@ -5541,7 +5612,7 @@ async fn durable_item_acceptance_cannot_create_an_overlay_behind_rename_admissio
     let acceptance = tokio::spawn(async move {
         acceptance_runtime
             .request(
-                RuntimeRequest::UpdateLoginItem {
+                RuntimeRequest::UpdateItem {
                     account_id: acceptance_account,
                     item_id: ITEM_ID.into(),
                     draft: draft(),
@@ -5683,7 +5754,7 @@ async fn active_item_operation_refuses_rename_without_patch_or_false_publication
     harness
         .runtime
         .request(
-            RuntimeRequest::UpdateLoginItem {
+            RuntimeRequest::UpdateItem {
                 account_id: harness.account_id.clone(),
                 item_id: ITEM_ID.into(),
                 draft: draft(),

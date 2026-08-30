@@ -334,6 +334,13 @@ impl Runtime {
         auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
         let observed = outcome.clone();
+        let expected_category = self.replica.snapshot(account_id).and_then(|snapshot| {
+            snapshot
+                .items
+                .iter()
+                .find(|item| item.operation_id == operation.operation_id)
+                .map(|item| item.category.clone())
+        });
         let mutation = match &outcome.result {
             OperationOutcomeResult::Applied { entity_id, version } => {
                 if operation.kind != OperationKind::CreateItem {
@@ -381,6 +388,8 @@ impl Runtime {
                             item.id == operation.item_id
                                 && item.vault_id == operation.vault_id
                                 && item.version == *version
+                                && expected_category.as_ref() == Some(&item.category)
+                                && self.validate_authoritative_item(account_id, item).is_ok()
                         }
                         _ => false,
                     };
@@ -408,6 +417,8 @@ impl Runtime {
                     if item.id != operation.item_id
                         || item.vault_id != operation.vault_id
                         || item.version != *version
+                        || expected_category.as_ref() != Some(&item.category)
+                        || self.validate_authoritative_item(account_id, &item).is_err()
                     {
                         // The Server's own outcome and its own Item disagree. Reading further would
                         // be guessing, and this Runtime does not guess about authority.
@@ -463,6 +474,16 @@ impl Runtime {
                             };
                             authority.attachments = attachments;
                         }
+                    }
+                    if item.as_ref().is_some_and(|item| {
+                        expected_category.as_ref() != Some(&item.category)
+                            || self.validate_authoritative_item(account_id, item).is_err()
+                    }) {
+                        return if fence_already_held {
+                            self.fail_account_module_fenced(account_id).await
+                        } else {
+                            self.fail_account_module(account_id).await
+                        };
                     }
                     PlanMutation::ReconcileItemMutation {
                         outcome,

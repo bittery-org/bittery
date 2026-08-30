@@ -1016,12 +1016,26 @@ export const ffi_bittery_client_bindings_rustbuffer_reserve: (
   d: number,
 ) => void;
 export const ffi_bittery_client_bindings_uniffi_contract_version: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_address_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_attachmentuploadmetadata_new: () => number;
-export const uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new: () => number;
-export const uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_authenticatoritemdata_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_creditcarditemdata_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_customfield_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_identityitemdata_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_loginitemdata_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_passkey_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_passwordhistoryentry_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_phonenumber_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_constructor_secretstring_new: () => number;
+export const uniffi_bittery_client_bindings_checksum_constructor_securenoteitemdata_new: () => number;
 export const uniffi_bittery_client_bindings_checksum_func_normalize_account_email: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_address_city: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_address_country: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_address_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_address_state: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_address_street: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_address_zip: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_attachment_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_content_type: () => number;
@@ -1031,36 +1045,124 @@ export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_name: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_uploaded_by: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_id: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_label: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_logincustomfield_value: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_notes: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_password: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_status: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_tags: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username: () => number;
-export const uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_custom_fields: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_linked_item_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_notes: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_tags: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_title: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_account_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_algorithm: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_digits: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_issuer: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_period: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_secret: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_billing_address: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_card_number: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_cardholder_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_custom_fields: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_cvv: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_expiry_date: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_notes: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_tags: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_title: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_account_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_algorithm: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_digits: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_issuer: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_period: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_secret: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_customfield_field_type: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_customfield_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_customfield_label: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_customfield_value: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_addresses: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_custom_fields: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_date_of_birth: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_drivers_license: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_email: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_first_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_last_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_middle_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_notes: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_passport_number: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_phone_numbers: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_ssn: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_tags: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_title: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_account_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_algorithm: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_digits: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_issuer: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_period: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_secret: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_account_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_attachments: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_created_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_data: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_deleted_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_favorite: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_item_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_status: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_updated_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_itemprojection_vault_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_custom_fields: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_note: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_notes: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_passkeys: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_password: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_password_history: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_tags: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_title: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_account_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_algorithm: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_digits: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_issuer: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_period: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_secret: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_url: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_urls: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_loginitemdata_username: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_algorithm: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_created_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_credential_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_last_used_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_private_key: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_public_key: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_rp_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_rp_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_sign_count: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_status: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_status_updated_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_transports: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_user_display_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_user_handle: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_user_name: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passwordhistoryentry_changed_at: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_passwordhistoryentry_password: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_item_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_operation_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_link_id: () => number;
 export const uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url: () => number;
-export const uniffi_bittery_client_bindings_fn_clone_attachmentname: (
+export const uniffi_bittery_client_bindings_checksum_method_phonenumber_id: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_phonenumber_label: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_phonenumber_number: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_custom_fields: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_note: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_notes: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_tags: () => number;
+export const uniffi_bittery_client_bindings_fn_clone_address: (
   a: bigint,
   b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_address_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+  f: number,
+  g: number,
 ) => bigint;
 export const uniffi_bittery_client_bindings_fn_constructor_attachmentname_new: (
   a: number,
@@ -1071,14 +1173,7 @@ export const uniffi_bittery_client_bindings_fn_constructor_attachmentuploadmetad
   b: number,
   c: number,
 ) => bigint;
-export const uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new: (
-  a: number,
-  b: number,
-  c: number,
-  d: number,
-  e: number,
-) => bigint;
-export const uniffi_bittery_client_bindings_fn_constructor_loginitemdraft_new: (
+export const uniffi_bittery_client_bindings_fn_constructor_authenticatoritemdata_new: (
   a: number,
   b: number,
   c: number,
@@ -1089,7 +1184,119 @@ export const uniffi_bittery_client_bindings_fn_constructor_loginitemdraft_new: (
   h: number,
   i: number,
   j: number,
+  k: number,
+  l: number,
 ) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_creditcarditemdata_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+  f: number,
+  g: number,
+  h: number,
+  i: number,
+  j: number,
+  k: number,
+  l: number,
+  m: number,
+  n: number,
+  o: number,
+  p: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_customfield_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_identityitemdata_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+  f: number,
+  g: number,
+  h: number,
+  i: number,
+  j: number,
+  k: number,
+  l: number,
+  m: number,
+  n: number,
+  o: number,
+  p: number,
+  q: number,
+  r: number,
+  s: number,
+  t: number,
+  u: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_loginitemdata_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+  f: number,
+  g: number,
+  h: number,
+  i: number,
+  j: number,
+  k: number,
+  l: number,
+  m: number,
+  n: number,
+  o: number,
+  p: number,
+  q: number,
+  r: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_passkey_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+  f: number,
+  g: number,
+  h: number,
+  i: number,
+  j: number,
+  k: number,
+  l: number,
+  m: number,
+  n: number,
+  o: number,
+  p: number,
+  q: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_passwordhistoryentry_new: (
+  a: number,
+  b: number,
+  c: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_phonenumber_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_constructor_securenoteitemdata_new: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+  f: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_free_address: (
+  a: bigint,
+  b: number,
+) => void;
 export const uniffi_bittery_client_bindings_fn_free_attachmentname: (
   a: bigint,
   b: number,
@@ -1102,15 +1309,31 @@ export const uniffi_bittery_client_bindings_fn_free_attachmentuploadmetadata: (
   a: bigint,
   b: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_free_logincustomfield: (
+export const uniffi_bittery_client_bindings_fn_free_authenticatoritemdata: (
   a: bigint,
   b: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_free_loginitemdraft: (
+export const uniffi_bittery_client_bindings_fn_free_creditcarditemdata: (
   a: bigint,
   b: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_free_loginitemprojection: (
+export const uniffi_bittery_client_bindings_fn_free_customfield: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_identityitemdata: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_itemprojection: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_loginitemdata: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_passkey: (
   a: bigint,
   b: number,
 ) => void;
@@ -1118,9 +1341,47 @@ export const uniffi_bittery_client_bindings_fn_free_pendingshareresult: (
   a: bigint,
   b: number,
 ) => void;
+export const uniffi_bittery_client_bindings_fn_free_phonenumber: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_securenoteitemdata: (
+  a: bigint,
+  b: number,
+) => void;
 export const uniffi_bittery_client_bindings_fn_func_normalize_account_email: (
   a: number,
   b: number,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_address_city: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_address_country: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_address_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_address_state: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_address_street: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_address_zip: (
+  a: number,
+  b: bigint,
   c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_account_id: (
@@ -1167,111 +1428,474 @@ export const uniffi_bittery_client_bindings_fn_method_attachmentprojection_vault
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_logincustomfield_field_type: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_custom_fields: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_logincustomfield_id: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_linked_item_id: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_logincustomfield_label: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_notes: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_logincustomfield_value: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_tags: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_account_id: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_title: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_account_name: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_algorithm: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_digits: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_issuer: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite: (
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_period: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_secret: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_billing_address: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_card_number: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_cardholder_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_custom_fields: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_cvv: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_expiry_date: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_notes: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_tags: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_title: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_account_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_algorithm: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_digits: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_issuer: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_period: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_secret: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_customfield_field_type: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_customfield_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_customfield_label: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_customfield_value: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_addresses: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_custom_fields: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_date_of_birth: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_drivers_license: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_email: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_first_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_last_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_middle_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_notes: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_passport_number: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_phone_numbers: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_ssn: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_tags: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_title: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_account_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_algorithm: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_digits: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_issuer: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_period: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_secret: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_account_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_attachments: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_created_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_data: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_deleted_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_favorite: (
   a: bigint,
   b: number,
 ) => number;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_item_id: (
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_item_id: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_note: (
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_status: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_notes: (
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_updated_at: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_password: (
+export const uniffi_bittery_client_bindings_fn_method_itemprojection_vault_id: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_status: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_custom_fields: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_tags: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_note: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_title: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_notes: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_passkeys: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_url: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_password: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_urls: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_password_history: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_username: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_tags: (
   a: number,
   b: bigint,
   c: number,
 ) => void;
-export const uniffi_bittery_client_bindings_fn_method_loginitemprojection_vault_id: (
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_title: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_account_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_algorithm: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_digits: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_issuer: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_period: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_secret: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_url: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_urls: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_loginitemdata_username: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_algorithm: (
+  a: bigint,
+  b: number,
+) => number;
+export const uniffi_bittery_client_bindings_fn_method_passkey_created_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_credential_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_last_used_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_private_key: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_public_key: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_rp_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_rp_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_sign_count: (
+  a: bigint,
+  b: number,
+) => number;
+export const uniffi_bittery_client_bindings_fn_method_passkey_status: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_status_reason: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_status_updated_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_transports: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_user_display_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_user_handle: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passkey_user_name: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passwordhistoryentry_changed_at: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_passwordhistoryentry_password: (
   a: number,
   b: bigint,
   c: number,
@@ -1297,6 +1921,46 @@ export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_l
   c: number,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_method_pendingshareresult_share_url: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_phonenumber_id: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_phonenumber_label: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_phonenumber_number: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_securenoteitemdata_custom_fields: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_securenoteitemdata_note: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_securenoteitemdata_notes: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_securenoteitemdata_tags: (
+  a: number,
+  b: bigint,
+  c: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_method_securenoteitemdata_title: (
   a: number,
   b: bigint,
   c: number,
@@ -1367,6 +2031,10 @@ export const webclientruntime_withExecutors: (
   d: any,
 ) => number;
 export const webclientruntime_withReplicaExecutor: (a: any) => number;
+export const uniffi_bittery_client_bindings_fn_clone_attachmentname: (
+  a: bigint,
+  b: number,
+) => bigint;
 export const uniffi_bittery_client_bindings_fn_clone_attachmentprojection: (
   a: bigint,
   b: number,
@@ -1375,15 +2043,35 @@ export const uniffi_bittery_client_bindings_fn_clone_attachmentuploadmetadata: (
   a: bigint,
   b: number,
 ) => bigint;
-export const uniffi_bittery_client_bindings_fn_clone_logincustomfield: (
+export const uniffi_bittery_client_bindings_fn_clone_authenticatoritemdata: (
   a: bigint,
   b: number,
 ) => bigint;
-export const uniffi_bittery_client_bindings_fn_clone_loginitemdraft: (
+export const uniffi_bittery_client_bindings_fn_clone_creditcarditemdata: (
   a: bigint,
   b: number,
 ) => bigint;
-export const uniffi_bittery_client_bindings_fn_clone_loginitemprojection: (
+export const uniffi_bittery_client_bindings_fn_clone_customfield: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_identityitemdata: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_itemprojection: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_loginitemdata: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_passkey: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_passwordhistoryentry: (
   a: bigint,
   b: number,
 ) => bigint;
@@ -1391,10 +2079,20 @@ export const uniffi_bittery_client_bindings_fn_clone_pendingshareresult: (
   a: bigint,
   b: number,
 ) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_phonenumber: (
+  a: bigint,
+  b: number,
+) => bigint;
 export const uniffi_bittery_client_bindings_fn_clone_secretstring: (
   a: bigint,
   b: number,
 ) => bigint;
+export const uniffi_bittery_client_bindings_fn_clone_securenoteitemdata: (
+  a: bigint,
+  b: number,
+) => bigint;
+export const uniffi_bittery_client_bindings_checksum_method_passkey_status_reason: () => number;
+export const uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_title: () => number;
 export const ffi_bittery_client_bindings_rust_future_free_f32: (
   a: bigint,
 ) => void;
@@ -1469,6 +2167,10 @@ export const ffi_bittery_client_bindings_rust_future_cancel_u64: (
   a: bigint,
 ) => void;
 export const uniffi_bittery_client_bindings_fn_free_secretstring: (
+  a: bigint,
+  b: number,
+) => void;
+export const uniffi_bittery_client_bindings_fn_free_passwordhistoryentry: (
   a: bigint,
   b: number,
 ) => void;

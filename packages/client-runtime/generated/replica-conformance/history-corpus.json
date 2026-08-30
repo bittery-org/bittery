@@ -2040,6 +2040,1251 @@
       ]
     },
     {
+      "name": "five-category-item-authority",
+      "coverage": [
+        "closed Item categories",
+        "encrypted authority persistence",
+        "atomic Bootstrap promotion"
+      ],
+      "steps": [
+        {
+          "label": "install category Account",
+          "request": {
+            "type": "install",
+            "prepared": {
+              "expected": {
+                "type": "missing",
+                "accountId": "account-categories"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "0",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": []
+            }
+          },
+          "expectedResponse": {
+            "type": "installed",
+            "result": {
+              "type": "applied"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "0",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": []
+              }
+            }
+          ]
+        },
+        {
+          "label": "begin category generation",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "0",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"vaultsInitial\"},\"finalPageStaged\":false}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"cold\"},\"nextPageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"vaultsInitial\"},\"finalPageStaged\":false}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage category Vault",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"nextPageCursor\":{\"type\":\"itemsInitial\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage category-login",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"5a40bc62e16b298bfa011c0f9ef94b225d039eae38d3e18f29cee635f98ff83d\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-1\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-login"
+                    },
+                    "payloadJson": "{\"id\":\"category-login\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-login\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"5a40bc62e16b298bfa011c0f9ef94b225d039eae38d3e18f29cee635f98ff83d\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-1\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-login"
+                    },
+                    "payloadJson": "{\"id\":\"category-login\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-login\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage category-secure-note",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-2\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"rawResponseFingerprint\":\"8b0e774209329d52dfcd81ab7c954e2d7c465e330867c3e07d7a3e443f46e05c\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-2\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-secure-note"
+                    },
+                    "payloadJson": "{\"id\":\"category-secure-note\",\"vaultId\":\"vault-1\",\"category\":\"secureNote\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-secure-note\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-2\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"5a40bc62e16b298bfa011c0f9ef94b225d039eae38d3e18f29cee635f98ff83d\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-1\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"rawResponseFingerprint\":\"8b0e774209329d52dfcd81ab7c954e2d7c465e330867c3e07d7a3e443f46e05c\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-login"
+                    },
+                    "payloadJson": "{\"id\":\"category-login\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-login\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-secure-note"
+                    },
+                    "payloadJson": "{\"id\":\"category-secure-note\",\"vaultId\":\"vault-1\",\"category\":\"secureNote\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-secure-note\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage category-credit-card",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"3\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-3\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:2"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-2\"},\"rawResponseFingerprint\":\"96093da7e61692eac442c9cdd1661a82cab33a53b6e33f372a6d142adab0dbaa\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-3\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-credit-card"
+                    },
+                    "payloadJson": "{\"id\":\"category-credit-card\",\"vaultId\":\"vault-1\",\"category\":\"creditCard\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-credit-card\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"3\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-3\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"5a40bc62e16b298bfa011c0f9ef94b225d039eae38d3e18f29cee635f98ff83d\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-1\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"rawResponseFingerprint\":\"8b0e774209329d52dfcd81ab7c954e2d7c465e330867c3e07d7a3e443f46e05c\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:2"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-2\"},\"rawResponseFingerprint\":\"96093da7e61692eac442c9cdd1661a82cab33a53b6e33f372a6d142adab0dbaa\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-3\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-credit-card"
+                    },
+                    "payloadJson": "{\"id\":\"category-credit-card\",\"vaultId\":\"vault-1\",\"category\":\"creditCard\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-credit-card\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-login"
+                    },
+                    "payloadJson": "{\"id\":\"category-login\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-login\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-secure-note"
+                    },
+                    "payloadJson": "{\"id\":\"category-secure-note\",\"vaultId\":\"vault-1\",\"category\":\"secureNote\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-secure-note\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage category-identity",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"4\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"finalPageStaged\":false}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:3"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"3\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-3\"},\"rawResponseFingerprint\":\"d898686f229ebe7438161bd5fa664a0a482fa055dc23cff07573d5f499a9a091\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-4\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-identity"
+                    },
+                    "payloadJson": "{\"id\":\"category-identity\",\"vaultId\":\"vault-1\",\"category\":\"identity\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-identity\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"4\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"finalPageStaged\":false}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"5a40bc62e16b298bfa011c0f9ef94b225d039eae38d3e18f29cee635f98ff83d\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-1\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"rawResponseFingerprint\":\"8b0e774209329d52dfcd81ab7c954e2d7c465e330867c3e07d7a3e443f46e05c\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:2"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-2\"},\"rawResponseFingerprint\":\"96093da7e61692eac442c9cdd1661a82cab33a53b6e33f372a6d142adab0dbaa\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-3\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:3"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"3\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-3\"},\"rawResponseFingerprint\":\"d898686f229ebe7438161bd5fa664a0a482fa055dc23cff07573d5f499a9a091\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-4\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-credit-card"
+                    },
+                    "payloadJson": "{\"id\":\"category-credit-card\",\"vaultId\":\"vault-1\",\"category\":\"creditCard\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-credit-card\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-identity"
+                    },
+                    "payloadJson": "{\"id\":\"category-identity\",\"vaultId\":\"vault-1\",\"category\":\"identity\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-identity\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-login"
+                    },
+                    "payloadJson": "{\"id\":\"category-login\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-login\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-secure-note"
+                    },
+                    "payloadJson": "{\"id\":\"category-secure-note\",\"vaultId\":\"vault-1\",\"category\":\"secureNote\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-secure-note\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "stage category-authenticator",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "1",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"5\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"finalPageStaged\":true}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:4"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"4\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"rawResponseFingerprint\":\"ebf097bd6c614fb11d41aa3795d7d8f861e9f5652db339a24bfb1f00e40b21f2\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  }
+                },
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-authenticator"
+                    },
+                    "payloadJson": "{\"id\":\"category-authenticator\",\"vaultId\":\"vault-1\",\"category\":\"totp\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-authenticator\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "1"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "1",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"bootstrapping\",\"activeGeneration\":null,\"activeCursor\":{\"type\":\"cold\"},\"stagingGeneration\":\"generation-1\"}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"5\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"5a40bc62e16b298bfa011c0f9ef94b225d039eae38d3e18f29cee635f98ff83d\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-1\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"rawResponseFingerprint\":\"8b0e774209329d52dfcd81ab7c954e2d7c465e330867c3e07d7a3e443f46e05c\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:2"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-2\"},\"rawResponseFingerprint\":\"96093da7e61692eac442c9cdd1661a82cab33a53b6e33f372a6d142adab0dbaa\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-3\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:3"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"3\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-3\"},\"rawResponseFingerprint\":\"d898686f229ebe7438161bd5fa664a0a482fa055dc23cff07573d5f499a9a091\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-4\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:4"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"4\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"rawResponseFingerprint\":\"ebf097bd6c614fb11d41aa3795d7d8f861e9f5652db339a24bfb1f00e40b21f2\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-authenticator"
+                    },
+                    "payloadJson": "{\"id\":\"category-authenticator\",\"vaultId\":\"vault-1\",\"category\":\"totp\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-authenticator\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-credit-card"
+                    },
+                    "payloadJson": "{\"id\":\"category-credit-card\",\"vaultId\":\"vault-1\",\"category\":\"creditCard\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-credit-card\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-identity"
+                    },
+                    "payloadJson": "{\"id\":\"category-identity\",\"vaultId\":\"vault-1\",\"category\":\"identity\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-identity\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-login"
+                    },
+                    "payloadJson": "{\"id\":\"category-login\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-login\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-secure-note"
+                    },
+                    "payloadJson": "{\"id\":\"category-secure-note\",\"vaultId\":\"vault-1\",\"category\":\"secureNote\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-secure-note\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "label": "promote five-category authority atomically",
+          "request": {
+            "type": "commit",
+            "prepared": {
+              "expected": {
+                "accountId": "account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "userId": "user-account-categories",
+                "replicaRevision": "1",
+                "lockEpoch": "0"
+              },
+              "nextHead": {
+                "accountId": "account-categories",
+                "userId": "user-account-categories",
+                "incarnation": "incarnation-account-categories-first",
+                "replicaRevision": "2",
+                "lockEpoch": "0",
+                "failure": null
+              },
+              "writes": [
+                {
+                  "type": "put",
+                  "row": {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedEmpty\"},\"stagingGeneration\":null}"
+                  }
+                }
+              ]
+            }
+          },
+          "expectedResponse": {
+            "type": "committed",
+            "result": {
+              "type": "applied",
+              "replicaRevision": "2"
+            }
+          },
+          "expectedLoadedState": [
+            {
+              "accountId": "account-categories",
+              "response": {
+                "type": "loaded",
+                "head": {
+                  "accountId": "account-categories",
+                  "userId": "user-account-categories",
+                  "incarnation": "incarnation-account-categories-first",
+                  "replicaRevision": "2",
+                  "lockEpoch": "0",
+                  "failure": null
+                },
+                "rows": [
+                  {
+                    "store": "replicaMetadata",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "bootstrap"
+                    },
+                    "payloadJson": "{\"state\":\"ready\",\"activeGeneration\":\"generation-1\",\"activeCursor\":{\"type\":\"capturedEmpty\"},\"stagingGeneration\":null}"
+                  },
+                  {
+                    "store": "bootstrapGenerations",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"fallbackState\":\"cold\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"nextPageIdentity\":{\"phase\":\"items\",\"ordinal\":\"5\"},\"nextPageCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"finalPageStaged\":true}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"itemsInitial\"},\"rawResponseFingerprint\":\"5a40bc62e16b298bfa011c0f9ef94b225d039eae38d3e18f29cee635f98ff83d\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-1\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:1"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"1\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-1\"},\"rawResponseFingerprint\":\"8b0e774209329d52dfcd81ab7c954e2d7c465e330867c3e07d7a3e443f46e05c\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-2\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:2"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"2\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-2\"},\"rawResponseFingerprint\":\"96093da7e61692eac442c9cdd1661a82cab33a53b6e33f372a6d142adab0dbaa\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-3\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:3"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"3\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-3\"},\"rawResponseFingerprint\":\"d898686f229ebe7438161bd5fa664a0a482fa055dc23cff07573d5f499a9a091\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"more\",\"nextCursor\":\"category-page-4\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/items:4"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"items\",\"ordinal\":\"4\"},\"requestCursor\":{\"type\":\"itemsAfter\",\"cursor\":\"category-page-4\"},\"rawResponseFingerprint\":\"ebf097bd6c614fb11d41aa3795d7d8f861e9f5652db339a24bfb1f00e40b21f2\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "bootstrapPages",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vaults:0"
+                    },
+                    "payloadJson": "{\"generationId\":\"generation-1\",\"pageIdentity\":{\"phase\":\"vaults\",\"ordinal\":\"0\"},\"requestCursor\":{\"type\":\"vaultsInitial\"},\"rawResponseFingerprint\":\"9e3d9a598c0ec023d12ae09de97ce4f3323de251258a592f1fd5bdafdc375f57\",\"pinnedWatermark\":{\"type\":\"capturedEmpty\"},\"continuation\":{\"type\":\"final\"}}"
+                  },
+                  {
+                    "store": "authorityVaults",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/vault-1"
+                    },
+                    "payloadJson": "{\"id\":\"vault-1\",\"name\":\"Personal\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"opaque-wrapped-vault-key-account-categories\",\"role\":\"owner\"}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-authenticator"
+                    },
+                    "payloadJson": "{\"id\":\"category-authenticator\",\"vaultId\":\"vault-1\",\"category\":\"totp\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-authenticator\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-credit-card"
+                    },
+                    "payloadJson": "{\"id\":\"category-credit-card\",\"vaultId\":\"vault-1\",\"category\":\"creditCard\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-credit-card\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-identity"
+                    },
+                    "payloadJson": "{\"id\":\"category-identity\",\"vaultId\":\"vault-1\",\"category\":\"identity\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-identity\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-login"
+                    },
+                    "payloadJson": "{\"id\":\"category-login\",\"vaultId\":\"vault-1\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-login\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  },
+                  {
+                    "store": "authorityItems",
+                    "key": {
+                      "accountId": "account-categories",
+                      "recordId": "generation-1/category-secure-note"
+                    },
+                    "payloadJson": "{\"id\":\"category-secure-note\",\"vaultId\":\"vault-1\",\"category\":\"secureNote\",\"favorite\":false,\"encryptedData\":\"authoritative-opaque-ciphertext-category-secure-note\",\"encryptionIv\":\"BBBBBBBBBBBBBBBB\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"encryptionVersion\":1,\"encryptedByUserId\":\"user-account-categories\",\"lastModifiedBy\":\"user-account-categories\",\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:01:00Z\",\"deletedAt\":null,\"attachments\":[]}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "operation-retry-outcome-and-receipt-reconciliation",
       "coverage": [
         "accepted Operation and encrypted optimistic overlay",

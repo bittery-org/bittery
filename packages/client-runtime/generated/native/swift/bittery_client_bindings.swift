@@ -430,6 +430,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
     typealias FfiType = Int32
     typealias SwiftType = Int32
@@ -528,6 +544,185 @@ fileprivate struct FfiConverterString: FfiConverter {
         writeBytes(&buf, value.utf8)
     }
 }
+
+
+
+
+public protocol AddressProtocol: AnyObject, Sendable {
+
+    func city()  -> String
+
+    func country()  -> String
+
+    func id()  -> String
+
+    func state()  -> String
+
+    func street()  -> String
+
+    func zip()  -> String
+
+}
+open class Address: AddressProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_address(self.handle, $0) }
+    }
+public convenience init(id: String, street: String, city: String, state: String, zip: String, country: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_address_new(
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(street),
+        FfiConverterString.lower(city),
+        FfiConverterString.lower(state),
+        FfiConverterString.lower(zip),
+        FfiConverterString.lower(country),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_address(handle, $0) }
+    }
+
+
+
+
+open func city() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_address_city(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func country() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_address_country(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func id() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_address_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func state() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_address_state(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func street() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_address_street(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func zip() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_address_zip(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAddress: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = Address
+
+    public static func lift(_ handle: UInt64) throws -> Address {
+        return Address(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: Address) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Address {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: Address, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAddress_lift(_ handle: UInt64) throws -> Address {
+    return try FfiConverterTypeAddress.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAddress_lower(_ value: Address) -> UInt64 {
+    return FfiConverterTypeAddress.lower(value)
+}
+
+
 
 
 
@@ -983,6 +1178,240 @@ public func FfiConverterTypeAttachmentUploadMetadata_lower(_ value: AttachmentUp
 
 
 
+public protocol AuthenticatorItemDataProtocol: AnyObject, Sendable {
+
+    func customFields()  -> [CustomField]
+
+    func linkedItemId()  -> String?
+
+    func notes()  -> String?
+
+    func tags()  -> [String]
+
+    func title()  -> String
+
+    func totpAccountName()  -> String?
+
+    func totpAlgorithm()  -> TotpAlgorithm?
+
+    func totpDigits()  -> TotpDigits?
+
+    func totpIssuer()  -> String?
+
+    func totpPeriod()  -> UInt32?
+
+    func totpSecret()  -> String
+
+}
+open class AuthenticatorItemData: AuthenticatorItemDataProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_authenticatoritemdata(self.handle, $0) }
+    }
+public convenience init(title: String, totpSecret: String, totpIssuer: String?, totpAccountName: String?, totpAlgorithm: TotpAlgorithm?, totpDigits: TotpDigits?, totpPeriod: UInt32?, linkedItemId: String?, notes: String?, customFields: [CustomField], tags: [String]) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_authenticatoritemdata_new(
+        FfiConverterString.lower(title),
+        FfiConverterString.lower(totpSecret),
+        FfiConverterOptionString.lower(totpIssuer),
+        FfiConverterOptionString.lower(totpAccountName),
+        FfiConverterOptionTypeTotpAlgorithm.lower(totpAlgorithm),
+        FfiConverterOptionTypeTotpDigits.lower(totpDigits),
+        FfiConverterOptionUInt32.lower(totpPeriod),
+        FfiConverterOptionString.lower(linkedItemId),
+        FfiConverterOptionString.lower(notes),
+        FfiConverterSequenceTypeCustomField.lower(customFields),
+        FfiConverterSequenceString.lower(tags),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_authenticatoritemdata(handle, $0) }
+    }
+
+
+
+
+open func customFields() -> [CustomField]  {
+    return try!  FfiConverterSequenceTypeCustomField.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func linkedItemId() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_linked_item_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func notes() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_notes(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func tags() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_tags(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func title() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_title(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAccountName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_account_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAlgorithm() -> TotpAlgorithm?  {
+    return try!  FfiConverterOptionTypeTotpAlgorithm.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_algorithm(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpDigits() -> TotpDigits?  {
+    return try!  FfiConverterOptionTypeTotpDigits.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_digits(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpIssuer() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_issuer(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpPeriod() -> UInt32?  {
+    return try!  FfiConverterOptionUInt32.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_period(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpSecret() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_authenticatoritemdata_totp_secret(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAuthenticatorItemData: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = AuthenticatorItemData
+
+    public static func lift(_ handle: UInt64) throws -> AuthenticatorItemData {
+        return AuthenticatorItemData(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: AuthenticatorItemData) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AuthenticatorItemData {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: AuthenticatorItemData, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthenticatorItemData_lift(_ handle: UInt64) throws -> AuthenticatorItemData {
+    return try FfiConverterTypeAuthenticatorItemData.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthenticatorItemData_lower(_ value: AuthenticatorItemData) -> UInt64 {
+    return FfiConverterTypeAuthenticatorItemData.lower(value)
+}
+
+
+
+
+
+
 public protocol ClientRuntimeProtocol: AnyObject, Sendable {
 
     func observe(request: ObservationRequest, sink: ObservationSink) throws  -> ObservationHandle
@@ -1147,18 +1576,40 @@ public func FfiConverterTypeClientRuntime_lower(_ value: ClientRuntime) -> UInt6
 
 
 
-public protocol LoginCustomFieldProtocol: AnyObject, Sendable {
+public protocol CreditCardItemDataProtocol: AnyObject, Sendable {
 
-    func fieldType()  -> CustomFieldKind
+    func billingAddress()  -> String?
 
-    func id()  -> String
+    func cardNumber()  -> String?
 
-    func label()  -> String
+    func cardholderName()  -> String?
 
-    func value()  -> String
+    func customFields()  -> [CustomField]
+
+    func cvv()  -> String?
+
+    func expiryDate()  -> String?
+
+    func notes()  -> String?
+
+    func tags()  -> [String]
+
+    func title()  -> String
+
+    func totpAccountName()  -> String?
+
+    func totpAlgorithm()  -> TotpAlgorithm?
+
+    func totpDigits()  -> TotpDigits?
+
+    func totpIssuer()  -> String?
+
+    func totpPeriod()  -> UInt32?
+
+    func totpSecret()  -> String?
 
 }
-open class LoginCustomField: LoginCustomFieldProtocol, @unchecked Sendable {
+open class CreditCardItemData: CreditCardItemDataProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -1195,12 +1646,268 @@ open class LoginCustomField: LoginCustomFieldProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_logincustomfield(self.handle, $0) }
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_creditcarditemdata(self.handle, $0) }
+    }
+public convenience init(title: String, cardholderName: String?, cardNumber: String?, cvv: String?, expiryDate: String?, billingAddress: String?, notes: String?, customFields: [CustomField], totpSecret: String?, totpIssuer: String?, totpAccountName: String?, totpAlgorithm: TotpAlgorithm?, totpDigits: TotpDigits?, totpPeriod: UInt32?, tags: [String]) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_creditcarditemdata_new(
+        FfiConverterString.lower(title),
+        FfiConverterOptionString.lower(cardholderName),
+        FfiConverterOptionString.lower(cardNumber),
+        FfiConverterOptionString.lower(cvv),
+        FfiConverterOptionString.lower(expiryDate),
+        FfiConverterOptionString.lower(billingAddress),
+        FfiConverterOptionString.lower(notes),
+        FfiConverterSequenceTypeCustomField.lower(customFields),
+        FfiConverterOptionString.lower(totpSecret),
+        FfiConverterOptionString.lower(totpIssuer),
+        FfiConverterOptionString.lower(totpAccountName),
+        FfiConverterOptionTypeTotpAlgorithm.lower(totpAlgorithm),
+        FfiConverterOptionTypeTotpDigits.lower(totpDigits),
+        FfiConverterOptionUInt32.lower(totpPeriod),
+        FfiConverterSequenceString.lower(tags),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_creditcarditemdata(handle, $0) }
+    }
+
+
+
+
+open func billingAddress() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_billing_address(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func cardNumber() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_card_number(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func cardholderName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_cardholder_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func customFields() -> [CustomField]  {
+    return try!  FfiConverterSequenceTypeCustomField.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func cvv() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_cvv(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func expiryDate() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_expiry_date(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func notes() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_notes(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func tags() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_tags(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func title() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_title(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAccountName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_account_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAlgorithm() -> TotpAlgorithm?  {
+    return try!  FfiConverterOptionTypeTotpAlgorithm.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_algorithm(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpDigits() -> TotpDigits?  {
+    return try!  FfiConverterOptionTypeTotpDigits.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_digits(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpIssuer() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_issuer(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpPeriod() -> UInt32?  {
+    return try!  FfiConverterOptionUInt32.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_period(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpSecret() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_creditcarditemdata_totp_secret(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCreditCardItemData: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = CreditCardItemData
+
+    public static func lift(_ handle: UInt64) throws -> CreditCardItemData {
+        return CreditCardItemData(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: CreditCardItemData) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CreditCardItemData {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: CreditCardItemData, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreditCardItemData_lift(_ handle: UInt64) throws -> CreditCardItemData {
+    return try FfiConverterTypeCreditCardItemData.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreditCardItemData_lower(_ value: CreditCardItemData) -> UInt64 {
+    return FfiConverterTypeCreditCardItemData.lower(value)
+}
+
+
+
+
+
+
+public protocol CustomFieldProtocol: AnyObject, Sendable {
+
+    func fieldType()  -> CustomFieldKind
+
+    func id()  -> String
+
+    func label()  -> String
+
+    func value()  -> String
+
+}
+open class CustomField: CustomFieldProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_customfield(self.handle, $0) }
     }
 public convenience init(id: String, label: String, value: String, fieldType: CustomFieldKind) {
     let handle =
         try! rustCall() {
-    uniffi_bittery_client_bindings_fn_constructor_logincustomfield_new(
+    uniffi_bittery_client_bindings_fn_constructor_customfield_new(
         FfiConverterString.lower(id),
         FfiConverterString.lower(label),
         FfiConverterString.lower(value),
@@ -1216,7 +1923,7 @@ public convenience init(id: String, label: String, value: String, fieldType: Cus
             return
         }
 
-        try! rustCall { uniffi_bittery_client_bindings_fn_free_logincustomfield(handle, $0) }
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_customfield(handle, $0) }
     }
 
 
@@ -1224,7 +1931,7 @@ public convenience init(id: String, label: String, value: String, fieldType: Cus
 
 open func fieldType() -> CustomFieldKind  {
     return try!  FfiConverterTypeCustomFieldKind_lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_logincustomfield_field_type(
+    uniffi_bittery_client_bindings_fn_method_customfield_field_type(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1232,7 +1939,7 @@ open func fieldType() -> CustomFieldKind  {
 
 open func id() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_logincustomfield_id(
+    uniffi_bittery_client_bindings_fn_method_customfield_id(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1240,7 +1947,7 @@ open func id() -> String  {
 
 open func label() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_logincustomfield_label(
+    uniffi_bittery_client_bindings_fn_method_customfield_label(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1248,7 +1955,7 @@ open func label() -> String  {
 
 open func value() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_logincustomfield_value(
+    uniffi_bittery_client_bindings_fn_method_customfield_value(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1262,24 +1969,24 @@ open func value() -> String  {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeLoginCustomField: FfiConverter {
+public struct FfiConverterTypeCustomField: FfiConverter {
     typealias FfiType = UInt64
-    typealias SwiftType = LoginCustomField
+    typealias SwiftType = CustomField
 
-    public static func lift(_ handle: UInt64) throws -> LoginCustomField {
-        return LoginCustomField(unsafeFromHandle: handle)
+    public static func lift(_ handle: UInt64) throws -> CustomField {
+        return CustomField(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: LoginCustomField) -> UInt64 {
+    public static func lower(_ value: CustomField) -> UInt64 {
         return value.uniffiCloneHandle()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginCustomField {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CustomField {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: LoginCustomField, into buf: inout [UInt8]) {
+    public static func write(_ value: CustomField, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -1288,15 +1995,15 @@ public struct FfiConverterTypeLoginCustomField: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLoginCustomField_lift(_ handle: UInt64) throws -> LoginCustomField {
-    return try FfiConverterTypeLoginCustomField.lift(handle)
+public func FfiConverterTypeCustomField_lift(_ handle: UInt64) throws -> CustomField {
+    return try FfiConverterTypeCustomField.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLoginCustomField_lower(_ value: LoginCustomField) -> UInt64 {
-    return FfiConverterTypeLoginCustomField.lower(value)
+public func FfiConverterTypeCustomField_lower(_ value: CustomField) -> UInt64 {
+    return FfiConverterTypeCustomField.lower(value)
 }
 
 
@@ -1304,10 +2011,50 @@ public func FfiConverterTypeLoginCustomField_lower(_ value: LoginCustomField) ->
 
 
 
-public protocol LoginItemDraftProtocol: AnyObject, Sendable {
+public protocol IdentityItemDataProtocol: AnyObject, Sendable {
+
+    func addresses()  -> [Address]
+
+    func customFields()  -> [CustomField]
+
+    func dateOfBirth()  -> String?
+
+    func driversLicense()  -> String?
+
+    func email()  -> String?
+
+    func firstName()  -> String?
+
+    func lastName()  -> String?
+
+    func middleName()  -> String?
+
+    func notes()  -> String?
+
+    func passportNumber()  -> String?
+
+    func phoneNumbers()  -> [PhoneNumber]
+
+    func ssn()  -> String?
+
+    func tags()  -> [String]
+
+    func title()  -> String
+
+    func totpAccountName()  -> String?
+
+    func totpAlgorithm()  -> TotpAlgorithm?
+
+    func totpDigits()  -> TotpDigits?
+
+    func totpIssuer()  -> String?
+
+    func totpPeriod()  -> UInt32?
+
+    func totpSecret()  -> String?
 
 }
-open class LoginItemDraft: LoginItemDraftProtocol, @unchecked Sendable {
+open class IdentityItemData: IdentityItemDataProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -1344,20 +2091,31 @@ open class LoginItemDraft: LoginItemDraftProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_loginitemdraft(self.handle, $0) }
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_identityitemdata(self.handle, $0) }
     }
-public convenience init(title: String, url: String?, urls: [String], username: String?, password: String?, notes: String?, note: String?, customFields: [LoginCustomField], tags: [String]) {
+public convenience init(title: String, firstName: String?, middleName: String?, lastName: String?, email: String?, addresses: [Address], phoneNumbers: [PhoneNumber], ssn: String?, passportNumber: String?, driversLicense: String?, dateOfBirth: String?, notes: String?, customFields: [CustomField], totpSecret: String?, totpIssuer: String?, totpAccountName: String?, totpAlgorithm: TotpAlgorithm?, totpDigits: TotpDigits?, totpPeriod: UInt32?, tags: [String]) {
     let handle =
         try! rustCall() {
-    uniffi_bittery_client_bindings_fn_constructor_loginitemdraft_new(
+    uniffi_bittery_client_bindings_fn_constructor_identityitemdata_new(
         FfiConverterString.lower(title),
-        FfiConverterOptionString.lower(url),
-        FfiConverterSequenceString.lower(urls),
-        FfiConverterOptionString.lower(username),
-        FfiConverterOptionString.lower(password),
+        FfiConverterOptionString.lower(firstName),
+        FfiConverterOptionString.lower(middleName),
+        FfiConverterOptionString.lower(lastName),
+        FfiConverterOptionString.lower(email),
+        FfiConverterSequenceTypeAddress.lower(addresses),
+        FfiConverterSequenceTypePhoneNumber.lower(phoneNumbers),
+        FfiConverterOptionString.lower(ssn),
+        FfiConverterOptionString.lower(passportNumber),
+        FfiConverterOptionString.lower(driversLicense),
+        FfiConverterOptionString.lower(dateOfBirth),
         FfiConverterOptionString.lower(notes),
-        FfiConverterOptionString.lower(note),
-        FfiConverterSequenceTypeLoginCustomField.lower(customFields),
+        FfiConverterSequenceTypeCustomField.lower(customFields),
+        FfiConverterOptionString.lower(totpSecret),
+        FfiConverterOptionString.lower(totpIssuer),
+        FfiConverterOptionString.lower(totpAccountName),
+        FfiConverterOptionTypeTotpAlgorithm.lower(totpAlgorithm),
+        FfiConverterOptionTypeTotpDigits.lower(totpDigits),
+        FfiConverterOptionUInt32.lower(totpPeriod),
         FfiConverterSequenceString.lower(tags),$0
     )
 }
@@ -1370,11 +2128,171 @@ public convenience init(title: String, url: String?, urls: [String], username: S
             return
         }
 
-        try! rustCall { uniffi_bittery_client_bindings_fn_free_loginitemdraft(handle, $0) }
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_identityitemdata(handle, $0) }
     }
 
 
 
+
+open func addresses() -> [Address]  {
+    return try!  FfiConverterSequenceTypeAddress.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_addresses(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func customFields() -> [CustomField]  {
+    return try!  FfiConverterSequenceTypeCustomField.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func dateOfBirth() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_date_of_birth(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func driversLicense() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_drivers_license(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func email() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_email(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func firstName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_first_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func lastName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_last_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func middleName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_middle_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func notes() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_notes(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func passportNumber() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_passport_number(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func phoneNumbers() -> [PhoneNumber]  {
+    return try!  FfiConverterSequenceTypePhoneNumber.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_phone_numbers(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func ssn() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_ssn(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func tags() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_tags(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func title() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_title(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAccountName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_account_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAlgorithm() -> TotpAlgorithm?  {
+    return try!  FfiConverterOptionTypeTotpAlgorithm.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_algorithm(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpDigits() -> TotpDigits?  {
+    return try!  FfiConverterOptionTypeTotpDigits.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_digits(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpIssuer() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_issuer(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpPeriod() -> UInt32?  {
+    return try!  FfiConverterOptionUInt32.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_period(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpSecret() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_identityitemdata_totp_secret(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
 
 
 
@@ -1384,24 +2302,24 @@ public convenience init(title: String, url: String?, urls: [String], username: S
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeLoginItemDraft: FfiConverter {
+public struct FfiConverterTypeIdentityItemData: FfiConverter {
     typealias FfiType = UInt64
-    typealias SwiftType = LoginItemDraft
+    typealias SwiftType = IdentityItemData
 
-    public static func lift(_ handle: UInt64) throws -> LoginItemDraft {
-        return LoginItemDraft(unsafeFromHandle: handle)
+    public static func lift(_ handle: UInt64) throws -> IdentityItemData {
+        return IdentityItemData(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: LoginItemDraft) -> UInt64 {
+    public static func lower(_ value: IdentityItemData) -> UInt64 {
         return value.uniffiCloneHandle()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginItemDraft {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> IdentityItemData {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: LoginItemDraft, into buf: inout [UInt8]) {
+    public static func write(_ value: IdentityItemData, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -1410,15 +2328,15 @@ public struct FfiConverterTypeLoginItemDraft: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLoginItemDraft_lift(_ handle: UInt64) throws -> LoginItemDraft {
-    return try FfiConverterTypeLoginItemDraft.lift(handle)
+public func FfiConverterTypeIdentityItemData_lift(_ handle: UInt64) throws -> IdentityItemData {
+    return try FfiConverterTypeIdentityItemData.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLoginItemDraft_lower(_ value: LoginItemDraft) -> UInt64 {
-    return FfiConverterTypeLoginItemDraft.lower(value)
+public func FfiConverterTypeIdentityItemData_lower(_ value: IdentityItemData) -> UInt64 {
+    return FfiConverterTypeIdentityItemData.lower(value)
 }
 
 
@@ -1426,7 +2344,7 @@ public func FfiConverterTypeLoginItemDraft_lower(_ value: LoginItemDraft) -> UIn
 
 
 
-public protocol LoginItemProjectionProtocol: AnyObject, Sendable {
+public protocol ItemProjectionProtocol: AnyObject, Sendable {
 
     func accountId()  -> String
 
@@ -1434,7 +2352,7 @@ public protocol LoginItemProjectionProtocol: AnyObject, Sendable {
 
     func createdAt()  -> String
 
-    func customFields()  -> [LoginCustomField]
+    func data()  -> ItemDraft
 
     func deletedAt()  -> String?
 
@@ -1442,30 +2360,14 @@ public protocol LoginItemProjectionProtocol: AnyObject, Sendable {
 
     func itemId()  -> String
 
-    func note()  -> String?
-
-    func notes()  -> String?
-
-    func password()  -> String?
-
     func status()  -> ItemProjectionStatus
 
-    func tags()  -> [String]
-
-    func title()  -> String
-
     func updatedAt()  -> String
-
-    func url()  -> String?
-
-    func urls()  -> [String]
-
-    func username()  -> String?
 
     func vaultId()  -> String
 
 }
-open class LoginItemProjection: LoginItemProjectionProtocol, @unchecked Sendable {
+open class ItemProjection: ItemProjectionProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -1502,7 +2404,7 @@ open class LoginItemProjection: LoginItemProjectionProtocol, @unchecked Sendable
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_loginitemprojection(self.handle, $0) }
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_itemprojection(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -1512,7 +2414,7 @@ open class LoginItemProjection: LoginItemProjectionProtocol, @unchecked Sendable
             return
         }
 
-        try! rustCall { uniffi_bittery_client_bindings_fn_free_loginitemprojection(handle, $0) }
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_itemprojection(handle, $0) }
     }
 
 
@@ -1520,7 +2422,7 @@ open class LoginItemProjection: LoginItemProjectionProtocol, @unchecked Sendable
 
 open func accountId() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_account_id(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_account_id(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1528,7 +2430,7 @@ open func accountId() -> String  {
 
 open func attachments() -> [AttachmentProjection]  {
     return try!  FfiConverterSequenceTypeAttachmentProjection.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_attachments(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_attachments(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1536,15 +2438,15 @@ open func attachments() -> [AttachmentProjection]  {
 
 open func createdAt() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_created_at(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_created_at(
             self.uniffiCloneHandle(),$0
     )
 })
 }
 
-open func customFields() -> [LoginCustomField]  {
-    return try!  FfiConverterSequenceTypeLoginCustomField.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_custom_fields(
+open func data() -> ItemDraft  {
+    return try!  FfiConverterTypeItemDraft_lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_itemprojection_data(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1552,7 +2454,7 @@ open func customFields() -> [LoginCustomField]  {
 
 open func deletedAt() -> String?  {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_deleted_at(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_deleted_at(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1560,7 +2462,7 @@ open func deletedAt() -> String?  {
 
 open func favorite() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_favorite(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_favorite(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1568,31 +2470,7 @@ open func favorite() -> Bool  {
 
 open func itemId() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_item_id(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func note() -> String?  {
-    return try!  FfiConverterOptionString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_note(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func notes() -> String?  {
-    return try!  FfiConverterOptionString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_notes(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func password() -> String?  {
-    return try!  FfiConverterOptionString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_password(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_item_id(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1600,23 +2478,7 @@ open func password() -> String?  {
 
 open func status() -> ItemProjectionStatus  {
     return try!  FfiConverterTypeItemProjectionStatus_lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_status(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func tags() -> [String]  {
-    return try!  FfiConverterSequenceString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_tags(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func title() -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_title(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_status(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1624,31 +2486,7 @@ open func title() -> String  {
 
 open func updatedAt() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_updated_at(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func url() -> String?  {
-    return try!  FfiConverterOptionString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_url(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func urls() -> [String]  {
-    return try!  FfiConverterSequenceString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_urls(
-            self.uniffiCloneHandle(),$0
-    )
-})
-}
-
-open func username() -> String?  {
-    return try!  FfiConverterOptionString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_username(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_updated_at(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1656,7 +2494,7 @@ open func username() -> String?  {
 
 open func vaultId() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_bittery_client_bindings_fn_method_loginitemprojection_vault_id(
+    uniffi_bittery_client_bindings_fn_method_itemprojection_vault_id(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1670,24 +2508,24 @@ open func vaultId() -> String  {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeLoginItemProjection: FfiConverter {
+public struct FfiConverterTypeItemProjection: FfiConverter {
     typealias FfiType = UInt64
-    typealias SwiftType = LoginItemProjection
+    typealias SwiftType = ItemProjection
 
-    public static func lift(_ handle: UInt64) throws -> LoginItemProjection {
-        return LoginItemProjection(unsafeFromHandle: handle)
+    public static func lift(_ handle: UInt64) throws -> ItemProjection {
+        return ItemProjection(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: LoginItemProjection) -> UInt64 {
+    public static func lower(_ value: ItemProjection) -> UInt64 {
         return value.uniffiCloneHandle()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginItemProjection {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ItemProjection {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: LoginItemProjection, into buf: inout [UInt8]) {
+    public static func write(_ value: ItemProjection, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -1696,15 +2534,315 @@ public struct FfiConverterTypeLoginItemProjection: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLoginItemProjection_lift(_ handle: UInt64) throws -> LoginItemProjection {
-    return try FfiConverterTypeLoginItemProjection.lift(handle)
+public func FfiConverterTypeItemProjection_lift(_ handle: UInt64) throws -> ItemProjection {
+    return try FfiConverterTypeItemProjection.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeLoginItemProjection_lower(_ value: LoginItemProjection) -> UInt64 {
-    return FfiConverterTypeLoginItemProjection.lower(value)
+public func FfiConverterTypeItemProjection_lower(_ value: ItemProjection) -> UInt64 {
+    return FfiConverterTypeItemProjection.lower(value)
+}
+
+
+
+
+
+
+public protocol LoginItemDataProtocol: AnyObject, Sendable {
+
+    func customFields()  -> [CustomField]
+
+    func note()  -> String?
+
+    func notes()  -> String?
+
+    func passkeys()  -> [Passkey]
+
+    func password()  -> String?
+
+    func passwordHistory()  -> [PasswordHistoryEntry]
+
+    func tags()  -> [String]
+
+    func title()  -> String
+
+    func totpAccountName()  -> String?
+
+    func totpAlgorithm()  -> TotpAlgorithm?
+
+    func totpDigits()  -> TotpDigits?
+
+    func totpIssuer()  -> String?
+
+    func totpPeriod()  -> UInt32?
+
+    func totpSecret()  -> String?
+
+    func url()  -> String?
+
+    func urls()  -> [String]
+
+    func username()  -> String?
+
+}
+open class LoginItemData: LoginItemDataProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_loginitemdata(self.handle, $0) }
+    }
+public convenience init(title: String, url: String?, urls: [String], username: String?, password: String?, passwordHistory: [PasswordHistoryEntry], passkeys: [Passkey], notes: String?, note: String?, customFields: [CustomField], tags: [String], totpSecret: String?, totpIssuer: String?, totpAccountName: String?, totpAlgorithm: TotpAlgorithm?, totpDigits: TotpDigits?, totpPeriod: UInt32?) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_loginitemdata_new(
+        FfiConverterString.lower(title),
+        FfiConverterOptionString.lower(url),
+        FfiConverterSequenceString.lower(urls),
+        FfiConverterOptionString.lower(username),
+        FfiConverterOptionString.lower(password),
+        FfiConverterSequenceTypePasswordHistoryEntry.lower(passwordHistory),
+        FfiConverterSequenceTypePasskey.lower(passkeys),
+        FfiConverterOptionString.lower(notes),
+        FfiConverterOptionString.lower(note),
+        FfiConverterSequenceTypeCustomField.lower(customFields),
+        FfiConverterSequenceString.lower(tags),
+        FfiConverterOptionString.lower(totpSecret),
+        FfiConverterOptionString.lower(totpIssuer),
+        FfiConverterOptionString.lower(totpAccountName),
+        FfiConverterOptionTypeTotpAlgorithm.lower(totpAlgorithm),
+        FfiConverterOptionTypeTotpDigits.lower(totpDigits),
+        FfiConverterOptionUInt32.lower(totpPeriod),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_loginitemdata(handle, $0) }
+    }
+
+
+
+
+open func customFields() -> [CustomField]  {
+    return try!  FfiConverterSequenceTypeCustomField.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func note() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_note(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func notes() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_notes(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func passkeys() -> [Passkey]  {
+    return try!  FfiConverterSequenceTypePasskey.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_passkeys(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func password() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_password(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func passwordHistory() -> [PasswordHistoryEntry]  {
+    return try!  FfiConverterSequenceTypePasswordHistoryEntry.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_password_history(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func tags() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_tags(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func title() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_title(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAccountName() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_account_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpAlgorithm() -> TotpAlgorithm?  {
+    return try!  FfiConverterOptionTypeTotpAlgorithm.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_algorithm(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpDigits() -> TotpDigits?  {
+    return try!  FfiConverterOptionTypeTotpDigits.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_digits(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpIssuer() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_issuer(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpPeriod() -> UInt32?  {
+    return try!  FfiConverterOptionUInt32.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_period(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func totpSecret() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_totp_secret(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func url() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_url(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func urls() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_urls(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func username() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_loginitemdata_username(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLoginItemData: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = LoginItemData
+
+    public static func lift(_ handle: UInt64) throws -> LoginItemData {
+        return LoginItemData(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: LoginItemData) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginItemData {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: LoginItemData, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginItemData_lift(_ handle: UInt64) throws -> LoginItemData {
+    return try FfiConverterTypeLoginItemData.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLoginItemData_lower(_ value: LoginItemData) -> UInt64 {
+    return FfiConverterTypeLoginItemData.lower(value)
 }
 
 
@@ -2024,6 +3162,430 @@ public func FfiConverterTypeObservationSink_lower(_ value: ObservationSink) -> U
 
 
 
+public protocol PasskeyProtocol: AnyObject, Sendable {
+
+    func algorithm()  -> Int32
+
+    func createdAt()  -> String
+
+    func credentialId()  -> String
+
+    func lastUsedAt()  -> String?
+
+    func privateKey()  -> String
+
+    func publicKey()  -> String
+
+    func rpId()  -> String
+
+    func rpName()  -> String
+
+    func signCount()  -> UInt32
+
+    func status()  -> PasskeyStatus?
+
+    func statusReason()  -> PasskeyStatusReason?
+
+    func statusUpdatedAt()  -> String?
+
+    func transports()  -> [String]
+
+    func userDisplayName()  -> String
+
+    func userHandle()  -> String
+
+    func userName()  -> String
+
+}
+open class Passkey: PasskeyProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_passkey(self.handle, $0) }
+    }
+public convenience init(credentialId: String, rpId: String, rpName: String, userHandle: String, userName: String, userDisplayName: String, privateKey: String, publicKey: String, algorithm: Int32, signCount: UInt32, transports: [String], createdAt: String, lastUsedAt: String?, status: PasskeyStatus?, statusReason: PasskeyStatusReason?, statusUpdatedAt: String?) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_passkey_new(
+        FfiConverterString.lower(credentialId),
+        FfiConverterString.lower(rpId),
+        FfiConverterString.lower(rpName),
+        FfiConverterString.lower(userHandle),
+        FfiConverterString.lower(userName),
+        FfiConverterString.lower(userDisplayName),
+        FfiConverterString.lower(privateKey),
+        FfiConverterString.lower(publicKey),
+        FfiConverterInt32.lower(algorithm),
+        FfiConverterUInt32.lower(signCount),
+        FfiConverterSequenceString.lower(transports),
+        FfiConverterString.lower(createdAt),
+        FfiConverterOptionString.lower(lastUsedAt),
+        FfiConverterOptionTypePasskeyStatus.lower(status),
+        FfiConverterOptionTypePasskeyStatusReason.lower(statusReason),
+        FfiConverterOptionString.lower(statusUpdatedAt),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_passkey(handle, $0) }
+    }
+
+
+
+
+open func algorithm() -> Int32  {
+    return try!  FfiConverterInt32.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_algorithm(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func createdAt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_created_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func credentialId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_credential_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func lastUsedAt() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_last_used_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func privateKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_private_key(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func publicKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_public_key(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func rpId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_rp_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func rpName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_rp_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func signCount() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_sign_count(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func status() -> PasskeyStatus?  {
+    return try!  FfiConverterOptionTypePasskeyStatus.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_status(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func statusReason() -> PasskeyStatusReason?  {
+    return try!  FfiConverterOptionTypePasskeyStatusReason.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_status_reason(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func statusUpdatedAt() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_status_updated_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func transports() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_transports(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func userDisplayName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_user_display_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func userHandle() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_user_handle(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func userName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passkey_user_name(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePasskey: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = Passkey
+
+    public static func lift(_ handle: UInt64) throws -> Passkey {
+        return Passkey(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: Passkey) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Passkey {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: Passkey, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasskey_lift(_ handle: UInt64) throws -> Passkey {
+    return try FfiConverterTypePasskey.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasskey_lower(_ value: Passkey) -> UInt64 {
+    return FfiConverterTypePasskey.lower(value)
+}
+
+
+
+
+
+
+public protocol PasswordHistoryEntryProtocol: AnyObject, Sendable {
+
+    func changedAt()  -> String
+
+    func password()  -> String
+
+}
+open class PasswordHistoryEntry: PasswordHistoryEntryProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_passwordhistoryentry(self.handle, $0) }
+    }
+public convenience init(password: String, changedAt: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_passwordhistoryentry_new(
+        FfiConverterString.lower(password),
+        FfiConverterString.lower(changedAt),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_passwordhistoryentry(handle, $0) }
+    }
+
+
+
+
+open func changedAt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passwordhistoryentry_changed_at(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func password() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_passwordhistoryentry_password(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePasswordHistoryEntry: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = PasswordHistoryEntry
+
+    public static func lift(_ handle: UInt64) throws -> PasswordHistoryEntry {
+        return PasswordHistoryEntry(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: PasswordHistoryEntry) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PasswordHistoryEntry {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: PasswordHistoryEntry, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasswordHistoryEntry_lift(_ handle: UInt64) throws -> PasswordHistoryEntry {
+    return try FfiConverterTypePasswordHistoryEntry.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasswordHistoryEntry_lower(_ value: PasswordHistoryEntry) -> UInt64 {
+    return FfiConverterTypePasswordHistoryEntry.lower(value)
+}
+
+
+
+
+
+
 public protocol PendingShareResultProtocol: AnyObject, Sendable {
 
     func expiresAt()  -> String
@@ -2180,6 +3742,152 @@ public func FfiConverterTypePendingShareResult_lower(_ value: PendingShareResult
 
 
 
+public protocol PhoneNumberProtocol: AnyObject, Sendable {
+
+    func id()  -> String
+
+    func label()  -> String
+
+    func number()  -> String
+
+}
+open class PhoneNumber: PhoneNumberProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_phonenumber(self.handle, $0) }
+    }
+public convenience init(id: String, label: String, number: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_phonenumber_new(
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(label),
+        FfiConverterString.lower(number),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_phonenumber(handle, $0) }
+    }
+
+
+
+
+open func id() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_phonenumber_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func label() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_phonenumber_label(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func number() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_phonenumber_number(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePhoneNumber: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = PhoneNumber
+
+    public static func lift(_ handle: UInt64) throws -> PhoneNumber {
+        return PhoneNumber(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: PhoneNumber) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PhoneNumber {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: PhoneNumber, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePhoneNumber_lift(_ handle: UInt64) throws -> PhoneNumber {
+    return try FfiConverterTypePhoneNumber.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePhoneNumber_lower(_ value: PhoneNumber) -> UInt64 {
+    return FfiConverterTypePhoneNumber.lower(value)
+}
+
+
+
+
+
+
 public protocol SecretStringProtocol: AnyObject, Sendable {
 
 }
@@ -2287,6 +3995,174 @@ public func FfiConverterTypeSecretString_lift(_ handle: UInt64) throws -> Secret
 #endif
 public func FfiConverterTypeSecretString_lower(_ value: SecretString) -> UInt64 {
     return FfiConverterTypeSecretString.lower(value)
+}
+
+
+
+
+
+
+public protocol SecureNoteItemDataProtocol: AnyObject, Sendable {
+
+    func customFields()  -> [CustomField]
+
+    func note()  -> String
+
+    func notes()  -> String?
+
+    func tags()  -> [String]
+
+    func title()  -> String
+
+}
+open class SecureNoteItemData: SecureNoteItemDataProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_securenoteitemdata(self.handle, $0) }
+    }
+public convenience init(title: String, note: String, notes: String?, customFields: [CustomField], tags: [String]) {
+    let handle =
+        try! rustCall() {
+    uniffi_bittery_client_bindings_fn_constructor_securenoteitemdata_new(
+        FfiConverterString.lower(title),
+        FfiConverterString.lower(note),
+        FfiConverterOptionString.lower(notes),
+        FfiConverterSequenceTypeCustomField.lower(customFields),
+        FfiConverterSequenceString.lower(tags),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_securenoteitemdata(handle, $0) }
+    }
+
+
+
+
+open func customFields() -> [CustomField]  {
+    return try!  FfiConverterSequenceTypeCustomField.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_securenoteitemdata_custom_fields(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func note() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_securenoteitemdata_note(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func notes() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_securenoteitemdata_notes(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func tags() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_securenoteitemdata_tags(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+open func title() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_securenoteitemdata_title(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSecureNoteItemData: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = SecureNoteItemData
+
+    public static func lift(_ handle: UInt64) throws -> SecureNoteItemData {
+        return SecureNoteItemData(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: SecureNoteItemData) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SecureNoteItemData {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SecureNoteItemData, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecureNoteItemData_lift(_ handle: UInt64) throws -> SecureNoteItemData {
+    return try FfiConverterTypeSecureNoteItemData.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecureNoteItemData_lower(_ value: SecureNoteItemData) -> UInt64 {
+    return FfiConverterTypeSecureNoteItemData.lower(value)
 }
 
 
@@ -2477,12 +4353,12 @@ public func FfiConverterTypeCreateShareDraft_lower(_ value: CreateShareDraft) ->
 public struct ItemsProjection {
     public var accountId: String
     public var replicaRevision: UInt64
-    public var items: [LoginItemProjection]
+    public var items: [ItemProjection]
     public var vaults: [VaultProjection]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(accountId: String, replicaRevision: UInt64, items: [LoginItemProjection], vaults: [VaultProjection]) {
+    public init(accountId: String, replicaRevision: UInt64, items: [ItemProjection], vaults: [VaultProjection]) {
         self.accountId = accountId
         self.replicaRevision = replicaRevision
         self.items = items
@@ -2507,7 +4383,7 @@ public struct FfiConverterTypeItemsProjection: FfiConverterRustBuffer {
             try ItemsProjection(
                 accountId: FfiConverterString.read(from: &buf),
                 replicaRevision: FfiConverterUInt64.read(from: &buf),
-                items: FfiConverterSequenceTypeLoginItemProjection.read(from: &buf),
+                items: FfiConverterSequenceTypeItemProjection.read(from: &buf),
                 vaults: FfiConverterSequenceTypeVaultProjection.read(from: &buf)
         )
     }
@@ -2515,7 +4391,7 @@ public struct FfiConverterTypeItemsProjection: FfiConverterRustBuffer {
     public static func write(_ value: ItemsProjection, into buf: inout [UInt8]) {
         FfiConverterString.write(value.accountId, into: &buf)
         FfiConverterUInt64.write(value.replicaRevision, into: &buf)
-        FfiConverterSequenceTypeLoginItemProjection.write(value.items, into: &buf)
+        FfiConverterSequenceTypeItemProjection.write(value.items, into: &buf)
         FfiConverterSequenceTypeVaultProjection.write(value.vaults, into: &buf)
     }
 }
@@ -3028,6 +4904,109 @@ public func FfiConverterTypeCustomFieldKind_lower(_ value: CustomFieldKind) -> R
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum ItemDraft {
+
+    case login(value: LoginItemData
+    )
+    case secureNote(value: SecureNoteItemData
+    )
+    case creditCard(value: CreditCardItemData
+    )
+    case identity(value: IdentityItemData
+    )
+    case authenticator(value: AuthenticatorItemData
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ItemDraft: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeItemDraft: FfiConverterRustBuffer {
+    typealias SwiftType = ItemDraft
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ItemDraft {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .login(value: try FfiConverterTypeLoginItemData.read(from: &buf)
+        )
+
+        case 2: return .secureNote(value: try FfiConverterTypeSecureNoteItemData.read(from: &buf)
+        )
+
+        case 3: return .creditCard(value: try FfiConverterTypeCreditCardItemData.read(from: &buf)
+        )
+
+        case 4: return .identity(value: try FfiConverterTypeIdentityItemData.read(from: &buf)
+        )
+
+        case 5: return .authenticator(value: try FfiConverterTypeAuthenticatorItemData.read(from: &buf)
+        )
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ItemDraft, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case let .login(value):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeLoginItemData.write(value, into: &buf)
+
+
+        case let .secureNote(value):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeSecureNoteItemData.write(value, into: &buf)
+
+
+        case let .creditCard(value):
+            writeInt(&buf, Int32(3))
+            FfiConverterTypeCreditCardItemData.write(value, into: &buf)
+
+
+        case let .identity(value):
+            writeInt(&buf, Int32(4))
+            FfiConverterTypeIdentityItemData.write(value, into: &buf)
+
+
+        case let .authenticator(value):
+            writeInt(&buf, Int32(5))
+            FfiConverterTypeAuthenticatorItemData.write(value, into: &buf)
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeItemDraft_lift(_ buf: RustBuffer) throws -> ItemDraft {
+    return try FfiConverterTypeItemDraft.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeItemDraft_lower(_ value: ItemDraft) -> RustBuffer {
+    return FfiConverterTypeItemDraft.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum ItemProjectionStatus: Equatable, Hashable {
 
     case pending
@@ -3179,6 +5158,154 @@ public func FfiConverterTypeObservationRequest_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeObservationRequest_lower(_ value: ObservationRequest) -> RustBuffer {
     return FfiConverterTypeObservationRequest.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum PasskeyStatus: Equatable, Hashable {
+
+    case active
+    case suspect
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PasskeyStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePasskeyStatus: FfiConverterRustBuffer {
+    typealias SwiftType = PasskeyStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PasskeyStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .active
+
+        case 2: return .suspect
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PasskeyStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .active:
+            writeInt(&buf, Int32(1))
+
+
+        case .suspect:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasskeyStatus_lift(_ buf: RustBuffer) throws -> PasskeyStatus {
+    return try FfiConverterTypePasskeyStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasskeyStatus_lower(_ value: PasskeyStatus) -> RustBuffer {
+    return FfiConverterTypePasskeyStatus.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum PasskeyStatusReason: Equatable, Hashable {
+
+    case manual
+    case unknownCredential
+    case signingError
+    case other
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PasskeyStatusReason: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePasskeyStatusReason: FfiConverterRustBuffer {
+    typealias SwiftType = PasskeyStatusReason
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PasskeyStatusReason {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .manual
+
+        case 2: return .unknownCredential
+
+        case 3: return .signingError
+
+        case 4: return .other
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PasskeyStatusReason, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .manual:
+            writeInt(&buf, Int32(1))
+
+
+        case .unknownCredential:
+            writeInt(&buf, Int32(2))
+
+
+        case .signingError:
+            writeInt(&buf, Int32(3))
+
+
+        case .other:
+            writeInt(&buf, Int32(4))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasskeyStatusReason_lift(_ buf: RustBuffer) throws -> PasskeyStatusReason {
+    return try FfiConverterTypePasskeyStatusReason.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasskeyStatusReason_lower(_ value: PasskeyStatusReason) -> RustBuffer {
+    return FfiConverterTypePasskeyStatusReason.lower(value)
 }
 
 
@@ -3448,9 +5575,9 @@ public enum RuntimeRequest {
     case deleteServerAccount(accountId: String, confirmEmail: String, requestId: String
     )
     case wipe
-    case createLoginItem(accountId: String, vaultId: String, draft: LoginItemDraft
+    case createItem(accountId: String, vaultId: String, draft: ItemDraft
     )
-    case updateLoginItem(accountId: String, itemId: String, draft: LoginItemDraft
+    case updateItem(accountId: String, itemId: String, draft: ItemDraft
     )
     case setItemFavorite(accountId: String, itemId: String, favorite: Bool
     )
@@ -3515,10 +5642,10 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
 
         case 7: return .wipe
 
-        case 8: return .createLoginItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 8: return .createItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
         )
 
-        case 9: return .updateLoginItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeLoginItemDraft.read(from: &buf)
+        case 9: return .updateItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
         )
 
         case 10: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
@@ -3603,18 +5730,18 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
 
 
-        case let .createLoginItem(accountId,vaultId,draft):
+        case let .createItem(accountId,vaultId,draft):
             writeInt(&buf, Int32(8))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
-            FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
+            FfiConverterTypeItemDraft.write(draft, into: &buf)
 
 
-        case let .updateLoginItem(accountId,itemId,draft):
+        case let .updateItem(accountId,itemId,draft):
             writeInt(&buf, Int32(9))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
-            FfiConverterTypeLoginItemDraft.write(draft, into: &buf)
+            FfiConverterTypeItemDraft.write(draft, into: &buf)
 
 
         case let .setItemFavorite(accountId,itemId,favorite):
@@ -4325,6 +6452,154 @@ public func FfiConverterTypeTeardownStatus_lower(_ value: TeardownStatus) -> Rus
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum TotpAlgorithm: Equatable, Hashable {
+
+    case sha1
+    case sha256
+    case sha512
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TotpAlgorithm: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTotpAlgorithm: FfiConverterRustBuffer {
+    typealias SwiftType = TotpAlgorithm
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TotpAlgorithm {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .sha1
+
+        case 2: return .sha256
+
+        case 3: return .sha512
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TotpAlgorithm, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .sha1:
+            writeInt(&buf, Int32(1))
+
+
+        case .sha256:
+            writeInt(&buf, Int32(2))
+
+
+        case .sha512:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTotpAlgorithm_lift(_ buf: RustBuffer) throws -> TotpAlgorithm {
+    return try FfiConverterTypeTotpAlgorithm.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTotpAlgorithm_lower(_ value: TotpAlgorithm) -> RustBuffer {
+    return FfiConverterTypeTotpAlgorithm.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum TotpDigits: Equatable, Hashable {
+
+    case six
+    case seven
+    case eight
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TotpDigits: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTotpDigits: FfiConverterRustBuffer {
+    typealias SwiftType = TotpDigits
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TotpDigits {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .six
+
+        case 2: return .seven
+
+        case 3: return .eight
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TotpDigits, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .six:
+            writeInt(&buf, Int32(1))
+
+
+        case .seven:
+            writeInt(&buf, Int32(2))
+
+
+        case .eight:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTotpDigits_lift(_ buf: RustBuffer) throws -> TotpDigits {
+    return try FfiConverterTypeTotpDigits.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTotpDigits_lower(_ value: TotpDigits) -> RustBuffer {
+    return FfiConverterTypeTotpDigits.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * One Account's membership in one Vault, in the Server's own closed set.
  */
@@ -4477,6 +6752,30 @@ public func FfiConverterTypeVaultProjectionType_lower(_ value: VaultProjectionTy
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -4549,6 +6848,54 @@ fileprivate struct FfiConverterOptionTypeAccountWaitingReason: FfiConverterRustB
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypePasskeyStatus: FfiConverterRustBuffer {
+    typealias SwiftType = PasskeyStatus?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePasskeyStatus.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePasskeyStatus.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypePasskeyStatusReason: FfiConverterRustBuffer {
+    typealias SwiftType = PasskeyStatusReason?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePasskeyStatusReason.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePasskeyStatusReason.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeRuntimeErrorCode: FfiConverterRustBuffer {
     typealias SwiftType = RuntimeErrorCode?
 
@@ -4565,6 +6912,54 @@ fileprivate struct FfiConverterOptionTypeRuntimeErrorCode: FfiConverterRustBuffe
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeErrorCode.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeTotpAlgorithm: FfiConverterRustBuffer {
+    typealias SwiftType = TotpAlgorithm?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeTotpAlgorithm.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeTotpAlgorithm.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeTotpDigits: FfiConverterRustBuffer {
+    typealias SwiftType = TotpDigits?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeTotpDigits.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeTotpDigits.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -4598,6 +6993,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeAddress: FfiConverterRustBuffer {
+    typealias SwiftType = [Address]
+
+    public static func write(_ value: [Address], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAddress.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Address] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Address]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAddress.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeAttachmentProjection: FfiConverterRustBuffer {
     typealias SwiftType = [AttachmentProjection]
 
@@ -4623,23 +7043,23 @@ fileprivate struct FfiConverterSequenceTypeAttachmentProjection: FfiConverterRus
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeLoginCustomField: FfiConverterRustBuffer {
-    typealias SwiftType = [LoginCustomField]
+fileprivate struct FfiConverterSequenceTypeCustomField: FfiConverterRustBuffer {
+    typealias SwiftType = [CustomField]
 
-    public static func write(_ value: [LoginCustomField], into buf: inout [UInt8]) {
+    public static func write(_ value: [CustomField], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
-            FfiConverterTypeLoginCustomField.write(item, into: &buf)
+            FfiConverterTypeCustomField.write(item, into: &buf)
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LoginCustomField] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CustomField] {
         let len: Int32 = try readInt(&buf)
-        var seq = [LoginCustomField]()
+        var seq = [CustomField]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeLoginCustomField.read(from: &buf))
+            seq.append(try FfiConverterTypeCustomField.read(from: &buf))
         }
         return seq
     }
@@ -4648,23 +7068,73 @@ fileprivate struct FfiConverterSequenceTypeLoginCustomField: FfiConverterRustBuf
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeLoginItemProjection: FfiConverterRustBuffer {
-    typealias SwiftType = [LoginItemProjection]
+fileprivate struct FfiConverterSequenceTypeItemProjection: FfiConverterRustBuffer {
+    typealias SwiftType = [ItemProjection]
 
-    public static func write(_ value: [LoginItemProjection], into buf: inout [UInt8]) {
+    public static func write(_ value: [ItemProjection], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
-            FfiConverterTypeLoginItemProjection.write(item, into: &buf)
+            FfiConverterTypeItemProjection.write(item, into: &buf)
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LoginItemProjection] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ItemProjection] {
         let len: Int32 = try readInt(&buf)
-        var seq = [LoginItemProjection]()
+        var seq = [ItemProjection]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeLoginItemProjection.read(from: &buf))
+            seq.append(try FfiConverterTypeItemProjection.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePasskey: FfiConverterRustBuffer {
+    typealias SwiftType = [Passkey]
+
+    public static func write(_ value: [Passkey], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePasskey.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Passkey] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Passkey]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePasskey.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePasswordHistoryEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [PasswordHistoryEntry]
+
+    public static func write(_ value: [PasswordHistoryEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePasswordHistoryEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PasswordHistoryEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PasswordHistoryEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePasswordHistoryEntry.read(from: &buf))
         }
         return seq
     }
@@ -4690,6 +7160,31 @@ fileprivate struct FfiConverterSequenceTypePendingShareResult: FfiConverterRustB
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypePendingShareResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePhoneNumber: FfiConverterRustBuffer {
+    typealias SwiftType = [PhoneNumber]
+
+    public static func write(_ value: [PhoneNumber], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePhoneNumber.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PhoneNumber] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PhoneNumber]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePhoneNumber.read(from: &buf))
         }
         return seq
     }
@@ -4846,6 +7341,24 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_func_normalize_account_email() != 25740) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_address_city() != 58253) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_address_country() != 34509) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_address_id() != 48009) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_address_state() != 6840) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_address_street() != 7340) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_address_zip() != 47330) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_account_id() != 40485) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4873,6 +7386,39 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_attachmentprojection_vault_id() != 16604) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_custom_fields() != 43783) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_linked_item_id() != 44227) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_notes() != 60731) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_tags() != 18173) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_title() != 61337) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_account_name() != 16252) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_algorithm() != 11625) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_digits() != 37301) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_issuer() != 49517) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_period() != 7235) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_secret() != 16808) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_method_clientruntime_observe() != 8781) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4882,76 +7428,262 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_clientruntime_shutdown() != 63419) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_field_type() != 53304) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_billing_address() != 55399) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_id() != 43011) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_card_number() != 50568) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_label() != 8495) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_cardholder_name() != 62234) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_logincustomfield_value() != 17024) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_custom_fields() != 13949) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_account_id() != 25649) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_cvv() != 34747) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_attachments() != 62974) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_expiry_date() != 41711) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_created_at() != 48453) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_notes() != 52206) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_custom_fields() != 41939) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_tags() != 60460) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_deleted_at() != 51974) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_title() != 50105) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_favorite() != 21525) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_account_name() != 7822) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_item_id() != 32154) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_algorithm() != 10649) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_note() != 1288) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_digits() != 27867) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_notes() != 36364) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_issuer() != 28173) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_password() != 46390) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_period() != 1956) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_status() != 40814) {
+    if (uniffi_bittery_client_bindings_checksum_method_creditcarditemdata_totp_secret() != 55978) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_tags() != 26227) {
+    if (uniffi_bittery_client_bindings_checksum_method_customfield_field_type() != 57581) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_title() != 63640) {
+    if (uniffi_bittery_client_bindings_checksum_method_customfield_id() != 21808) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_updated_at() != 623) {
+    if (uniffi_bittery_client_bindings_checksum_method_customfield_label() != 58360) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_url() != 868) {
+    if (uniffi_bittery_client_bindings_checksum_method_customfield_value() != 31343) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_urls() != 56038) {
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_addresses() != 20942) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_username() != 55946) {
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_custom_fields() != 8167) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_method_loginitemprojection_vault_id() != 1268) {
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_date_of_birth() != 55065) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_drivers_license() != 54028) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_email() != 48731) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_first_name() != 35942) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_last_name() != 56789) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_middle_name() != 44777) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_notes() != 25937) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_passport_number() != 24081) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_phone_numbers() != 23915) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_ssn() != 50338) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_tags() != 62625) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_title() != 904) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_account_name() != 24945) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_algorithm() != 15912) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_digits() != 9168) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_issuer() != 9981) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_period() != 38141) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_identityitemdata_totp_secret() != 56330) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_account_id() != 7576) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_attachments() != 55281) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_created_at() != 20999) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_data() != 42780) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_deleted_at() != 60661) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_favorite() != 8881) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_item_id() != 16170) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_status() != 12951) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_updated_at() != 40114) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_itemprojection_vault_id() != 24544) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_custom_fields() != 30681) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_note() != 41453) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_notes() != 56453) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_passkeys() != 25913) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_password() != 16567) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_password_history() != 6029) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_tags() != 47101) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_title() != 56029) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_account_name() != 53600) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_algorithm() != 10298) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_digits() != 44469) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_issuer() != 6657) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_period() != 64197) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_totp_secret() != 33016) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_url() != 59524) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_urls() != 49043) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_loginitemdata_username() != 20095) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_observationhandle_close() != 5413) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_observationsink_publish() != 48581) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_algorithm() != 43902) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_created_at() != 8414) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_credential_id() != 19409) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_last_used_at() != 5378) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_private_key() != 47116) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_public_key() != 40746) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_rp_id() != 34138) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_rp_name() != 64709) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_sign_count() != 6080) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_status() != 4222) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_status_reason() != 42427) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_status_updated_at() != 30005) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_transports() != 472) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_user_display_name() != 65270) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_user_handle() != 61971) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passkey_user_name() != 26852) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passwordhistoryentry_changed_at() != 61194) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_passwordhistoryentry_password() != 51700) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_expires_at() != 54441) {
@@ -4969,22 +7701,70 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_pendingshareresult_share_url() != 58893) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_phonenumber_id() != 30324) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_phonenumber_label() != 47459) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_phonenumber_number() != 37185) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_custom_fields() != 33327) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_note() != 54637) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_notes() != 52949) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_tags() != 14768) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_title() != 24945) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_address_new() != 54888) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new() != 20792) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_constructor_attachmentuploadmetadata_new() != 26080) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_constructor_authenticatoritemdata_new() != 52454) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_constructor_clientruntime_new() != 45744) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_constructor_logincustomfield_new() != 17823) {
+    if (uniffi_bittery_client_bindings_checksum_constructor_creditcarditemdata_new() != 28963) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bittery_client_bindings_checksum_constructor_loginitemdraft_new() != 20797) {
+    if (uniffi_bittery_client_bindings_checksum_constructor_customfield_new() != 20737) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_identityitemdata_new() != 44861) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_loginitemdata_new() != 26739) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_passkey_new() != 10806) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_passwordhistoryentry_new() != 1792) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_phonenumber_new() != 40383) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_constructor_secretstring_new() != 460) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_constructor_securenoteitemdata_new() != 46986) {
         return InitializationResult.apiChecksumMismatch
     }
 

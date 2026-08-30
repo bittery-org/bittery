@@ -13,21 +13,31 @@ fn native_generated_values_keep_plaintext_behind_opaque_objects() {
     for name in [
         "SecretString",
         "AttachmentName",
-        "LoginCustomField",
-        "LoginItemDraft",
-        "LoginItemProjection",
+        "CustomField",
+        "PasswordHistoryEntry",
+        "Passkey",
+        "Address",
+        "PhoneNumber",
+        "LoginItemData",
+        "SecureNoteItemData",
+        "CreditCardItemData",
+        "IdentityItemData",
+        "AuthenticatorItemData",
+        "ItemProjection",
     ] {
         assert!(KOTLIN.contains(&format!("open class {name}:")));
         assert!(!KOTLIN.contains(&format!("data class {name}")));
         assert!(SWIFT.contains(&format!("open class {name}:")));
         assert!(!SWIFT.contains(&format!("public struct {name}")));
     }
+    assert!(KOTLIN.contains("sealed class ItemDraft:"));
+    assert!(SWIFT.contains("public enum ItemDraft"));
     assert!(KOTLIN.contains("val `masterPassword`: uniffi.bittery_client_bindings.SecretString"));
-    assert!(KOTLIN.contains("val `draft`: uniffi.bittery_client_bindings.LoginItemDraft"));
+    assert!(KOTLIN.contains("val `draft`: uniffi.bittery_client_bindings.ItemDraft"));
     assert!(KOTLIN.contains("val `name`: uniffi.bittery_client_bindings.AttachmentName"));
     assert!(!KOTLIN.contains("val `name`: kotlin.String) : RuntimeRequest()"));
     assert!(SWIFT.contains("masterPassword: SecretString, secretKey: SecretString"));
-    assert!(SWIFT.contains("draft: LoginItemDraft"));
+    assert!(SWIFT.contains("draft: ItemDraft"));
     assert!(SWIFT.contains("name: AttachmentName"));
     assert!(!KOTLIN.contains("override fun toString"));
     assert!(!SWIFT.contains("CustomStringConvertible"));

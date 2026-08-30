@@ -12,7 +12,7 @@ import {
 import { createFakeRuntimeTransport } from "../testing";
 import {
 	RuntimeProvider,
-	useCreateLoginItem,
+	useCreateItem,
 	useRuntimeItems,
 	useRuntimeQuickUnlock,
 	useRuntimeSession,
@@ -31,7 +31,7 @@ function itemsProjection(accountId: string, title: string) {
 					itemId: "item-1",
 					accountId,
 					vaultId: "vault-1",
-					title,
+					data: { category: "login" as const, data: { title } },
 					status: "authoritative" as const,
 					favorite: false,
 					createdAt: "2026-08-23T00:00:00Z",
@@ -46,7 +46,7 @@ function ItemTitles({ label }: { label: string }) {
 	const snapshot = useRuntimeItems("account-1");
 	const titles =
 		snapshot.state === "ready"
-			? snapshot.value.items.map((item) => item.title).join(",")
+			? snapshot.value.items.map((item) => item.data.data.title).join(",")
 			: snapshot.state;
 	return <p data-testid={label}>{titles}</p>;
 }
@@ -244,7 +244,7 @@ describe("creating a Login Item from React", () => {
 		let accepting: Promise<RuntimeAccepted> | undefined;
 
 		function CreateButton() {
-			const create = useCreateLoginItem();
+			const create = useCreateItem();
 			return (
 				<button
 					type="button"
@@ -253,7 +253,7 @@ describe("creating a Login Item from React", () => {
 						accepting = create.mutateAsync({
 							accountId: "account-1",
 							vaultId: "vault-1",
-							draft: { title: "Bank" },
+							draft: { category: "login", data: { title: "Bank" } },
 						});
 					}}
 				>
@@ -274,10 +274,10 @@ describe("creating a Login Item from React", () => {
 		const requests = transport.calls.filter((call) => call.type === "request");
 		expect(requests).toHaveLength(1);
 		expect(JSON.parse(requests[0]?.requestJson ?? "{}")).toEqual({
-			type: "createLoginItem",
+			type: "createItem",
 			accountId: "account-1",
 			vaultId: "vault-1",
-			draft: { title: "Bank" },
+			draft: { category: "login", data: { title: "Bank" } },
 		});
 
 		await act(async () => {

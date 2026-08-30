@@ -5,7 +5,7 @@ use crate::{
         ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
     test_fixtures::{seed_ready_personal_vault, test_operation, test_overlay, TEST_VAULT_ID},
-    AccountAccessState, AccountId, CustomFieldKind, LoginItemDraft, ObservationHandle,
+    AccountAccessState, AccountId, CustomFieldKind, ItemDraft, LoginItemData, ObservationHandle,
     ObservationRequest, ObservationSink, RequestCancellation, Runtime, RuntimeError,
     RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
 };
@@ -370,20 +370,28 @@ fn installed_runtime() -> (Arc<Runtime>, AccountId, Incarnation) {
 }
 
 fn create_request(account_id: AccountId) -> RuntimeRequest {
-    RuntimeRequest::CreateLoginItem {
+    RuntimeRequest::CreateItem {
         account_id,
         vault_id: TEST_VAULT_ID.into(),
-        draft: LoginItemDraft {
+        draft: ItemDraft::Login(LoginItemData {
             title: "Example".into(),
             url: Some("https://example.test".into()),
             urls: vec![],
             username: Some("person@example.test".into()),
             password: Some("correct horse battery staple".into()),
+            password_history: Vec::new(),
+            passkeys: Vec::new(),
             notes: Some("private".into()),
             note: None,
             custom_fields: vec![],
             tags: vec![],
-        },
+            totp_secret: None,
+            totp_issuer: None,
+            totp_account_name: None,
+            totp_algorithm: None,
+            totp_digits: None,
+            totp_period: None,
+        }),
     }
 }
 
@@ -1534,29 +1542,36 @@ async fn accounts_fail_in_isolation_and_close_stops_runtime_calls() {
 
 #[test]
 fn login_draft_and_runtime_wire_match_the_existing_camel_case_subset() {
-    let draft: LoginItemDraft = serde_json::from_value(serde_json::json!({
-        "title": "Example",
-        "customFields": [{
-            "id": "field-1",
-            "label": "PIN",
-            "value": "1234",
-            "type": "password"
-        }]
+    let draft: ItemDraft = serde_json::from_value(serde_json::json!({
+        "category": "login",
+        "data": {
+            "title": "Example",
+            "customFields": [{
+                "id": "field-1",
+                "label": "PIN",
+                "value": "1234",
+                "type": "password"
+            }]
+        }
     }))
     .unwrap();
-    assert_eq!(draft.url, None);
-    assert_eq!(draft.custom_fields[0].field_type, CustomFieldKind::Password);
+    let ItemDraft::Login(login) = &draft else {
+        panic!("expected Login")
+    };
+    assert_eq!(login.url, None);
+    assert_eq!(login.custom_fields[0].field_type, CustomFieldKind::Password);
 
-    let wire = serde_json::to_value(RuntimeRequest::CreateLoginItem {
+    let wire = serde_json::to_value(RuntimeRequest::CreateItem {
         account_id: AccountId::from("account-1"),
         vault_id: "vault-1".into(),
         draft,
     })
     .unwrap();
-    assert_eq!(wire["type"], "createLoginItem");
+    assert_eq!(wire["type"], "createItem");
     assert_eq!(wire["accountId"], "account-1");
     assert_eq!(wire["vaultId"], "vault-1");
-    assert_eq!(wire["draft"]["customFields"][0]["type"], "password");
+    assert_eq!(wire["draft"]["data"]["customFields"][0]["type"], "password");
+    assert_eq!(wire["draft"]["category"], "login");
     assert!(wire.get("account_id").is_none());
 
     let quick_unlock = serde_json::to_value(RuntimeRequest::QuickUnlock {
@@ -1567,6 +1582,193 @@ fn login_draft_and_runtime_wire_match_the_existing_camel_case_subset() {
     assert_eq!(quick_unlock["type"], "quickUnlock");
     assert_eq!(quick_unlock["accountId"], "account-1");
     assert_eq!(quick_unlock["masterPassword"], "secret");
+}
+
+#[test]
+fn all_item_categories_round_trip_every_existing_plaintext_field_and_fail_closed() {
+    use crate::{
+        Address, AuthenticatorItemData, CreditCardItemData, IdentityItemData, Passkey,
+        PasskeyStatus, PasskeyStatusReason, PasswordHistoryEntry, PhoneNumber, SecureNoteItemData,
+        TotpAlgorithm, TotpDigits,
+    };
+    let drafts = vec![
+        ItemDraft::Login(LoginItemData {
+            title: "login-title".into(),
+            url: Some("https://primary.test".into()),
+            urls: vec!["https://secondary.test".into()],
+            username: Some("login-user".into()),
+            password: Some("login-password".into()),
+            password_history: vec![PasswordHistoryEntry {
+                password: "old-password".into(),
+                changed_at: "2026-01-02T03:04:05Z".into(),
+            }],
+            passkeys: vec![Passkey {
+                credential_id: "credential".into(),
+                rp_id: "rp.test".into(),
+                rp_name: "RP".into(),
+                user_handle: "handle".into(),
+                user_name: "name".into(),
+                user_display_name: "display".into(),
+                private_key: "private".into(),
+                public_key: "public".into(),
+                algorithm: -7,
+                sign_count: 9,
+                transports: vec!["internal".into()],
+                created_at: "2026-01-01T00:00:00Z".into(),
+                last_used_at: Some("2026-01-02T00:00:00Z".into()),
+                status: Some(PasskeyStatus::Suspect),
+                status_reason: Some(PasskeyStatusReason::SigningError),
+                status_updated_at: Some("2026-01-03T00:00:00Z".into()),
+            }],
+            notes: Some("login-notes".into()),
+            note: Some("legacy-note".into()),
+            custom_fields: vec![crate::CustomField {
+                id: "custom".into(),
+                label: "Custom".into(),
+                value: "custom-value".into(),
+                field_type: CustomFieldKind::Password,
+            }],
+            tags: vec!["login-tag".into()],
+            totp_secret: Some("LOGIN-TOTP".into()),
+            totp_issuer: Some("Login issuer".into()),
+            totp_account_name: Some("Login account".into()),
+            totp_algorithm: Some(TotpAlgorithm::Sha512),
+            totp_digits: Some(TotpDigits::Eight),
+            totp_period: Some(45),
+        }),
+        ItemDraft::SecureNote(SecureNoteItemData {
+            title: "note-title".into(),
+            note: "secure body".into(),
+            notes: Some("provider-note".into()),
+            custom_fields: vec![crate::CustomField {
+                id: "note-custom".into(),
+                label: "Note custom".into(),
+                value: "note-custom-value".into(),
+                field_type: CustomFieldKind::Text,
+            }],
+            tags: vec!["note-tag".into()],
+        }),
+        ItemDraft::CreditCard(CreditCardItemData {
+            title: "card-title".into(),
+            cardholder_name: Some("Holder".into()),
+            card_number: Some("4111111111111111".into()),
+            cvv: Some("123".into()),
+            expiry_date: Some("12/30".into()),
+            billing_address: Some("Billing".into()),
+            notes: Some("card-notes".into()),
+            custom_fields: vec![crate::CustomField {
+                id: "card-custom".into(),
+                label: "Card custom".into(),
+                value: "card-custom-value".into(),
+                field_type: CustomFieldKind::Password,
+            }],
+            totp_secret: Some("CARD-TOTP".into()),
+            totp_issuer: Some("Card issuer".into()),
+            totp_account_name: Some("Card account".into()),
+            totp_algorithm: Some(TotpAlgorithm::Sha1),
+            totp_digits: Some(TotpDigits::Six),
+            totp_period: Some(30),
+            tags: vec!["card-tag".into()],
+        }),
+        ItemDraft::Identity(IdentityItemData {
+            title: "identity-title".into(),
+            first_name: Some("First".into()),
+            middle_name: Some("Middle".into()),
+            last_name: Some("Last".into()),
+            email: Some("identity@example.test".into()),
+            addresses: vec![Address {
+                id: "address".into(),
+                street: "Street".into(),
+                city: "City".into(),
+                state: "State".into(),
+                zip: "12345".into(),
+                country: "Country".into(),
+            }],
+            phone_numbers: vec![PhoneNumber {
+                id: "phone".into(),
+                label: "Mobile".into(),
+                number: "+49123".into(),
+            }],
+            ssn: Some("ssn".into()),
+            passport_number: Some("passport".into()),
+            drivers_license: Some("license".into()),
+            date_of_birth: Some("2000-01-01".into()),
+            notes: Some("identity-notes".into()),
+            custom_fields: vec![crate::CustomField {
+                id: "identity-custom".into(),
+                label: "Identity custom".into(),
+                value: "identity-custom-value".into(),
+                field_type: CustomFieldKind::Email,
+            }],
+            totp_secret: Some("IDENTITY-TOTP".into()),
+            totp_issuer: Some("Identity issuer".into()),
+            totp_account_name: Some("Identity account".into()),
+            totp_algorithm: Some(TotpAlgorithm::Sha512),
+            totp_digits: Some(TotpDigits::Eight),
+            totp_period: Some(90),
+            tags: vec!["identity-tag".into()],
+        }),
+        ItemDraft::Authenticator(AuthenticatorItemData {
+            title: "auth-title".into(),
+            totp_secret: "AUTH-TOTP".into(),
+            totp_issuer: Some("Issuer".into()),
+            totp_account_name: Some("Account".into()),
+            totp_algorithm: Some(TotpAlgorithm::Sha256),
+            totp_digits: Some(TotpDigits::Seven),
+            totp_period: Some(60),
+            linked_item_id: Some("linked-login".into()),
+            notes: Some("auth-notes".into()),
+            custom_fields: vec![crate::CustomField {
+                id: "auth-custom".into(),
+                label: "Auth custom".into(),
+                value: "auth-custom-value".into(),
+                field_type: CustomFieldKind::Url,
+            }],
+            tags: vec!["auth-tag".into()],
+        }),
+    ];
+    for draft in drafts {
+        let encoded = serde_json::to_value(&draft).unwrap();
+        assert_eq!(serde_json::from_value::<ItemDraft>(encoded).unwrap(), draft);
+        let debug = format!("{draft:?}");
+        assert!(debug.contains("[redacted]"));
+        for secret in [
+            "login-password",
+            "old-password",
+            "private",
+            "secure body",
+            "4111111111111111",
+            "ssn",
+            "AUTH-TOTP",
+        ] {
+            assert!(!debug.contains(secret));
+        }
+    }
+    assert!(serde_json::from_value::<ItemDraft>(serde_json::json!({
+        "category": "secure-note", "data": { "title": "x", "note": "y", "password": "wrong-category" }
+    })).is_err());
+    assert!(serde_json::from_value::<ItemDraft>(serde_json::json!({
+        "category": "login", "data": { "title": "x", "cardNumber": "wrong-category" }
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ItemDraft>(serde_json::json!({
+        "category": "login",
+        "data": {
+            "title": "x",
+            "customFields": [{
+                "id": "field-1",
+                "label": "PIN",
+                "value": "1234",
+                "type": "password",
+                "foreignAuthority": "must-not-be-ignored"
+            }]
+        }
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ItemDraft>(serde_json::json!({
+        "category": "totp", "data": { "title": "x", "totpSecret": "secret" }
+    }))
+    .is_err());
 }
 
 #[tokio::test]

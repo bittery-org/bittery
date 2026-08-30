@@ -33,10 +33,10 @@ test("generated validators keep the Runtime request surface closed", () => {
 	);
 	assert.equal(
 		validateRuntimeRequest({
-			type: "createLoginItem",
+			type: "createItem",
 			accountId: "account-1",
 			vaultId: "vault-1",
-			draft: { title: "Server" },
+			draft: { category: "login", data: { title: "Server" } },
 		}),
 		true,
 	);
@@ -54,6 +54,118 @@ test("generated validators keep the Runtime request surface closed", () => {
 		true,
 	);
 	assert.equal(validateObservationRequest({ type: "items" }), false);
+});
+
+test("generated Item validators preserve five closed categories and reject mixed fields", () => {
+	const drafts = [
+		{
+			category: "login",
+			data: { title: "Login", password: "secret", totpDigits: 8 },
+		},
+		{ category: "secure-note", data: { title: "Note", note: "Body" } },
+		{
+			category: "credit-card",
+			data: {
+				title: "Card",
+				cardholderName: "Holder",
+				cardNumber: "4111",
+				cvv: "123",
+				expiryDate: "12/30",
+			},
+		},
+		{ category: "identity", data: { title: "Identity", firstName: "First" } },
+		{
+			category: "authenticator",
+			data: {
+				title: "Authenticator",
+				totpSecret: "secret",
+				linkedItemId: "login-1",
+				totpDigits: 7,
+			},
+		},
+	];
+	for (const draft of drafts) {
+		assert.equal(
+			validateRuntimeRequest({
+				type: "createItem",
+				accountId: "account-1",
+				vaultId: "vault-1",
+				draft,
+			}),
+			true,
+		);
+	}
+	assert.equal(
+		validateRuntimeRequest({
+			type: "createItem",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			draft: {
+				category: "secure-note",
+				data: { title: "Note", note: "Body", password: "mixed" },
+			},
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "createItem",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			draft: {
+				category: "login",
+				data: {
+					title: "Login",
+					customFields: [
+						{
+							id: "field-1",
+							label: "PIN",
+							value: "1234",
+							type: "password",
+							foreignAuthority: "must-not-be-ignored",
+						},
+					],
+				},
+			},
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "createItem",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			draft: {
+				category: "login",
+				data: { title: "Login", cardNumber: "mixed" },
+			},
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "createItem",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			draft: {
+				category: "totp",
+				data: { title: "Authenticator", totpSecret: "secret" },
+			},
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "createItem",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			draft: {
+				category: "authenticator",
+				data: { title: "Authenticator", totpSecret: "secret", totpDigits: 9 },
+			},
+		}),
+		false,
+	);
 });
 
 test("generated Web Attachment Delete shapes are minimal and closed", () => {
@@ -229,11 +341,16 @@ test("the Item projection keeps the fields the Web host used to drop", () => {
 		accountId: "account-1",
 		itemId: "item-1",
 		vaultId: "vault-1",
-		title: "Server",
-		customFields: [
-			{ id: "field-1", label: "PIN", value: "1234", type: "password" },
-		],
-		tags: ["work"],
+		data: {
+			category: "login",
+			data: {
+				title: "Server",
+				customFields: [
+					{ id: "field-1", label: "PIN", value: "1234", type: "password" },
+				],
+				tags: ["work"],
+			},
+		},
 		favorite: false,
 		deletedAt: "2026-01-02T00:00:00Z",
 		attachments: [
@@ -267,9 +384,15 @@ test("the Item projection keeps the fields the Web host used to drop", () => {
 		validateRuntimeProjection(
 			projection({
 				...item,
-				customFields: [
-					{ id: "field-1", label: "PIN", value: "1234", type: "pin" },
-				],
+				data: {
+					...item.data,
+					data: {
+						...item.data.data,
+						customFields: [
+							{ id: "field-1", label: "PIN", value: "1234", type: "pin" },
+						],
+					},
+				},
 			}),
 		),
 		false,

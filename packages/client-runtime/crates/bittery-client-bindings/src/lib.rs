@@ -114,17 +114,17 @@ impl AttachmentUploadMetadata {
 }
 
 #[derive(uniffi::Object)]
-pub struct LoginCustomField {
+pub struct CustomField {
     id: String,
     label: String,
     value: String,
     field_type: CustomFieldKind,
 }
 
-impl fmt::Debug for LoginCustomField {
+impl fmt::Debug for CustomField {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("LoginCustomField")
+            .debug_struct("CustomField")
             .field("plaintext", &"[redacted]")
             .field("field_type", &self.field_type)
             .finish()
@@ -132,7 +132,7 @@ impl fmt::Debug for LoginCustomField {
 }
 
 #[uniffi::export]
-impl LoginCustomField {
+impl CustomField {
     #[uniffi::constructor]
     pub fn new(id: String, label: String, value: String, field_type: CustomFieldKind) -> Arc<Self> {
         Arc::new(Self {
@@ -160,9 +160,9 @@ impl LoginCustomField {
     }
 }
 
-impl LoginCustomField {
-    fn to_core(&self) -> core::LoginCustomField {
-        core::LoginCustomField {
+impl CustomField {
+    fn to_core(&self) -> core::CustomField {
+        core::CustomField {
             id: self.id.clone(),
             label: self.label.clone(),
             value: self.value.clone(),
@@ -180,31 +180,283 @@ pub enum CustomFieldKind {
 }
 
 #[derive(uniffi::Object)]
-pub struct LoginItemDraft {
+pub struct PasswordHistoryEntry {
+    password: String,
+    changed_at: String,
+}
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum PasskeyStatus {
+    Active,
+    Suspect,
+}
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum PasskeyStatusReason {
+    Manual,
+    UnknownCredential,
+    SigningError,
+    Other,
+}
+
+#[derive(uniffi::Object)]
+pub struct Passkey {
+    credential_id: String,
+    rp_id: String,
+    rp_name: String,
+    user_handle: String,
+    user_name: String,
+    user_display_name: String,
+    private_key: String,
+    public_key: String,
+    algorithm: i32,
+    sign_count: u32,
+    transports: Vec<String>,
+    created_at: String,
+    last_used_at: Option<String>,
+    status: Option<PasskeyStatus>,
+    status_reason: Option<PasskeyStatusReason>,
+    status_updated_at: Option<String>,
+}
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum TotpAlgorithm {
+    Sha1,
+    Sha256,
+    Sha512,
+}
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum TotpDigits {
+    Six,
+    Seven,
+    Eight,
+}
+
+#[derive(uniffi::Object)]
+pub struct LoginItemData {
     title: String,
     url: Option<String>,
     urls: Vec<String>,
     username: Option<String>,
     password: Option<String>,
+    password_history: Vec<Arc<PasswordHistoryEntry>>,
+    passkeys: Vec<Arc<Passkey>>,
     notes: Option<String>,
     note: Option<String>,
-    custom_fields: Vec<Arc<LoginCustomField>>,
+    custom_fields: Vec<Arc<CustomField>>,
+    tags: Vec<String>,
+    totp_secret: Option<String>,
+    totp_issuer: Option<String>,
+    totp_account_name: Option<String>,
+    totp_algorithm: Option<TotpAlgorithm>,
+    totp_digits: Option<TotpDigits>,
+    totp_period: Option<u32>,
+}
+
+#[derive(uniffi::Object)]
+pub struct SecureNoteItemData {
+    title: String,
+    note: String,
+    notes: Option<String>,
+    custom_fields: Vec<Arc<CustomField>>,
     tags: Vec<String>,
 }
 
-impl fmt::Debug for LoginItemDraft {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("LoginItemDraft")
-            .field("plaintext", &"[redacted]")
-            .field("custom_field_count", &self.custom_fields.len())
-            .field("tag_count", &self.tags.len())
-            .finish()
+#[derive(uniffi::Object)]
+pub struct CreditCardItemData {
+    title: String,
+    cardholder_name: Option<String>,
+    card_number: Option<String>,
+    cvv: Option<String>,
+    expiry_date: Option<String>,
+    billing_address: Option<String>,
+    notes: Option<String>,
+    custom_fields: Vec<Arc<CustomField>>,
+    totp_secret: Option<String>,
+    totp_issuer: Option<String>,
+    totp_account_name: Option<String>,
+    totp_algorithm: Option<TotpAlgorithm>,
+    totp_digits: Option<TotpDigits>,
+    totp_period: Option<u32>,
+    tags: Vec<String>,
+}
+
+#[derive(uniffi::Object)]
+pub struct Address {
+    id: String,
+    street: String,
+    city: String,
+    state: String,
+    zip: String,
+    country: String,
+}
+
+#[derive(uniffi::Object)]
+pub struct PhoneNumber {
+    id: String,
+    label: String,
+    number: String,
+}
+
+#[derive(uniffi::Object)]
+pub struct IdentityItemData {
+    title: String,
+    first_name: Option<String>,
+    middle_name: Option<String>,
+    last_name: Option<String>,
+    email: Option<String>,
+    addresses: Vec<Arc<Address>>,
+    phone_numbers: Vec<Arc<PhoneNumber>>,
+    ssn: Option<String>,
+    passport_number: Option<String>,
+    drivers_license: Option<String>,
+    date_of_birth: Option<String>,
+    notes: Option<String>,
+    custom_fields: Vec<Arc<CustomField>>,
+    totp_secret: Option<String>,
+    totp_issuer: Option<String>,
+    totp_account_name: Option<String>,
+    totp_algorithm: Option<TotpAlgorithm>,
+    totp_digits: Option<TotpDigits>,
+    totp_period: Option<u32>,
+    tags: Vec<String>,
+}
+
+#[derive(uniffi::Object)]
+pub struct AuthenticatorItemData {
+    title: String,
+    totp_secret: String,
+    totp_issuer: Option<String>,
+    totp_account_name: Option<String>,
+    totp_algorithm: Option<TotpAlgorithm>,
+    totp_digits: Option<TotpDigits>,
+    totp_period: Option<u32>,
+    linked_item_id: Option<String>,
+    notes: Option<String>,
+    custom_fields: Vec<Arc<CustomField>>,
+    tags: Vec<String>,
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum ItemDraft {
+    Login { value: Arc<LoginItemData> },
+    SecureNote { value: Arc<SecureNoteItemData> },
+    CreditCard { value: Arc<CreditCardItemData> },
+    Identity { value: Arc<IdentityItemData> },
+    Authenticator { value: Arc<AuthenticatorItemData> },
+}
+
+#[uniffi::export]
+impl PasswordHistoryEntry {
+    #[uniffi::constructor]
+    pub fn new(password: String, changed_at: String) -> Arc<Self> {
+        Arc::new(Self {
+            password,
+            changed_at,
+        })
+    }
+    pub fn password(&self) -> String {
+        self.password.clone()
+    }
+    pub fn changed_at(&self) -> String {
+        self.changed_at.clone()
     }
 }
 
 #[uniffi::export]
-impl LoginItemDraft {
+impl Passkey {
+    #[uniffi::constructor]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        credential_id: String,
+        rp_id: String,
+        rp_name: String,
+        user_handle: String,
+        user_name: String,
+        user_display_name: String,
+        private_key: String,
+        public_key: String,
+        algorithm: i32,
+        sign_count: u32,
+        transports: Vec<String>,
+        created_at: String,
+        last_used_at: Option<String>,
+        status: Option<PasskeyStatus>,
+        status_reason: Option<PasskeyStatusReason>,
+        status_updated_at: Option<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            credential_id,
+            rp_id,
+            rp_name,
+            user_handle,
+            user_name,
+            user_display_name,
+            private_key,
+            public_key,
+            algorithm,
+            sign_count,
+            transports,
+            created_at,
+            last_used_at,
+            status,
+            status_reason,
+            status_updated_at,
+        })
+    }
+    pub fn credential_id(&self) -> String {
+        self.credential_id.clone()
+    }
+    pub fn rp_id(&self) -> String {
+        self.rp_id.clone()
+    }
+    pub fn rp_name(&self) -> String {
+        self.rp_name.clone()
+    }
+    pub fn user_handle(&self) -> String {
+        self.user_handle.clone()
+    }
+    pub fn user_name(&self) -> String {
+        self.user_name.clone()
+    }
+    pub fn user_display_name(&self) -> String {
+        self.user_display_name.clone()
+    }
+    pub fn private_key(&self) -> String {
+        self.private_key.clone()
+    }
+    pub fn public_key(&self) -> String {
+        self.public_key.clone()
+    }
+    pub fn algorithm(&self) -> i32 {
+        self.algorithm
+    }
+    pub fn sign_count(&self) -> u32 {
+        self.sign_count
+    }
+    pub fn transports(&self) -> Vec<String> {
+        self.transports.clone()
+    }
+    pub fn created_at(&self) -> String {
+        self.created_at.clone()
+    }
+    pub fn last_used_at(&self) -> Option<String> {
+        self.last_used_at.clone()
+    }
+    pub fn status(&self) -> Option<PasskeyStatus> {
+        self.status
+    }
+    pub fn status_reason(&self) -> Option<PasskeyStatusReason> {
+        self.status_reason
+    }
+    pub fn status_updated_at(&self) -> Option<String> {
+        self.status_updated_at.clone()
+    }
+}
+
+#[uniffi::export]
+impl LoginItemData {
     #[uniffi::constructor]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -213,10 +465,18 @@ impl LoginItemDraft {
         urls: Vec<String>,
         username: Option<String>,
         password: Option<String>,
+        password_history: Vec<Arc<PasswordHistoryEntry>>,
+        passkeys: Vec<Arc<Passkey>>,
         notes: Option<String>,
         note: Option<String>,
-        custom_fields: Vec<Arc<LoginCustomField>>,
+        custom_fields: Vec<Arc<CustomField>>,
         tags: Vec<String>,
+        totp_secret: Option<String>,
+        totp_issuer: Option<String>,
+        totp_account_name: Option<String>,
+        totp_algorithm: Option<TotpAlgorithm>,
+        totp_digits: Option<TotpDigits>,
+        totp_period: Option<u32>,
     ) -> Arc<Self> {
         Arc::new(Self {
             title,
@@ -224,11 +484,442 @@ impl LoginItemDraft {
             urls,
             username,
             password,
+            password_history,
+            passkeys,
             notes,
             note,
             custom_fields,
             tags,
+            totp_secret,
+            totp_issuer,
+            totp_account_name,
+            totp_algorithm,
+            totp_digits,
+            totp_period,
         })
+    }
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
+    pub fn url(&self) -> Option<String> {
+        self.url.clone()
+    }
+    pub fn urls(&self) -> Vec<String> {
+        self.urls.clone()
+    }
+    pub fn username(&self) -> Option<String> {
+        self.username.clone()
+    }
+    pub fn password(&self) -> Option<String> {
+        self.password.clone()
+    }
+    pub fn password_history(&self) -> Vec<Arc<PasswordHistoryEntry>> {
+        self.password_history.clone()
+    }
+    pub fn passkeys(&self) -> Vec<Arc<Passkey>> {
+        self.passkeys.clone()
+    }
+    pub fn notes(&self) -> Option<String> {
+        self.notes.clone()
+    }
+    pub fn note(&self) -> Option<String> {
+        self.note.clone()
+    }
+    pub fn custom_fields(&self) -> Vec<Arc<CustomField>> {
+        self.custom_fields.clone()
+    }
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.clone()
+    }
+    pub fn totp_secret(&self) -> Option<String> {
+        self.totp_secret.clone()
+    }
+    pub fn totp_issuer(&self) -> Option<String> {
+        self.totp_issuer.clone()
+    }
+    pub fn totp_account_name(&self) -> Option<String> {
+        self.totp_account_name.clone()
+    }
+    pub fn totp_algorithm(&self) -> Option<TotpAlgorithm> {
+        self.totp_algorithm
+    }
+    pub fn totp_digits(&self) -> Option<TotpDigits> {
+        self.totp_digits
+    }
+    pub fn totp_period(&self) -> Option<u32> {
+        self.totp_period
+    }
+}
+
+#[uniffi::export]
+impl SecureNoteItemData {
+    #[uniffi::constructor]
+    pub fn new(
+        title: String,
+        note: String,
+        notes: Option<String>,
+        custom_fields: Vec<Arc<CustomField>>,
+        tags: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            title,
+            note,
+            notes,
+            custom_fields,
+            tags,
+        })
+    }
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
+    pub fn note(&self) -> String {
+        self.note.clone()
+    }
+    pub fn notes(&self) -> Option<String> {
+        self.notes.clone()
+    }
+    pub fn custom_fields(&self) -> Vec<Arc<CustomField>> {
+        self.custom_fields.clone()
+    }
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.clone()
+    }
+}
+
+#[uniffi::export]
+impl CreditCardItemData {
+    #[uniffi::constructor]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        title: String,
+        cardholder_name: Option<String>,
+        card_number: Option<String>,
+        cvv: Option<String>,
+        expiry_date: Option<String>,
+        billing_address: Option<String>,
+        notes: Option<String>,
+        custom_fields: Vec<Arc<CustomField>>,
+        totp_secret: Option<String>,
+        totp_issuer: Option<String>,
+        totp_account_name: Option<String>,
+        totp_algorithm: Option<TotpAlgorithm>,
+        totp_digits: Option<TotpDigits>,
+        totp_period: Option<u32>,
+        tags: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            title,
+            cardholder_name,
+            card_number,
+            cvv,
+            expiry_date,
+            billing_address,
+            notes,
+            custom_fields,
+            totp_secret,
+            totp_issuer,
+            totp_account_name,
+            totp_algorithm,
+            totp_digits,
+            totp_period,
+            tags,
+        })
+    }
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
+    pub fn cardholder_name(&self) -> Option<String> {
+        self.cardholder_name.clone()
+    }
+    pub fn card_number(&self) -> Option<String> {
+        self.card_number.clone()
+    }
+    pub fn cvv(&self) -> Option<String> {
+        self.cvv.clone()
+    }
+    pub fn expiry_date(&self) -> Option<String> {
+        self.expiry_date.clone()
+    }
+    pub fn billing_address(&self) -> Option<String> {
+        self.billing_address.clone()
+    }
+    pub fn notes(&self) -> Option<String> {
+        self.notes.clone()
+    }
+    pub fn custom_fields(&self) -> Vec<Arc<CustomField>> {
+        self.custom_fields.clone()
+    }
+    pub fn totp_secret(&self) -> Option<String> {
+        self.totp_secret.clone()
+    }
+    pub fn totp_issuer(&self) -> Option<String> {
+        self.totp_issuer.clone()
+    }
+    pub fn totp_account_name(&self) -> Option<String> {
+        self.totp_account_name.clone()
+    }
+    pub fn totp_algorithm(&self) -> Option<TotpAlgorithm> {
+        self.totp_algorithm
+    }
+    pub fn totp_digits(&self) -> Option<TotpDigits> {
+        self.totp_digits
+    }
+    pub fn totp_period(&self) -> Option<u32> {
+        self.totp_period
+    }
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.clone()
+    }
+}
+
+#[uniffi::export]
+impl Address {
+    #[uniffi::constructor]
+    pub fn new(
+        id: String,
+        street: String,
+        city: String,
+        state: String,
+        zip: String,
+        country: String,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            id,
+            street,
+            city,
+            state,
+            zip,
+            country,
+        })
+    }
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+    pub fn street(&self) -> String {
+        self.street.clone()
+    }
+    pub fn city(&self) -> String {
+        self.city.clone()
+    }
+    pub fn state(&self) -> String {
+        self.state.clone()
+    }
+    pub fn zip(&self) -> String {
+        self.zip.clone()
+    }
+    pub fn country(&self) -> String {
+        self.country.clone()
+    }
+}
+
+#[uniffi::export]
+impl PhoneNumber {
+    #[uniffi::constructor]
+    pub fn new(id: String, label: String, number: String) -> Arc<Self> {
+        Arc::new(Self { id, label, number })
+    }
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+    pub fn label(&self) -> String {
+        self.label.clone()
+    }
+    pub fn number(&self) -> String {
+        self.number.clone()
+    }
+}
+
+#[uniffi::export]
+impl IdentityItemData {
+    #[uniffi::constructor]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        title: String,
+        first_name: Option<String>,
+        middle_name: Option<String>,
+        last_name: Option<String>,
+        email: Option<String>,
+        addresses: Vec<Arc<Address>>,
+        phone_numbers: Vec<Arc<PhoneNumber>>,
+        ssn: Option<String>,
+        passport_number: Option<String>,
+        drivers_license: Option<String>,
+        date_of_birth: Option<String>,
+        notes: Option<String>,
+        custom_fields: Vec<Arc<CustomField>>,
+        totp_secret: Option<String>,
+        totp_issuer: Option<String>,
+        totp_account_name: Option<String>,
+        totp_algorithm: Option<TotpAlgorithm>,
+        totp_digits: Option<TotpDigits>,
+        totp_period: Option<u32>,
+        tags: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            title,
+            first_name,
+            middle_name,
+            last_name,
+            email,
+            addresses,
+            phone_numbers,
+            ssn,
+            passport_number,
+            drivers_license,
+            date_of_birth,
+            notes,
+            custom_fields,
+            totp_secret,
+            totp_issuer,
+            totp_account_name,
+            totp_algorithm,
+            totp_digits,
+            totp_period,
+            tags,
+        })
+    }
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
+    pub fn first_name(&self) -> Option<String> {
+        self.first_name.clone()
+    }
+    pub fn middle_name(&self) -> Option<String> {
+        self.middle_name.clone()
+    }
+    pub fn last_name(&self) -> Option<String> {
+        self.last_name.clone()
+    }
+    pub fn email(&self) -> Option<String> {
+        self.email.clone()
+    }
+    pub fn addresses(&self) -> Vec<Arc<Address>> {
+        self.addresses.clone()
+    }
+    pub fn phone_numbers(&self) -> Vec<Arc<PhoneNumber>> {
+        self.phone_numbers.clone()
+    }
+    pub fn ssn(&self) -> Option<String> {
+        self.ssn.clone()
+    }
+    pub fn passport_number(&self) -> Option<String> {
+        self.passport_number.clone()
+    }
+    pub fn drivers_license(&self) -> Option<String> {
+        self.drivers_license.clone()
+    }
+    pub fn date_of_birth(&self) -> Option<String> {
+        self.date_of_birth.clone()
+    }
+    pub fn notes(&self) -> Option<String> {
+        self.notes.clone()
+    }
+    pub fn custom_fields(&self) -> Vec<Arc<CustomField>> {
+        self.custom_fields.clone()
+    }
+    pub fn totp_secret(&self) -> Option<String> {
+        self.totp_secret.clone()
+    }
+    pub fn totp_issuer(&self) -> Option<String> {
+        self.totp_issuer.clone()
+    }
+    pub fn totp_account_name(&self) -> Option<String> {
+        self.totp_account_name.clone()
+    }
+    pub fn totp_algorithm(&self) -> Option<TotpAlgorithm> {
+        self.totp_algorithm
+    }
+    pub fn totp_digits(&self) -> Option<TotpDigits> {
+        self.totp_digits
+    }
+    pub fn totp_period(&self) -> Option<u32> {
+        self.totp_period
+    }
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.clone()
+    }
+}
+
+#[uniffi::export]
+impl AuthenticatorItemData {
+    #[uniffi::constructor]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        title: String,
+        totp_secret: String,
+        totp_issuer: Option<String>,
+        totp_account_name: Option<String>,
+        totp_algorithm: Option<TotpAlgorithm>,
+        totp_digits: Option<TotpDigits>,
+        totp_period: Option<u32>,
+        linked_item_id: Option<String>,
+        notes: Option<String>,
+        custom_fields: Vec<Arc<CustomField>>,
+        tags: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            title,
+            totp_secret,
+            totp_issuer,
+            totp_account_name,
+            totp_algorithm,
+            totp_digits,
+            totp_period,
+            linked_item_id,
+            notes,
+            custom_fields,
+            tags,
+        })
+    }
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
+    pub fn totp_secret(&self) -> String {
+        self.totp_secret.clone()
+    }
+    pub fn totp_issuer(&self) -> Option<String> {
+        self.totp_issuer.clone()
+    }
+    pub fn totp_account_name(&self) -> Option<String> {
+        self.totp_account_name.clone()
+    }
+    pub fn totp_algorithm(&self) -> Option<TotpAlgorithm> {
+        self.totp_algorithm
+    }
+    pub fn totp_digits(&self) -> Option<TotpDigits> {
+        self.totp_digits
+    }
+    pub fn totp_period(&self) -> Option<u32> {
+        self.totp_period
+    }
+    pub fn linked_item_id(&self) -> Option<String> {
+        self.linked_item_id.clone()
+    }
+    pub fn notes(&self) -> Option<String> {
+        self.notes.clone()
+    }
+    pub fn custom_fields(&self) -> Vec<Arc<CustomField>> {
+        self.custom_fields.clone()
+    }
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.clone()
+    }
+}
+
+impl fmt::Debug for ItemDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let category = match self {
+            Self::Login { .. } => "login",
+            Self::SecureNote { .. } => "secure-note",
+            Self::CreditCard { .. } => "credit-card",
+            Self::Identity { .. } => "identity",
+            Self::Authenticator { .. } => "authenticator",
+        };
+        formatter
+            .debug_struct("ItemDraft")
+            .field("category", &category)
+            .field("plaintext", &"[redacted]")
+            .finish()
     }
 }
 
@@ -255,23 +946,9 @@ pub enum ShareExpiration {
     ThirtyDays,
 }
 
-impl LoginItemDraft {
-    fn to_core(&self) -> core::LoginItemDraft {
-        core::LoginItemDraft {
-            title: self.title.clone(),
-            url: self.url.clone(),
-            urls: self.urls.clone(),
-            username: self.username.clone(),
-            password: self.password.clone(),
-            notes: self.notes.clone(),
-            note: self.note.clone(),
-            custom_fields: self
-                .custom_fields
-                .iter()
-                .map(|field| field.to_core())
-                .collect(),
-            tags: self.tags.clone(),
-        }
+impl ItemDraft {
+    fn to_core(&self) -> core::ItemDraft {
+        item_draft_to_core(self)
     }
 }
 
@@ -303,15 +980,15 @@ pub enum RuntimeRequest {
         request_id: String,
     },
     Wipe,
-    CreateLoginItem {
+    CreateItem {
         account_id: String,
         vault_id: String,
-        draft: Arc<LoginItemDraft>,
+        draft: ItemDraft,
     },
-    UpdateLoginItem {
+    UpdateItem {
         account_id: String,
         item_id: String,
-        draft: Arc<LoginItemDraft>,
+        draft: ItemDraft,
     },
     SetItemFavorite {
         account_id: String,
@@ -396,22 +1073,22 @@ impl fmt::Debug for RuntimeRequest {
                 formatter.write_str("DeleteServerAccount([redacted scope and confirmation])")
             }
             Self::Wipe => formatter.write_str("Wipe"),
-            Self::CreateLoginItem {
+            Self::CreateItem {
                 account_id,
                 vault_id,
                 draft,
             } => formatter
-                .debug_struct("CreateLoginItem")
+                .debug_struct("CreateItem")
                 .field("account_id", account_id)
                 .field("vault_id", vault_id)
                 .field("draft", draft)
                 .finish(),
-            Self::UpdateLoginItem {
+            Self::UpdateItem {
                 account_id,
                 item_id,
                 draft,
             } => formatter
-                .debug_struct("UpdateLoginItem")
+                .debug_struct("UpdateItem")
                 .field("account_id", account_id)
                 .field("item_id", item_id)
                 .field("draft", draft)
@@ -611,19 +1288,11 @@ pub enum ItemProjectionStatus {
 }
 
 #[derive(uniffi::Object)]
-pub struct LoginItemProjection {
+pub struct ItemProjection {
     account_id: String,
     item_id: String,
     vault_id: String,
-    title: String,
-    url: Option<String>,
-    urls: Vec<String>,
-    username: Option<String>,
-    password: Option<String>,
-    notes: Option<String>,
-    note: Option<String>,
-    custom_fields: Vec<Arc<LoginCustomField>>,
-    tags: Vec<String>,
+    data: ItemDraft,
     favorite: bool,
     deleted_at: Option<String>,
     attachments: Vec<Arc<AttachmentProjection>>,
@@ -632,10 +1301,9 @@ pub struct LoginItemProjection {
     status: ItemProjectionStatus,
 }
 
-impl fmt::Debug for LoginItemProjection {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("LoginItemProjection")
+impl fmt::Debug for ItemProjection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ItemProjection")
             .field("account_id", &self.account_id)
             .field("item_id", &self.item_id)
             .field("vault_id", &self.vault_id)
@@ -646,75 +1314,34 @@ impl fmt::Debug for LoginItemProjection {
 }
 
 #[uniffi::export]
-impl LoginItemProjection {
+impl ItemProjection {
     pub fn account_id(&self) -> String {
         self.account_id.clone()
     }
-
     pub fn item_id(&self) -> String {
         self.item_id.clone()
     }
-
     pub fn vault_id(&self) -> String {
         self.vault_id.clone()
     }
-
-    pub fn title(&self) -> String {
-        self.title.clone()
+    pub fn data(&self) -> ItemDraft {
+        self.data.clone()
     }
-
-    pub fn url(&self) -> Option<String> {
-        self.url.clone()
-    }
-
-    pub fn urls(&self) -> Vec<String> {
-        self.urls.clone()
-    }
-
-    pub fn username(&self) -> Option<String> {
-        self.username.clone()
-    }
-
-    pub fn password(&self) -> Option<String> {
-        self.password.clone()
-    }
-
-    pub fn notes(&self) -> Option<String> {
-        self.notes.clone()
-    }
-
-    pub fn note(&self) -> Option<String> {
-        self.note.clone()
-    }
-
-    pub fn custom_fields(&self) -> Vec<Arc<LoginCustomField>> {
-        self.custom_fields.clone()
-    }
-
-    pub fn tags(&self) -> Vec<String> {
-        self.tags.clone()
-    }
-
     pub fn favorite(&self) -> bool {
         self.favorite
     }
-
     pub fn deleted_at(&self) -> Option<String> {
         self.deleted_at.clone()
     }
-
     pub fn attachments(&self) -> Vec<Arc<AttachmentProjection>> {
         self.attachments.clone()
     }
-
     pub fn created_at(&self) -> String {
         self.created_at.clone()
     }
-
     pub fn updated_at(&self) -> String {
         self.updated_at.clone()
     }
-
     pub fn status(&self) -> ItemProjectionStatus {
         self.status
     }
@@ -779,7 +1406,7 @@ impl AttachmentProjection {
 pub struct ItemsProjection {
     pub account_id: String,
     pub replica_revision: u64,
-    pub items: Vec<Arc<LoginItemProjection>>,
+    pub items: Vec<Arc<ItemProjection>>,
     pub vaults: Vec<VaultProjection>,
 }
 
@@ -1104,20 +1731,20 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 request_id,
             },
             RuntimeRequest::Wipe => Self::Wipe,
-            RuntimeRequest::CreateLoginItem {
+            RuntimeRequest::CreateItem {
                 account_id,
                 vault_id,
                 draft,
-            } => Self::CreateLoginItem {
+            } => Self::CreateItem {
                 account_id: account_id.into(),
                 vault_id,
                 draft: draft.to_core(),
             },
-            RuntimeRequest::UpdateLoginItem {
+            RuntimeRequest::UpdateItem {
                 account_id,
                 item_id,
                 draft,
-            } => Self::UpdateLoginItem {
+            } => Self::UpdateItem {
                 account_id: account_id.into(),
                 item_id,
                 draft: draft.to_core(),
@@ -1425,7 +2052,7 @@ impl From<core::ItemsProjection> for ItemsProjection {
             replica_revision,
             items: items
                 .into_iter()
-                .map(|item| Arc::new(LoginItemProjection::from(item)))
+                .map(|item| Arc::new(ItemProjection::from(item)))
                 .collect(),
             vaults: vaults.into_iter().map(Into::into).collect(),
         }
@@ -1458,21 +2085,13 @@ impl From<core::PendingShareResult> for PendingShareResult {
     }
 }
 
-impl From<core::LoginItemProjection> for LoginItemProjection {
-    fn from(value: core::LoginItemProjection) -> Self {
-        let core::LoginItemProjection {
+impl From<core::ItemProjection> for ItemProjection {
+    fn from(value: core::ItemProjection) -> Self {
+        let core::ItemProjection {
             account_id,
             item_id,
             vault_id,
-            title,
-            url,
-            urls,
-            username,
-            password,
-            notes,
-            note,
-            custom_fields,
-            tags,
+            data,
             favorite,
             deleted_at,
             attachments,
@@ -1484,18 +2103,7 @@ impl From<core::LoginItemProjection> for LoginItemProjection {
             account_id: account_id.into(),
             item_id,
             vault_id,
-            title,
-            url,
-            urls,
-            username,
-            password,
-            notes,
-            note,
-            custom_fields: custom_fields
-                .into_iter()
-                .map(|field| Arc::new(LoginCustomField::from(field)))
-                .collect(),
-            tags,
+            data: item_draft_from_core(data),
             favorite,
             deleted_at,
             attachments: attachments
@@ -1506,6 +2114,375 @@ impl From<core::LoginItemProjection> for LoginItemProjection {
             updated_at,
             status: status.into(),
         }
+    }
+}
+
+fn item_draft_to_core(value: &ItemDraft) -> core::ItemDraft {
+    match value {
+        ItemDraft::Login { value } => core::ItemDraft::Login(core::LoginItemData {
+            title: value.title.clone(),
+            url: value.url.clone(),
+            urls: value.urls.clone(),
+            username: value.username.clone(),
+            password: value.password.clone(),
+            password_history: value
+                .password_history
+                .iter()
+                .map(|entry| core::PasswordHistoryEntry {
+                    password: entry.password.clone(),
+                    changed_at: entry.changed_at.clone(),
+                })
+                .collect(),
+            passkeys: value
+                .passkeys
+                .iter()
+                .map(|passkey| passkey_to_core(passkey))
+                .collect(),
+            notes: value.notes.clone(),
+            note: value.note.clone(),
+            custom_fields: value
+                .custom_fields
+                .iter()
+                .map(|field| field.to_core())
+                .collect(),
+            tags: value.tags.clone(),
+            totp_secret: value.totp_secret.clone(),
+            totp_issuer: value.totp_issuer.clone(),
+            totp_account_name: value.totp_account_name.clone(),
+            totp_algorithm: value.totp_algorithm.map(totp_to_core),
+            totp_digits: value.totp_digits.map(totp_digits_to_core),
+            totp_period: value.totp_period,
+        }),
+        ItemDraft::SecureNote { value } => core::ItemDraft::SecureNote(core::SecureNoteItemData {
+            title: value.title.clone(),
+            note: value.note.clone(),
+            notes: value.notes.clone(),
+            custom_fields: value
+                .custom_fields
+                .iter()
+                .map(|field| field.to_core())
+                .collect(),
+            tags: value.tags.clone(),
+        }),
+        ItemDraft::CreditCard { value } => core::ItemDraft::CreditCard(core::CreditCardItemData {
+            title: value.title.clone(),
+            cardholder_name: value.cardholder_name.clone(),
+            card_number: value.card_number.clone(),
+            cvv: value.cvv.clone(),
+            expiry_date: value.expiry_date.clone(),
+            billing_address: value.billing_address.clone(),
+            notes: value.notes.clone(),
+            custom_fields: value
+                .custom_fields
+                .iter()
+                .map(|field| field.to_core())
+                .collect(),
+            totp_secret: value.totp_secret.clone(),
+            totp_issuer: value.totp_issuer.clone(),
+            totp_account_name: value.totp_account_name.clone(),
+            totp_algorithm: value.totp_algorithm.map(totp_to_core),
+            totp_digits: value.totp_digits.map(totp_digits_to_core),
+            totp_period: value.totp_period,
+            tags: value.tags.clone(),
+        }),
+        ItemDraft::Identity { value } => core::ItemDraft::Identity(core::IdentityItemData {
+            title: value.title.clone(),
+            first_name: value.first_name.clone(),
+            middle_name: value.middle_name.clone(),
+            last_name: value.last_name.clone(),
+            email: value.email.clone(),
+            addresses: value
+                .addresses
+                .iter()
+                .map(|v| core::Address {
+                    id: v.id.clone(),
+                    street: v.street.clone(),
+                    city: v.city.clone(),
+                    state: v.state.clone(),
+                    zip: v.zip.clone(),
+                    country: v.country.clone(),
+                })
+                .collect(),
+            phone_numbers: value
+                .phone_numbers
+                .iter()
+                .map(|v| core::PhoneNumber {
+                    id: v.id.clone(),
+                    label: v.label.clone(),
+                    number: v.number.clone(),
+                })
+                .collect(),
+            ssn: value.ssn.clone(),
+            passport_number: value.passport_number.clone(),
+            drivers_license: value.drivers_license.clone(),
+            date_of_birth: value.date_of_birth.clone(),
+            notes: value.notes.clone(),
+            custom_fields: value
+                .custom_fields
+                .iter()
+                .map(|field| field.to_core())
+                .collect(),
+            totp_secret: value.totp_secret.clone(),
+            totp_issuer: value.totp_issuer.clone(),
+            totp_account_name: value.totp_account_name.clone(),
+            totp_algorithm: value.totp_algorithm.map(totp_to_core),
+            totp_digits: value.totp_digits.map(totp_digits_to_core),
+            totp_period: value.totp_period,
+            tags: value.tags.clone(),
+        }),
+        ItemDraft::Authenticator { value } => {
+            core::ItemDraft::Authenticator(core::AuthenticatorItemData {
+                title: value.title.clone(),
+                totp_secret: value.totp_secret.clone(),
+                totp_issuer: value.totp_issuer.clone(),
+                totp_account_name: value.totp_account_name.clone(),
+                totp_algorithm: value.totp_algorithm.map(totp_to_core),
+                totp_digits: value.totp_digits.map(totp_digits_to_core),
+                totp_period: value.totp_period,
+                linked_item_id: value.linked_item_id.clone(),
+                notes: value.notes.clone(),
+                custom_fields: value
+                    .custom_fields
+                    .iter()
+                    .map(|field| field.to_core())
+                    .collect(),
+                tags: value.tags.clone(),
+            })
+        }
+    }
+}
+
+fn item_draft_from_core(value: core::ItemDraft) -> ItemDraft {
+    match value {
+        core::ItemDraft::Login(value) => ItemDraft::Login {
+            value: Arc::new(LoginItemData {
+                title: value.title,
+                url: value.url,
+                urls: value.urls,
+                username: value.username,
+                password: value.password,
+                password_history: value
+                    .password_history
+                    .into_iter()
+                    .map(|v| {
+                        Arc::new(PasswordHistoryEntry {
+                            password: v.password,
+                            changed_at: v.changed_at,
+                        })
+                    })
+                    .collect(),
+                passkeys: value
+                    .passkeys
+                    .into_iter()
+                    .map(|v| Arc::new(passkey_from_core(v)))
+                    .collect(),
+                notes: value.notes,
+                note: value.note,
+                custom_fields: value
+                    .custom_fields
+                    .into_iter()
+                    .map(|v| Arc::new(CustomField::from(v)))
+                    .collect(),
+                tags: value.tags,
+                totp_secret: value.totp_secret,
+                totp_issuer: value.totp_issuer,
+                totp_account_name: value.totp_account_name,
+                totp_algorithm: value.totp_algorithm.map(totp_from_core),
+                totp_digits: value.totp_digits.map(totp_digits_from_core),
+                totp_period: value.totp_period,
+            }),
+        },
+        core::ItemDraft::SecureNote(value) => ItemDraft::SecureNote {
+            value: Arc::new(SecureNoteItemData {
+                title: value.title,
+                note: value.note,
+                notes: value.notes,
+                custom_fields: value
+                    .custom_fields
+                    .into_iter()
+                    .map(|v| Arc::new(CustomField::from(v)))
+                    .collect(),
+                tags: value.tags,
+            }),
+        },
+        core::ItemDraft::CreditCard(value) => ItemDraft::CreditCard {
+            value: Arc::new(CreditCardItemData {
+                title: value.title,
+                cardholder_name: value.cardholder_name,
+                card_number: value.card_number,
+                cvv: value.cvv,
+                expiry_date: value.expiry_date,
+                billing_address: value.billing_address,
+                notes: value.notes,
+                custom_fields: value
+                    .custom_fields
+                    .into_iter()
+                    .map(|v| Arc::new(CustomField::from(v)))
+                    .collect(),
+                totp_secret: value.totp_secret,
+                totp_issuer: value.totp_issuer,
+                totp_account_name: value.totp_account_name,
+                totp_algorithm: value.totp_algorithm.map(totp_from_core),
+                totp_digits: value.totp_digits.map(totp_digits_from_core),
+                totp_period: value.totp_period,
+                tags: value.tags,
+            }),
+        },
+        core::ItemDraft::Identity(value) => ItemDraft::Identity {
+            value: Arc::new(IdentityItemData {
+                title: value.title,
+                first_name: value.first_name,
+                middle_name: value.middle_name,
+                last_name: value.last_name,
+                email: value.email,
+                addresses: value
+                    .addresses
+                    .into_iter()
+                    .map(|v| {
+                        Arc::new(Address {
+                            id: v.id,
+                            street: v.street,
+                            city: v.city,
+                            state: v.state,
+                            zip: v.zip,
+                            country: v.country,
+                        })
+                    })
+                    .collect(),
+                phone_numbers: value
+                    .phone_numbers
+                    .into_iter()
+                    .map(|v| {
+                        Arc::new(PhoneNumber {
+                            id: v.id,
+                            label: v.label,
+                            number: v.number,
+                        })
+                    })
+                    .collect(),
+                ssn: value.ssn,
+                passport_number: value.passport_number,
+                drivers_license: value.drivers_license,
+                date_of_birth: value.date_of_birth,
+                notes: value.notes,
+                custom_fields: value
+                    .custom_fields
+                    .into_iter()
+                    .map(|v| Arc::new(CustomField::from(v)))
+                    .collect(),
+                totp_secret: value.totp_secret,
+                totp_issuer: value.totp_issuer,
+                totp_account_name: value.totp_account_name,
+                totp_algorithm: value.totp_algorithm.map(totp_from_core),
+                totp_digits: value.totp_digits.map(totp_digits_from_core),
+                totp_period: value.totp_period,
+                tags: value.tags,
+            }),
+        },
+        core::ItemDraft::Authenticator(value) => ItemDraft::Authenticator {
+            value: Arc::new(AuthenticatorItemData {
+                title: value.title,
+                totp_secret: value.totp_secret,
+                totp_issuer: value.totp_issuer,
+                totp_account_name: value.totp_account_name,
+                totp_algorithm: value.totp_algorithm.map(totp_from_core),
+                totp_digits: value.totp_digits.map(totp_digits_from_core),
+                totp_period: value.totp_period,
+                linked_item_id: value.linked_item_id,
+                notes: value.notes,
+                custom_fields: value
+                    .custom_fields
+                    .into_iter()
+                    .map(|v| Arc::new(CustomField::from(v)))
+                    .collect(),
+                tags: value.tags,
+            }),
+        },
+    }
+}
+
+fn totp_to_core(value: TotpAlgorithm) -> core::TotpAlgorithm {
+    match value {
+        TotpAlgorithm::Sha1 => core::TotpAlgorithm::Sha1,
+        TotpAlgorithm::Sha256 => core::TotpAlgorithm::Sha256,
+        TotpAlgorithm::Sha512 => core::TotpAlgorithm::Sha512,
+    }
+}
+fn totp_from_core(value: core::TotpAlgorithm) -> TotpAlgorithm {
+    match value {
+        core::TotpAlgorithm::Sha1 => TotpAlgorithm::Sha1,
+        core::TotpAlgorithm::Sha256 => TotpAlgorithm::Sha256,
+        core::TotpAlgorithm::Sha512 => TotpAlgorithm::Sha512,
+    }
+}
+fn totp_digits_to_core(value: TotpDigits) -> core::TotpDigits {
+    match value {
+        TotpDigits::Six => core::TotpDigits::Six,
+        TotpDigits::Seven => core::TotpDigits::Seven,
+        TotpDigits::Eight => core::TotpDigits::Eight,
+    }
+}
+fn totp_digits_from_core(value: core::TotpDigits) -> TotpDigits {
+    match value {
+        core::TotpDigits::Six => TotpDigits::Six,
+        core::TotpDigits::Seven => TotpDigits::Seven,
+        core::TotpDigits::Eight => TotpDigits::Eight,
+    }
+}
+fn passkey_to_core(value: &Passkey) -> core::Passkey {
+    core::Passkey {
+        credential_id: value.credential_id.clone(),
+        rp_id: value.rp_id.clone(),
+        rp_name: value.rp_name.clone(),
+        user_handle: value.user_handle.clone(),
+        user_name: value.user_name.clone(),
+        user_display_name: value.user_display_name.clone(),
+        private_key: value.private_key.clone(),
+        public_key: value.public_key.clone(),
+        algorithm: value.algorithm,
+        sign_count: value.sign_count,
+        transports: value.transports.clone(),
+        created_at: value.created_at.clone(),
+        last_used_at: value.last_used_at.clone(),
+        status: value.status.map(|v| match v {
+            PasskeyStatus::Active => core::PasskeyStatus::Active,
+            PasskeyStatus::Suspect => core::PasskeyStatus::Suspect,
+        }),
+        status_reason: value.status_reason.map(|v| match v {
+            PasskeyStatusReason::Manual => core::PasskeyStatusReason::Manual,
+            PasskeyStatusReason::UnknownCredential => core::PasskeyStatusReason::UnknownCredential,
+            PasskeyStatusReason::SigningError => core::PasskeyStatusReason::SigningError,
+            PasskeyStatusReason::Other => core::PasskeyStatusReason::Other,
+        }),
+        status_updated_at: value.status_updated_at.clone(),
+    }
+}
+fn passkey_from_core(value: core::Passkey) -> Passkey {
+    Passkey {
+        credential_id: value.credential_id,
+        rp_id: value.rp_id,
+        rp_name: value.rp_name,
+        user_handle: value.user_handle,
+        user_name: value.user_name,
+        user_display_name: value.user_display_name,
+        private_key: value.private_key,
+        public_key: value.public_key,
+        algorithm: value.algorithm,
+        sign_count: value.sign_count,
+        transports: value.transports,
+        created_at: value.created_at,
+        last_used_at: value.last_used_at,
+        status: value.status.map(|v| match v {
+            core::PasskeyStatus::Active => PasskeyStatus::Active,
+            core::PasskeyStatus::Suspect => PasskeyStatus::Suspect,
+        }),
+        status_reason: value.status_reason.map(|v| match v {
+            core::PasskeyStatusReason::Manual => PasskeyStatusReason::Manual,
+            core::PasskeyStatusReason::UnknownCredential => PasskeyStatusReason::UnknownCredential,
+            core::PasskeyStatusReason::SigningError => PasskeyStatusReason::SigningError,
+            core::PasskeyStatusReason::Other => PasskeyStatusReason::Other,
+        }),
+        status_updated_at: value.status_updated_at,
     }
 }
 
@@ -1536,9 +2513,9 @@ impl From<core::AttachmentProjection> for AttachmentProjection {
     }
 }
 
-impl From<core::LoginCustomField> for LoginCustomField {
-    fn from(value: core::LoginCustomField) -> Self {
-        let core::LoginCustomField {
+impl From<core::CustomField> for CustomField {
+    fn from(value: core::CustomField) -> Self {
+        let core::CustomField {
             id,
             label,
             value,
@@ -1909,25 +2886,35 @@ mod tests {
             account_id: "account-1".into(),
             master_password: SecretString::new("UNIQUE_QUICK_UNLOCK_PASSWORD".into()),
         };
-        let create = RuntimeRequest::CreateLoginItem {
+        let create = RuntimeRequest::CreateItem {
             account_id: "account-1".into(),
             vault_id: "vault-1".into(),
-            draft: LoginItemDraft::new(
-                "UNIQUE_TITLE".into(),
-                Some("UNIQUE_URL".into()),
-                vec!["UNIQUE_URLS".into()],
-                Some("UNIQUE_USERNAME".into()),
-                Some("UNIQUE_PASSWORD".into()),
-                Some("UNIQUE_NOTES".into()),
-                Some("UNIQUE_NOTE".into()),
-                vec![LoginCustomField::new(
-                    "UNIQUE_FIELD_ID".into(),
-                    "UNIQUE_FIELD_LABEL".into(),
-                    "UNIQUE_FIELD_VALUE".into(),
-                    CustomFieldKind::Password,
-                )],
-                vec!["UNIQUE_TAG".into()],
-            ),
+            draft: ItemDraft::Login {
+                value: Arc::new(LoginItemData {
+                    title: "UNIQUE_TITLE".into(),
+                    url: Some("UNIQUE_URL".into()),
+                    urls: vec!["UNIQUE_URLS".into()],
+                    username: Some("UNIQUE_USERNAME".into()),
+                    password: Some("UNIQUE_PASSWORD".into()),
+                    password_history: vec![],
+                    passkeys: vec![],
+                    notes: Some("UNIQUE_NOTES".into()),
+                    note: Some("UNIQUE_NOTE".into()),
+                    custom_fields: vec![CustomField::new(
+                        "UNIQUE_FIELD_ID".into(),
+                        "UNIQUE_FIELD_LABEL".into(),
+                        "UNIQUE_FIELD_VALUE".into(),
+                        CustomFieldKind::Password,
+                    )],
+                    tags: vec!["UNIQUE_TAG".into()],
+                    totp_secret: None,
+                    totp_issuer: None,
+                    totp_account_name: None,
+                    totp_algorithm: None,
+                    totp_digits: None,
+                    totp_period: None,
+                }),
+            },
         };
         let rename = RuntimeRequest::RenameAttachment {
             account_id: "account-1".into(),
@@ -1938,19 +2925,31 @@ mod tests {
             value: ItemsProjection {
                 account_id: "account-1".into(),
                 replica_revision: 1,
-                items: vec![Arc::new(LoginItemProjection {
+                items: vec![Arc::new(ItemProjection {
                     account_id: "account-1".into(),
                     item_id: "item-1".into(),
                     vault_id: "vault-1".into(),
-                    title: "UNIQUE_PROJECTION_TITLE".into(),
-                    url: Some("UNIQUE_PROJECTION_URL".into()),
-                    urls: vec!["UNIQUE_PROJECTION_URLS".into()],
-                    username: Some("UNIQUE_PROJECTION_USERNAME".into()),
-                    password: Some("UNIQUE_PROJECTION_PASSWORD".into()),
-                    notes: Some("UNIQUE_PROJECTION_NOTES".into()),
-                    note: Some("UNIQUE_PROJECTION_NOTE".into()),
-                    custom_fields: vec![],
-                    tags: vec![],
+                    data: ItemDraft::Login {
+                        value: Arc::new(LoginItemData {
+                            title: "UNIQUE_PROJECTION_TITLE".into(),
+                            url: Some("UNIQUE_PROJECTION_URL".into()),
+                            urls: vec!["UNIQUE_PROJECTION_URLS".into()],
+                            username: Some("UNIQUE_PROJECTION_USERNAME".into()),
+                            password: Some("UNIQUE_PROJECTION_PASSWORD".into()),
+                            password_history: vec![],
+                            passkeys: vec![],
+                            notes: Some("UNIQUE_PROJECTION_NOTES".into()),
+                            note: Some("UNIQUE_PROJECTION_NOTE".into()),
+                            custom_fields: vec![],
+                            tags: vec![],
+                            totp_secret: None,
+                            totp_issuer: None,
+                            totp_account_name: None,
+                            totp_algorithm: None,
+                            totp_digits: None,
+                            totp_period: None,
+                        }),
+                    },
                     favorite: true,
                     deleted_at: None,
                     attachments: vec![],

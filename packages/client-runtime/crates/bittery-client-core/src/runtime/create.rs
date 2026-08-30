@@ -10,7 +10,7 @@ use crate::{
         ReplicaState, Sha256Fingerprint,
     },
     server_contract::{CreateItemBody, FavoriteBody, ItemCategory, MoveItemBody, UpdateItemBody},
-    CreateShareDraft, LoginItemDraft, ShareAccessMode,
+    CreateShareDraft, ItemDraft, ItemProjection, ShareAccessMode,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{
@@ -172,11 +172,11 @@ pub(super) fn share_operation_fingerprint(item_id: &str, body: &[u8]) -> Sha256F
 struct PreparedCreate {
     operation: OperationRecord,
     overlay: ReplicaItemRecord,
-    projection: LoginItemProjection,
+    projection: ItemProjection,
 }
 
 pub(super) enum ExistingItemIntent {
-    Update(LoginItemDraft),
+    Update(Box<ItemDraft>),
     SetFavorite(bool),
     Trash,
     Restore,
@@ -335,7 +335,7 @@ impl Runtime {
             &snapshot.user_id,
             &master_unlock_key,
         )?);
-        let item_plaintext = Zeroizing::new(
+        let decrypted_plaintext = Zeroizing::new(
             decrypt_with_aad(
                 &EncryptedData {
                     ciphertext: item.encrypted_data.clone(),
@@ -358,13 +358,21 @@ impl Runtime {
                 )
             })?,
         );
-        let payload =
-            ZeroizingJsonValue::new(serde_json::from_str(&item_plaintext).map_err(|_| {
+        let typed = super::bootstrap::decode_item_plaintext(&decrypted_plaintext, &item.category)?;
+        let payload = ZeroizingJsonValue::new(
+            serde_json::from_str(&item_plaintext(&typed).map_err(|_| {
                 RuntimeError::new(
                     RuntimeErrorCode::InvariantViolation,
                     "the selected Item plaintext is invalid",
                 )
-            })?);
+            })?)
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item plaintext is invalid",
+                )
+            })?,
+        );
         let shared_payload =
             ZeroizingJsonValue::new(build_shared_payload(payload.as_value(), &item.category)?);
         let shared_plaintext = Zeroizing::new(
@@ -551,7 +559,7 @@ impl Runtime {
         &self,
         account_id: AccountId,
         vault_id: String,
-        draft: LoginItemDraft,
+        draft: ItemDraft,
         cancellation: RequestCancellation,
         accepted: impl FnOnce(),
     ) -> Result<RuntimeResponse, RuntimeError> {
@@ -945,7 +953,7 @@ impl Runtime {
         &self,
         snapshot: &ReplicaSnapshot,
         vault_id: &str,
-        draft: LoginItemDraft,
+        draft: ItemDraft,
         accepted_at: &str,
     ) -> Result<PreparedCreate, RuntimeError> {
         if snapshot.bootstrap.state != ReplicaState::Ready {
@@ -1006,7 +1014,7 @@ impl Runtime {
             &master_unlock_key,
         )?);
         drop(master_unlock_key);
-        let plaintext = Zeroizing::new(serde_json::to_string(&draft).map_err(|_| {
+        let plaintext = Zeroizing::new(item_plaintext(&draft).map_err(|_| {
             RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "Login draft could not be serialized",
@@ -1033,7 +1041,7 @@ impl Runtime {
         drop(vault_key);
 
         let body = serde_json::to_vec(&CreateItemBody {
-            category: ItemCategory::Login,
+            category: server_item_category(draft.category()),
             encrypted_data: sealed.ciphertext.clone(),
             encryption_algorithm: sealed.algorithm.clone(),
             encryption_iv: sealed.iv.clone(),
@@ -1073,7 +1081,7 @@ impl Runtime {
                 item_id: item_id.clone(),
                 vault_id: vault_id.to_owned(),
                 operation_id,
-                category: AuthorityItemCategory::Login,
+                category: authority_item_category(draft.category()),
                 encrypted_data: sealed.ciphertext,
                 encryption_iv: sealed.iv,
                 encryption_algorithm: sealed.algorithm,
@@ -1087,19 +1095,11 @@ impl Runtime {
                 attachments: Vec::new(),
                 permanently_deleted: false,
             },
-            projection: LoginItemProjection {
+            projection: ItemProjection {
                 account_id: snapshot.account_id.clone(),
                 item_id,
                 vault_id: vault_id.to_owned(),
-                title: draft.title,
-                url: draft.url,
-                urls: draft.urls,
-                username: draft.username,
-                password: draft.password,
-                notes: draft.notes,
-                note: draft.note,
-                custom_fields: draft.custom_fields,
-                tags: draft.tags,
+                data: draft,
                 favorite: false,
                 deleted_at: None,
                 attachments: Vec::new(),
@@ -1145,10 +1145,10 @@ impl Runtime {
                     "the selected Item is not authoritative in this Replica",
                 )
             })?;
-        if item.category != AuthorityItemCategory::Login || item.version <= 0 {
+        if item.version <= 0 {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
-                "the selected Item cannot use the Login Item operation contract",
+                "the selected Item cannot use the Item operation contract",
             ));
         }
         let source_vault = snapshot
@@ -1207,12 +1207,18 @@ impl Runtime {
         };
         let (kind, method, route, path, mut headers, body, operation_vault_id) = match intent {
             ExistingItemIntent::Update(draft) => {
+                if authority_item_category(draft.category()) != item.category {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "an Item update cannot change its category",
+                    ));
+                }
                 let vault_key = Zeroizing::new(unwrap_vault_key(
                     source_vault,
                     &snapshot.user_id,
                     &master_unlock_key,
                 )?);
-                let plaintext = Zeroizing::new(serde_json::to_string(&draft).map_err(|_| {
+                let plaintext = Zeroizing::new(item_plaintext(&draft).map_err(|_| {
                     RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
                         "Login draft could not be serialized",
@@ -1338,6 +1344,7 @@ impl Runtime {
                         )
                     })?,
                 );
+                super::bootstrap::decode_item_plaintext(&plaintext, &item.category)?;
                 let target_key = Zeroizing::new(unwrap_vault_key(
                     target_vault,
                     &snapshot.user_id,
@@ -1453,6 +1460,36 @@ impl Runtime {
             },
             overlay,
         })
+    }
+}
+
+pub(super) fn item_plaintext(draft: &ItemDraft) -> Result<String, serde_json::Error> {
+    match draft {
+        ItemDraft::Login(value) => serde_json::to_string(value),
+        ItemDraft::SecureNote(value) => serde_json::to_string(value),
+        ItemDraft::CreditCard(value) => serde_json::to_string(value),
+        ItemDraft::Identity(value) => serde_json::to_string(value),
+        ItemDraft::Authenticator(value) => serde_json::to_string(value),
+    }
+}
+
+fn authority_item_category(category: crate::ItemCategory) -> AuthorityItemCategory {
+    match category {
+        crate::ItemCategory::Login => AuthorityItemCategory::Login,
+        crate::ItemCategory::SecureNote => AuthorityItemCategory::SecureNote,
+        crate::ItemCategory::CreditCard => AuthorityItemCategory::CreditCard,
+        crate::ItemCategory::Identity => AuthorityItemCategory::Identity,
+        crate::ItemCategory::Authenticator => AuthorityItemCategory::Totp,
+    }
+}
+
+fn server_item_category(category: crate::ItemCategory) -> ItemCategory {
+    match category {
+        crate::ItemCategory::Login => ItemCategory::Login,
+        crate::ItemCategory::SecureNote => ItemCategory::SecureNote,
+        crate::ItemCategory::CreditCard => ItemCategory::CreditCard,
+        crate::ItemCategory::Identity => ItemCategory::Identity,
+        crate::ItemCategory::Authenticator => ItemCategory::Totp,
     }
 }
 

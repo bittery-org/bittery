@@ -100,6 +100,38 @@
         "reauthenticationRequired"
       ]
     },
+    "Address": {
+      "type": "object",
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "street": {
+          "type": "string"
+        },
+        "zip": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "street",
+        "city",
+        "state",
+        "zip",
+        "country"
+      ]
+    },
     "AttachmentProjection": {
       "type": "object",
       "properties": {
@@ -145,6 +177,86 @@
         "createdAt"
       ]
     },
+    "AuthenticatorItemData": {
+      "type": "object",
+      "properties": {
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "linkedItemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "totpSecret"
+      ]
+    },
     "CreateShareDraft": {
       "type": "object",
       "properties": {
@@ -171,6 +283,136 @@
         "isOneTimeUse"
       ]
     },
+    "CreditCardItemData": {
+      "type": "object",
+      "properties": {
+        "billingAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cardNumber": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cardholderName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "cvv": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiryDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "CustomField": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/CustomFieldKind"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "value",
+        "type"
+      ]
+    },
     "CustomFieldKind": {
       "type": "string",
       "enum": [
@@ -178,6 +420,282 @@
         "password",
         "email",
         "url"
+      ]
+    },
+    "IdentityItemData": {
+      "type": "object",
+      "properties": {
+        "addresses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Address"
+          }
+        },
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "dateOfBirth": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "driversLicense": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "middleName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passportNumber": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneNumbers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PhoneNumber"
+          }
+        },
+        "ssn": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "ItemDraft": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "login"
+            },
+            "data": {
+              "$ref": "#/$defs/LoginItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "secure-note"
+            },
+            "data": {
+              "$ref": "#/$defs/SecureNoteItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "credit-card"
+            },
+            "data": {
+              "$ref": "#/$defs/CreditCardItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "identity"
+            },
+            "data": {
+              "$ref": "#/$defs/IdentityItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "authenticator"
+            },
+            "data": {
+              "$ref": "#/$defs/AuthenticatorItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        }
+      ]
+    },
+    "ItemProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AttachmentProjection"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/ItemDraft"
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "favorite": {
+          "type": "boolean"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ItemProjectionStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "itemId",
+        "vaultId",
+        "data",
+        "favorite",
+        "createdAt",
+        "updatedAt",
+        "status"
       ]
     },
     "ItemProjectionStatus": {
@@ -197,7 +715,7 @@
         "items": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/LoginItemProjection"
+            "$ref": "#/$defs/ItemProjection"
           }
         },
         "replicaRevision": {
@@ -219,36 +737,13 @@
         "vaults"
       ]
     },
-    "LoginCustomField": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "label": {
-          "type": "string"
-        },
-        "type": {
-          "$ref": "#/$defs/CustomFieldKind"
-        },
-        "value": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "label",
-        "value",
-        "type"
-      ]
-    },
-    "LoginItemDraft": {
+    "LoginItemData": {
       "type": "object",
       "properties": {
         "customFields": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/LoginCustomField"
+            "$ref": "#/$defs/CustomField"
           }
         },
         "note": {
@@ -263,11 +758,23 @@
             "null"
           ]
         },
+        "passkeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Passkey"
+          }
+        },
         "password": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "passwordHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PasswordHistoryEntry"
+          }
         },
         "tags": {
           "type": "array",
@@ -277,6 +784,52 @@
         },
         "title": {
           "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "url": {
           "type": [
@@ -297,107 +850,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
         "title"
-      ]
-    },
-    "LoginItemProjection": {
-      "type": "object",
-      "properties": {
-        "accountId": {
-          "type": "string"
-        },
-        "attachments": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AttachmentProjection"
-          }
-        },
-        "createdAt": {
-          "type": "string"
-        },
-        "customFields": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/LoginCustomField"
-          }
-        },
-        "deletedAt": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "favorite": {
-          "type": "boolean"
-        },
-        "itemId": {
-          "type": "string"
-        },
-        "note": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "notes": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "password": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "status": {
-          "$ref": "#/$defs/ItemProjectionStatus"
-        },
-        "tags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "title": {
-          "type": "string"
-        },
-        "updatedAt": {
-          "type": "string"
-        },
-        "url": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "urls": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "username": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "vaultId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "accountId",
-        "itemId",
-        "vaultId",
-        "title",
-        "favorite",
-        "createdAt",
-        "updatedAt",
-        "status"
       ]
     },
     "ObservationRequest": {
@@ -455,6 +910,133 @@
         }
       ]
     },
+    "Passkey": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "credentialId": {
+          "type": "string"
+        },
+        "lastUsedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privateKey": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "rpId": {
+          "type": "string"
+        },
+        "rpName": {
+          "type": "string"
+        },
+        "signCount": {
+          "type": "integer",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PasskeyStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PasskeyStatusReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusUpdatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transports": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "userDisplayName": {
+          "type": "string"
+        },
+        "userHandle": {
+          "type": "string"
+        },
+        "userName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "credentialId",
+        "rpId",
+        "rpName",
+        "userHandle",
+        "userName",
+        "userDisplayName",
+        "privateKey",
+        "publicKey",
+        "algorithm",
+        "signCount",
+        "transports",
+        "createdAt"
+      ]
+    },
+    "PasskeyStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "suspect"
+      ]
+    },
+    "PasskeyStatusReason": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "unknown-credential",
+        "signing-error",
+        "other"
+      ]
+    },
+    "PasswordHistoryEntry": {
+      "type": "object",
+      "properties": {
+        "changedAt": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "password",
+        "changedAt"
+      ]
+    },
     "PendingShareResult": {
       "type": "object",
       "properties": {
@@ -503,6 +1085,26 @@
         "accountId",
         "replicaRevision",
         "results"
+      ]
+    },
+    "PhoneNumber": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "number": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "number"
       ]
     },
     "RuntimeError": {
@@ -789,11 +1391,11 @@
               "type": "string"
             },
             "draft": {
-              "$ref": "#/$defs/LoginItemDraft"
+              "$ref": "#/$defs/ItemDraft"
             },
             "type": {
               "type": "string",
-              "const": "createLoginItem"
+              "const": "createItem"
             },
             "vaultId": {
               "type": "string"
@@ -814,14 +1416,14 @@
               "type": "string"
             },
             "draft": {
-              "$ref": "#/$defs/LoginItemDraft"
+              "$ref": "#/$defs/ItemDraft"
             },
             "itemId": {
               "type": "string"
             },
             "type": {
               "type": "string",
-              "const": "updateLoginItem"
+              "const": "updateItem"
             }
           },
           "additionalProperties": false,
@@ -1375,6 +1977,40 @@
         "closed"
       ]
     },
+    "SecureNoteItemData": {
+      "type": "object",
+      "properties": {
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "note"
+      ]
+    },
     "ServerAccountDeletionOutcome": {
       "type": "string",
       "enum": [
@@ -1450,6 +2086,22 @@
       "enum": [
         "complete",
         "incomplete"
+      ]
+    },
+    "TotpAlgorithm": {
+      "type": "string",
+      "enum": [
+        "SHA1",
+        "SHA256",
+        "SHA512"
+      ]
+    },
+    "TotpDigits": {
+      "type": "integer",
+      "enum": [
+        6,
+        7,
+        8
       ]
     },
     "VaultProjection": {

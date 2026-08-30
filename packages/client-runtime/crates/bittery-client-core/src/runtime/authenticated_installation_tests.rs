@@ -947,22 +947,30 @@ fn runtime_status(runtime: &Runtime) -> RuntimeStatusProjection {
 }
 
 fn create_request(account_id: &str) -> RuntimeRequest {
-    RuntimeRequest::CreateLoginItem {
+    RuntimeRequest::CreateItem {
         account_id: AccountId::from(account_id),
         // The Bootstrap fixtures publish one personal Vault, and a local write has to name the
         // Vault the Replica actually holds.
         vault_id: "vault-1".into(),
-        draft: crate::LoginItemDraft {
+        draft: crate::ItemDraft::Login(crate::LoginItemData {
             title: "Login".into(),
             url: None,
             urls: Vec::new(),
             username: None,
             password: None,
+            password_history: Vec::new(),
+            passkeys: Vec::new(),
             notes: None,
             note: None,
             custom_fields: Vec::new(),
             tags: Vec::new(),
-        },
+            totp_secret: None,
+            totp_issuer: None,
+            totp_account_name: None,
+            totp_algorithm: None,
+            totp_digits: None,
+            totp_period: None,
+        }),
     }
 }
 
@@ -3137,11 +3145,8 @@ async fn bootstrap_decrypts_login_items_and_sse_hint_is_not_authority() {
         panic!("expected Items");
     };
     assert_eq!(projection.items.len(), 1);
-    assert_eq!(projection.items[0].title, "Bank");
-    assert_eq!(
-        projection.items[0].password.as_deref(),
-        Some("secret-password")
-    );
+    assert_eq!(projection.items[0].data.title(), "Bank");
+    assert_eq!(projection.items[0].data.password(), Some("secret-password"));
     assert!(projection.items[0].favorite);
     assert_eq!(projection.items[0].created_at, "2026-08-23T00:00:00Z");
     assert_eq!(projection.items[0].updated_at, "2026-08-23T00:00:00Z");
@@ -3502,7 +3507,7 @@ async fn restart_from_durable_replica_reads_offline_after_online_unlock() {
     else {
         panic!("expected Items");
     };
-    assert_eq!(projection.items[0].title, "Bank");
+    assert_eq!(projection.items[0].data.title(), "Bank");
     assert!(http.requests().is_empty());
 }
 
@@ -3543,7 +3548,7 @@ async fn expired_cursor_starts_staging_while_old_projection_stays_readable() {
     let RuntimeProjection::Items(before) = sink.0.lock().unwrap().last().cloned().unwrap() else {
         panic!("expected Items");
     };
-    assert_eq!(before.items[0].title, "Bank");
+    assert_eq!(before.items[0].data.title(), "Bank");
     let previous_generation = runtime
         .replica
         .snapshot(&account_id)
@@ -3603,14 +3608,17 @@ async fn expired_cursor_starts_staging_while_old_projection_stays_readable() {
     let RuntimeProjection::Items(during) = sink.0.lock().unwrap().last().cloned().unwrap() else {
         panic!("expected Items");
     };
-    assert_eq!(during.items[0].title, "Bank");
-    assert!(!during.items.iter().any(|item| item.title == "Treasury"));
+    assert_eq!(during.items[0].data.title(), "Bank");
+    assert!(!during
+        .items
+        .iter()
+        .any(|item| item.data.title() == "Treasury"));
     pause.release();
     running.await.unwrap().unwrap();
     let RuntimeProjection::Items(after) = sink.0.lock().unwrap().last().cloned().unwrap() else {
         panic!("expected Items");
     };
-    assert_eq!(after.items[0].title, "Treasury");
+    assert_eq!(after.items[0].data.title(), "Treasury");
     assert_eq!(
         runtime
             .replica
@@ -3690,8 +3698,8 @@ async fn lock_during_bootstrap_publishes_no_plaintext() {
             continue;
         };
         for item in items.items {
-            assert_ne!(item.password.as_deref(), Some("secret-password"));
-            assert_ne!(item.title.as_str(), "Bank");
+            assert_ne!(item.data.password(), Some("secret-password"));
+            assert_ne!(item.data.title(), "Bank");
         }
     }
     let snapshot = runtime.replica.snapshot(&account_id).unwrap();
@@ -3777,8 +3785,8 @@ async fn lock_at_the_final_bootstrap_boundary_publishes_no_plaintext() {
             continue;
         };
         for item in items.items {
-            assert_ne!(item.password.as_deref(), Some("secret-password"));
-            assert_ne!(item.title.as_str(), "Bank");
+            assert_ne!(item.data.password(), Some("secret-password"));
+            assert_ne!(item.data.title(), "Bank");
         }
     }
 }
@@ -3841,10 +3849,7 @@ async fn cancelled_lock_waiter_does_not_fence_bootstrap_decryption() {
     else {
         panic!("expected Items");
     };
-    assert_eq!(
-        projection.items[0].password.as_deref(),
-        Some("secret-password")
-    );
+    assert_eq!(projection.items[0].data.password(), Some("secret-password"));
 }
 
 #[tokio::test]
@@ -4072,7 +4077,7 @@ async fn sign_out_destroys_live_keys_decrypted_items_and_quick_unlock_material()
         .get(&account_id)
         .is_some_and(|items| items
             .iter()
-            .any(|item| item.password.as_deref() == Some("secret-password"))));
+            .any(|item| item.data.password() == Some("secret-password"))));
     let published_items_before_sign_out = items_sink.0.lock().unwrap().len();
     assert!(published_items_before_sign_out > 0);
     let _ = take_zeroized_live_master_unlock_key_drops();

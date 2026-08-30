@@ -1372,7 +1372,7 @@ async fn production_scheduler_persists_backoff_after_manifest_refresh_replay_is_
     runtime.seed_unlocked_preparation_account(&account_id);
     let ordinary_operation_id = match runtime
         .request(
-            crate::RuntimeRequest::CreateLoginItem {
+            crate::RuntimeRequest::CreateItem {
                 account_id: account_id.clone(),
                 vault_id: "vault-source".into(),
                 draft: super::operation_fixtures::draft(),

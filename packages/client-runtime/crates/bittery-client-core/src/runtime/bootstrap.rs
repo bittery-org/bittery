@@ -3,7 +3,7 @@ use crate::{
     auth_http::{AuthHttpClient, AuthenticatedOutcome},
     authentication_installation::parse_session_expiry_ms,
     platform_storage::CurrentSessionDocument,
-    protocol::{AttachmentProjection, LoginCustomField, LoginItemProjection},
+    protocol::{AttachmentProjection, ItemDraft, ItemProjection},
     replica::{
         AbandonBootstrapPlan, AuthorityAttachmentRecord, AuthorityItemCategory,
         AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
@@ -17,8 +17,8 @@ use crate::{
         BootstrapVaultSummary, ItemCategory, ItemResponseDto, SyncCursorResponse, SyncEntityType,
         VaultRole, VaultType,
     },
-    AccountAccessState, AccountId, AccountWaitingReason, CustomFieldKind, ItemProjectionStatus,
-    RequestCancellation, Runtime, RuntimeError, RuntimeErrorCode,
+    AccountAccessState, AccountId, AccountWaitingReason, ItemProjectionStatus, RequestCancellation,
+    Runtime, RuntimeError, RuntimeErrorCode,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{
@@ -566,9 +566,6 @@ impl Runtime {
             if item_generation != &generation_id {
                 continue;
             }
-            if item.category != AuthorityItemCategory::Login {
-                continue;
-            }
             let Some(vault) = snapshot
                 .bootstrap
                 .vaults
@@ -576,25 +573,18 @@ impl Runtime {
             else {
                 continue;
             };
-            match decrypt_login_item(
+            match decrypt_item(
                 &muk,
                 &snapshot.user_id,
                 vault,
-                &SealedLoginItem::from_authority(item),
+                &SealedItem::from_authority(item),
+                &item.category,
             ) {
-                Ok(projection) => projections.push(LoginItemProjection {
+                Ok(data) => projections.push(ItemProjection {
                     account_id: account_id.clone(),
                     item_id: item.id.clone(),
                     vault_id: item.vault_id.clone(),
-                    title: projection.title,
-                    url: projection.url,
-                    urls: projection.urls,
-                    username: projection.username,
-                    password: projection.password,
-                    notes: projection.notes,
-                    note: projection.note,
-                    custom_fields: projection.custom_fields,
-                    tags: projection.tags,
+                    data,
                     favorite: item.favorite,
                     deleted_at: item.deleted_at.clone(),
                     attachments: decrypt_attachment_projections(
@@ -638,30 +628,23 @@ impl Runtime {
             } else {
                 ItemProjectionStatus::Failed
             };
-            let Ok(projection) = decrypt_login_item(
+            let Ok(data) = decrypt_item(
                 &muk,
                 &snapshot.user_id,
                 vault,
-                &SealedLoginItem::from_overlay(overlay),
+                &SealedItem::from_overlay(overlay),
+                &overlay.category,
             ) else {
                 continue;
             };
             // An overlay is this Device's own newer truth, so it replaces any authority row for
             // the same Item until reconciliation removes it.
             projections.retain(|existing| existing.item_id != overlay.item_id);
-            projections.push(LoginItemProjection {
+            projections.push(ItemProjection {
                 account_id: account_id.clone(),
                 item_id: overlay.item_id.clone(),
                 vault_id: overlay.vault_id.clone(),
-                title: projection.title,
-                url: projection.url,
-                urls: projection.urls,
-                username: projection.username,
-                password: projection.password,
-                notes: projection.notes,
-                note: projection.note,
-                custom_fields: projection.custom_fields,
-                tags: projection.tags,
+                data,
                 favorite: overlay.favorite,
                 deleted_at: overlay.deleted_at.clone(),
                 attachments: decrypt_attachment_projections_by_authority(
@@ -762,6 +745,35 @@ impl Runtime {
         self.replica.snapshot(account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })
+    }
+
+    pub(super) fn validate_authoritative_item(
+        &self,
+        account_id: &AccountId,
+        item: &AuthorityItemRecord,
+    ) -> Result<(), RuntimeError> {
+        let snapshot = self.require_snapshot(account_id)?;
+        let generation = snapshot
+            .bootstrap
+            .active_generation
+            .as_ref()
+            .ok_or_else(|| sync_failure("authoritative Item has no active Bootstrap generation"))?;
+        let vault = snapshot
+            .bootstrap
+            .vaults
+            .get(&(generation.clone(), item.vault_id.clone()))
+            .ok_or_else(|| sync_failure("authoritative Item Vault is not visible"))?;
+        let muk = self
+            .copy_live_master_unlock_key(account_id, &snapshot.incarnation)
+            .ok_or_else(|| sync_failure("authoritative Item cannot be validated while locked"))?;
+        decrypt_item(
+            &muk,
+            &snapshot.user_id,
+            vault,
+            &SealedItem::from_authority(item),
+            &item.category,
+        )
+        .map(|_| ())
     }
 
     pub(super) fn mark_reauthentication_required(&self, account_id: &AccountId) {
@@ -1021,52 +1033,11 @@ fn item_category(category: ItemCategory) -> Result<AuthorityItemCategory, Runtim
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DecryptedLoginPayload {
-    title: String,
-    #[serde(default)]
-    url: Option<String>,
-    #[serde(default)]
-    urls: Vec<String>,
-    #[serde(default)]
-    username: Option<String>,
-    #[serde(default)]
-    password: Option<String>,
-    #[serde(default)]
-    notes: Option<String>,
-    #[serde(default)]
-    note: Option<String>,
-    #[serde(default)]
-    custom_fields: Vec<LoginCustomFieldPayload>,
-    #[serde(default)]
-    tags: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct LoginCustomFieldPayload {
-    id: String,
-    label: String,
-    value: String,
-    #[serde(rename = "type")]
-    field_type: CustomFieldKind,
-}
-
-struct DecryptedLogin {
-    title: String,
-    url: Option<String>,
-    urls: Vec<String>,
-    username: Option<String>,
-    password: Option<String>,
-    notes: Option<String>,
-    note: Option<String>,
-    custom_fields: Vec<LoginCustomField>,
-    tags: Vec<String>,
-}
-
 /// One sealed Login and the exact AAD binding it was sealed under.
 ///
 /// Authority rows and encrypted optimistic overlays are both this, which is why one reader opens
 /// both without either of them pretending to be the other.
-struct SealedLoginItem<'a> {
+struct SealedItem<'a> {
     item_id: &'a str,
     vault_id: &'a str,
     encryption_version: i32,
@@ -1074,7 +1045,7 @@ struct SealedLoginItem<'a> {
     data: EncryptedData,
 }
 
-impl<'a> SealedLoginItem<'a> {
+impl<'a> SealedItem<'a> {
     fn from_authority(item: &'a AuthorityItemRecord) -> Self {
         Self {
             item_id: &item.id,
@@ -1104,12 +1075,13 @@ impl<'a> SealedLoginItem<'a> {
     }
 }
 
-fn decrypt_login_item(
+fn decrypt_item(
     muk: &[u8; 32],
     user_id: &str,
     vault: &AuthorityVaultRecord,
-    item: &SealedLoginItem<'_>,
-) -> Result<DecryptedLogin, RuntimeError> {
+    item: &SealedItem<'_>,
+    category: &AuthorityItemCategory,
+) -> Result<ItemDraft, RuntimeError> {
     let wrapped: WrappedVaultKeyData = serde_json::from_str(&vault.encrypted_vault_key)
         .map_err(|_| sync_failure("wrapped Vault key is invalid"))?;
     if wrapped.context.vault_id != vault.id || wrapped.context.user_id != user_id {
@@ -1130,27 +1102,30 @@ fn decrypt_login_item(
         },
     )
     .map_err(|_| sync_failure("Item ciphertext could not be decrypted"))?;
-    let payload: DecryptedLoginPayload = serde_json::from_str(&plaintext)
-        .map_err(|_| sync_failure("Item plaintext is not a Login"))?;
-    Ok(DecryptedLogin {
-        title: payload.title,
-        url: payload.url,
-        urls: payload.urls,
-        username: payload.username,
-        password: payload.password,
-        notes: payload.notes,
-        note: payload.note,
-        custom_fields: payload
-            .custom_fields
-            .into_iter()
-            .map(|field| LoginCustomField {
-                id: field.id,
-                label: field.label,
-                value: field.value,
-                field_type: field.field_type,
-            })
-            .collect(),
-        tags: payload.tags,
+    decode_item_plaintext(&plaintext, category)
+}
+
+pub(super) fn decode_item_plaintext(
+    plaintext: &str,
+    category: &AuthorityItemCategory,
+) -> Result<ItemDraft, RuntimeError> {
+    let invalid = |_| sync_failure("Item plaintext does not match its category");
+    Ok(match category {
+        AuthorityItemCategory::Login => {
+            ItemDraft::Login(serde_json::from_str(plaintext).map_err(invalid)?)
+        }
+        AuthorityItemCategory::SecureNote => {
+            ItemDraft::SecureNote(serde_json::from_str(plaintext).map_err(invalid)?)
+        }
+        AuthorityItemCategory::CreditCard => {
+            ItemDraft::CreditCard(serde_json::from_str(plaintext).map_err(invalid)?)
+        }
+        AuthorityItemCategory::Identity => {
+            ItemDraft::Identity(serde_json::from_str(plaintext).map_err(invalid)?)
+        }
+        AuthorityItemCategory::Totp => {
+            ItemDraft::Authenticator(serde_json::from_str(plaintext).map_err(invalid)?)
+        }
     })
 }
 
@@ -1276,4 +1251,184 @@ fn replica_busy() -> RuntimeError {
 
 fn sync_failure(message: &'static str) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
+}
+
+#[cfg(test)]
+mod item_category_tests {
+    use super::*;
+    use crate::{
+        runtime::create::item_plaintext,
+        test_fixtures::{personal_vault, TEST_MASTER_UNLOCK_KEY, TEST_VAULT_ID, TEST_VAULT_KEY},
+        AuthenticatorItemData, CreditCardItemData, IdentityItemData, LoginItemData,
+        SecureNoteItemData,
+    };
+    use bittery_crypto_core::{encrypt_with_aad, AadContext};
+
+    #[test]
+    fn bootstrap_decrypts_every_authoritative_category_into_the_closed_projection() {
+        let cases = vec![
+            (
+                AuthorityItemCategory::Login,
+                ItemDraft::Login(LoginItemData {
+                    title: "Login".into(),
+                    url: None,
+                    urls: vec![],
+                    username: None,
+                    password: None,
+                    password_history: vec![],
+                    passkeys: vec![],
+                    notes: None,
+                    note: None,
+                    custom_fields: vec![],
+                    tags: vec![],
+                    totp_secret: None,
+                    totp_issuer: None,
+                    totp_account_name: None,
+                    totp_algorithm: None,
+                    totp_digits: None,
+                    totp_period: None,
+                }),
+            ),
+            (
+                AuthorityItemCategory::SecureNote,
+                ItemDraft::SecureNote(SecureNoteItemData {
+                    title: "Note".into(),
+                    note: "Body".into(),
+                    notes: None,
+                    custom_fields: vec![],
+                    tags: vec![],
+                }),
+            ),
+            (
+                AuthorityItemCategory::CreditCard,
+                ItemDraft::CreditCard(CreditCardItemData {
+                    title: "Card".into(),
+                    cardholder_name: Some("Holder".into()),
+                    card_number: Some("4111".into()),
+                    cvv: Some("123".into()),
+                    expiry_date: Some("12/30".into()),
+                    billing_address: None,
+                    notes: None,
+                    custom_fields: vec![],
+                    totp_secret: None,
+                    totp_issuer: None,
+                    totp_account_name: None,
+                    totp_algorithm: None,
+                    totp_digits: None,
+                    totp_period: None,
+                    tags: vec![],
+                }),
+            ),
+            (
+                AuthorityItemCategory::Identity,
+                ItemDraft::Identity(IdentityItemData {
+                    title: "Identity".into(),
+                    first_name: None,
+                    middle_name: None,
+                    last_name: None,
+                    email: None,
+                    addresses: vec![],
+                    phone_numbers: vec![],
+                    ssn: None,
+                    passport_number: None,
+                    drivers_license: None,
+                    date_of_birth: None,
+                    notes: None,
+                    custom_fields: vec![],
+                    totp_secret: None,
+                    totp_issuer: None,
+                    totp_account_name: None,
+                    totp_algorithm: None,
+                    totp_digits: None,
+                    totp_period: None,
+                    tags: vec![],
+                }),
+            ),
+            (
+                AuthorityItemCategory::Totp,
+                ItemDraft::Authenticator(AuthenticatorItemData {
+                    title: "Authenticator".into(),
+                    totp_secret: "secret".into(),
+                    totp_issuer: None,
+                    totp_account_name: None,
+                    totp_algorithm: None,
+                    totp_digits: None,
+                    totp_period: None,
+                    linked_item_id: Some("login-id".into()),
+                    notes: None,
+                    custom_fields: vec![],
+                    tags: vec![],
+                }),
+            ),
+        ];
+        let vault = personal_vault(TEST_VAULT_ID, "user-1");
+        for (category, expected) in cases {
+            let encrypted = encrypt_with_aad(
+                &item_plaintext(&expected).unwrap(),
+                &TEST_VAULT_KEY,
+                &AadContext {
+                    vault_id: TEST_VAULT_ID.into(),
+                    entity_id: "item-1".into(),
+                    entity_type: "item".into(),
+                    version: 1,
+                    user_id: "user-1".into(),
+                },
+            )
+            .unwrap();
+            let sealed = SealedItem {
+                item_id: "item-1",
+                vault_id: TEST_VAULT_ID,
+                encryption_version: 1,
+                encrypted_by_user_id: "user-1",
+                data: encrypted,
+            };
+            assert_eq!(
+                decrypt_item(
+                    &TEST_MASTER_UNLOCK_KEY,
+                    "user-1",
+                    &vault,
+                    &sealed,
+                    &category
+                )
+                .unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_rejects_plaintext_that_does_not_match_authoritative_category() {
+        let vault = personal_vault(TEST_VAULT_ID, "user-1");
+        let encrypted = encrypt_with_aad(
+            r#"{"title":"Login","password":"secret"}"#,
+            &TEST_VAULT_KEY,
+            &AadContext {
+                vault_id: TEST_VAULT_ID.into(),
+                entity_id: "item-1".into(),
+                entity_type: "item".into(),
+                version: 1,
+                user_id: "user-1".into(),
+            },
+        )
+        .unwrap();
+        let sealed = SealedItem {
+            item_id: "item-1",
+            vault_id: TEST_VAULT_ID,
+            encryption_version: 1,
+            encrypted_by_user_id: "user-1",
+            data: encrypted,
+        };
+        assert_eq!(
+            decrypt_item(
+                &TEST_MASTER_UNLOCK_KEY,
+                "user-1",
+                &vault,
+                &sealed,
+                &AuthorityItemCategory::SecureNote
+            )
+            .unwrap_err()
+            .code,
+            RuntimeErrorCode::InvariantViolation
+        );
+    }
 }

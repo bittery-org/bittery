@@ -62,7 +62,7 @@ impl OrdinaryItemCase {
 
     fn request(self, account_id: AccountId) -> RuntimeRequest {
         match self {
-            Self::Update => RuntimeRequest::UpdateLoginItem {
+            Self::Update => RuntimeRequest::UpdateItem {
                 account_id,
                 item_id: "item-existing".into(),
                 draft: draft(),
@@ -246,6 +246,122 @@ async fn all_six_ordinary_item_outcomes_reconcile_authority_overlay_and_validato
                 assert_eq!(authority[0].vault_id, "vault-2");
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn every_category_dispatches_validates_and_reconciles_its_authoritative_projection() {
+    use crate::{
+        AuthenticatorItemData, CreditCardItemData, IdentityItemData, ItemDraft, LoginItemData,
+        SecureNoteItemData,
+    };
+    let drafts = vec![
+        ItemDraft::Login(LoginItemData {
+            title: "Login".into(),
+            url: None,
+            urls: vec![],
+            username: Some("user".into()),
+            password: Some("password".into()),
+            password_history: vec![],
+            passkeys: vec![],
+            notes: None,
+            note: None,
+            custom_fields: vec![],
+            tags: vec![],
+            totp_secret: None,
+            totp_issuer: None,
+            totp_account_name: None,
+            totp_algorithm: None,
+            totp_digits: None,
+            totp_period: None,
+        }),
+        ItemDraft::SecureNote(SecureNoteItemData {
+            title: "Note".into(),
+            note: "Body".into(),
+            notes: None,
+            custom_fields: vec![],
+            tags: vec![],
+        }),
+        ItemDraft::CreditCard(CreditCardItemData {
+            title: "Card".into(),
+            cardholder_name: Some("Holder".into()),
+            card_number: Some("4111".into()),
+            cvv: Some("123".into()),
+            expiry_date: Some("12/30".into()),
+            billing_address: None,
+            notes: None,
+            custom_fields: vec![],
+            totp_secret: None,
+            totp_issuer: None,
+            totp_account_name: None,
+            totp_algorithm: None,
+            totp_digits: None,
+            totp_period: None,
+            tags: vec![],
+        }),
+        ItemDraft::Identity(IdentityItemData {
+            title: "Identity".into(),
+            first_name: Some("First".into()),
+            middle_name: None,
+            last_name: None,
+            email: None,
+            addresses: vec![],
+            phone_numbers: vec![],
+            ssn: None,
+            passport_number: None,
+            drivers_license: None,
+            date_of_birth: None,
+            notes: None,
+            custom_fields: vec![],
+            totp_secret: None,
+            totp_issuer: None,
+            totp_account_name: None,
+            totp_algorithm: None,
+            totp_digits: None,
+            totp_period: None,
+            tags: vec![],
+        }),
+        ItemDraft::Authenticator(AuthenticatorItemData {
+            title: "Authenticator".into(),
+            totp_secret: "secret".into(),
+            totp_issuer: None,
+            totp_account_name: None,
+            totp_algorithm: None,
+            totp_digits: Some(crate::TotpDigits::Six),
+            totp_period: Some(30),
+            linked_item_id: Some("login-id".into()),
+            notes: None,
+            custom_fields: vec![],
+            tags: vec![],
+        }),
+    ];
+    for draft in drafts {
+        let harness = seeded(false).await;
+        let response = harness
+            .runtime
+            .request(
+                RuntimeRequest::CreateItem {
+                    account_id: harness.account_id.clone(),
+                    vault_id: TEST_VAULT_ID.into(),
+                    draft: draft.clone(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let RuntimeResponse::Accepted { operation_id, .. } = response else {
+            panic!("expected Accepted")
+        };
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        let visible = harness.visible_items();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].data, draft);
+        assert_eq!(visible[0].status, ItemProjectionStatus::Authoritative);
+        assert!(harness.snapshot().operations.is_empty());
+        assert!(harness.snapshot().items.is_empty());
     }
 }
 
@@ -765,6 +881,42 @@ async fn applied_authority_presence_must_match_permanent_deletion_semantics() {
 }
 
 #[tokio::test]
+async fn fetched_authority_with_category_invalid_plaintext_fails_closed_before_reconciliation() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+        .await;
+    let malformed = bittery_crypto_core::encrypt_with_aad(
+        r#"{"title":"Login","cardNumber":"field-not-allowed-on-login"}"#,
+        &crate::test_fixtures::TEST_VAULT_KEY,
+        &bittery_crypto_core::AadContext {
+            vault_id: crate::test_fixtures::TEST_VAULT_ID.into(),
+            entity_id: "item-existing".into(),
+            entity_type: "item".into(),
+            version: 1,
+            user_id: USER.into(),
+        },
+    )
+    .unwrap();
+    {
+        let mut items = harness.server.created_items.lock().unwrap();
+        items[0].encrypted_data = malformed.ciphertext;
+        items[0].encryption_iv = malformed.iv;
+        items[0].encryption_algorithm = malformed.algorithm;
+    }
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let snapshot = harness.snapshot();
+    assert_eq!(snapshot.failure, Some(RuntimeErrorCode::InvariantViolation));
+    assert_eq!(snapshot.operations.len(), 1);
+    assert_eq!(snapshot.items.len(), 1);
+    assert!(snapshot.receipts.is_empty());
+}
+
+#[tokio::test]
 async fn same_kind_lookup_identity_reuse_is_proved_by_exact_replay_and_fails_the_account() {
     for case in OrdinaryItemCase::ALL {
         let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
@@ -896,7 +1048,7 @@ impl Harness {
         self.snapshot().bootstrap.snapshot().visible_items
     }
 
-    fn visible_items(&self) -> Vec<LoginItemProjection> {
+    fn visible_items(&self) -> Vec<ItemProjection> {
         match self
             .runtime
             .projection(&ObservationRequest::Items {

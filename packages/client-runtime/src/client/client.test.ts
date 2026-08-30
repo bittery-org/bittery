@@ -3,6 +3,58 @@ import { createFakeRuntimeTransport } from "../testing";
 import { createRuntimeClient, RuntimeRequestError } from "./index";
 
 describe("Runtime client requests", () => {
+	test("routes every closed Item category through the neutral client facade", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const drafts = [
+			{ category: "login", data: { title: "Login" } },
+			{ category: "secure-note", data: { title: "Note", note: "Body" } },
+			{
+				category: "credit-card",
+				data: {
+					title: "Card",
+					cardholderName: "Holder",
+					cardNumber: "4111",
+					cvv: "123",
+					expiryDate: "12/30",
+				},
+			},
+			{ category: "identity", data: { title: "Identity" } },
+			{
+				category: "authenticator",
+				data: {
+					title: "Authenticator",
+					totpSecret: "secret",
+					linkedItemId: "login-1",
+				},
+			},
+		] as const;
+		const pending = drafts.map((draft) =>
+			client.createItem({ accountId: "account-1", vaultId: "vault-1", draft }),
+		);
+		await transport.settled();
+		expect(transport.pendingRequests().map(({ request }) => request)).toEqual(
+			drafts.map((draft) => ({
+				type: "createItem",
+				accountId: "account-1",
+				vaultId: "vault-1",
+				draft,
+			})),
+		);
+		for (let index = 0; index < drafts.length; index += 1) {
+			transport.answer({
+				type: "succeeded",
+				value: {
+					type: "accepted",
+					operationId: `operation-${index}`,
+					itemId: `item-${index}`,
+					replicaRevision: String(index),
+				},
+			});
+		}
+		await Promise.all(pending);
+	});
+
 	test("signs in over the generated request and response shapes", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });
@@ -77,10 +129,10 @@ describe("Runtime client requests", () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });
 
-		const creating = client.createLoginItem({
+		const creating = client.createItem({
 			accountId: "account-1",
 			vaultId: "vault-1",
-			draft: { title: "Bank" },
+			draft: { category: "login", data: { title: "Bank" } },
 		});
 		await transport.settled();
 		transport.answer({
@@ -97,10 +149,10 @@ describe("Runtime client requests", () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });
 
-		const creating = client.createLoginItem({
+		const creating = client.createItem({
 			accountId: "account-1",
 			vaultId: "vault-1",
-			draft: { title: "Bank", username: "me" },
+			draft: { category: "login", data: { title: "Bank", username: "me" } },
 		});
 		await transport.settled();
 		transport.answer({

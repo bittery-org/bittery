@@ -14,7 +14,7 @@ function itemsProjection(accountId: string, title: string) {
 					itemId: "item-1",
 					accountId,
 					vaultId: "vault-1",
-					title,
+					data: { category: "login" as const, data: { title } },
 					status: "authoritative" as const,
 					favorite: false,
 					createdAt: "2026-08-23T00:00:00Z",
@@ -59,12 +59,12 @@ describe("observation registry", () => {
 		const stopFirst = store.subscribe(() => {
 			const snapshot = store.getSnapshot();
 			if (snapshot.state === "ready")
-				first.push(snapshot.value.items[0]?.title ?? "");
+				first.push(snapshot.value.items[0]?.data.data.title ?? "");
 		});
 		const stopSecond = store.subscribe(() => {
 			const snapshot = store.getSnapshot();
 			if (snapshot.state === "ready")
-				second.push(snapshot.value.items[0]?.title ?? "");
+				second.push(snapshot.value.items[0]?.data.data.title ?? "");
 		});
 		await transport.settled();
 

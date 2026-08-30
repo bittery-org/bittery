@@ -18,7 +18,7 @@ use crate::{
         ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
     test_fixtures::{personal_vault, seed_ready_personal_vault, TEST_VAULT_ID, TEST_VAULT_KEY},
-    LoginItemDraft,
+    ItemDraft, LoginItemData,
 };
 use async_trait::async_trait;
 use bittery_crypto_core::{encrypt_with_aad, AadContext};
@@ -282,9 +282,11 @@ pub(super) enum StoredResult {
 pub(super) struct StoredItem {
     pub(super) id: String,
     pub(super) vault_id: String,
+    pub(super) category: String,
     pub(super) encrypted_data: String,
     pub(super) encryption_iv: String,
     pub(super) encryption_algorithm: String,
+    pub(super) encryption_version: i32,
     pub(super) version: i32,
     pub(super) favorite: bool,
     pub(super) deleted_at: Option<String>,
@@ -510,9 +512,11 @@ impl FakeServer {
                 self.created_items.lock().unwrap().push(StoredItem {
                     id: item_id.to_owned(),
                     vault_id: vault_id.to_owned(),
+                    category: body["category"].as_str().unwrap().to_owned(),
                     encrypted_data: body["encryptedData"].as_str().unwrap().to_owned(),
                     encryption_iv: body["encryptionIv"].as_str().unwrap().to_owned(),
                     encryption_algorithm: body["encryptionAlgorithm"].as_str().unwrap().to_owned(),
+                    encryption_version: 1,
                     version: 1,
                     favorite: false,
                     deleted_at: None,
@@ -722,6 +726,7 @@ impl FakeServer {
                         item.encryption_iv = body["encryptionIv"].as_str().unwrap().to_owned();
                         item.encryption_algorithm =
                             body["encryptionAlgorithm"].as_str().unwrap().to_owned();
+                        item.encryption_version = next_version;
                     }
                     crate::replica::OperationKind::SetItemFavorite => {
                         item.favorite = body["favorite"].as_bool().unwrap();
@@ -736,6 +741,7 @@ impl FakeServer {
                         item.encryption_iv = body["encryptionIv"].as_str().unwrap().to_owned();
                         item.encryption_algorithm =
                             body["encryptionAlgorithm"].as_str().unwrap().to_owned();
+                        item.encryption_version = next_version;
                     }
                     _ => {}
                 }
@@ -971,12 +977,12 @@ pub(super) fn item_body(item: &StoredItem) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "id": item.id,
         "vaultId": item.vault_id,
-        "category": "login",
+        "category": item.category,
         "favorite": item.favorite,
         "encryptedData": item.encrypted_data,
         "encryptionIv": item.encryption_iv,
         "encryptionAlgorithm": item.encryption_algorithm,
-        "encryptionVersion": 1,
+        "encryptionVersion": item.encryption_version,
         "version": item.version,
         "encryptedByUserId": USER,
         "lastModifiedBy": USER,
@@ -1113,7 +1119,7 @@ async fn seeded_inner(hold_time: bool, authority: SeedAuthority) -> Harness {
             include_target_vault,
         } => {
             let sealed = encrypt_with_aad(
-                &serde_json::to_string(&draft()).unwrap(),
+                &super::create::item_plaintext(&draft()).unwrap(),
                 &TEST_VAULT_KEY,
                 &AadContext {
                     vault_id: TEST_VAULT_ID.into(),
@@ -1163,9 +1169,18 @@ async fn seeded_inner(hold_time: bool, authority: SeedAuthority) -> Harness {
         .map(|item| StoredItem {
             id: item.id,
             vault_id: item.vault_id,
+            category: match item.category {
+                AuthorityItemCategory::Login => "login",
+                AuthorityItemCategory::SecureNote => "secure-note",
+                AuthorityItemCategory::CreditCard => "credit-card",
+                AuthorityItemCategory::Identity => "identity",
+                AuthorityItemCategory::Totp => "totp",
+            }
+            .into(),
             encrypted_data: item.encrypted_data,
             encryption_iv: item.encryption_iv,
             encryption_algorithm: item.encryption_algorithm,
+            encryption_version: item.encryption_version,
             version: item.version,
             favorite: item.favorite,
             deleted_at: item.deleted_at,
@@ -1247,18 +1262,26 @@ pub(super) async fn store_session(runtime: &Runtime, account_id: &AccountId, tok
         .unwrap();
 }
 
-pub(super) fn draft() -> LoginItemDraft {
-    LoginItemDraft {
+pub(super) fn draft() -> ItemDraft {
+    ItemDraft::Login(LoginItemData {
         title: "Bank".into(),
         url: Some("https://example.test".into()),
         urls: Vec::new(),
         username: Some("user".into()),
         password: Some("secret".into()),
+        password_history: Vec::new(),
+        passkeys: Vec::new(),
         notes: None,
         note: None,
         custom_fields: Vec::new(),
         tags: Vec::new(),
-    }
+        totp_secret: None,
+        totp_issuer: None,
+        totp_account_name: None,
+        totp_algorithm: None,
+        totp_digits: None,
+        totp_period: None,
+    })
 }
 
 impl Harness {
@@ -1266,7 +1289,7 @@ impl Harness {
         match self
             .runtime
             .request(
-                RuntimeRequest::CreateLoginItem {
+                RuntimeRequest::CreateItem {
                     account_id: self.account_id.clone(),
                     vault_id: TEST_VAULT_ID.to_owned(),
                     draft: draft(),

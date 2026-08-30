@@ -109,23 +109,23 @@ pub enum RuntimeRequest {
     },
     /// Irreversibly removes every Runtime-owned Account and Device record.
     Wipe,
-    CreateLoginItem {
+    CreateItem {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
             schemars(with = "String")
         )]
         account_id: AccountId,
         vault_id: String,
-        draft: LoginItemDraft,
+        draft: ItemDraft,
     },
-    UpdateLoginItem {
+    UpdateItem {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
             schemars(with = "String")
         )]
         account_id: AccountId,
         item_id: String,
-        draft: LoginItemDraft,
+        draft: ItemDraft,
     },
     SetItemFavorite {
         #[cfg_attr(
@@ -276,22 +276,22 @@ impl fmt::Debug for RuntimeRequest {
                 formatter.write_str("DeleteServerAccount([redacted scope and confirmation])")
             }
             Self::Wipe => formatter.write_str("Wipe"),
-            Self::CreateLoginItem {
+            Self::CreateItem {
                 account_id,
                 vault_id,
                 draft,
             } => formatter
-                .debug_struct("CreateLoginItem")
+                .debug_struct("CreateItem")
                 .field("account_id", account_id)
                 .field("vault_id", vault_id)
                 .field("draft", draft)
                 .finish(),
-            Self::UpdateLoginItem {
+            Self::UpdateItem {
                 account_id,
                 item_id,
                 draft,
             } => formatter
-                .debug_struct("UpdateLoginItem")
+                .debug_struct("UpdateItem")
                 .field("account_id", account_id)
                 .field("item_id", item_id)
                 .field("draft", draft)
@@ -411,8 +411,8 @@ impl RuntimeRequest {
             Self::RemoveAccount { account_id } => Some(account_id),
             Self::DeleteServerAccount { account_id, .. } => Some(account_id),
             Self::Wipe => None,
-            Self::CreateLoginItem { account_id, .. }
-            | Self::UpdateLoginItem { account_id, .. }
+            Self::CreateItem { account_id, .. }
+            | Self::UpdateItem { account_id, .. }
             | Self::SetItemFavorite { account_id, .. }
             | Self::TrashItem { account_id, .. }
             | Self::RestoreItem { account_id, .. }
@@ -477,8 +477,8 @@ pub enum ShareExpiration {
     feature = "runtime-protocol-contract-schema",
     derive(schemars::JsonSchema)
 )]
-#[serde(rename_all = "camelCase")]
-pub struct LoginItemDraft {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LoginItemData {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -488,20 +488,40 @@ pub struct LoginItemDraft {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub password_history: Vec<PasswordHistoryEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passkeys: Vec<Passkey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub custom_fields: Vec<LoginCustomField>,
+    pub custom_fields: Vec<CustomField>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_issuer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_algorithm: Option<TotpAlgorithm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_digits: Option<TotpDigits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_u32_schema")
+    )]
+    pub totp_period: Option<u32>,
 }
 
-impl fmt::Debug for LoginItemDraft {
+impl fmt::Debug for LoginItemData {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("LoginItemDraft")
+            .debug_struct("LoginItemData")
             .field("plaintext", &"[redacted]")
             .field("custom_field_count", &self.custom_fields.len())
             .field("tag_count", &self.tags.len())
@@ -514,8 +534,375 @@ impl fmt::Debug for LoginItemDraft {
     feature = "runtime-protocol-contract-schema",
     derive(schemars::JsonSchema)
 )]
-#[serde(rename_all = "camelCase")]
-pub struct LoginCustomField {
+#[serde(tag = "category", content = "data", deny_unknown_fields)]
+pub enum ItemDraft {
+    #[serde(rename = "login")]
+    Login(LoginItemData),
+    #[serde(rename = "secure-note")]
+    SecureNote(SecureNoteItemData),
+    #[serde(rename = "credit-card")]
+    CreditCard(CreditCardItemData),
+    #[serde(rename = "identity")]
+    Identity(IdentityItemData),
+    #[serde(rename = "authenticator")]
+    Authenticator(AuthenticatorItemData),
+}
+
+impl fmt::Debug for ItemDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ItemDraft")
+            .field("category", &self.category())
+            .field("plaintext", &"[redacted]")
+            .finish()
+    }
+}
+
+impl ItemDraft {
+    pub fn category(&self) -> ItemCategory {
+        match self {
+            Self::Login(_) => ItemCategory::Login,
+            Self::SecureNote(_) => ItemCategory::SecureNote,
+            Self::CreditCard(_) => ItemCategory::CreditCard,
+            Self::Identity(_) => ItemCategory::Identity,
+            Self::Authenticator(_) => ItemCategory::Authenticator,
+        }
+    }
+
+    pub fn title(&self) -> &str {
+        match self {
+            Self::Login(value) => &value.title,
+            Self::SecureNote(value) => &value.title,
+            Self::CreditCard(value) => &value.title,
+            Self::Identity(value) => &value.title,
+            Self::Authenticator(value) => &value.title,
+        }
+    }
+
+    pub fn password(&self) -> Option<&str> {
+        match self {
+            Self::Login(value) => value.password.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ItemCategory {
+    Login,
+    SecureNote,
+    CreditCard,
+    Identity,
+    Authenticator,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasswordHistoryEntry {
+    pub password: String,
+    pub changed_at: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Passkey {
+    pub credential_id: String,
+    pub rp_id: String,
+    pub rp_name: String,
+    pub user_handle: String,
+    pub user_name: String,
+    pub user_display_name: String,
+    pub private_key: String,
+    pub public_key: String,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "plain_i32_schema")
+    )]
+    pub algorithm: i32,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "plain_u32_schema")
+    )]
+    pub sign_count: u32,
+    pub transports: Vec<String>,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<PasskeyStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_reason: Option<PasskeyStatusReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_updated_at: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum PasskeyStatus {
+    Active,
+    Suspect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum PasskeyStatusReason {
+    Manual,
+    UnknownCredential,
+    SigningError,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+pub enum TotpAlgorithm {
+    #[serde(rename = "SHA1")]
+    Sha1,
+    #[serde(rename = "SHA256")]
+    Sha256,
+    #[serde(rename = "SHA512")]
+    Sha512,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TotpDigits {
+    Six,
+    Seven,
+    Eight,
+}
+
+impl Serialize for TotpDigits {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(match self {
+            Self::Six => 6,
+            Self::Seven => 7,
+            Self::Eight => 8,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for TotpDigits {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match u8::deserialize(deserializer)? {
+            6 => Ok(Self::Six),
+            7 => Ok(Self::Seven),
+            8 => Ok(Self::Eight),
+            _ => Err(serde::de::Error::custom("TOTP digits must be 6, 7, or 8")),
+        }
+    }
+}
+
+#[cfg(feature = "runtime-protocol-contract-schema")]
+impl schemars::JsonSchema for TotpDigits {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TotpDigits".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "integer", "enum": [6, 7, 8] })
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SecureNoteItemData {
+    pub title: String,
+    pub note: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<CustomField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreditCardItemData {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cardholder_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cvv: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<CustomField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_issuer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_algorithm: Option<TotpAlgorithm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_digits: Option<TotpDigits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_u32_schema")
+    )]
+    pub totp_period: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Address {
+    pub id: String,
+    pub street: String,
+    pub city: String,
+    pub state: String,
+    pub zip: String,
+    pub country: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PhoneNumber {
+    pub id: String,
+    pub label: String,
+    pub number: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IdentityItemData {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub middle_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub addresses: Vec<Address>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub phone_numbers: Vec<PhoneNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passport_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drivers_license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_of_birth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<CustomField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_issuer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_algorithm: Option<TotpAlgorithm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_digits: Option<TotpDigits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_u32_schema")
+    )]
+    pub totp_period: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuthenticatorItemData {
+    pub title: String,
+    pub totp_secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_issuer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_algorithm: Option<TotpAlgorithm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_digits: Option<TotpDigits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_u32_schema")
+    )]
+    pub totp_period: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<CustomField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CustomField {
     pub id: String,
     pub label: String,
     pub value: String,
@@ -523,10 +910,10 @@ pub struct LoginCustomField {
     pub field_type: CustomFieldKind,
 }
 
-impl fmt::Debug for LoginCustomField {
+impl fmt::Debug for CustomField {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("LoginCustomField")
+            .debug_struct("CustomField")
             .field("plaintext", &"[redacted]")
             .field("field_type", &self.field_type)
             .finish()
@@ -897,7 +1284,7 @@ pub struct ItemsProjection {
         schemars(schema_with = "decimal_u64::json_schema")
     )]
     pub replica_revision: u64,
-    pub items: Vec<LoginItemProjection>,
+    pub items: Vec<ItemProjection>,
     /// The Vaults these Items live in, so a host can name one and can tell a reader from a
     /// writer without asking a second source. Present for the first slice's create affordance;
     /// full Vault metadata still belongs to the read path that owns it.
@@ -961,7 +1348,7 @@ pub enum VaultProjectionType {
     derive(schemars::JsonSchema)
 )]
 #[serde(rename_all = "camelCase")]
-pub struct LoginItemProjection {
+pub struct ItemProjection {
     #[cfg_attr(
         feature = "runtime-protocol-contract-schema",
         schemars(with = "String")
@@ -969,23 +1356,7 @@ pub struct LoginItemProjection {
     pub account_id: AccountId,
     pub item_id: String,
     pub vault_id: String,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub urls: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub custom_fields: Vec<LoginCustomField>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
+    pub data: ItemDraft,
     pub favorite: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<String>,
@@ -1031,6 +1402,16 @@ fn plain_i32_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     })
 }
 
+#[cfg(feature = "runtime-protocol-contract-schema")]
+fn plain_u32_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "integer", "minimum": 0, "maximum": u32::MAX })
+}
+
+#[cfg(feature = "runtime-protocol-contract-schema")]
+fn optional_plain_u32_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": ["integer", "null"], "minimum": 0, "maximum": u32::MAX })
+}
+
 impl fmt::Debug for AttachmentProjection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1044,10 +1425,10 @@ impl fmt::Debug for AttachmentProjection {
     }
 }
 
-impl fmt::Debug for LoginItemProjection {
+impl fmt::Debug for ItemProjection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("LoginItemProjection")
+            .debug_struct("ItemProjection")
             .field("account_id", &self.account_id)
             .field("item_id", &self.item_id)
             .field("vault_id", &self.vault_id)

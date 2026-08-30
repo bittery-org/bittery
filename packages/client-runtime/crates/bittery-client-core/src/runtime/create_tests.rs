@@ -23,7 +23,7 @@ use crate::{
         personal_vault, seed_ready_personal_vault, TEST_MASTER_UNLOCK_KEY, TEST_VAULT_ID,
         TEST_VAULT_KEY,
     },
-    CreateShareDraft, CustomFieldKind, LoginCustomField, LoginItemDraft, ShareAccessMode,
+    CreateShareDraft, CustomField, CustomFieldKind, ItemDraft, LoginItemData, ShareAccessMode,
     ShareExpiration,
 };
 use async_trait::async_trait;
@@ -113,6 +113,14 @@ impl RecordingExecutor {
         category: AuthorityItemCategory,
         plaintext: serde_json::Value,
     ) -> Arc<Self> {
+        Self::seeded_category_item(category, plaintext, false)
+    }
+
+    fn seeded_category_item(
+        category: AuthorityItemCategory,
+        plaintext: serde_json::Value,
+        deleted: bool,
+    ) -> Arc<Self> {
         let state = InMemoryReplica::default();
         let account_id = AccountId::from(ACCOUNT);
         state
@@ -137,7 +145,10 @@ impl RecordingExecutor {
         state
             .seed_ready_authority(
                 &account_id,
-                vec![personal_vault(TEST_VAULT_ID, USER)],
+                vec![
+                    personal_vault(TEST_VAULT_ID, USER),
+                    personal_vault("vault-2", USER),
+                ],
                 vec![AuthorityItemRecord {
                     id: "item-existing".into(),
                     vault_id: TEST_VAULT_ID.into(),
@@ -152,7 +163,7 @@ impl RecordingExecutor {
                     last_modified_by: USER.into(),
                     created_at: "2026-08-23T00:00:00Z".into(),
                     updated_at: "2026-08-23T00:00:00Z".into(),
-                    deleted_at: None,
+                    deleted_at: deleted.then(|| "2026-08-24T00:00:00Z".into()),
                     attachments: Vec::new(),
                 }],
             )
@@ -196,7 +207,7 @@ impl RecordingExecutor {
             )
             .unwrap();
         let sealed = encrypt_with_aad(
-            &serde_json::to_string(&draft()).unwrap(),
+            &create::item_plaintext(&draft()).unwrap(),
             &TEST_VAULT_KEY,
             &AadContext {
                 vault_id: TEST_VAULT_ID.into(),
@@ -395,23 +406,31 @@ fn attachment_named(attachment_id: &str) -> AuthorityAttachmentRecord {
     }
 }
 
-fn draft() -> LoginItemDraft {
-    LoginItemDraft {
+fn draft() -> ItemDraft {
+    ItemDraft::Login(LoginItemData {
         title: TITLE.into(),
         url: Some("https://example.test".into()),
         urls: vec!["https://second.example.test".into()],
         username: Some(USERNAME.into()),
         password: Some(PASSWORD.into()),
+        password_history: Vec::new(),
+        passkeys: Vec::new(),
         notes: Some(NOTES.into()),
         note: None,
-        custom_fields: vec![LoginCustomField {
+        custom_fields: vec![CustomField {
             id: "field-1".into(),
             label: "Recovery".into(),
             value: FIELD_VALUE.into(),
             field_type: CustomFieldKind::Password,
         }],
         tags: vec![TAG.into()],
-    }
+        totp_secret: None,
+        totp_issuer: None,
+        totp_account_name: None,
+        totp_algorithm: None,
+        totp_digits: None,
+        totp_period: None,
+    })
 }
 
 fn plaintext_markers() -> [&'static str; 6] {
@@ -419,7 +438,7 @@ fn plaintext_markers() -> [&'static str; 6] {
 }
 
 fn create(account_id: &AccountId, vault_id: &str) -> RuntimeRequest {
-    RuntimeRequest::CreateLoginItem {
+    RuntimeRequest::CreateItem {
         account_id: account_id.clone(),
         vault_id: vault_id.to_owned(),
         draft: draft(),
@@ -596,10 +615,8 @@ async fn share_payload_preserves_non_login_category_and_withholds_local_only_fie
             "cvv": "123",
             "expiryDate": "12/30",
             "billingAddress": "1 Cipher Lane",
-            "passwordHistory": [{ "password": "old" }],
-            "passkeys": [{ "privateKey": "forbidden" }],
-            "tags": ["private"],
-            "linkedItemId": "item-local"
+            "customFields": [{ "id": "field", "label": "Label", "value": "Value", "type": "text" }],
+            "tags": ["private"]
         }),
     );
     let (runtime, account_id) = unlocked_runtime(executor).await;
@@ -659,6 +676,7 @@ async fn share_payload_preserves_non_login_category_and_withholds_local_only_fie
 
     assert_eq!(payload["category"], "credit-card");
     assert_eq!(payload["cardNumber"], "4111111111111111");
+    assert_eq!(payload["customFields"][0]["value"], "Value");
     for forbidden in [
         "id",
         "vaultId",
@@ -675,6 +693,35 @@ async fn share_payload_preserves_non_login_category_and_withholds_local_only_fie
             "{forbidden} leaked into Share payload"
         );
     }
+}
+
+#[tokio::test]
+async fn share_rejects_authority_whose_plaintext_does_not_match_its_category() {
+    let executor = RecordingExecutor::seeded_share_item(
+        AuthorityItemCategory::CreditCard,
+        serde_json::json!({
+            "title": "Malformed card",
+            "passwordHistory": [{ "password": "not-a-card-field" }]
+        }),
+    );
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let error = runtime
+        .request(
+            RuntimeRequest::CreateShare {
+                account_id,
+                item_id: "item-existing".into(),
+                draft: CreateShareDraft {
+                    access_mode: ShareAccessMode::Anyone,
+                    expires_in: ShareExpiration::OneDay,
+                    is_one_time_use: false,
+                    allowed_emails: vec![],
+                },
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
 }
 
 #[tokio::test]
@@ -1248,7 +1295,7 @@ async fn accepted_create_seals_the_draft_under_the_existing_item_aad() {
         TEST_VAULT_ID,
         &item_id,
     );
-    assert_eq!(opened, serde_json::to_string(&draft()).unwrap());
+    assert_eq!(opened, create::item_plaintext(&draft()).unwrap());
 
     // The AAD is bound to this exact Item, so the same ciphertext under another Item ID fails.
     assert!(decrypt_with_aad(
@@ -1281,7 +1328,290 @@ async fn accepted_create_seals_the_draft_under_the_existing_item_aad() {
     assert_eq!(projection.items.len(), 1);
     assert_eq!(projection.items[0].item_id, item_id);
     assert_eq!(projection.items[0].status, ItemProjectionStatus::Pending);
-    assert_eq!(projection.items[0].title, TITLE);
+    assert_eq!(projection.items[0].data.title(), TITLE);
+}
+
+#[tokio::test]
+async fn create_acceptance_preserves_each_closed_item_category_and_server_totp_spelling() {
+    use crate::{AuthenticatorItemData, CreditCardItemData, IdentityItemData, SecureNoteItemData};
+    let cases = vec![
+        (draft(), ItemCategory::Login, AuthorityItemCategory::Login),
+        (
+            ItemDraft::SecureNote(SecureNoteItemData {
+                title: "Note".into(),
+                note: "Body".into(),
+                notes: Some("Provider notes".into()),
+                custom_fields: vec![],
+                tags: vec!["tag".into()],
+            }),
+            ItemCategory::SecureNote,
+            AuthorityItemCategory::SecureNote,
+        ),
+        (
+            ItemDraft::CreditCard(CreditCardItemData {
+                title: "Card".into(),
+                cardholder_name: Some("Holder".into()),
+                card_number: Some("4111".into()),
+                cvv: Some("123".into()),
+                expiry_date: Some("12/30".into()),
+                billing_address: Some("Address".into()),
+                notes: Some("Notes".into()),
+                custom_fields: vec![],
+                totp_secret: Some("card-totp".into()),
+                totp_issuer: Some("Issuer".into()),
+                totp_account_name: Some("Card".into()),
+                totp_algorithm: Some(crate::TotpAlgorithm::Sha1),
+                totp_digits: Some(crate::TotpDigits::Six),
+                totp_period: Some(30),
+                tags: vec!["tag".into()],
+            }),
+            ItemCategory::CreditCard,
+            AuthorityItemCategory::CreditCard,
+        ),
+        (
+            ItemDraft::Identity(IdentityItemData {
+                title: "Identity".into(),
+                first_name: Some("First".into()),
+                middle_name: None,
+                last_name: Some("Last".into()),
+                email: Some("id@example.test".into()),
+                addresses: vec![],
+                phone_numbers: vec![],
+                ssn: Some("ssn".into()),
+                passport_number: None,
+                drivers_license: None,
+                date_of_birth: None,
+                notes: Some("Notes".into()),
+                custom_fields: vec![],
+                totp_secret: Some("identity-totp".into()),
+                totp_issuer: Some("Issuer".into()),
+                totp_account_name: Some("Identity".into()),
+                totp_algorithm: Some(crate::TotpAlgorithm::Sha256),
+                totp_digits: Some(crate::TotpDigits::Eight),
+                totp_period: Some(60),
+                tags: vec!["tag".into()],
+            }),
+            ItemCategory::Identity,
+            AuthorityItemCategory::Identity,
+        ),
+        (
+            ItemDraft::Authenticator(AuthenticatorItemData {
+                title: "Authenticator".into(),
+                totp_secret: "secret".into(),
+                totp_issuer: Some("Issuer".into()),
+                totp_account_name: Some("Account".into()),
+                totp_algorithm: None,
+                totp_digits: Some(crate::TotpDigits::Six),
+                totp_period: Some(30),
+                linked_item_id: Some("login-id".into()),
+                notes: Some("Notes".into()),
+                custom_fields: vec![],
+                tags: vec!["tag".into()],
+            }),
+            ItemCategory::Totp,
+            AuthorityItemCategory::Totp,
+        ),
+    ];
+    for (draft, server_category, authority_category) in cases {
+        let executor = RecordingExecutor::seeded();
+        let (runtime, account_id) = unlocked_runtime(executor).await;
+        let (_, item_id, _) = accepted(
+            runtime
+                .request(
+                    RuntimeRequest::CreateItem {
+                        account_id: account_id.clone(),
+                        vault_id: TEST_VAULT_ID.into(),
+                        draft: draft.clone(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+        );
+        let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+        let body: CreateItemBody =
+            serde_json::from_slice(&snapshot.operations[0].request.body).unwrap();
+        assert_eq!(
+            serde_json::to_value(&body.category).unwrap(),
+            serde_json::to_value(&server_category).unwrap()
+        );
+        assert_eq!(snapshot.items[0].category, authority_category);
+        assert_eq!(
+            open_item(
+                EncryptedData {
+                    ciphertext: body.encrypted_data,
+                    iv: body.encryption_iv,
+                    algorithm: body.encryption_algorithm
+                },
+                TEST_VAULT_ID,
+                &item_id
+            ),
+            create::item_plaintext(&draft).unwrap()
+        );
+        let RuntimeProjection::Items(items) = runtime
+            .projection(&ObservationRequest::Items { account_id })
+            .unwrap()
+            .projection
+        else {
+            panic!("expected Items")
+        };
+        assert_eq!(items.items[0].data, draft);
+    }
+}
+
+#[tokio::test]
+async fn category_independent_item_acceptance_has_no_login_admission_guard() {
+    let cases = vec![
+        (
+            AuthorityItemCategory::Login,
+            ItemDraft::Login(LoginItemData {
+                title: "Login".into(),
+                url: None,
+                urls: vec![],
+                username: None,
+                password: None,
+                password_history: vec![],
+                passkeys: vec![],
+                notes: None,
+                note: None,
+                custom_fields: vec![],
+                tags: vec![],
+                totp_secret: None,
+                totp_issuer: None,
+                totp_account_name: None,
+                totp_algorithm: None,
+                totp_digits: None,
+                totp_period: None,
+            }),
+        ),
+        (
+            AuthorityItemCategory::SecureNote,
+            ItemDraft::SecureNote(crate::SecureNoteItemData {
+                title: "Note".into(),
+                note: "Body".into(),
+                notes: None,
+                custom_fields: vec![],
+                tags: vec![],
+            }),
+        ),
+        (
+            AuthorityItemCategory::CreditCard,
+            ItemDraft::CreditCard(crate::CreditCardItemData {
+                title: "Card".into(),
+                cardholder_name: None,
+                card_number: None,
+                cvv: None,
+                expiry_date: None,
+                billing_address: None,
+                notes: None,
+                custom_fields: vec![],
+                totp_secret: None,
+                totp_issuer: None,
+                totp_account_name: None,
+                totp_algorithm: None,
+                totp_digits: None,
+                totp_period: None,
+                tags: vec![],
+            }),
+        ),
+        (
+            AuthorityItemCategory::Identity,
+            ItemDraft::Identity(crate::IdentityItemData {
+                title: "Identity".into(),
+                first_name: None,
+                middle_name: None,
+                last_name: None,
+                email: None,
+                addresses: vec![],
+                phone_numbers: vec![],
+                ssn: None,
+                passport_number: None,
+                drivers_license: None,
+                date_of_birth: None,
+                notes: None,
+                custom_fields: vec![],
+                totp_secret: None,
+                totp_issuer: None,
+                totp_account_name: None,
+                totp_algorithm: None,
+                totp_digits: None,
+                totp_period: None,
+                tags: vec![],
+            }),
+        ),
+        (
+            AuthorityItemCategory::Totp,
+            ItemDraft::Authenticator(crate::AuthenticatorItemData {
+                title: "Authenticator".into(),
+                totp_secret: "secret".into(),
+                totp_issuer: None,
+                totp_account_name: None,
+                totp_algorithm: None,
+                totp_digits: None,
+                totp_period: None,
+                linked_item_id: None,
+                notes: None,
+                custom_fields: vec![],
+                tags: vec![],
+            }),
+        ),
+    ];
+    for (category, draft) in cases {
+        for action in [
+            RemainingKindCase::Update,
+            RemainingKindCase::Favorite,
+            RemainingKindCase::Trash,
+            RemainingKindCase::Restore,
+            RemainingKindCase::Move,
+            RemainingKindCase::PermanentlyDelete,
+        ] {
+            let plaintext = serde_json::from_str(&create::item_plaintext(&draft).unwrap()).unwrap();
+            let executor = RecordingExecutor::seeded_category_item(
+                category.clone(),
+                plaintext,
+                action.needs_deleted_authority(),
+            );
+            let (runtime, account_id) = unlocked_runtime(executor).await;
+            let request = match action {
+                RemainingKindCase::Update => RuntimeRequest::UpdateItem {
+                    account_id,
+                    item_id: "item-existing".into(),
+                    draft: draft.clone(),
+                },
+                _ => action.request(account_id),
+            };
+            assert!(matches!(
+                runtime
+                    .request(request, RequestCancellation::new())
+                    .await
+                    .unwrap(),
+                RuntimeResponse::Accepted { .. }
+            ));
+        }
+
+        let plaintext = serde_json::from_str(&create::item_plaintext(&draft).unwrap()).unwrap();
+        let executor = RecordingExecutor::seeded_category_item(category, plaintext, false);
+        let (runtime, account_id) = unlocked_runtime(executor).await;
+        assert!(matches!(
+            runtime
+                .request(
+                    RuntimeRequest::CreateShare {
+                        account_id,
+                        item_id: "item-existing".into(),
+                        draft: CreateShareDraft {
+                            access_mode: ShareAccessMode::Anyone,
+                            expires_in: ShareExpiration::OneDay,
+                            is_one_time_use: false,
+                            allowed_emails: vec![],
+                        },
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+            RuntimeResponse::Accepted { .. }
+        ));
+    }
 }
 
 #[tokio::test]
@@ -1657,7 +1987,7 @@ async fn an_offline_create_is_visible_as_pending_at_once_and_after_a_restart() {
     let before = visible(&runtime, &account_id).items;
     assert_eq!(before.len(), 1, "the accepted Item is visible at once");
     assert_eq!(before[0].item_id, item_id);
-    assert_eq!(before[0].title, TITLE);
+    assert_eq!(before[0].data.title(), TITLE);
     assert_eq!(before[0].status, ItemProjectionStatus::Pending);
     // A list that sorts by time has to be able to read these. An empty string is not a date.
     assert!(
@@ -1682,7 +2012,7 @@ async fn an_offline_create_is_visible_as_pending_at_once_and_after_a_restart() {
     let after = visible(&restarted, &account_id).items;
     assert_eq!(after.len(), 1, "the restarted process still shows the Item");
     assert_eq!(after[0].item_id, item_id);
-    assert_eq!(after[0].title, TITLE);
+    assert_eq!(after[0].data.title(), TITLE);
     assert_eq!(after[0].status, ItemProjectionStatus::Pending);
     // The date is durable too: a restart must not reshuffle a list that sorts by it.
     assert_eq!(after[0].created_at, created_at);
@@ -1780,7 +2110,7 @@ impl RemainingKindCase {
 
     fn request(self, account_id: AccountId) -> RuntimeRequest {
         match self {
-            Self::Update => RuntimeRequest::UpdateLoginItem {
+            Self::Update => RuntimeRequest::UpdateItem {
                 account_id,
                 item_id: "item-existing".into(),
                 draft: draft(),
@@ -1925,7 +2255,7 @@ fn assert_remaining_projection(case: RemainingKindCase, projection: &ItemsProjec
         RemainingKindCase::Restore => assert!(projection.items[0].deleted_at.is_none()),
         RemainingKindCase::Move => assert_eq!(projection.items[0].vault_id, "vault-2"),
         RemainingKindCase::PermanentlyDelete => assert!(projection.items.is_empty()),
-        RemainingKindCase::Update => assert_eq!(projection.items[0].title, TITLE),
+        RemainingKindCase::Update => assert_eq!(projection.items[0].data.title(), TITLE),
     }
 }
 

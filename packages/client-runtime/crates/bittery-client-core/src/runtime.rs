@@ -90,11 +90,11 @@ use crate::{
         SerializedReplicaPersistence,
     },
     AccountAccessState, AccountDisplayIdentity, AccountId, AccountStatus, AccountWaitingReason,
-    ItemProjectionStatus, ItemsProjection, LoginItemProjection, ObservationRequest,
-    ObservationSink, PendingShareResult, PendingShareResultsProjection, RequestCancellation,
-    RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
-    RuntimeStatusProjection, TeardownPhase, TeardownScope, TeardownStatus, VaultProjection,
-    VaultProjectionRole, VaultProjectionType,
+    ItemProjection, ItemProjectionStatus, ItemsProjection, ObservationRequest, ObservationSink,
+    PendingShareResult, PendingShareResultsProjection, RequestCancellation, RuntimeError,
+    RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
+    TeardownPhase, TeardownScope, TeardownStatus, VaultProjection, VaultProjectionRole,
+    VaultProjectionType,
 };
 use std::{
     cell::RefCell,
@@ -508,7 +508,7 @@ pub struct Runtime {
     close_finished: tokio::sync::Notify,
     catalog_transition: tokio::sync::Mutex<()>,
     publication: Mutex<()>,
-    unlocked_items: Mutex<HashMap<AccountId, Vec<LoginItemProjection>>>,
+    unlocked_items: Mutex<HashMap<AccountId, Vec<ItemProjection>>>,
     live_master_unlock_keys:
         Arc<Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
@@ -1559,7 +1559,7 @@ impl Runtime {
                 self.delete_server_account(account_id, confirm_email, request_id, cancellation)
                     .await
             }
-            RuntimeRequest::CreateLoginItem {
+            RuntimeRequest::CreateItem {
                 account_id,
                 vault_id,
                 draft,
@@ -1567,7 +1567,7 @@ impl Runtime {
                 self.accept_create_login_item(account_id, vault_id, draft, cancellation, accepted)
                     .await
             }
-            RuntimeRequest::UpdateLoginItem {
+            RuntimeRequest::UpdateItem {
                 account_id,
                 item_id,
                 draft,
@@ -1575,7 +1575,7 @@ impl Runtime {
                 self.accept_existing_item_operation(
                     account_id,
                     item_id,
-                    create::ExistingItemIntent::Update(draft),
+                    create::ExistingItemIntent::Update(Box::new(draft)),
                     cancellation,
                     accepted,
                 )
@@ -2090,16 +2090,24 @@ impl Runtime {
         let incarnation = crate::Incarnation::from("joined-upload-incarnation");
         let user_id = "user-1".to_owned();
         let item_id = "item-existing";
-        let draft = crate::LoginItemDraft {
+        let draft = crate::LoginItemData {
             title: "Joined Upload Item".into(),
             url: None,
             urls: Vec::new(),
             username: None,
             password: None,
+            password_history: Vec::new(),
+            passkeys: Vec::new(),
             notes: None,
             note: None,
             custom_fields: Vec::new(),
             tags: Vec::new(),
+            totp_secret: None,
+            totp_issuer: None,
+            totp_account_name: None,
+            totp_algorithm: None,
+            totp_digits: None,
+            totp_period: None,
         };
         let encrypted = encrypt_with_aad(
             &serde_json::to_string(&draft).map_err(|_| {
