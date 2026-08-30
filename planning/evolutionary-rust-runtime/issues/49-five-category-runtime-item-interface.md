@@ -1,7 +1,7 @@
 # Add the five-category Runtime Item interface
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 22, 24, 31, 32, 43, 45, 46, 48
 Parent: [28 — finalized E1–E10 frontier](28-remaining-item-write-kinds.md#2026-08-30--final-web-item-and-import-frontier-resolved)
 
@@ -47,3 +47,31 @@ not own `apps/server` route behavior, `apps/web` presentation, Vault creation, o
 - Run the focused Core/binding/generator/client tests, Replica conformance generation check,
   `pnpm exec turbo -F @bittery/client-runtime check-types`, `pnpm check:ci`,
   `pnpm check:ci:rust`, and `git diff --check` before resolving the ticket.
+
+## Comments
+
+### 2026-08-31 — resolved
+
+Commit `a29257df` replaces the Login-only Runtime Item boundary with the Rust-defined closed Login,
+Secure Note, Credit Card, Identity, and Authenticator values across protocol, encrypted Bootstrap,
+projections, create/update dispatch, retained outcomes, guarded reconciliation, bindings, generated
+Web/Kotlin/Swift/WASM artifacts, and Replica conformance. The Server continues to spell
+Authenticator as `totp`. The implementation preserves the existing encryption algorithms, key
+hierarchy, AAD, and persisted Item ciphertext format: category selects the existing inner plaintext
+shape rather than adding a new persisted category field. Independent review approved the corrected
+implementation with no remaining findings.
+
+`pnpm --filter @bittery/client-runtime run check` passed, including 515 Core unit tests, five
+Attachment API tests, three Replica-corpus tests, three Server-contract tests, 45 binding tests,
+five generated-contract tests, 31 generator tests, and all generated native/WASM drift checks.
+`pnpm check:ci:rust` passed end to end, including the Server, 139 crypto tests plus nine vectors, the
+Runtime and generated bindings/WASM, and 89 plus 50 Desktop tests. The focused Runtime TypeScript
+tests passed 21/21; focused Biome, Runtime type checking, and `git diff --check` also passed. The
+independent reviewer separately passed focused Rust coverage, the client tests 13/13, generator tests
+12/12, package type checking, and the diff check.
+
+The root `pnpm check:ci` reached Biome and stopped only on the preserved, pre-existing Ticket 58 Web,
+composition, and browser-harness draft; it exposed no Ticket 49 defect. Deliberately left open for
+Ticket 58: Web consumer-callsite migration and formatting of that host-cutover draft. This ticket
+does not change Server routes, Web UI behavior, Vault creation, Import dispatch, or make a Web hook
+the reusable interface.
