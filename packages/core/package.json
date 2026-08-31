@@ -47,7 +47,7 @@
 		"@bittery/storage": "workspace:*",
 		"@bittery/sync": "workspace:*",
 		"@bittery/types": "workspace:*",
-		"@tanstack/react-query": "^5.101.4",
+		"@tanstack/react-query": "^5.102.8",
 		"zxcvbn": "^4.4.2"
 	},
 	"devDependencies": {
