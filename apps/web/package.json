@@ -55,17 +55,17 @@
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@playwright/test": "^1.62.1",
-		"@tanstack/react-query-devtools": "^5.101.4",
+		"@tanstack/react-query-devtools": "^5.102.8",
 		"@tanstack/react-router-devtools": "^1.167.1",
 		"@testing-library/dom": "^10.4.0",
-		"@testing-library/react": "^16.2.0",
+		"@testing-library/react": "^16.3.3",
 		"@types/react": "catalog:",
 		"@types/react-dom": "catalog:",
 		"@types/zxcvbn": "^4.4.5",
-		"@vitejs/plugin-react": "^6.0.5",
+		"@vitejs/plugin-react": "^6.1.0",
 		"jsdom": "^26.0.0",
 		"typescript": "^5.7.2",
-		"vite": "^8.2.1",
+		"vite": "^8.2.2",
 		"web-vitals": "^5.0.3"
 	}
 }
