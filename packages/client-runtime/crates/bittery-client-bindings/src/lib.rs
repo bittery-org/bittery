@@ -3,6 +3,8 @@
 use bittery_client_core as core;
 use std::fmt;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use zeroize::Zeroizing;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 uniffi::setup_scaffolding!();
@@ -1609,6 +1611,84 @@ pub trait ObservationSink: Send + Sync {
     fn publish(&self, projection: RuntimeProjection);
 }
 
+/// A shallow native answer handle. Its sensitive payload is transferred as one canonical Base64
+/// String allocation instead of an ordinary UniFFI record/sequence buffer whose temporary
+/// serialization could not be wiped.
+#[cfg(not(target_arch = "wasm32"))]
+#[uniffi::export(with_foreign)]
+pub trait VaultImagePortAnswer: Send + Sync {
+    fn control_response_json(&self) -> String;
+
+    /// Transfers a canonical Base64 representation to Rust. Empty means that this answer carries
+    /// no binary chunk; valid Vault-image chunks are never empty. The generated native lowering
+    /// writes this String directly into its RustBuffer, avoiding an ordinary record/sequence lift.
+    fn take_binary_chunk_base64(&self) -> SensitiveVaultImageChunk;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub struct SensitiveVaultImageChunk(pub(crate) Zeroizing<String>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<SensitiveVaultImageChunk> for String {
+    fn from(mut value: SensitiveVaultImageChunk) -> Self {
+        std::mem::take(&mut *value.0)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<String> for SensitiveVaultImageChunk {
+    fn from(value: String) -> Self {
+        Self(Zeroizing::new(value))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+uniffi::custom_type!(SensitiveVaultImageChunk, String);
+
+#[cfg(not(target_arch = "wasm32"))]
+#[uniffi::export(with_foreign)]
+pub trait VaultImageArtifactExecutor: Send + Sync {
+    fn invoke(
+        &self,
+        control_request_json: String,
+        // Canonical Base64, or empty when the request carries no chunk.
+        binary_chunk_base64: SensitiveVaultImageChunk,
+    ) -> Result<Arc<dyn VaultImagePortAnswer>, BindingError>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[uniffi::export(with_foreign)]
+pub trait VaultImageSourceExecutor: Send + Sync {
+    fn invoke(
+        &self,
+        control_request_json: String,
+    ) -> Result<Arc<dyn VaultImagePortAnswer>, BindingError>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, uniffi::Record)]
+pub struct VaultImagePreparationRequest {
+    pub runtime_incarnation: String,
+    pub account_id: String,
+    pub operation_id: String,
+    pub vault_id: String,
+    pub capability_id: String,
+    pub content_type: String,
+    pub byte_length: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, uniffi::Record)]
+pub struct PreparedVaultImage {
+    pub account_id: String,
+    pub operation_id: String,
+    pub vault_id: String,
+    pub content_type: String,
+    pub byte_length: u64,
+    pub sha256: String,
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 struct NativeSink(Arc<dyn ObservationSink>);
 
@@ -1647,6 +1727,10 @@ impl ClientRuntime {
     #[uniffi::constructor]
     pub fn new() -> Arc<Self> {
         Self::headless()
+    }
+
+    pub async fn open(&self) -> Result<(), BindingError> {
+        self.inner.open().await.map_err(Into::into)
     }
 
     pub async fn request(&self, request: RuntimeRequest) -> Result<RuntimeResponse, BindingError> {
@@ -2698,6 +2782,11 @@ mod observation_slots;
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::WebClientRuntime;
+#[allow(
+    dead_code,
+    reason = "generated Vault-image controls are consumed by shallow host adapters"
+)]
+mod vault_image_control;
 #[cfg(any(target_arch = "wasm32", feature = "artifact-control-contract-schema"))]
 mod web_attachment_artifact_control;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -2720,6 +2809,10 @@ mod web_binary_transfer_control;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_binary_transfer_policy;
 
+#[cfg(feature = "vault-image-control-contract-schema")]
+pub use vault_image_control::{
+    vault_image_control_contract_fixture, vault_image_control_contract_schema,
+};
 #[cfg(feature = "artifact-control-contract-schema")]
 #[doc(hidden)]
 pub use web_attachment_artifact_control::{
@@ -2730,10 +2823,14 @@ pub use web_attachment_artifact_control::{
 pub use web_binary_transfer_control::{
     transfer_control_contract_fixture, transfer_control_contract_schema,
 };
+#[cfg(not(target_arch = "wasm32"))]
+mod native_vault_image_bridge;
 #[cfg(target_arch = "wasm32")]
 mod web_attachment_artifact_store;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_attachment_move_bridge;
+#[cfg(target_arch = "wasm32")]
+mod web_vault_image_bridge;
 #[cfg(all(target_arch = "wasm32", feature = "binding-test-harness"))]
 pub use web_attachment_move_bridge::WebAttachmentMoveBridgeTestHarness;
 
@@ -2859,6 +2956,17 @@ mod tests {
         }
 
         assert_eq!(take_sensitive_rust_buffer_free_observations(), 1);
+    }
+
+    #[test]
+    fn native_vault_image_sensitive_chunk_lift_takes_the_exact_rust_buffer_allocation() {
+        let buffer = <String as uniffi::Lower<UniFfiTag>>::lower("YWJj".into());
+        let transferred = buffer.data_pointer();
+        let chunk = <SensitiveVaultImageChunk as uniffi::Lift<UniFfiTag>>::try_lift(buffer)
+            .expect("sensitive custom String lift");
+
+        assert_eq!(chunk.0.as_ptr(), transferred);
+        assert_eq!(chunk.0.as_str(), "YWJj");
     }
 
     #[test]

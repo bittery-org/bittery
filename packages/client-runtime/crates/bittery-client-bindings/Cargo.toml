@@ -9,12 +9,15 @@ description = "Shallow native and Web bindings for the Bittery Client Runtime"
 default = []
 artifact-control-contract-schema = ["dep:schemars"]
 transfer-control-contract-schema = ["dep:schemars"]
+vault-image-control-contract-schema = ["dep:schemars"]
 binding-test-harness = ["bittery-client-core/binding-test-harness"]
 
 [lib]
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
+async-trait.workspace = true
+base64.workspace = true
 bittery-client-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,7 +29,6 @@ uniffi.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-async-trait.workspace = true
 getrandom = { version = "=0.4.2", features = ["wasm_js"] }
 getrandom_02 = { package = "getrandom", version = "=0.2.16", features = ["js"] }
 js-sys = "=0.3.103"
@@ -42,3 +44,8 @@ required-features = ["artifact-control-contract-schema"]
 name = "generate-transfer-control-contract-schema"
 path = "src/bin/generate_transfer_control_contract_schema.rs"
 required-features = ["transfer-control-contract-schema"]
+
+[[bin]]
+name = "generate-vault-image-control-contract-schema"
+path = "src/bin/generate_vault_image_control_contract_schema.rs"
+required-features = ["vault-image-control-contract-schema"]

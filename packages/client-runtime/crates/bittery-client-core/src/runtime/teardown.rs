@@ -197,10 +197,12 @@ impl Runtime {
             TeardownScope::Account { account_id } => {
                 self.retire_attachment_download_account(account_id).await;
                 self.retire_attachment_upload_account(account_id).await;
+                self.retire_vault_image_account(account_id).await;
             }
             TeardownScope::Device => {
                 self.retire_all_attachment_downloads().await;
                 self.retire_all_attachment_uploads().await;
+                self.retire_all_vault_images().await;
             }
         }
         {
@@ -291,6 +293,8 @@ impl Runtime {
                 self.complete_attachment_download_account_retirement(account_id)
                     .await;
                 self.complete_attachment_upload_account_retirement(account_id)
+                    .await;
+                self.complete_vault_image_account_retirement(account_id)
                     .await;
             }
             let _publication = self.publication.lock().expect("publication lock poisoned");

@@ -9,6 +9,7 @@ const allSuites = [
 	"tests/web-attachment-download-sink.chromium.test.ts",
 	"tests/web-attachment-upload.chromium.test.ts",
 	"tests/opfs-upload-spool.chromium.test.ts",
+	"tests/web-vault-image-artifact.chromium.test.ts",
 ];
 const selectors = new Map([
 	["binary-transfer", ["tests/web-binary-transfer.chromium.test.ts"]],
@@ -17,6 +18,7 @@ const selectors = new Map([
 		["tests/web-attachment-download-sink.chromium.test.ts"],
 	],
 	["attachment-upload", ["tests/web-attachment-upload.chromium.test.ts"]],
+	["vault-image-artifact", ["tests/web-vault-image-artifact.chromium.test.ts"]],
 ]);
 const requestedSelector = process.argv.slice(2);
 const suites =
@@ -28,7 +30,7 @@ const suites =
 
 if (suites === undefined) {
 	console.error(
-		"Usage: node ./scripts/test-chromium.mjs [binary-transfer|attachment-download-sink|attachment-upload]",
+		"Usage: node ./scripts/test-chromium.mjs [binary-transfer|attachment-download-sink|attachment-upload|vault-image-artifact]",
 	);
 	process.exit(2);
 }

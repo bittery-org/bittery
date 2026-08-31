@@ -95,6 +95,17 @@ export interface AttachmentUploadSourceExecutor {
 		controlRequestJson: string,
 	): Promise<{ controlResponseJson: string; binaryChunk?: Uint8Array }>;
 }
+export interface VaultImageArtifactExecutor {
+	invoke(
+		controlRequestJson: string,
+		binaryChunk?: Uint8Array,
+	): Promise<{ controlResponseJson: string; binaryChunk?: Uint8Array }>;
+}
+export interface VaultImageSourceExecutor {
+	invoke(
+		controlRequestJson: string,
+	): Promise<{ controlResponseJson: string; binaryChunk?: Uint8Array }>;
+}
 
 export interface AccountLeaseExecutor {
 	acquire(accountId: string): Promise<unknown | null>;
@@ -139,6 +150,9 @@ export interface RuntimeWasm {
 			downloadSinkExecutor: AttachmentDownloadSinkExecutor,
 			uploadSourceExecutor: AttachmentUploadSourceExecutor,
 			takeUploadSourceBinary: (value: unknown) => ArrayBuffer | undefined,
+			vaultImageArtifactExecutor: VaultImageArtifactExecutor,
+			vaultImageSourceExecutor: VaultImageSourceExecutor,
+			runtimeIncarnation: string,
 		): WebClientRuntimeLike;
 	};
 }
@@ -164,6 +178,10 @@ export interface RuntimeWorkerServiceDeps {
 	attachmentUploadSourceExecutorFactory?: (
 		runtimeIncarnation: string,
 	) => AttachmentUploadSourceExecutor;
+	vaultImageArtifactExecutor?: VaultImageArtifactExecutor;
+	vaultImageSourceExecutorFactory?: (
+		runtimeIncarnation: string,
+	) => VaultImageSourceExecutor;
 	prepareAttachmentDownloadSinkRuntimeIncarnation?: (
 		runtimeIncarnation: string,
 	) => Promise<void>;
@@ -416,12 +434,15 @@ export function createRuntimeWorkerService(
 					deps.attachmentDownloadSinkExecutorFactory === undefined ||
 					deps.attachmentUploadSourceExecutorFactory === undefined ||
 					deps.prepareAttachmentDownloadSinkRuntimeIncarnation === undefined ||
-					deps.commitAttachmentDownloadSinkRuntimeIncarnation === undefined
+					deps.commitAttachmentDownloadSinkRuntimeIncarnation === undefined ||
+					deps.vaultImageArtifactExecutor === undefined ||
+					deps.vaultImageSourceExecutorFactory === undefined
 				) {
 					throw attachmentPreparationFailed();
 				}
 				let downloadSinkExecutor: AttachmentDownloadSinkExecutor;
 				let uploadSourceExecutor: AttachmentUploadSourceExecutor;
+				let vaultImageSourceExecutor: VaultImageSourceExecutor;
 				try {
 					binaryTransferExecutor = deps.binaryTransferExecutorFactory();
 				} catch {
@@ -432,6 +453,8 @@ export function createRuntimeWorkerService(
 						deps.attachmentDownloadSinkExecutorFactory(runtimeIncarnation);
 					uploadSourceExecutor =
 						deps.attachmentUploadSourceExecutorFactory(runtimeIncarnation);
+					vaultImageSourceExecutor =
+						deps.vaultImageSourceExecutorFactory(runtimeIncarnation);
 				} catch {
 					await binaryTransferExecutor.close();
 					throw attachmentPreparationFailed();
@@ -445,13 +468,16 @@ export function createRuntimeWorkerService(
 					throw attachmentPreparationFailed();
 				}
 				const abortPendingScope = async (): Promise<void> => {
-					const [downloadResponse, uploadResponse] = await Promise.all([
-						downloadSinkExecutor.invoke('{"type":"retireRuntime"}'),
-						uploadSourceExecutor.invoke('{"type":"retireRuntime"}'),
-					]);
+					const [downloadResponse, uploadResponse, vaultImageResponse] =
+						await Promise.all([
+							downloadSinkExecutor.invoke('{"type":"retireRuntime"}'),
+							uploadSourceExecutor.invoke('{"type":"retireRuntime"}'),
+							vaultImageSourceExecutor.invoke('{"type":"retireRuntime"}'),
+						]);
 					if (
 						downloadResponse !== '{"type":"retired"}' ||
-						uploadResponse.controlResponseJson !== '{"type":"retired"}'
+						uploadResponse.controlResponseJson !== '{"type":"retired"}' ||
+						vaultImageResponse.controlResponseJson !== '{"type":"retired"}'
 					)
 						throw attachmentPreparationFailed();
 				};
@@ -512,6 +538,9 @@ export function createRuntimeWorkerService(
 							invoke: uploadSourceExecutor.invoke.bind(uploadSourceExecutor),
 						},
 						takeFullOwnedUint8ArrayIntrinsic,
+						deps.vaultImageArtifactExecutor,
+						vaultImageSourceExecutor,
+						runtimeIncarnation,
 					);
 				} catch {
 					await binaryTransferExecutor.close();

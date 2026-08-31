@@ -29,6 +29,23 @@ const authenticatedDownloadSinkPorts = {
 			}),
 		}),
 	}),
+	vaultImageArtifactExecutor: {
+		invoke: async (request: string) => ({
+			controlResponseJson: JSON.stringify({
+				type: JSON.parse(request).type === "wipe" ? "wiped" : "begun",
+			}),
+		}),
+	},
+	vaultImageSourceExecutorFactory: () => ({
+		invoke: async (request: string) => ({
+			controlResponseJson: JSON.stringify({
+				type:
+					JSON.parse(request).type === "retireRuntime"
+						? "retired"
+						: "invariantViolation",
+			}),
+		}),
+	}),
 	deviceTimerLivenessProbe: async () => undefined,
 };
 

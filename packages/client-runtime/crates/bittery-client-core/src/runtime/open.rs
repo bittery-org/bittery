@@ -51,6 +51,9 @@ impl Runtime {
                     "active Account Replica and generation metadata disagree",
                 ));
             }
+            // Startup cleanup is part of opening this Account. No Account work or projection may
+            // resume while a pre-accept plaintext artifact is still unowned.
+            self.sweep_vault_images_for_snapshot(&snapshot).await?;
             let access = self
                 .restored_access_state(&account.account_id, &active)
                 .await?;
@@ -236,6 +239,9 @@ impl Runtime {
         }
         self.ensure_open()?;
         let restored = self.replica.restore_known_accounts(&account_ids).await?;
+        for snapshot in &restored {
+            self.sweep_vault_images_for_snapshot(snapshot).await?;
+        }
         let _publication = self.publication.lock().expect("publication lock poisoned");
         let invalidated_deliveries: Vec<_> = lock_ids
             .iter()

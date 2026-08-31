@@ -30,6 +30,7 @@ mod device_timer;
 mod protocol;
 mod replica;
 mod runtime;
+mod vault_image;
 mod wire;
 
 #[cfg(any(test, feature = "binding-test-harness"))]
@@ -106,6 +107,14 @@ pub use runtime::{
     TeardownHostCleanupRequest, TeardownHostCleanupResponse,
 };
 pub use runtime::{ObservationHandle, Runtime};
+#[cfg(not(target_arch = "wasm32"))]
+pub use vault_image::SqliteVaultImageArtifactStore;
+pub use vault_image::{
+    MemoryVaultImageArtifactStore, PreparedVaultImage, VaultImageArtifactMetadata,
+    VaultImageArtifactPort, VaultImageArtifactScope, VaultImageChunkWrite, VaultImageIngress,
+    VaultImageIngressFacade, VaultImagePublication, VaultImageSource, VaultImageSourceError,
+    VaultImageSourceGrant, VaultImageSourcePort, VAULT_IMAGE_CHUNK_BYTES, VAULT_IMAGE_MAX_BYTES,
+};
 
 #[cfg(test)]
 mod account_email_tests {

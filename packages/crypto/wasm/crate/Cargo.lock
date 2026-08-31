@@ -184,6 +184,7 @@ name = "bittery-client-bindings"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64",
  "bittery-client-core",
  "getrandom 0.2.16",
  "getrandom 0.4.2",

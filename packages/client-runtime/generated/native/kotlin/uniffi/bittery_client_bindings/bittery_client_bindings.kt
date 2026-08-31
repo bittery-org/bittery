@@ -628,6 +628,18 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 internal interface UniffiCallbackInterfaceObservationSinkMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`projection`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceVaultImageArtifactExecutorMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`controlRequestJson`: RustBuffer.ByValue,`binaryChunkBase64`: RustBuffer.ByValue,`uniffiOutReturn`: LongByReference,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceVaultImagePortAnswerMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceVaultImagePortAnswerMethod1 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceVaultImageSourceExecutorMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`controlRequestJson`: RustBuffer.ByValue,`uniffiOutReturn`: LongByReference,uniffiCallStatus: UniffiRustCallStatus,)
+}
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "publish")
 internal open class UniffiVTableCallbackInterfaceObservationSink(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
@@ -644,6 +656,66 @@ internal open class UniffiVTableCallbackInterfaceObservationSink(
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
         `publish` = other.`publish`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "invoke")
+internal open class UniffiVTableCallbackInterfaceVaultImageArtifactExecutor(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `invoke`: UniffiCallbackInterfaceVaultImageArtifactExecutorMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `invoke`: UniffiCallbackInterfaceVaultImageArtifactExecutorMethod0? = null,
+    ): UniffiVTableCallbackInterfaceVaultImageArtifactExecutor(`uniffiFree`,`uniffiClone`,`invoke`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceVaultImageArtifactExecutor) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `invoke` = other.`invoke`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "controlResponseJson", "takeBinaryChunkBase64")
+internal open class UniffiVTableCallbackInterfaceVaultImagePortAnswer(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `controlResponseJson`: UniffiCallbackInterfaceVaultImagePortAnswerMethod0? = null,
+    @JvmField internal var `takeBinaryChunkBase64`: UniffiCallbackInterfaceVaultImagePortAnswerMethod1? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `controlResponseJson`: UniffiCallbackInterfaceVaultImagePortAnswerMethod0? = null,
+        `takeBinaryChunkBase64`: UniffiCallbackInterfaceVaultImagePortAnswerMethod1? = null,
+    ): UniffiVTableCallbackInterfaceVaultImagePortAnswer(`uniffiFree`,`uniffiClone`,`controlResponseJson`,`takeBinaryChunkBase64`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceVaultImagePortAnswer) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `controlResponseJson` = other.`controlResponseJson`
+        `takeBinaryChunkBase64` = other.`takeBinaryChunkBase64`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "invoke")
+internal open class UniffiVTableCallbackInterfaceVaultImageSourceExecutor(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `invoke`: UniffiCallbackInterfaceVaultImageSourceExecutorMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `invoke`: UniffiCallbackInterfaceVaultImageSourceExecutorMethod0? = null,
+    ): UniffiVTableCallbackInterfaceVaultImageSourceExecutor(`uniffiFree`,`uniffiClone`,`invoke`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceVaultImageSourceExecutor) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `invoke` = other.`invoke`
     }
 
 }
@@ -671,6 +743,14 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckApiChecksums(this)
     }
     external fun uniffi_bittery_client_bindings_checksum_func_normalize_account_email(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_func_begin_vault_image_acceptance(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_func_end_vault_image_acceptance(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_func_new_client_runtime_with_vault_image_ports(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_func_prepare_vault_image(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_address_city(
 ): Int
@@ -725,6 +805,8 @@ external fun uniffi_bittery_client_bindings_checksum_method_authenticatoritemdat
 external fun uniffi_bittery_client_bindings_checksum_method_authenticatoritemdata_totp_secret(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_clientruntime_observe(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_clientruntime_open(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_clientruntime_request(
 ): Int
@@ -928,6 +1010,14 @@ external fun uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_t
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_title(
 ): Int
+external fun uniffi_bittery_client_bindings_checksum_method_vaultimageartifactexecutor_invoke(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_vaultimageportanswer_control_response_json(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_vaultimageportanswer_take_binary_chunk_base64(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_vaultimagesourceexecutor_invoke(
+): Int
 external fun uniffi_bittery_client_bindings_checksum_constructor_address_new(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_constructor_attachmentname_new(
@@ -973,6 +1063,9 @@ internal object UniffiLib {
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "bittery_client_bindings"))
         uniffiCallbackInterfaceObservationSink.register(this)
+        uniffiCallbackInterfaceVaultImageArtifactExecutor.register(this)
+        uniffiCallbackInterfaceVaultImagePortAnswer.register(this)
+        uniffiCallbackInterfaceVaultImageSourceExecutor.register(this)
 
     }
     external fun uniffi_bittery_client_bindings_fn_clone_address(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1062,6 +1155,8 @@ external fun uniffi_bittery_client_bindings_fn_free_clientruntime(`handle`: Long
 external fun uniffi_bittery_client_bindings_fn_constructor_clientruntime_new(uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_bittery_client_bindings_fn_method_clientruntime_observe(`ptr`: Long,`request`: RustBuffer.ByValue,`sink`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_method_clientruntime_open(`ptr`: Long,
 ): Long
 external fun uniffi_bittery_client_bindings_fn_method_clientruntime_request(`ptr`: Long,`request`: RustBuffer.ByValue,
 ): Long
@@ -1337,8 +1432,42 @@ external fun uniffi_bittery_client_bindings_fn_method_securenoteitemdata_tags(`p
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_securenoteitemdata_title(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_clone_vaultimageartifactexecutor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_free_vaultimageartifactexecutor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimageartifactexecutor(`vtable`: UniffiVTableCallbackInterfaceVaultImageArtifactExecutor,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_method_vaultimageartifactexecutor_invoke(`ptr`: Long,`controlRequestJson`: RustBuffer.ByValue,`binaryChunkBase64`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_clone_vaultimageportanswer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_free_vaultimageportanswer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimageportanswer(`vtable`: UniffiVTableCallbackInterfaceVaultImagePortAnswer,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_method_vaultimageportanswer_control_response_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_vaultimageportanswer_take_binary_chunk_base64(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_clone_vaultimagesourceexecutor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_free_vaultimagesourceexecutor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimagesourceexecutor(`vtable`: UniffiVTableCallbackInterfaceVaultImageSourceExecutor,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_method_vaultimagesourceexecutor_invoke(`ptr`: Long,`controlRequestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Long
 external fun uniffi_bittery_client_bindings_fn_func_normalize_account_email(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_func_begin_vault_image_acceptance(`runtime`: Long,`accountId`: RustBuffer.ByValue,`operationId`: RustBuffer.ByValue,
+): Long
+external fun uniffi_bittery_client_bindings_fn_func_end_vault_image_acceptance(`runtime`: Long,`accountId`: RustBuffer.ByValue,`operationId`: RustBuffer.ByValue,
+): Long
+external fun uniffi_bittery_client_bindings_fn_func_new_client_runtime_with_vault_image_ports(`runtimeIncarnation`: RustBuffer.ByValue,`artifacts`: Long,`sources`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_func_prepare_vault_image(`runtime`: Long,`request`: RustBuffer.ByValue,
+): Long
 external fun ffi_bittery_client_bindings_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun ffi_bittery_client_bindings_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -1463,6 +1592,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_func_normalize_account_email() != 25740) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_bittery_client_bindings_checksum_func_begin_vault_image_acceptance() != 17738) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_func_end_vault_image_acceptance() != 44782) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_func_new_client_runtime_with_vault_image_ports() != 12708) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_func_prepare_vault_image() != 17206) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_address_city() != 58253) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1542,6 +1683,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_clientruntime_observe() != 8781) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_clientruntime_open() != 5200) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_clientruntime_request() != 8712) {
@@ -1845,6 +1989,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_title() != 24945) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_vaultimageartifactexecutor_invoke() != 4216) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_vaultimageportanswer_control_response_json() != 12850) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_vaultimageportanswer_take_binary_chunk_base64() != 6289) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_vaultimagesourceexecutor_invoke() != 23768) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_constructor_address_new() != 54888) {
@@ -2275,6 +2431,23 @@ private object FfiConverterSensitiveString {
         } finally {
             byteArr.fill(0)
             RustBuffer.freeSensitive(value)
+        }
+    }
+
+    fun lower(value: String): RustBuffer.ByValue {
+        val bytes = FfiConverterString.toUtf8(value)
+        var rbuf: RustBuffer.ByValue? = null
+        try {
+            val allocated = RustBuffer.alloc(bytes.limit().toULong())
+            rbuf = allocated
+            allocated.asByteBuffer()!!.put(bytes)
+            return allocated
+        } catch (error: Throwable) {
+            rbuf?.let { RustBuffer.freeSensitive(it) }
+            throw error
+        } finally {
+            bytes.clear()
+            while (bytes.hasRemaining()) bytes.put(0)
         }
     }
 }
@@ -3993,6 +4166,8 @@ public interface ClientRuntimeInterface {
 
     fun `observe`(`request`: ObservationRequest, `sink`: ObservationSink): ObservationHandle
 
+    suspend fun `open`()
+
     suspend fun `request`(`request`: RuntimeRequest): RuntimeResponse
 
     suspend fun `shutdown`()
@@ -4117,6 +4292,28 @@ open class ClientRuntime: Disposable, AutoCloseable, ClientRuntimeInterface
     )
     }
 
+
+
+    @Throws(BindingException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `open`() {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_method_clientruntime_open(
+                uniffiHandle,
+
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_bittery_client_bindings_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+
+        // Error FFI converter
+        BindingException.ErrorHandler,
+    )
+    }
 
 
     @Throws(BindingException::class)
@@ -8865,6 +9062,983 @@ public object FfiConverterTypeSecureNoteItemData: FfiConverter<SecureNoteItemDat
 }
 
 
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface VaultImageArtifactExecutor {
+
+    fun `invoke`(`controlRequestJson`: kotlin.String, `binaryChunkBase64`: SensitiveVaultImageChunk): VaultImagePortAnswer
+
+    companion object
+}
+
+open class VaultImageArtifactExecutorImpl: Disposable, AutoCloseable, VaultImageArtifactExecutor
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bittery_client_bindings_fn_free_vaultimageartifactexecutor(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_clone_vaultimageartifactexecutor(handle, status)
+        }
+    }
+
+
+    @Throws(BindingException::class)override fun `invoke`(`controlRequestJson`: kotlin.String, `binaryChunkBase64`: SensitiveVaultImageChunk): VaultImagePortAnswer {
+            return FfiConverterTypeVaultImagePortAnswer.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BindingException) { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_vaultimageartifactexecutor_invoke(
+        it,
+        FfiConverterString.lower(`controlRequestJson`),FfiConverterTypeSensitiveVaultImageChunk.lower(`binaryChunkBase64`),_status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+
+
+
+    /**
+     * @suppress
+     */
+    companion object
+
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceVaultImageArtifactExecutor {
+    internal object `invoke`: UniffiCallbackInterfaceVaultImageArtifactExecutorMethod0 {
+        override fun callback(`uniffiHandle`: Long,`controlRequestJson`: RustBuffer.ByValue,`binaryChunkBase64`: RustBuffer.ByValue,`uniffiOutReturn`: LongByReference,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeVaultImageArtifactExecutor.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`invoke`(
+                    FfiConverterString.lift(`controlRequestJson`),
+                    FfiConverterSensitiveString.lift(`binaryChunkBase64`),
+                )
+            }
+            val writeReturn = { value: VaultImagePortAnswer -> uniffiOutReturn.setValue(FfiConverterTypeVaultImagePortAnswer.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: BindingException -> FfiConverterTypeBindingError.lower(e) }
+            )
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeVaultImageArtifactExecutor.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeVaultImageArtifactExecutor.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceVaultImageArtifactExecutor.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `invoke`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimageartifactexecutor(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultImageArtifactExecutor: FfiConverter<VaultImageArtifactExecutor, Long> {
+    internal val handleMap = UniffiHandleMap<VaultImageArtifactExecutor>()
+
+    override fun lower(value: VaultImageArtifactExecutor): Long {
+        if (value is VaultImageArtifactExecutorImpl) {
+             // Rust-implemented object.  Clone the handle and return it
+            return value.uniffiCloneHandle()
+         } else {
+            // Kotlin object, generate a new vtable handle and return that.
+            return handleMap.insert(value)
+         }
+    }
+
+    override fun lift(value: Long): VaultImageArtifactExecutor {
+        if ((value and 1.toLong()) == 0.toLong()) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return VaultImageArtifactExecutorImpl(UniffiWithHandle, value)
+        } else {
+            // Kotlin-generated handle, get the object from the handle map
+            return handleMap.remove(value)
+        }
+    }
+
+    override fun read(buf: ByteBuffer): VaultImageArtifactExecutor {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: VaultImageArtifactExecutor) = 8UL
+
+    override fun write(value: VaultImageArtifactExecutor, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * A shallow native answer handle. Its sensitive payload is transferred as one canonical Base64
+ * String allocation instead of an ordinary UniFFI record/sequence buffer whose temporary
+ * serialization could not be wiped.
+ */
+public interface VaultImagePortAnswer {
+
+    fun `controlResponseJson`(): kotlin.String
+
+    /**
+     * Transfers a canonical Base64 representation to Rust. Empty means that this answer carries
+     * no binary chunk; valid Vault-image chunks are never empty. The generated native lowering
+     * writes this String directly into its RustBuffer, avoiding an ordinary record/sequence lift.
+     */
+    fun `takeBinaryChunkBase64`(): SensitiveVaultImageChunk
+
+    companion object
+}
+
+/**
+ * A shallow native answer handle. Its sensitive payload is transferred as one canonical Base64
+ * String allocation instead of an ordinary UniFFI record/sequence buffer whose temporary
+ * serialization could not be wiped.
+ */
+open class VaultImagePortAnswerImpl: Disposable, AutoCloseable, VaultImagePortAnswer
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bittery_client_bindings_fn_free_vaultimageportanswer(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_clone_vaultimageportanswer(handle, status)
+        }
+    }
+
+    override fun `controlResponseJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_vaultimageportanswer_control_response_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+
+    /**
+     * Transfers a canonical Base64 representation to Rust. Empty means that this answer carries
+     * no binary chunk; valid Vault-image chunks are never empty. The generated native lowering
+     * writes this String directly into its RustBuffer, avoiding an ordinary record/sequence lift.
+     */override fun `takeBinaryChunkBase64`(): SensitiveVaultImageChunk {
+            return FfiConverterTypeSensitiveVaultImageChunk.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_vaultimageportanswer_take_binary_chunk_base64(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+
+
+
+    /**
+     * @suppress
+     */
+    companion object
+
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceVaultImagePortAnswer {
+    internal object `controlResponseJson`: UniffiCallbackInterfaceVaultImagePortAnswerMethod0 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeVaultImagePortAnswer.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`controlResponseJson`(
+                )
+            }
+            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+    internal object `takeBinaryChunkBase64`: UniffiCallbackInterfaceVaultImagePortAnswerMethod1 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeVaultImagePortAnswer.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`takeBinaryChunkBase64`(
+                )
+            }
+            val writeReturn = { value: SensitiveVaultImageChunk -> uniffiOutReturn.setValue(FfiConverterSensitiveString.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeVaultImagePortAnswer.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeVaultImagePortAnswer.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceVaultImagePortAnswer.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `controlResponseJson`,
+        `takeBinaryChunkBase64`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimageportanswer(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultImagePortAnswer: FfiConverter<VaultImagePortAnswer, Long> {
+    internal val handleMap = UniffiHandleMap<VaultImagePortAnswer>()
+
+    override fun lower(value: VaultImagePortAnswer): Long {
+        if (value is VaultImagePortAnswerImpl) {
+             // Rust-implemented object.  Clone the handle and return it
+            return value.uniffiCloneHandle()
+         } else {
+            // Kotlin object, generate a new vtable handle and return that.
+            return handleMap.insert(value)
+         }
+    }
+
+    override fun lift(value: Long): VaultImagePortAnswer {
+        if ((value and 1.toLong()) == 0.toLong()) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return VaultImagePortAnswerImpl(UniffiWithHandle, value)
+        } else {
+            // Kotlin-generated handle, get the object from the handle map
+            return handleMap.remove(value)
+        }
+    }
+
+    override fun read(buf: ByteBuffer): VaultImagePortAnswer {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: VaultImagePortAnswer) = 8UL
+
+    override fun write(value: VaultImagePortAnswer, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface VaultImageSourceExecutor {
+
+    fun `invoke`(`controlRequestJson`: kotlin.String): VaultImagePortAnswer
+
+    companion object
+}
+
+open class VaultImageSourceExecutorImpl: Disposable, AutoCloseable, VaultImageSourceExecutor
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bittery_client_bindings_fn_free_vaultimagesourceexecutor(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_clone_vaultimagesourceexecutor(handle, status)
+        }
+    }
+
+
+    @Throws(BindingException::class)override fun `invoke`(`controlRequestJson`: kotlin.String): VaultImagePortAnswer {
+            return FfiConverterTypeVaultImagePortAnswer.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BindingException) { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_vaultimagesourceexecutor_invoke(
+        it,
+        FfiConverterString.lower(`controlRequestJson`),_status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+
+
+
+    /**
+     * @suppress
+     */
+    companion object
+
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceVaultImageSourceExecutor {
+    internal object `invoke`: UniffiCallbackInterfaceVaultImageSourceExecutorMethod0 {
+        override fun callback(`uniffiHandle`: Long,`controlRequestJson`: RustBuffer.ByValue,`uniffiOutReturn`: LongByReference,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeVaultImageSourceExecutor.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`invoke`(
+                    FfiConverterString.lift(`controlRequestJson`),
+                )
+            }
+            val writeReturn = { value: VaultImagePortAnswer -> uniffiOutReturn.setValue(FfiConverterTypeVaultImagePortAnswer.lower(value)) }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: BindingException -> FfiConverterTypeBindingError.lower(e) }
+            )
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeVaultImageSourceExecutor.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeVaultImageSourceExecutor.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceVaultImageSourceExecutor.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `invoke`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimagesourceexecutor(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultImageSourceExecutor: FfiConverter<VaultImageSourceExecutor, Long> {
+    internal val handleMap = UniffiHandleMap<VaultImageSourceExecutor>()
+
+    override fun lower(value: VaultImageSourceExecutor): Long {
+        if (value is VaultImageSourceExecutorImpl) {
+             // Rust-implemented object.  Clone the handle and return it
+            return value.uniffiCloneHandle()
+         } else {
+            // Kotlin object, generate a new vtable handle and return that.
+            return handleMap.insert(value)
+         }
+    }
+
+    override fun lift(value: Long): VaultImageSourceExecutor {
+        if ((value and 1.toLong()) == 0.toLong()) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return VaultImageSourceExecutorImpl(UniffiWithHandle, value)
+        } else {
+            // Kotlin-generated handle, get the object from the handle map
+            return handleMap.remove(value)
+        }
+    }
+
+    override fun read(buf: ByteBuffer): VaultImageSourceExecutor {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: VaultImageSourceExecutor) = 8UL
+
+    override fun write(value: VaultImageSourceExecutor, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
 
 data class AccountDisplayIdentity (
     var `email`: kotlin.String
@@ -9117,6 +10291,64 @@ public object FfiConverterTypePendingShareResultsProjection: FfiConverterRustBuf
 
 
 
+data class PreparedVaultImage (
+    var `accountId`: kotlin.String
+    ,
+    var `operationId`: kotlin.String
+    ,
+    var `vaultId`: kotlin.String
+    ,
+    var `contentType`: kotlin.String
+    ,
+    var `byteLength`: kotlin.ULong
+    ,
+    var `sha256`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePreparedVaultImage: FfiConverterRustBuffer<PreparedVaultImage> {
+    override fun read(buf: ByteBuffer): PreparedVaultImage {
+        return PreparedVaultImage(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PreparedVaultImage) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`operationId`) +
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterString.allocationSize(value.`contentType`) +
+            FfiConverterULong.allocationSize(value.`byteLength`) +
+            FfiConverterString.allocationSize(value.`sha256`)
+    )
+
+    override fun write(value: PreparedVaultImage, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`operationId`, buf)
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterString.write(value.`contentType`, buf)
+            FfiConverterULong.write(value.`byteLength`, buf)
+            FfiConverterString.write(value.`sha256`, buf)
+    }
+}
+
+
+
 data class RuntimeStatusProjection (
     var `accountId`: kotlin.String?
     ,
@@ -9160,6 +10392,69 @@ public object FfiConverterTypeRuntimeStatusProjection: FfiConverterRustBuffer<Ru
             FfiConverterULong.write(value.`revision`, buf)
             FfiConverterSequenceTypeAccountStatus.write(value.`accounts`, buf)
             FfiConverterBoolean.write(value.`closed`, buf)
+    }
+}
+
+
+
+data class VaultImagePreparationRequest (
+    var `runtimeIncarnation`: kotlin.String
+    ,
+    var `accountId`: kotlin.String
+    ,
+    var `operationId`: kotlin.String
+    ,
+    var `vaultId`: kotlin.String
+    ,
+    var `capabilityId`: kotlin.String
+    ,
+    var `contentType`: kotlin.String
+    ,
+    var `byteLength`: kotlin.ULong
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultImagePreparationRequest: FfiConverterRustBuffer<VaultImagePreparationRequest> {
+    override fun read(buf: ByteBuffer): VaultImagePreparationRequest {
+        return VaultImagePreparationRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VaultImagePreparationRequest) = (
+            FfiConverterString.allocationSize(value.`runtimeIncarnation`) +
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`operationId`) +
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterString.allocationSize(value.`capabilityId`) +
+            FfiConverterString.allocationSize(value.`contentType`) +
+            FfiConverterULong.allocationSize(value.`byteLength`)
+    )
+
+    override fun write(value: VaultImagePreparationRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`runtimeIncarnation`, buf)
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`operationId`, buf)
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterString.write(value.`capabilityId`, buf)
+            FfiConverterString.write(value.`contentType`, buf)
+            FfiConverterULong.write(value.`byteLength`, buf)
     }
 }
 
@@ -12129,6 +13424,16 @@ public object FfiConverterSequenceTypeTeardownPhase: FfiConverterRustBuffer<List
 
 
 
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ * It's also what we have an external type that references a custom type.
+ */
+public typealias SensitiveVaultImageChunk = kotlin.String
+public typealias FfiConverterTypeSensitiveVaultImageChunk = FfiConverterString
+
+
+
 
 
 
@@ -12144,5 +13449,64 @@ public object FfiConverterSequenceTypeTeardownPhase: FfiConverterRustBuffer<List
 
         FfiConverterString.lower(`input`),_status)
 }
+    )
+    }
+
+
+    @Throws(BindingException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+     suspend fun `beginVaultImageAcceptance`(`runtime`: ClientRuntime, `accountId`: kotlin.String, `operationId`: kotlin.String) {
+        return uniffiRustCallAsync(
+        UniffiLib.uniffi_bittery_client_bindings_fn_func_begin_vault_image_acceptance(FfiConverterTypeClientRuntime.lower(`runtime`),FfiConverterString.lower(`accountId`),FfiConverterString.lower(`operationId`),),
+        { future, callback, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_bittery_client_bindings_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+
+        // Error FFI converter
+        BindingException.ErrorHandler,
+    )
+    }
+
+    @Throws(BindingException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+     suspend fun `endVaultImageAcceptance`(`runtime`: ClientRuntime, `accountId`: kotlin.String, `operationId`: kotlin.String) {
+        return uniffiRustCallAsync(
+        UniffiLib.uniffi_bittery_client_bindings_fn_func_end_vault_image_acceptance(FfiConverterTypeClientRuntime.lower(`runtime`),FfiConverterString.lower(`accountId`),FfiConverterString.lower(`operationId`),),
+        { future, callback, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_bittery_client_bindings_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+
+        // Error FFI converter
+        BindingException.ErrorHandler,
+    )
+    }
+
+    @Throws(BindingException::class) fun `newClientRuntimeWithVaultImagePorts`(`runtimeIncarnation`: kotlin.String, `artifacts`: VaultImageArtifactExecutor, `sources`: VaultImageSourceExecutor): ClientRuntime {
+            return FfiConverterTypeClientRuntime.lift(
+    uniffiRustCallWithError(BindingException) { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_func_new_client_runtime_with_vault_image_ports(
+
+        FfiConverterString.lower(`runtimeIncarnation`),FfiConverterTypeVaultImageArtifactExecutor.lower(`artifacts`),FfiConverterTypeVaultImageSourceExecutor.lower(`sources`),_status)
+}
+    )
+    }
+
+
+    @Throws(BindingException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+     suspend fun `prepareVaultImage`(`runtime`: ClientRuntime, `request`: VaultImagePreparationRequest) : PreparedVaultImage {
+        return uniffiRustCallAsync(
+        UniffiLib.uniffi_bittery_client_bindings_fn_func_prepare_vault_image(FfiConverterTypeClientRuntime.lower(`runtime`),FfiConverterTypeVaultImagePreparationRequest.lower(`request`),),
+        { future, callback, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_bittery_client_bindings_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_bittery_client_bindings_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypePreparedVaultImage.lift(it) },
+        // Error FFI converter
+        BindingException.ErrorHandler,
     )
     }

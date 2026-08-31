@@ -13,8 +13,16 @@ export class RustCallStatus {
 export class WebClientRuntime {
   free(): void;
   [Symbol.dispose](): void;
+  beginVaultImageAcceptance(
+    account_id: string,
+    operation_id: string,
+  ): Promise<void>;
   cancel(request_id: string): void;
   close(): Promise<void>;
+  endVaultImageAcceptance(
+    account_id: string,
+    operation_id: string,
+  ): Promise<void>;
   constructor();
   static normalizeAccountEmail(input: string): string;
   observe_json(
@@ -23,6 +31,15 @@ export class WebClientRuntime {
     callback: Function,
   ): void;
   open(): Promise<void>;
+  prepareVaultImageForOperation(
+    runtime_incarnation: string,
+    account_id: string,
+    operation_id: string,
+    vault_id: string,
+    capability_id: string,
+    content_type: string,
+    byte_length: bigint,
+  ): Promise<string>;
   request_json(request_id: string, request_json: string): Promise<string>;
   unobserve(observation_id: string): void;
   static withConfiguredAttachmentMovePreparation(
@@ -40,6 +57,9 @@ export class WebClientRuntime {
     download_sink_executor: any,
     upload_source_executor: any,
     take_upload_source_binary: Function,
+    vault_image_artifact_executor: any,
+    vault_image_source_executor: any,
+    runtime_incarnation: string,
   ): WebClientRuntime;
   static withConfiguredExecutors(
     replica_invoke: Function,
@@ -2590,8 +2610,22 @@ export interface InitOutput {
     b: bigint,
     c: number,
   ) => void;
+  readonly webclientruntime_beginVaultImageAcceptance: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+  ) => any;
   readonly webclientruntime_cancel: (a: number, b: number, c: number) => void;
   readonly webclientruntime_close: (a: number) => any;
+  readonly webclientruntime_endVaultImageAcceptance: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+  ) => any;
   readonly webclientruntime_new: () => number;
   readonly webclientruntime_normalizeAccountEmail: (
     a: number,
@@ -2606,6 +2640,22 @@ export interface InitOutput {
     f: any,
   ) => [number, number];
   readonly webclientruntime_open: (a: number) => any;
+  readonly webclientruntime_prepareVaultImageForOperation: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+    i: number,
+    j: number,
+    k: number,
+    l: number,
+    m: number,
+    n: bigint,
+  ) => any;
   readonly webclientruntime_request_json: (
     a: number,
     b: number,
@@ -2636,6 +2686,10 @@ export interface InitOutput {
     o: any,
     p: any,
     q: any,
+    r: any,
+    s: any,
+    t: number,
+    u: number,
   ) => [number, number, number];
   readonly webclientruntime_withConfiguredExecutors: (
     a: any,

@@ -165,12 +165,15 @@ impl Runtime {
         let _execution_guard = execution_lock.lock().await;
         self.retire_attachment_download_account(account_id).await;
         self.retire_attachment_upload_account(account_id).await;
+        self.retire_vault_image_account(account_id).await;
         self.ensure_open()?;
         let Some(mut snapshot) = self.replica.snapshot(account_id) else {
             self.forget_uninstalled_account_access(account_id);
             self.complete_attachment_download_account_retirement(account_id)
                 .await;
             self.complete_attachment_upload_account_retirement(account_id)
+                .await;
+            self.complete_vault_image_account_retirement(account_id)
                 .await;
             return Ok(AccountAccessState::SignedOut);
         };
@@ -252,6 +255,8 @@ impl Runtime {
                             .await;
                         self.complete_attachment_upload_account_retirement(account_id)
                             .await;
+                        self.complete_vault_image_account_retirement(account_id)
+                            .await;
                         return Ok(AccountAccessState::SignedOut);
                     }
                 };
@@ -288,6 +293,8 @@ impl Runtime {
         self.complete_attachment_download_account_retirement(account_id)
             .await;
         self.complete_attachment_upload_account_retirement(account_id)
+            .await;
+        self.complete_vault_image_account_retirement(account_id)
             .await;
         pending_retirement.finish();
         drop(foreground_retirement);

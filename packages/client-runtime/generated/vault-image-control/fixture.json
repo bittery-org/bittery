@@ -1,0 +1,99 @@
+{
+  "sourceSteps": [
+    {
+      "request": {
+        "accountId": "account-1",
+        "byteLength": "3",
+        "capabilityId": "capability-1",
+        "contentType": "image/png",
+        "operationId": "operation-1",
+        "type": "claim",
+        "vaultId": "vault-1"
+      },
+      "response": {
+        "type": "claimed"
+      }
+    },
+    {
+      "request": {
+        "capabilityId": "capability-1",
+        "maxBytes": 262144,
+        "type": "read"
+      },
+      "response": {
+        "type": "chunk"
+      }
+    },
+    {
+      "request": {
+        "capabilityId": "capability-1",
+        "type": "close"
+      },
+      "response": {
+        "type": "closed"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "request": {
+        "scope": {
+          "accountId": "account-1",
+          "operationId": "operation-1"
+        },
+        "type": "begin"
+      },
+      "response": {
+        "type": "begun"
+      }
+    },
+    {
+      "request": {
+        "chunkIndex": 0,
+        "scope": {
+          "accountId": "account-1",
+          "operationId": "operation-1"
+        },
+        "type": "writeChunk"
+      },
+      "response": {
+        "result": "stored",
+        "type": "chunkWritten"
+      }
+    },
+    {
+      "request": {
+        "metadata": {
+          "accountId": "account-1",
+          "byteLength": "3",
+          "contentType": "image/png",
+          "operationId": "operation-1",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "vaultId": "vault-1"
+        },
+        "type": "publish"
+      },
+      "response": {
+        "result": "published",
+        "type": "published"
+      }
+    },
+    {
+      "request": {
+        "chunkIndex": 0,
+        "metadata": {
+          "accountId": "account-1",
+          "byteLength": "3",
+          "contentType": "image/png",
+          "operationId": "operation-1",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "vaultId": "vault-1"
+        },
+        "type": "readChunk"
+      },
+      "response": {
+        "type": "chunk"
+      }
+    }
+  ]
+}

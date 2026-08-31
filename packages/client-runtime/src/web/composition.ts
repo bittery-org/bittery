@@ -19,6 +19,10 @@ import {
 	isAttachmentUploadSourceHostRequest,
 	WebAttachmentUploadSourceRegistry,
 } from "../web-attachment-upload-source";
+import {
+	isVaultImageSourceHostRequest,
+	type VaultImageSourceGrant,
+} from "../web-vault-image-source";
 
 export type {
 	AtomicAttachmentDownloadSink,
@@ -38,6 +42,7 @@ import {
 } from "../worker/owner";
 import { createWorkerRuntime, type WorkerRuntime } from "../worker-runtime";
 import { createAttachmentRuntimeIncarnationTransitions } from "./attachment-runtime-incarnation";
+import { createVaultImageSourceRegistryOwner } from "./vault-image-runtime-incarnation";
 
 export {
 	decodeRuntimeClientIdentity,
@@ -68,8 +73,14 @@ export interface WebClientRuntime {
 	cryptoChannel: WorkerRpcChannel;
 	attachmentDownloads: WebAttachmentDownloadSinkRegistry;
 	attachmentUploads: WebAttachmentUploadSourceRegistry;
+	/** Narrow host-neutral grants; lifecycle and registry authority remain private. */
+	vaultImageSources: VaultImageSourceGrants;
 	workerOwner: SharedWorkerOwner;
 	close(): Promise<void>;
+}
+
+export interface VaultImageSourceGrants {
+	grant(source: VaultImageSourceGrant): string;
 }
 
 export function createWebClientRuntime(
@@ -78,6 +89,8 @@ export function createWebClientRuntime(
 	const platformStorage = new WebPlatformStorageHost();
 	const attachmentDownloads = new WebAttachmentDownloadSinkRegistry();
 	const attachmentUploads = new WebAttachmentUploadSourceRegistry();
+	const vaultImages = createVaultImageSourceRegistryOwner();
+	const vaultImageSources: VaultImageSourceGrants = vaultImages.grants;
 	const fallbackHostRequest =
 		deps.handleHostRequest ?? platformStorage.invoke.bind(platformStorage);
 	const transitionAttachmentRuntimeIncarnation =
@@ -89,10 +102,25 @@ export function createWebClientRuntime(
 		createWorker: deps.createWorker,
 		handleHostRequest: (payload, signal) => {
 			if (isAttachmentDownloadSinkRuntimeScopeRequest(payload)) {
-				return transitionAttachmentRuntimeIncarnation(
-					payload.phase,
-					payload.runtimeIncarnation,
-				);
+				return Promise.all([
+					transitionAttachmentRuntimeIncarnation(
+						payload.phase,
+						payload.runtimeIncarnation,
+					),
+					payload.phase === "prepare"
+						? vaultImages.prepare(payload.runtimeIncarnation)
+						: Promise.resolve(),
+				]).then(() => undefined);
+			}
+			if (isVaultImageSourceHostRequest(payload)) {
+				if (signal.aborted)
+					return Promise.reject(new Error("Vault-image request cancelled"));
+				return vaultImages
+					.invoke(payload.controlRequestJson, payload.runtimeIncarnation)
+					.then(({ binaryChunk, ...control }) => ({
+						controlResponseJson: JSON.stringify(control),
+						...(binaryChunk === undefined ? {} : { binaryChunk }),
+					}));
 			}
 			if (isAttachmentUploadSourceHostRequest(payload)) {
 				if (signal.aborted)
@@ -120,6 +148,13 @@ export function createWebClientRuntime(
 					payload.runtimeIncarnation,
 				);
 			}
+			if (isVaultImageSourceHostRequest(payload) && !signal.aborted)
+				return vaultImages
+					.invoke(payload.controlRequestJson, payload.runtimeIncarnation)
+					.then(({ binaryChunk, ...control }) => ({
+						controlResponseJson: JSON.stringify(control),
+						...(binaryChunk === undefined ? {} : { binaryChunk }),
+					}));
 			if (isAttachmentUploadSourceHostRequest(payload) && !signal.aborted)
 				return attachmentUploads.invoke(
 					payload.controlRequestJson,
@@ -140,26 +175,31 @@ export function createWebClientRuntime(
 			Promise.all([
 				attachmentDownloads.drainClose(),
 				attachmentUploads.drainClose(),
+				vaultImages.drainClose(),
 			]).then(() => undefined),
 		preserveHostRequestDuringClose: (payload) =>
 			isAttachmentDownloadSinkHostRequest(payload) ||
 			isAttachmentDownloadSinkRuntimeScopeRequest(payload) ||
-			isAttachmentUploadSourceHostRequest(payload),
+			isAttachmentUploadSourceHostRequest(payload) ||
+			isVaultImageSourceHostRequest(payload),
 	});
 	let closeTask: Promise<void> | undefined;
 	const close = (): Promise<void> => {
 		attachmentDownloads.beginClose();
 		attachmentUploads.beginClose();
+		vaultImages.beginClose();
 		if (closeTask !== undefined) return closeTask;
 		const closing = workerOwner.close().then(
 			() =>
 				Promise.all([
 					attachmentDownloads.drainClose(),
 					attachmentUploads.drainClose(),
+					vaultImages.drainClose(),
 				]).then(() => undefined),
 			async (error) => {
 				await attachmentDownloads.drainClose();
 				await attachmentUploads.drainClose();
+				await vaultImages.drainClose();
 				throw error;
 			},
 		);
@@ -174,6 +214,7 @@ export function createWebClientRuntime(
 		workerOwner,
 		attachmentDownloads,
 		attachmentUploads,
+		vaultImageSources,
 		cryptoChannel: workerOwner.channel("crypto"),
 		runtime,
 		normalizeAccountEmail: runtime.normalizeAccountEmail,

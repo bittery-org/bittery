@@ -36,6 +36,34 @@ const unavailableUploadSource = () => ({
 		return { controlResponseJson: JSON.stringify(answer) };
 	},
 });
+const unavailableVaultImageArtifact = () => ({
+	invoke: async (controlRequestJson) => {
+		const type = JSON.parse(controlRequestJson).type;
+		return {
+			controlResponseJson: JSON.stringify({
+				type:
+					type === "wipe"
+						? "wiped"
+						: type === "deleteAccount"
+							? "accountDeleted"
+							: "invariantViolation",
+			}),
+		};
+	},
+});
+const unavailableVaultImageSource = () => ({
+	invoke: async (controlRequestJson) => ({
+		controlResponseJson: JSON.stringify({
+			type: [
+				"retireAccount",
+				"completeAccountRetirement",
+				"retireRuntime",
+			].includes(JSON.parse(controlRequestJson).type)
+				? "retired"
+				: "invariantViolation",
+		}),
+	}),
+});
 
 const timerProbeRuntime = (
 	bindings,
@@ -59,6 +87,9 @@ const timerProbeRuntime = (
 		downloadSink,
 		unavailableUploadSource(),
 		takeFullOwnedUint8ArrayIntrinsic,
+		unavailableVaultImageArtifact(),
+		unavailableVaultImageSource(),
+		"runtime-vault-image",
 	);
 
 test("authenticated WASM construction leaves callback-liveness probing to the trusted Worker host", async () => {
@@ -80,6 +111,111 @@ test("authenticated WASM construction leaves callback-liveness probing to the tr
 	} finally {
 		globalThis.setTimeout = originalSetTimeout;
 	}
+});
+
+test("the production WASM bridge claims, copies, digests, publishes, and retires a Vault image", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
+	await bindings.default({ module_or_path: wasm });
+	let sourceRead = false;
+	let published;
+	const artifacts = {
+		invoke: async (requestJson, binaryChunk) => {
+			const request = JSON.parse(requestJson);
+			if (request.type === "begin")
+				return { controlResponseJson: '{"type":"begun"}' };
+			if (request.type === "writeChunk") {
+				assert.deepEqual(Array.from(binaryChunk), [97, 98, 99]);
+				binaryChunk.fill(0);
+				return {
+					controlResponseJson: '{"type":"chunkWritten","result":"stored"}',
+				};
+			}
+			if (request.type === "publish") {
+				published = request.metadata;
+				return {
+					controlResponseJson: '{"type":"published","result":"published"}',
+				};
+			}
+			if (request.type === "wipe")
+				return { controlResponseJson: '{"type":"wiped"}' };
+			throw new Error(`unexpected Vault image artifact ${request.type}`);
+		},
+	};
+	const sources = {
+		invoke: async (requestJson) => {
+			const request = JSON.parse(requestJson);
+			if (request.type === "claim")
+				return { controlResponseJson: '{"type":"claimed"}' };
+			if (request.type === "read" && !sourceRead) {
+				sourceRead = true;
+				return {
+					controlResponseJson: '{"type":"chunk"}',
+					binaryChunk: new Uint8Array([97, 98, 99]),
+				};
+			}
+			if (request.type === "read")
+				return { controlResponseJson: '{"type":"end"}' };
+			if (request.type === "close")
+				return { controlResponseJson: '{"type":"closed"}' };
+			if (request.type === "retireRuntime")
+				return { controlResponseJson: '{"type":"retired"}' };
+			throw new Error(`unexpected Vault image source ${request.type}`);
+		},
+	};
+	const runtime =
+		bindings.WebClientRuntime.withConfiguredAttachmentMovePreparation(
+			async () => {
+				throw new Error(
+					"Replica must stay cold while opening an empty catalog",
+				);
+			},
+			async (requestJson) =>
+				JSON.parse(requestJson).type === "get"
+					? '{"type":"value","value":null}'
+					: '{"type":"done"}',
+			async () => '{"type":"networkFailure"}',
+			() => undefined,
+			{
+				invoke: async () => ({ controlResponseJson: '{"type":"deviceWiped"}' }),
+			},
+			{
+				invoke: async () => ({ controlResponseJson: '{"type":"deviceWiped"}' }),
+				close: () => undefined,
+			},
+			{ acquire: async () => null },
+			"vault-image-bridge",
+			"web",
+			"1.0.0",
+			() => undefined,
+			unavailableDownloadSink(),
+			unavailableUploadSource(),
+			takeFullOwnedUint8ArrayIntrinsic,
+			artifacts,
+			sources,
+			"runtime-vault-image",
+		);
+	await runtime.open();
+	const metadata = JSON.parse(
+		await runtime.prepareVaultImageForOperation(
+			"runtime-vault-image",
+			"account-a",
+			"operation-a",
+			"vault-a",
+			"capability-a",
+			"image/png",
+			3n,
+		),
+	);
+	assert.equal(
+		metadata.sha256,
+		"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+	);
+	assert.deepEqual(published, metadata);
+	await runtime.close();
+	runtime.free();
 });
 
 test("a missing or throwing WASM timer parks persistent sink cleanup after one attempt", async () => {
@@ -769,6 +905,9 @@ test("the feature-only WASM harness exercises the closed lease and transfer brid
 			unavailableDownloadSink(),
 			unavailableUploadSource(),
 			takeFullOwnedUint8ArrayIntrinsic,
+			unavailableVaultImageArtifact(),
+			unavailableVaultImageSource(),
+			"runtime-vault-image",
 		);
 	assert.equal(harness.lifecycle_drop_probe(), 0);
 	configured.free();
@@ -1040,6 +1179,9 @@ test("Web teardown destroys the ciphertext spool and converges", async () => {
 				unavailableDownloadSink(),
 				unavailableUploadSource(),
 				takeFullOwnedUint8ArrayIntrinsic,
+				unavailableVaultImageArtifact(),
+				unavailableVaultImageSource(),
+				"runtime-vault-image",
 			);
 		return {
 			runtime,
@@ -1241,6 +1383,9 @@ const teardownRuntime = (bindings, spoolInvoke) => {
 			unavailableDownloadSink(),
 			unavailableUploadSource(),
 			takeFullOwnedUint8ArrayIntrinsic,
+			unavailableVaultImageArtifact(),
+			unavailableVaultImageSource(),
+			"runtime-vault-image",
 		);
 	return { runtime, spoolRequests };
 };

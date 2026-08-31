@@ -91,10 +91,10 @@ use crate::{
     },
     AccountAccessState, AccountDisplayIdentity, AccountId, AccountStatus, AccountWaitingReason,
     ItemProjection, ItemProjectionStatus, ItemsProjection, ObservationRequest, ObservationSink,
-    PendingShareResult, PendingShareResultsProjection, RequestCancellation, RuntimeError,
-    RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
-    TeardownPhase, TeardownScope, TeardownStatus, VaultProjection, VaultProjectionRole,
-    VaultProjectionType,
+    PendingShareResult, PendingShareResultsProjection, PreparedVaultImage, RequestCancellation,
+    RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
+    RuntimeStatusProjection, TeardownPhase, TeardownScope, TeardownStatus, VaultImageIngressFacade,
+    VaultImageSourceGrant, VaultProjection, VaultProjectionRole, VaultProjectionType,
 };
 use std::{
     cell::RefCell,
@@ -527,6 +527,7 @@ pub struct Runtime {
     foreground_attachments: foreground_attachment_lifecycle::ForegroundAttachmentRegistry,
     attachment_download: Mutex<Option<AttachmentDownloadFacade>>,
     attachment_upload: Mutex<Option<AttachmentUploadFacade>>,
+    vault_image_ingress: Mutex<Option<VaultImageIngressFacade>>,
     clock: Arc<dyn Clock>,
     device_timer: Arc<dyn DeviceTimer>,
     /// Wakes the dispatcher when something that can change eligibility happened: work was
@@ -921,6 +922,7 @@ impl Runtime {
                 foreground_attachment_lifecycle::ForegroundAttachmentRegistry::default(),
             attachment_download: Mutex::new(None),
             attachment_upload: Mutex::new(None),
+            vault_image_ingress: Mutex::new(None),
             clock,
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
@@ -995,6 +997,142 @@ impl Runtime {
             .attachment_upload
             .lock()
             .expect("Attachment Upload facade lock poisoned") = Some(facade);
+    }
+
+    #[doc(hidden)]
+    pub fn install_vault_image_ingress(&self, facade: VaultImageIngressFacade) {
+        *self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned") = Some(facade);
+    }
+
+    #[doc(hidden)]
+    pub async fn prepare_vault_image(
+        &self,
+        grant: VaultImageSourceGrant,
+        cancellation: RequestCancellation,
+    ) -> Result<PreparedVaultImage, RuntimeError> {
+        self.ensure_open()?;
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "Vault image ingress is unavailable",
+                )
+            })?;
+        facade.prepare(grant, &cancellation).await
+    }
+
+    #[doc(hidden)]
+    pub async fn begin_vault_image_acceptance(
+        &self,
+        account_id: &AccountId,
+        operation_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_open()?;
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "Vault image ingress is unavailable",
+                )
+            })?;
+        facade.begin_acceptance(account_id, operation_id).await
+    }
+
+    #[doc(hidden)]
+    pub async fn end_vault_image_acceptance(
+        &self,
+        account_id: &AccountId,
+        operation_id: &str,
+    ) -> Result<(), RuntimeError> {
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "Vault image ingress is unavailable",
+                )
+            })?;
+        facade.end_acceptance(account_id, operation_id).await
+    }
+
+    async fn sweep_vault_images_for_snapshot(
+        &self,
+        snapshot: &crate::replica::ReplicaSnapshot,
+    ) -> Result<(), RuntimeError> {
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone();
+        let Some(facade) = facade else { return Ok(()) };
+        let referenced_operations = snapshot
+            .operations
+            .iter()
+            .map(|operation| operation.operation_id.clone())
+            .collect();
+        facade
+            .sweep_account(&snapshot.account_id, &referenced_operations)
+            .await
+    }
+
+    async fn retire_vault_image_account(&self, account_id: &AccountId) {
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone();
+        let Some(facade) = facade else { return };
+        let mut failures = 0_u32;
+        while facade.retire_account(account_id).await.is_err() {
+            self.device_timer.sleep_ms(10_u64 << failures.min(7)).await;
+            failures = failures.saturating_add(1);
+        }
+    }
+
+    async fn complete_vault_image_account_retirement(&self, account_id: &AccountId) {
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone();
+        let Some(facade) = facade else { return };
+        let mut failures = 0_u32;
+        while facade
+            .complete_account_retirement(account_id)
+            .await
+            .is_err()
+        {
+            self.device_timer.sleep_ms(10_u64 << failures.min(7)).await;
+            failures = failures.saturating_add(1);
+        }
+    }
+
+    async fn retire_all_vault_images(&self) {
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone();
+        let Some(facade) = facade else { return };
+        let mut failures = 0_u32;
+        while facade.retire_runtime().await.is_err() {
+            self.device_timer.sleep_ms(10_u64 << failures.min(7)).await;
+            failures = failures.saturating_add(1);
+        }
     }
 
     /// Runs the one core-owned preparation scheduler until the Runtime closes.
@@ -1827,6 +1965,7 @@ impl Runtime {
             self.foreground_attachments.fence_all_and_drain().await;
             self.retire_all_attachment_downloads().await;
             self.retire_all_attachment_uploads().await;
+            self.retire_all_vault_images().await;
             let _catalog_guard = self.catalog_transition.lock().await;
             let mut execution_locks: Vec<_> = self
                 .account_execution_locks

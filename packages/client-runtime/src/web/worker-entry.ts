@@ -9,11 +9,13 @@
 
 import { IndexedDbAttachmentArtifactExecutor } from "../indexeddb-attachment-artifact-executor";
 import { IndexedDbReplicaExecutor } from "../indexeddb-executor";
+import { IndexedDbVaultImageArtifactExecutor } from "../indexeddb-vault-image-artifact-executor";
 import { WebAccountLeaseExecutor } from "../web-account-lease-executor";
 import { WebAttachmentDownloadSinkExecutor } from "../web-attachment-download-sink";
 import { WebAttachmentUploadSourceExecutor } from "../web-attachment-upload-source";
 import { WebBinaryTransferExecutor } from "../web-binary-transfer-executor";
 import { WebHttpTransportExecutor } from "../web-http-transport-executor";
+import { WebVaultImageSourceExecutor } from "../web-vault-image-source";
 import { createWorkerHostRpc } from "../worker/host-rpc";
 import {
 	serveWorkerChannels,
@@ -48,6 +50,7 @@ export function serveWebRuntimeWorker(
 ): void {
 	const hostRpc = createWorkerHostRpc(scope);
 	const attachmentArtifactExecutor = new IndexedDbAttachmentArtifactExecutor();
+	const vaultImageArtifacts = new IndexedDbVaultImageArtifactExecutor();
 	const accountLeaseExecutor = new WebAccountLeaseExecutor();
 	serveWorkerChannels(scope, {
 		...(deps.crypto === undefined ? {} : { crypto: deps.crypto }),
@@ -58,6 +61,19 @@ export function serveWebRuntimeWorker(
 			},
 			httpExecutor: new WebHttpTransportExecutor(),
 			attachmentArtifactExecutor,
+			vaultImageArtifactExecutor: {
+				async invoke(controlRequestJson, binaryChunk) {
+					const response = (await vaultImageArtifacts.invoke(
+						JSON.parse(controlRequestJson),
+						binaryChunk,
+					)) as { type: string; bytes?: Uint8Array };
+					const { bytes, ...control } = response;
+					return {
+						controlResponseJson: JSON.stringify(control),
+						...(bytes === undefined ? {} : { binaryChunk: bytes }),
+					};
+				},
+			},
 			binaryTransferExecutorFactory: () => new WebBinaryTransferExecutor(),
 			prepareAttachmentDownloadSinkRuntimeIncarnation: async (
 				runtimeIncarnation,
@@ -84,6 +100,11 @@ export function serveWebRuntimeWorker(
 				),
 			attachmentUploadSourceExecutorFactory: (runtimeIncarnation) =>
 				new WebAttachmentUploadSourceExecutor(
+					(payload) => hostRpc.request(payload),
+					runtimeIncarnation,
+				),
+			vaultImageSourceExecutorFactory: (runtimeIncarnation) =>
+				new WebVaultImageSourceExecutor(
 					(payload) => hostRpc.request(payload),
 					runtimeIncarnation,
 				),

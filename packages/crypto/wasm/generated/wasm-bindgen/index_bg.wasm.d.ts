@@ -1965,8 +1965,22 @@ export const uniffi_bittery_client_bindings_fn_method_securenoteitemdata_title: 
   b: bigint,
   c: number,
 ) => void;
+export const webclientruntime_beginVaultImageAcceptance: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+) => any;
 export const webclientruntime_cancel: (a: number, b: number, c: number) => void;
 export const webclientruntime_close: (a: number) => any;
+export const webclientruntime_endVaultImageAcceptance: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+) => any;
 export const webclientruntime_new: () => number;
 export const webclientruntime_normalizeAccountEmail: (
   a: number,
@@ -1981,6 +1995,22 @@ export const webclientruntime_observe_json: (
   f: any,
 ) => [number, number];
 export const webclientruntime_open: (a: number) => any;
+export const webclientruntime_prepareVaultImageForOperation: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number,
+  f: number,
+  g: number,
+  h: number,
+  i: number,
+  j: number,
+  k: number,
+  l: number,
+  m: number,
+  n: bigint,
+) => any;
 export const webclientruntime_request_json: (
   a: number,
   b: number,
@@ -2011,6 +2041,10 @@ export const webclientruntime_withConfiguredAttachmentMovePreparation: (
   o: any,
   p: any,
   q: any,
+  r: any,
+  s: any,
+  t: number,
+  u: number,
 ) => [number, number, number];
 export const webclientruntime_withConfiguredExecutors: (
   a: any,

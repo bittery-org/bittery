@@ -3,6 +3,7 @@ use crate::{
     observation_buffer::BufferedSink,
     observation_slots::ObservationSlots,
     web_attachment_move_bridge::{configured_runtime, WebAttachmentMoveResources},
+    web_vault_image_bridge::JsVaultImagePorts,
 };
 use bittery_client_core as core;
 use std::{
@@ -275,6 +276,9 @@ impl WebClientRuntime {
         download_sink_executor: JsValue,
         upload_source_executor: JsValue,
         take_upload_source_binary: js_sys::Function,
+        vault_image_artifact_executor: JsValue,
+        vault_image_source_executor: JsValue,
+        runtime_incarnation: String,
     ) -> Result<Self, JsValue> {
         let platform = client_platform(&platform)?;
         let config = core::AuthClientConfig::new(client_id, platform, version)
@@ -297,8 +301,15 @@ impl WebClientRuntime {
             lifecycle_error,
             download_sink_executor,
             upload_source_executor,
+            take_upload_source_binary.clone(),
+        )?;
+        let vault_images = JsVaultImagePorts::new(
+            runtime_incarnation,
+            vault_image_artifact_executor,
+            vault_image_source_executor,
             take_upload_source_binary,
         )?;
+        inner.install_vault_image_ingress(vault_images.facade);
         Ok(Self::from_inner_with_attachment_move_resources(
             inner, resources,
         ))
@@ -338,6 +349,76 @@ impl WebClientRuntime {
     pub async fn open(&self) -> Result<(), JsValue> {
         self.inner
             .open()
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = prepareVaultImageForOperation)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the shallow binding carries the exact pre-accept source claim"
+    )]
+    pub async fn prepare_vault_image_for_operation(
+        &self,
+        runtime_incarnation: String,
+        account_id: String,
+        operation_id: String,
+        vault_id: String,
+        capability_id: String,
+        content_type: String,
+        byte_length: u64,
+    ) -> Result<String, JsValue> {
+        let prepared = self
+            .inner
+            .prepare_vault_image(
+                core::VaultImageSourceGrant {
+                    runtime_incarnation,
+                    account_id: account_id.into(),
+                    operation_id,
+                    vault_id,
+                    capability_id,
+                    content_type,
+                    byte_length,
+                },
+                core::RequestCancellation::new(),
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let metadata = prepared.metadata();
+        serde_json::to_string(&serde_json::json!({
+            "accountId": metadata.account_id().as_str(),
+            "operationId": metadata.operation_id(),
+            "vaultId": metadata.vault_id(),
+            "contentType": metadata.content_type(),
+            "byteLength": metadata.byte_length().to_string(),
+            "sha256": metadata.sha256(),
+        }))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = beginVaultImageAcceptance)]
+    pub async fn begin_vault_image_acceptance(
+        &self,
+        account_id: String,
+        operation_id: String,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .begin_vault_image_acceptance(&account_id.into(), &operation_id)
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = endVaultImageAcceptance)]
+    pub async fn end_vault_image_acceptance(
+        &self,
+        account_id: String,
+        operation_id: String,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .end_vault_image_acceptance(&account_id.into(), &operation_id)
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))
     }

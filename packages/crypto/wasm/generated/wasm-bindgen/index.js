@@ -75,6 +75,33 @@ export class WebClientRuntime {
     wasm.__wbg_webclientruntime_free(ptr, 0);
   }
   /**
+   * @param {string} account_id
+   * @param {string} operation_id
+   * @returns {Promise<void>}
+   */
+  beginVaultImageAcceptance(account_id, operation_id) {
+    const ptr0 = passStringToWasm0(
+      account_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(
+      operation_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.webclientruntime_beginVaultImageAcceptance(
+      this.__wbg_ptr,
+      ptr0,
+      len0,
+      ptr1,
+      len1,
+    );
+    return ret;
+  }
+  /**
    * @param {string} request_id
    */
   cancel(request_id) {
@@ -91,6 +118,33 @@ export class WebClientRuntime {
    */
   close() {
     const ret = wasm.webclientruntime_close(this.__wbg_ptr);
+    return ret;
+  }
+  /**
+   * @param {string} account_id
+   * @param {string} operation_id
+   * @returns {Promise<void>}
+   */
+  endVaultImageAcceptance(account_id, operation_id) {
+    const ptr0 = passStringToWasm0(
+      account_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(
+      operation_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.webclientruntime_endVaultImageAcceptance(
+      this.__wbg_ptr,
+      ptr0,
+      len0,
+      ptr1,
+      len1,
+    );
     return ret;
   }
   constructor() {
@@ -166,6 +220,79 @@ export class WebClientRuntime {
     return ret;
   }
   /**
+   * @param {string} runtime_incarnation
+   * @param {string} account_id
+   * @param {string} operation_id
+   * @param {string} vault_id
+   * @param {string} capability_id
+   * @param {string} content_type
+   * @param {bigint} byte_length
+   * @returns {Promise<string>}
+   */
+  prepareVaultImageForOperation(
+    runtime_incarnation,
+    account_id,
+    operation_id,
+    vault_id,
+    capability_id,
+    content_type,
+    byte_length,
+  ) {
+    const ptr0 = passStringToWasm0(
+      runtime_incarnation,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(
+      account_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(
+      operation_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passStringToWasm0(
+      vault_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passStringToWasm0(
+      capability_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len4 = WASM_VECTOR_LEN;
+    const ptr5 = passStringToWasm0(
+      content_type,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len5 = WASM_VECTOR_LEN;
+    const ret = wasm.webclientruntime_prepareVaultImageForOperation(
+      this.__wbg_ptr,
+      ptr0,
+      len0,
+      ptr1,
+      len1,
+      ptr2,
+      len2,
+      ptr3,
+      len3,
+      ptr4,
+      len4,
+      ptr5,
+      len5,
+      byte_length,
+    );
+    return ret;
+  }
+  /**
    * @param {string} request_id
    * @param {string} request_json
    * @returns {Promise<string>}
@@ -219,6 +346,9 @@ export class WebClientRuntime {
    * @param {any} download_sink_executor
    * @param {any} upload_source_executor
    * @param {Function} take_upload_source_binary
+   * @param {any} vault_image_artifact_executor
+   * @param {any} vault_image_source_executor
+   * @param {string} runtime_incarnation
    * @returns {WebClientRuntime}
    */
   static withConfiguredAttachmentMovePreparation(
@@ -236,6 +366,9 @@ export class WebClientRuntime {
     download_sink_executor,
     upload_source_executor,
     take_upload_source_binary,
+    vault_image_artifact_executor,
+    vault_image_source_executor,
+    runtime_incarnation,
   ) {
     const ptr0 = passStringToWasm0(
       client_id,
@@ -255,6 +388,12 @@ export class WebClientRuntime {
       wasm.__wbindgen_realloc,
     );
     const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passStringToWasm0(
+      runtime_incarnation,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len3 = WASM_VECTOR_LEN;
     const ret = wasm.webclientruntime_withConfiguredAttachmentMovePreparation(
       replica_invoke,
       platform_storage_invoke,
@@ -273,6 +412,10 @@ export class WebClientRuntime {
       download_sink_executor,
       upload_source_executor,
       take_upload_source_binary,
+      vault_image_artifact_executor,
+      vault_image_source_executor,
+      ptr3,
+      len3,
     );
     if (ret[2]) {
       throw takeFromExternrefTable0(ret[1]);
@@ -2474,6 +2617,10 @@ function __wbg_get_imports() {
         globalThis.crypto.getRandomValues(getArrayU8FromWasm0(arg0, arg1));
       }, arguments);
     },
+    __wbg_get_507a50627bffa49b: function (arg0, arg1) {
+      const ret = arg0[arg1 >>> 0];
+      return ret;
+    },
     __wbg_get_78f252d074a84d0b: function () {
       return handleError(function (arg0, arg1) {
         const ret = Reflect.get(arg0, arg1);
@@ -2494,6 +2641,16 @@ function __wbg_get_imports() {
       const ret = result;
       return ret;
     },
+    __wbg_instanceof_Object_33f20e6f12439f3e: function (arg0) {
+      let result;
+      try {
+        result = arg0 instanceof Object;
+      } catch (_) {
+        result = false;
+      }
+      const ret = result;
+      return ret;
+    },
     __wbg_instanceof_Promise_4cb210c0b8f8c959: function (arg0) {
       let result;
       try {
@@ -2502,6 +2659,10 @@ function __wbg_get_imports() {
         result = false;
       }
       const ret = result;
+      return ret;
+    },
+    __wbg_keys_58421f8f96795607: function (arg0) {
+      const ret = Object.keys(arg0);
       return ret;
     },
     __wbg_length_1f0964f4a5e2c6d8: function (arg0) {

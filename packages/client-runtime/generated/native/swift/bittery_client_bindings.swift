@@ -858,6 +858,16 @@ fileprivate struct FfiConverterSensitiveString {
         let bytes = UnsafeBufferPointer<UInt8>(start: value.data!, count: Int(value.len))
         return String(decoding: bytes, as: UTF8.self)
     }
+
+    public static func lower(_ value: String) -> RustBuffer {
+        var bytes = Array(value.utf8)
+        defer {
+            bytes.withUnsafeMutableBytes { raw in
+                raw.initializeMemory(as: UInt8.self, repeating: 0)
+            }
+        }
+        return RustBuffer(bytes: bytes)
+    }
 }
 
 
@@ -1416,6 +1426,8 @@ public protocol ClientRuntimeProtocol: AnyObject, Sendable {
 
     func observe(request: ObservationRequest, sink: ObservationSink) throws  -> ObservationHandle
 
+    func `open`() async throws
+
     func request(request: RuntimeRequest) async throws  -> RuntimeResponse
 
     func shutdown() async
@@ -1489,6 +1501,23 @@ open func observe(request: ObservationRequest, sink: ObservationSink)throws  -> 
         FfiConverterTypeObservationSink_lower(sink),$0
     )
 })
+}
+
+open func `open`()async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_bittery_client_bindings_fn_method_clientruntime_open(
+                    self.uniffiCloneHandle()
+
+                )
+            },
+            pollFunc: ffi_bittery_client_bindings_rust_future_poll_void,
+            completeFunc: ffi_bittery_client_bindings_rust_future_complete_void,
+            freeFunc: ffi_bittery_client_bindings_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeBindingError_lift
+        )
 }
 
 open func request(request: RuntimeRequest)async throws  -> RuntimeResponse  {
@@ -4168,6 +4197,654 @@ public func FfiConverterTypeSecureNoteItemData_lower(_ value: SecureNoteItemData
 
 
 
+
+
+public protocol VaultImageArtifactExecutor: AnyObject, Sendable {
+
+    func invoke(controlRequestJson: String, binaryChunkBase64: SensitiveVaultImageChunk) throws  -> VaultImagePortAnswer
+
+}
+open class VaultImageArtifactExecutorImpl: VaultImageArtifactExecutor, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_vaultimageartifactexecutor(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_vaultimageartifactexecutor(handle, $0) }
+    }
+
+
+
+
+open func invoke(controlRequestJson: String, binaryChunkBase64: SensitiveVaultImageChunk)throws  -> VaultImagePortAnswer  {
+    return try  FfiConverterTypeVaultImagePortAnswer_lift(try rustCallWithError(FfiConverterTypeBindingError_lift) {
+    uniffi_bittery_client_bindings_fn_method_vaultimageartifactexecutor_invoke(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(controlRequestJson),
+        FfiConverterTypeSensitiveVaultImageChunk_lower(binaryChunkBase64),$0
+    )
+})
+}
+
+
+
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceVaultImageArtifactExecutor {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceVaultImageArtifactExecutor = UniffiVTableCallbackInterfaceVaultImageArtifactExecutor(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeVaultImageArtifactExecutor.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface VaultImageArtifactExecutor: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeVaultImageArtifactExecutor.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface VaultImageArtifactExecutor: handle missing in uniffiClone")
+            }
+        },
+        invoke: { (
+            uniffiHandle: UInt64,
+            controlRequestJson: RustBuffer,
+            binaryChunkBase64: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<UInt64>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> VaultImagePortAnswer in
+                guard let uniffiObj = try? FfiConverterTypeVaultImageArtifactExecutor.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.invoke(
+                     controlRequestJson: try FfiConverterString.lift(controlRequestJson),
+                     binaryChunkBase64: try FfiConverterSensitiveString.lift(binaryChunkBase64)
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterTypeVaultImagePortAnswer_lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeBindingError_lower
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceVaultImageArtifactExecutor> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceVaultImageArtifactExecutor>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitVaultImageArtifactExecutor() {
+    uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimageartifactexecutor(UniffiCallbackInterfaceVaultImageArtifactExecutor.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaultImageArtifactExecutor: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<VaultImageArtifactExecutor>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = VaultImageArtifactExecutor
+
+    public static func lift(_ handle: UInt64) throws -> VaultImageArtifactExecutor {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return VaultImageArtifactExecutorImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: VaultImageArtifactExecutor) -> UInt64 {
+         if let rustImpl = value as? VaultImageArtifactExecutorImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultImageArtifactExecutor {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: VaultImageArtifactExecutor, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImageArtifactExecutor_lift(_ handle: UInt64) throws -> VaultImageArtifactExecutor {
+    return try FfiConverterTypeVaultImageArtifactExecutor.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImageArtifactExecutor_lower(_ value: VaultImageArtifactExecutor) -> UInt64 {
+    return FfiConverterTypeVaultImageArtifactExecutor.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A shallow native answer handle. Its sensitive payload is transferred as one canonical Base64
+ * String allocation instead of an ordinary UniFFI record/sequence buffer whose temporary
+ * serialization could not be wiped.
+ */
+public protocol VaultImagePortAnswer: AnyObject, Sendable {
+
+    func controlResponseJson()  -> String
+
+    /**
+     * Transfers a canonical Base64 representation to Rust. Empty means that this answer carries
+     * no binary chunk; valid Vault-image chunks are never empty. The generated native lowering
+     * writes this String directly into its RustBuffer, avoiding an ordinary record/sequence lift.
+     */
+    func takeBinaryChunkBase64()  -> SensitiveVaultImageChunk
+
+}
+/**
+ * A shallow native answer handle. Its sensitive payload is transferred as one canonical Base64
+ * String allocation instead of an ordinary UniFFI record/sequence buffer whose temporary
+ * serialization could not be wiped.
+ */
+open class VaultImagePortAnswerImpl: VaultImagePortAnswer, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_vaultimageportanswer(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_vaultimageportanswer(handle, $0) }
+    }
+
+
+
+
+open func controlResponseJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_vaultimageportanswer_control_response_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+    /**
+     * Transfers a canonical Base64 representation to Rust. Empty means that this answer carries
+     * no binary chunk; valid Vault-image chunks are never empty. The generated native lowering
+     * writes this String directly into its RustBuffer, avoiding an ordinary record/sequence lift.
+     */
+open func takeBinaryChunkBase64() -> SensitiveVaultImageChunk  {
+    return try!  FfiConverterTypeSensitiveVaultImageChunk_lift(try! rustCall() {
+    uniffi_bittery_client_bindings_fn_method_vaultimageportanswer_take_binary_chunk_base64(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+
+
+
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceVaultImagePortAnswer {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceVaultImagePortAnswer = UniffiVTableCallbackInterfaceVaultImagePortAnswer(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeVaultImagePortAnswer.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface VaultImagePortAnswer: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeVaultImagePortAnswer.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface VaultImagePortAnswer: handle missing in uniffiClone")
+            }
+        },
+        controlResponseJson: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeVaultImagePortAnswer.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.controlResponseJson(
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        takeBinaryChunkBase64: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> SensitiveVaultImageChunk in
+                guard let uniffiObj = try? FfiConverterTypeVaultImagePortAnswer.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.takeBinaryChunkBase64(
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterSensitiveString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceVaultImagePortAnswer> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceVaultImagePortAnswer>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitVaultImagePortAnswer() {
+    uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimageportanswer(UniffiCallbackInterfaceVaultImagePortAnswer.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaultImagePortAnswer: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<VaultImagePortAnswer>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = VaultImagePortAnswer
+
+    public static func lift(_ handle: UInt64) throws -> VaultImagePortAnswer {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return VaultImagePortAnswerImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: VaultImagePortAnswer) -> UInt64 {
+         if let rustImpl = value as? VaultImagePortAnswerImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultImagePortAnswer {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: VaultImagePortAnswer, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImagePortAnswer_lift(_ handle: UInt64) throws -> VaultImagePortAnswer {
+    return try FfiConverterTypeVaultImagePortAnswer.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImagePortAnswer_lower(_ value: VaultImagePortAnswer) -> UInt64 {
+    return FfiConverterTypeVaultImagePortAnswer.lower(value)
+}
+
+
+
+
+
+
+public protocol VaultImageSourceExecutor: AnyObject, Sendable {
+
+    func invoke(controlRequestJson: String) throws  -> VaultImagePortAnswer
+
+}
+open class VaultImageSourceExecutorImpl: VaultImageSourceExecutor, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bittery_client_bindings_fn_clone_vaultimagesourceexecutor(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bittery_client_bindings_fn_free_vaultimagesourceexecutor(handle, $0) }
+    }
+
+
+
+
+open func invoke(controlRequestJson: String)throws  -> VaultImagePortAnswer  {
+    return try  FfiConverterTypeVaultImagePortAnswer_lift(try rustCallWithError(FfiConverterTypeBindingError_lift) {
+    uniffi_bittery_client_bindings_fn_method_vaultimagesourceexecutor_invoke(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(controlRequestJson),$0
+    )
+})
+}
+
+
+
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceVaultImageSourceExecutor {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceVaultImageSourceExecutor = UniffiVTableCallbackInterfaceVaultImageSourceExecutor(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeVaultImageSourceExecutor.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface VaultImageSourceExecutor: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeVaultImageSourceExecutor.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface VaultImageSourceExecutor: handle missing in uniffiClone")
+            }
+        },
+        invoke: { (
+            uniffiHandle: UInt64,
+            controlRequestJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<UInt64>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> VaultImagePortAnswer in
+                guard let uniffiObj = try? FfiConverterTypeVaultImageSourceExecutor.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.invoke(
+                     controlRequestJson: try FfiConverterString.lift(controlRequestJson)
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterTypeVaultImagePortAnswer_lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeBindingError_lower
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceVaultImageSourceExecutor> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceVaultImageSourceExecutor>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitVaultImageSourceExecutor() {
+    uniffi_bittery_client_bindings_fn_init_callback_vtable_vaultimagesourceexecutor(UniffiCallbackInterfaceVaultImageSourceExecutor.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaultImageSourceExecutor: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<VaultImageSourceExecutor>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = VaultImageSourceExecutor
+
+    public static func lift(_ handle: UInt64) throws -> VaultImageSourceExecutor {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return VaultImageSourceExecutorImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: VaultImageSourceExecutor) -> UInt64 {
+         if let rustImpl = value as? VaultImageSourceExecutorImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultImageSourceExecutor {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: VaultImageSourceExecutor, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImageSourceExecutor_lift(_ handle: UInt64) throws -> VaultImageSourceExecutor {
+    return try FfiConverterTypeVaultImageSourceExecutor.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImageSourceExecutor_lower(_ value: VaultImageSourceExecutor) -> UInt64 {
+    return FfiConverterTypeVaultImageSourceExecutor.lower(value)
+}
+
+
+
+
 public struct AccountDisplayIdentity: Equatable, Hashable {
     public var email: String
 
@@ -4470,6 +5147,76 @@ public func FfiConverterTypePendingShareResultsProjection_lower(_ value: Pending
 }
 
 
+public struct PreparedVaultImage: Equatable, Hashable {
+    public var accountId: String
+    public var operationId: String
+    public var vaultId: String
+    public var contentType: String
+    public var byteLength: UInt64
+    public var sha256: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accountId: String, operationId: String, vaultId: String, contentType: String, byteLength: UInt64, sha256: String) {
+        self.accountId = accountId
+        self.operationId = operationId
+        self.vaultId = vaultId
+        self.contentType = contentType
+        self.byteLength = byteLength
+        self.sha256 = sha256
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PreparedVaultImage: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePreparedVaultImage: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PreparedVaultImage {
+        return
+            try PreparedVaultImage(
+                accountId: FfiConverterString.read(from: &buf),
+                operationId: FfiConverterString.read(from: &buf),
+                vaultId: FfiConverterString.read(from: &buf),
+                contentType: FfiConverterString.read(from: &buf),
+                byteLength: FfiConverterUInt64.read(from: &buf),
+                sha256: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PreparedVaultImage, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.accountId, into: &buf)
+        FfiConverterString.write(value.operationId, into: &buf)
+        FfiConverterString.write(value.vaultId, into: &buf)
+        FfiConverterString.write(value.contentType, into: &buf)
+        FfiConverterUInt64.write(value.byteLength, into: &buf)
+        FfiConverterString.write(value.sha256, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePreparedVaultImage_lift(_ buf: RustBuffer) throws -> PreparedVaultImage {
+    return try FfiConverterTypePreparedVaultImage.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePreparedVaultImage_lower(_ value: PreparedVaultImage) -> RustBuffer {
+    return FfiConverterTypePreparedVaultImage.lower(value)
+}
+
+
 public struct RuntimeStatusProjection: Equatable, Hashable {
     public var accountId: String?
     public var revision: UInt64
@@ -4529,6 +5276,80 @@ public func FfiConverterTypeRuntimeStatusProjection_lift(_ buf: RustBuffer) thro
 #endif
 public func FfiConverterTypeRuntimeStatusProjection_lower(_ value: RuntimeStatusProjection) -> RustBuffer {
     return FfiConverterTypeRuntimeStatusProjection.lower(value)
+}
+
+
+public struct VaultImagePreparationRequest: Equatable, Hashable {
+    public var runtimeIncarnation: String
+    public var accountId: String
+    public var operationId: String
+    public var vaultId: String
+    public var capabilityId: String
+    public var contentType: String
+    public var byteLength: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(runtimeIncarnation: String, accountId: String, operationId: String, vaultId: String, capabilityId: String, contentType: String, byteLength: UInt64) {
+        self.runtimeIncarnation = runtimeIncarnation
+        self.accountId = accountId
+        self.operationId = operationId
+        self.vaultId = vaultId
+        self.capabilityId = capabilityId
+        self.contentType = contentType
+        self.byteLength = byteLength
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VaultImagePreparationRequest: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaultImagePreparationRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultImagePreparationRequest {
+        return
+            try VaultImagePreparationRequest(
+                runtimeIncarnation: FfiConverterString.read(from: &buf),
+                accountId: FfiConverterString.read(from: &buf),
+                operationId: FfiConverterString.read(from: &buf),
+                vaultId: FfiConverterString.read(from: &buf),
+                capabilityId: FfiConverterString.read(from: &buf),
+                contentType: FfiConverterString.read(from: &buf),
+                byteLength: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VaultImagePreparationRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.runtimeIncarnation, into: &buf)
+        FfiConverterString.write(value.accountId, into: &buf)
+        FfiConverterString.write(value.operationId, into: &buf)
+        FfiConverterString.write(value.vaultId, into: &buf)
+        FfiConverterString.write(value.capabilityId, into: &buf)
+        FfiConverterString.write(value.contentType, into: &buf)
+        FfiConverterUInt64.write(value.byteLength, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImagePreparationRequest_lift(_ buf: RustBuffer) throws -> VaultImagePreparationRequest {
+    return try FfiConverterTypeVaultImagePreparationRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultImagePreparationRequest_lower(_ value: VaultImagePreparationRequest) -> RustBuffer {
+    return FfiConverterTypeVaultImagePreparationRequest.lower(value)
 }
 
 
@@ -7264,6 +8085,50 @@ fileprivate struct FfiConverterSequenceTypeTeardownPhase: FfiConverterRustBuffer
         return seq
     }
 }
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ */
+public typealias SensitiveVaultImageChunk = String
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSensitiveVaultImageChunk: FfiConverter {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SensitiveVaultImageChunk {
+        return try FfiConverterString.read(from: &buf)
+    }
+
+    public static func write(_ value: SensitiveVaultImageChunk, into buf: inout [UInt8]) {
+        return FfiConverterString.write(value, into: &buf)
+    }
+
+    public static func lift(_ value: RustBuffer) throws -> SensitiveVaultImageChunk {
+        return try FfiConverterString.lift(value)
+    }
+
+    public static func lower(_ value: SensitiveVaultImageChunk) -> RustBuffer {
+        return FfiConverterString.lower(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSensitiveVaultImageChunk_lift(_ value: RustBuffer) throws -> SensitiveVaultImageChunk {
+    return try FfiConverterTypeSensitiveVaultImageChunk.lift(value)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSensitiveVaultImageChunk_lower(_ value: SensitiveVaultImageChunk) -> RustBuffer {
+    return FfiConverterTypeSensitiveVaultImageChunk.lower(value)
+}
+
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
 
@@ -7322,6 +8187,57 @@ public func normalizeAccountEmail(input: String)throws  -> String  {
     )
 })
 }
+public func beginVaultImageAcceptance(runtime: ClientRuntime, accountId: String, operationId: String)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_bittery_client_bindings_fn_func_begin_vault_image_acceptance(FfiConverterTypeClientRuntime_lower(runtime),FfiConverterString.lower(accountId),FfiConverterString.lower(operationId)
+                )
+            },
+            pollFunc: ffi_bittery_client_bindings_rust_future_poll_void,
+            completeFunc: ffi_bittery_client_bindings_rust_future_complete_void,
+            freeFunc: ffi_bittery_client_bindings_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeBindingError_lift
+        )
+}
+public func endVaultImageAcceptance(runtime: ClientRuntime, accountId: String, operationId: String)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_bittery_client_bindings_fn_func_end_vault_image_acceptance(FfiConverterTypeClientRuntime_lower(runtime),FfiConverterString.lower(accountId),FfiConverterString.lower(operationId)
+                )
+            },
+            pollFunc: ffi_bittery_client_bindings_rust_future_poll_void,
+            completeFunc: ffi_bittery_client_bindings_rust_future_complete_void,
+            freeFunc: ffi_bittery_client_bindings_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeBindingError_lift
+        )
+}
+public func newClientRuntimeWithVaultImagePorts(runtimeIncarnation: String, artifacts: VaultImageArtifactExecutor, sources: VaultImageSourceExecutor)throws  -> ClientRuntime  {
+    return try  FfiConverterTypeClientRuntime_lift(try rustCallWithError(FfiConverterTypeBindingError_lift) {
+    uniffi_bittery_client_bindings_fn_func_new_client_runtime_with_vault_image_ports(
+        FfiConverterString.lower(runtimeIncarnation),
+        FfiConverterTypeVaultImageArtifactExecutor_lower(artifacts),
+        FfiConverterTypeVaultImageSourceExecutor_lower(sources),$0
+    )
+})
+}
+public func prepareVaultImage(runtime: ClientRuntime, request: VaultImagePreparationRequest)async throws  -> PreparedVaultImage  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_bittery_client_bindings_fn_func_prepare_vault_image(FfiConverterTypeClientRuntime_lower(runtime),FfiConverterTypeVaultImagePreparationRequest_lower(request)
+                )
+            },
+            pollFunc: ffi_bittery_client_bindings_rust_future_poll_rust_buffer,
+            completeFunc: ffi_bittery_client_bindings_rust_future_complete_rust_buffer,
+            freeFunc: ffi_bittery_client_bindings_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypePreparedVaultImage_lift,
+            errorHandler: FfiConverterTypeBindingError_lift
+        )
+}
 
 private enum InitializationResult {
     case ok
@@ -7339,6 +8255,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_func_normalize_account_email() != 25740) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_func_begin_vault_image_acceptance() != 17738) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_func_end_vault_image_acceptance() != 44782) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_func_new_client_runtime_with_vault_image_ports() != 12708) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_func_prepare_vault_image() != 17206) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_address_city() != 58253) {
@@ -7420,6 +8348,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_clientruntime_observe() != 8781) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_clientruntime_open() != 5200) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bittery_client_bindings_checksum_method_clientruntime_request() != 8712) {
@@ -7725,6 +8656,18 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_title() != 24945) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bittery_client_bindings_checksum_method_vaultimageartifactexecutor_invoke() != 4216) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_vaultimageportanswer_control_response_json() != 12850) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_vaultimageportanswer_take_binary_chunk_base64() != 6289) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bittery_client_bindings_checksum_method_vaultimagesourceexecutor_invoke() != 23768) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bittery_client_bindings_checksum_constructor_address_new() != 54888) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7769,6 +8712,9 @@ private let initializationResult: InitializationResult = {
     }
 
     uniffiCallbackInitObservationSink()
+    uniffiCallbackInitVaultImageArtifactExecutor()
+    uniffiCallbackInitVaultImagePortAnswer()
+    uniffiCallbackInitVaultImageSourceExecutor()
     return InitializationResult.ok
 }()
 

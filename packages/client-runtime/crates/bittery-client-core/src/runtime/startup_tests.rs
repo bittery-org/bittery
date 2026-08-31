@@ -8,6 +8,12 @@ use crate::{
     replica::{
         InMemoryReplica, ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
     },
+    vault_image::{
+        MemoryVaultImageArtifactStore, VaultImageArtifactMetadata, VaultImageArtifactPort,
+        VaultImageArtifactScope, VaultImageChunkWrite, VaultImageIngressFacade,
+        VaultImagePublication, VaultImageSource, VaultImageSourceError, VaultImageSourceGrant,
+        VaultImageSourcePort,
+    },
     ObservationSink, RequestCancellation, RuntimeRequest,
 };
 use async_trait::async_trait;
@@ -288,6 +294,109 @@ fn production_runtime(
     Runtime::with_serialized_executors(replica, platform, Arc::new(UnusedHttpExecutor))
 }
 
+struct UnusedVaultImageSource;
+
+#[async_trait]
+impl VaultImageSourcePort for UnusedVaultImageSource {
+    async fn claim(
+        &self,
+        _grant: &VaultImageSourceGrant,
+    ) -> Result<Box<dyn VaultImageSource>, VaultImageSourceError> {
+        panic!("startup sweep must not claim a source")
+    }
+    async fn retire_account(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_account_retirement(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn begin_acceptance(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _operation_id: &str,
+    ) -> Result<(), VaultImageSourceError> {
+        panic!("startup sweep must not accept work")
+    }
+    async fn end_acceptance(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _operation_id: &str,
+    ) -> Result<(), VaultImageSourceError> {
+        panic!("startup sweep must not release work")
+    }
+    async fn retire_runtime(
+        &self,
+        _runtime_incarnation: &str,
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct FailFirstSweep {
+    inner: MemoryVaultImageArtifactStore,
+    fail: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl VaultImageArtifactPort for FailFirstSweep {
+    async fn begin(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError> {
+        self.inner.begin(scope).await
+    }
+    async fn write_chunk(
+        &self,
+        scope: &VaultImageArtifactScope,
+        index: u32,
+        bytes: &[u8],
+    ) -> Result<VaultImageChunkWrite, RuntimeError> {
+        self.inner.write_chunk(scope, index, bytes).await
+    }
+    async fn publish(
+        &self,
+        metadata: &VaultImageArtifactMetadata,
+    ) -> Result<VaultImagePublication, RuntimeError> {
+        self.inner.publish(metadata).await
+    }
+    async fn read_chunk(
+        &self,
+        metadata: &VaultImageArtifactMetadata,
+        index: u32,
+    ) -> Result<Option<Vec<u8>>, RuntimeError> {
+        self.inner.read_chunk(metadata, index).await
+    }
+    async fn delete(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError> {
+        self.inner.delete(scope).await
+    }
+    async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+        self.inner.delete_account(account_id).await
+    }
+    async fn wipe(&self) -> Result<(), RuntimeError> {
+        self.inner.wipe().await
+    }
+    async fn sweep_orphans(
+        &self,
+        account_id: &AccountId,
+        referenced_operations: &HashSet<String>,
+    ) -> Result<(), RuntimeError> {
+        if self.fail.swap(false, Ordering::SeqCst) {
+            return Err(startup_invariant("injected Vault image sweep failure"));
+        }
+        self.inner
+            .sweep_orphans(account_id, referenced_operations)
+            .await
+    }
+}
+
 fn active(account_id: &str, generation: &str) -> DeviceCatalogAccount {
     DeviceCatalogAccount {
         account_id: account(account_id),
@@ -377,6 +486,61 @@ async fn open_restores_final_active_accounts_signed_out_once() {
             .as_ref()
             .map(|identity| identity.email.as_str()),
         Some("user@example.com")
+    );
+}
+
+#[tokio::test]
+async fn open_exclusively_sweeps_vault_images_before_publishing_account_work_and_retries_failure() {
+    let replica = Arc::new(MemoryReplicaExecutor::default());
+    replica
+        .state
+        .install(
+            account("account-sweep"),
+            "user-sweep".into(),
+            incarnation("generation-sweep"),
+        )
+        .unwrap();
+    let platform = Arc::new(MemoryPlatformExecutor::default());
+    seed_catalog(&platform, vec![active("account-sweep", "generation-sweep")]);
+    seed_metadata(&platform, "account-sweep", "generation-sweep", "user-sweep");
+    let artifacts = MemoryVaultImageArtifactStore::default();
+    let orphan = VaultImageArtifactScope::new(account("account-sweep"), "orphan").unwrap();
+    artifacts.begin(&orphan).await.unwrap();
+    artifacts.write_chunk(&orphan, 0, b"x").await.unwrap();
+    let metadata = VaultImageArtifactMetadata::new(
+        orphan,
+        "vault-sweep",
+        1,
+        "image/png",
+        "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+    )
+    .unwrap();
+    artifacts.publish(&metadata).await.unwrap();
+    let runtime = production_runtime(replica, platform);
+    runtime.install_vault_image_ingress(
+        VaultImageIngressFacade::new(
+            "runtime-sweep",
+            Arc::new(UnusedVaultImageSource),
+            Arc::new(FailFirstSweep {
+                inner: artifacts.clone(),
+                fail: Arc::new(AtomicBool::new(true)),
+            }),
+        )
+        .unwrap(),
+    );
+
+    assert!(runtime.open().await.is_err());
+    assert!(runtime
+        .observe(
+            ObservationRequest::RuntimeStatus { account_id: None },
+            Arc::new(Sink::default()),
+        )
+        .is_err());
+    runtime.open().await.unwrap();
+    assert_eq!(artifacts.read_chunk(&metadata, 0).await.unwrap(), None);
+    assert_eq!(
+        runtime.account_access_state(&account("account-sweep")),
+        Some(AccountAccessState::SignedOut)
     );
 }
 
