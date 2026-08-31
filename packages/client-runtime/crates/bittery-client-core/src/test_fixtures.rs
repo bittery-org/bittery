@@ -62,8 +62,10 @@ pub(crate) fn test_operation(operation_id: &str, item_id: &str) -> OperationReco
     OperationRecord {
         operation_id: operation_id.to_owned(),
         kind: OperationKind::CreateItem,
-        item_id: item_id.to_owned(),
-        vault_id: TEST_VAULT_ID.to_owned(),
+        target: crate::replica::ResourceRef::Item {
+            item_id: item_id.to_owned(),
+            vault_id: TEST_VAULT_ID.to_owned(),
+        },
         request: ImmutableHttpRequest {
             method: HttpMethod::Put,
             path: format!("/api/v1/vaults/{TEST_VAULT_ID}/items/{item_id}"),
@@ -75,6 +77,7 @@ pub(crate) fn test_operation(operation_id: &str, item_id: &str) -> OperationReco
         },
         request_fingerprint: Sha256Fingerprint::of_bytes(&body),
         attachment_move_recovery: None,
+        create_vault: None,
         scheduling: OperationSchedulingState::default(),
     }
 }

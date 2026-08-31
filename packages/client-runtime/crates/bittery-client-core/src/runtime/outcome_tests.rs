@@ -187,7 +187,7 @@ async fn each_ordinary_item_kind_accepts_its_exact_tagged_applied_outcome() {
             "kind": case.wire_kind(),
             "result": {
                 "status": "applied",
-                "itemId": operation.item_id,
+                "itemId": operation.item_id(),
                 "version": 2,
             },
         }))
@@ -226,7 +226,7 @@ async fn all_six_ordinary_item_outcomes_reconcile_authority_overlay_and_validato
         let receipt = &snapshot.receipts[0];
         assert_eq!(receipt.operation_id, operation_id);
         assert_eq!(receipt.kind, case.kind());
-        assert_eq!(receipt.item_id, item_id);
+        assert_eq!(receipt.item_id(), item_id);
         assert_eq!(
             receipt.result,
             OperationOutcomeResult::Applied {
@@ -1151,7 +1151,7 @@ fn assert_reconciled(harness: &Harness, operation_id: &str, item_id: &str) {
     assert_eq!(snapshot.receipts.len(), 1, "exactly one completed receipt");
     let receipt = &snapshot.receipts[0];
     assert_eq!(receipt.operation_id, operation_id);
-    assert_eq!(receipt.item_id, item_id);
+    assert_eq!(receipt.item_id(), item_id);
     assert_eq!(
         receipt.result,
         OperationOutcomeResult::Applied {

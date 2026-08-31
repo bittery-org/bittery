@@ -982,6 +982,13 @@ pub enum RuntimeRequest {
         request_id: String,
     },
     Wipe,
+    CreateVault {
+        account_id: String,
+        name: String,
+        vault_type: CreateVaultType,
+        icon: String,
+        image_source: Option<VaultImageSourceInput>,
+    },
     CreateItem {
         account_id: String,
         vault_id: String,
@@ -1046,6 +1053,19 @@ pub enum RuntimeRequest {
     },
 }
 
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CreateVaultType {
+    Personal,
+    Shared,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct VaultImageSourceInput {
+    pub capability_id: String,
+    pub byte_length: u64,
+    pub content_type: String,
+}
+
 impl fmt::Debug for RuntimeRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1075,6 +1095,20 @@ impl fmt::Debug for RuntimeRequest {
                 formatter.write_str("DeleteServerAccount([redacted scope and confirmation])")
             }
             Self::Wipe => formatter.write_str("Wipe"),
+            Self::CreateVault {
+                account_id,
+                name,
+                vault_type,
+                icon,
+                ..
+            } => formatter
+                .debug_struct("CreateVault")
+                .field("account_id", account_id)
+                .field("name", name)
+                .field("vault_type", vault_type)
+                .field("icon", icon)
+                .field("image_source_capability", &"[redacted]")
+                .finish(),
             Self::CreateItem {
                 account_id,
                 vault_id,
@@ -1221,6 +1255,11 @@ pub enum RuntimeResponse {
         item_id: String,
         replica_revision: u64,
     },
+    VaultCreationAccepted {
+        operation_id: String,
+        vault_id: String,
+        replica_revision: u64,
+    },
     ShareResultAcknowledged {
         account_id: String,
         operation_id: String,
@@ -1277,6 +1316,7 @@ pub enum TeardownPhase {
 
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum ObservationRequest {
+    WritableVaultCatalog,
     Items { account_id: String },
     PendingShareResults { account_id: String },
     RuntimeStatus { account_id: Option<String> },
@@ -1410,6 +1450,23 @@ pub struct ItemsProjection {
     pub replica_revision: u64,
     pub items: Vec<Arc<ItemProjection>>,
     pub vaults: Vec<VaultProjection>,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct WritableVaultCatalogProjection {
+    pub revision: u64,
+    pub vaults: Vec<WritableVaultProjection>,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct WritableVaultProjection {
+    pub account_id: String,
+    pub vault_id: String,
+    pub name: String,
+    pub vault_type: VaultProjectionType,
+    pub icon: Option<String>,
+    pub image_url: Option<String>,
+    pub role: VaultProjectionRole,
 }
 
 #[derive(Zeroize, ZeroizeOnDrop, uniffi::Object)]
@@ -1570,6 +1627,9 @@ pub struct RuntimeStatusProjection {
 
 #[derive(Clone, uniffi::Enum)]
 pub enum RuntimeProjection {
+    WritableVaultCatalog {
+        value: WritableVaultCatalogProjection,
+    },
     Items {
         value: ItemsProjection,
     },
@@ -1584,6 +1644,10 @@ pub enum RuntimeProjection {
 impl fmt::Debug for RuntimeProjection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::WritableVaultCatalog { value } => formatter
+                .debug_tuple("WritableVaultCatalog")
+                .field(value)
+                .finish(),
             Self::Items { value } => formatter.debug_tuple("Items").field(value).finish(),
             Self::PendingShareResults { value } => formatter
                 .debug_tuple("PendingShareResults")
@@ -1815,6 +1879,26 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 request_id,
             },
             RuntimeRequest::Wipe => Self::Wipe,
+            RuntimeRequest::CreateVault {
+                account_id,
+                name,
+                vault_type,
+                icon,
+                image_source,
+            } => Self::CreateVault {
+                account_id: account_id.into(),
+                name,
+                vault_type: match vault_type {
+                    CreateVaultType::Personal => core::CreateVaultType::Personal,
+                    CreateVaultType::Shared => core::CreateVaultType::Shared,
+                },
+                icon,
+                image_source: image_source.map(|source| core::VaultImageSourceInput {
+                    capability_id: source.capability_id,
+                    byte_length: source.byte_length,
+                    content_type: source.content_type,
+                }),
+            },
             RuntimeRequest::CreateItem {
                 account_id,
                 vault_id,
@@ -1971,6 +2055,7 @@ impl From<CustomFieldKind> for core::CustomFieldKind {
 impl From<ObservationRequest> for core::ObservationRequest {
     fn from(value: ObservationRequest) -> Self {
         match value {
+            ObservationRequest::WritableVaultCatalog => Self::WritableVaultCatalog,
             ObservationRequest::Items { account_id } => Self::Items {
                 account_id: account_id.into(),
             },
@@ -2014,6 +2099,15 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
             } => Self::Accepted {
                 operation_id,
                 item_id,
+                replica_revision,
+            },
+            core::RuntimeResponse::VaultCreationAccepted {
+                operation_id,
+                vault_id,
+                replica_revision,
+            } => Self::VaultCreationAccepted {
+                operation_id,
+                vault_id,
                 replica_revision,
             },
             core::RuntimeResponse::ShareResultAcknowledged {
@@ -2110,6 +2204,9 @@ impl From<core::TeardownPhase> for TeardownPhase {
 impl From<core::RuntimeProjection> for RuntimeProjection {
     fn from(value: core::RuntimeProjection) -> Self {
         match value {
+            core::RuntimeProjection::WritableVaultCatalog(value) => Self::WritableVaultCatalog {
+                value: value.into(),
+            },
             core::RuntimeProjection::Items(value) => Self::Items {
                 value: value.into(),
             },
@@ -2119,6 +2216,29 @@ impl From<core::RuntimeProjection> for RuntimeProjection {
             core::RuntimeProjection::RuntimeStatus(value) => Self::RuntimeStatus {
                 value: value.into(),
             },
+        }
+    }
+}
+
+impl From<core::WritableVaultCatalogProjection> for WritableVaultCatalogProjection {
+    fn from(value: core::WritableVaultCatalogProjection) -> Self {
+        Self {
+            revision: value.revision,
+            vaults: value.vaults.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<core::WritableVaultProjection> for WritableVaultProjection {
+    fn from(value: core::WritableVaultProjection) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            vault_id: value.vault_id,
+            name: value.name,
+            vault_type: value.vault_type.into(),
+            icon: value.icon,
+            image_url: value.image_url,
+            role: value.role.into(),
         }
     }
 }

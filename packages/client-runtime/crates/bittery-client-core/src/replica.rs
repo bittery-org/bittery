@@ -31,20 +31,24 @@ use domain::AccountReplica;
     reason = "closed Replica types are re-exported for Runtime"
 )]
 pub(crate) use domain::{
-    attachment_move_artifact_ref, attachment_move_intent_fingerprint, item_operation_fingerprint,
+    attachment_move_artifact_ref, attachment_move_intent_fingerprint,
+    canonical_create_vault_request, item_operation_fingerprint, validate_create_vault_text_fields,
     AbandonBootstrapPlan, AttachmentMoveArtifactRef, AttachmentMovePreparationRecord,
     AttachmentMoveProgress, AttachmentMoveRecovery, AttachmentMoveUploadState,
     AuthorityAttachmentRecord, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
     AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority,
     BootstrapAuthoritySnapshot, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
-    BootstrapPageCursor, BootstrapPageIdentity, BootstrapPhase, CleanupBootstrapGenerationPlan,
-    CleanupBootstrapGenerationResult, CursorAdvance, ForegroundAttachmentCommitPlan,
+    BootstrapPageCursor, BootstrapPageIdentity, BootstrapPhase, CanonicalCreateVaultRequest,
+    CleanupBootstrapGenerationPlan, CleanupBootstrapGenerationResult, CreateVaultCheckpoint,
+    CreateVaultCleanupObligation, CreateVaultImageRecord, CreateVaultOperationRecord,
+    CreateVaultOperationRejectionCode, CursorAdvance, ForegroundAttachmentCommitPlan,
     ForegroundAttachmentCommitResult, GuardedCommitPlan, ImmutableHttpRequest,
     MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
     OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
     PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan,
     ProtectedShareCapabilityRecord, RecomputedPlanResult, ReplicaItemRecord, ReplicaSnapshot,
-    ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
+    ReplicaState, ResourceRef, Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult,
+    SyncCursor,
 };
 
 #[cfg(feature = "persistence-contract-schema")]

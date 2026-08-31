@@ -450,7 +450,7 @@ async fn pending_share_item_correlation_is_derived_from_the_operation_receipt() 
     else {
         panic!("expected PendingShareResults projection");
     };
-    assert_eq!(projected.results[0].item_id, receipt.item_id);
+    assert_eq!(projected.results[0].item_id, receipt.item_id());
 }
 
 #[tokio::test]
@@ -737,7 +737,7 @@ async fn cross_kind_share_outcome_fails_closed_without_discarding_the_receiptles
         operation_fixtures::StoredOutcome {
             fingerprint: operation.request_fingerprint.0,
             result: operation_fixtures::StoredResult::Applied {
-                item_id: operation.item_id,
+                item_id: operation.item_id().to_owned(),
                 version: 1,
             },
         },

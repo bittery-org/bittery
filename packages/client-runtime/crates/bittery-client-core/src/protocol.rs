@@ -109,6 +109,18 @@ pub enum RuntimeRequest {
     },
     /// Irreversibly removes every Runtime-owned Account and Device record.
     Wipe,
+    CreateVault {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        name: String,
+        vault_type: CreateVaultType,
+        icon: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image_source: Option<VaultImageSourceInput>,
+    },
     CreateItem {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -276,6 +288,20 @@ impl fmt::Debug for RuntimeRequest {
                 formatter.write_str("DeleteServerAccount([redacted scope and confirmation])")
             }
             Self::Wipe => formatter.write_str("Wipe"),
+            Self::CreateVault {
+                account_id,
+                name,
+                vault_type,
+                icon,
+                image_source,
+            } => formatter
+                .debug_struct("CreateVault")
+                .field("account_id", account_id)
+                .field("name", name)
+                .field("vault_type", vault_type)
+                .field("icon", icon)
+                .field("image_source", &image_source.as_ref().map(|_| "[redacted]"))
+                .finish(),
             Self::CreateItem {
                 account_id,
                 vault_id,
@@ -411,7 +437,8 @@ impl RuntimeRequest {
             Self::RemoveAccount { account_id } => Some(account_id),
             Self::DeleteServerAccount { account_id, .. } => Some(account_id),
             Self::Wipe => None,
-            Self::CreateItem { account_id, .. }
+            Self::CreateVault { account_id, .. }
+            | Self::CreateItem { account_id, .. }
             | Self::UpdateItem { account_id, .. }
             | Self::SetItemFavorite { account_id, .. }
             | Self::TrashItem { account_id, .. }
@@ -425,6 +452,49 @@ impl RuntimeRequest {
             | Self::DownloadAttachment { account_id, .. }
             | Self::UploadAttachment { account_id, .. } => Some(account_id),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum CreateVaultType {
+    Personal,
+    Shared,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VaultImageSourceInput {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(length(min = 1, max = 128), regex(pattern = "^[A-Za-z0-9._~-]+$"))
+    )]
+    pub capability_id: String,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
+    pub byte_length: u64,
+    pub content_type: String,
+}
+
+impl fmt::Debug for VaultImageSourceInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VaultImageSourceInput")
+            .field("capability", &"[redacted]")
+            .field("byte_length", &self.byte_length)
+            .field("content_type", &self.content_type)
+            .finish()
     }
 }
 
@@ -972,6 +1042,16 @@ pub enum RuntimeResponse {
         request_id: String,
         outcome: ServerAccountDeletionOutcome,
     },
+    VaultCreationAccepted {
+        operation_id: String,
+        vault_id: String,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        replica_revision: u64,
+    },
     Accepted {
         operation_id: String,
         item_id: String,
@@ -1131,6 +1211,7 @@ impl From<Result<RuntimeResponse, RuntimeError>> for RuntimeOutcome {
     rename_all_fields = "camelCase"
 )]
 pub enum ObservationRequest {
+    WritableVaultCatalog,
     Items {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -1161,6 +1242,7 @@ impl ObservationRequest {
                 Some(account_id)
             }
             Self::RuntimeStatus { account_id } => account_id.as_ref(),
+            Self::WritableVaultCatalog => None,
         }
     }
 }
@@ -1172,6 +1254,7 @@ impl ObservationRequest {
 )]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum RuntimeProjection {
+    WritableVaultCatalog(WritableVaultCatalogProjection),
     Items(ItemsProjection),
     PendingShareResults(PendingShareResultsProjection),
     RuntimeStatus(RuntimeStatusProjection),
@@ -1180,6 +1263,7 @@ pub enum RuntimeProjection {
 impl RuntimeProjection {
     pub fn revision(&self) -> u64 {
         match self {
+            Self::WritableVaultCatalog(value) => value.revision,
             Self::Items(value) => value.replica_revision,
             Self::PendingShareResults(value) => value.replica_revision,
             Self::RuntimeStatus(value) => value.revision,
@@ -1188,11 +1272,51 @@ impl RuntimeProjection {
 
     pub fn item_count(&self) -> usize {
         match self {
+            Self::WritableVaultCatalog(_) => 0,
             Self::Items(value) => value.items.len(),
             Self::PendingShareResults(_) => 0,
             Self::RuntimeStatus(_) => 0,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct WritableVaultCatalogProjection {
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
+    pub revision: u64,
+    pub vaults: Vec<WritableVaultProjection>,
+}
+
+/// Non-secret authority metadata for every currently unlocked writable Vault on this Device.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct WritableVaultProjection {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
+    pub account_id: AccountId,
+    pub vault_id: String,
+    pub name: String,
+    pub vault_type: VaultProjectionType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    pub role: VaultProjectionRole,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

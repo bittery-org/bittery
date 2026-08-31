@@ -386,7 +386,8 @@ pub(super) fn prepare_commit(
         if let PlanMutation::ReconcileAppliedCreate { outcome, .. }
         | PlanMutation::ReconcileItemMutation { outcome, .. }
         | PlanMutation::RetainRejection { outcome, .. }
-        | PlanMutation::ReconcileShareOutcome { outcome, .. } = mutation
+        | PlanMutation::ReconcileShareOutcome { outcome, .. }
+        | PlanMutation::ReconcileCreateVault { outcome, .. } = mutation
         {
             writes.extend(completion_writes(
                 &plan.account_id,
@@ -539,7 +540,8 @@ pub(super) fn prepare_commit(
                     )?,
                 }
             }
-            PlanMutation::RescheduleOperation(operation) => {
+            PlanMutation::RescheduleOperation(operation)
+            | PlanMutation::CheckpointCreateVault(operation) => {
                 let synchronized = next
                     .operations
                     .iter()
@@ -573,12 +575,28 @@ pub(super) fn prepare_commit(
             | PlanMutation::CommitAttachmentAuthority { .. }
             | PlanMutation::RetainRejection { .. }
             | PlanMutation::ReconcileShareOutcome { .. }
+            | PlanMutation::ReconcileCreateVault { .. }
             | PlanMutation::AdvanceSyncPageCursor { .. }
             | PlanMutation::FailAccount { .. }
             | PlanMutation::FreezeAttachmentMoveRejection { .. }
             | PlanMutation::PromoteAttachmentMovePreparation { .. }
             | PlanMutation::ReactivateAttachmentMovePreparation { .. } => {
                 unreachable!("completion and failure writes are collected above")
+            }
+            PlanMutation::CompleteCreateVaultCleanup { operation_id, .. } => {
+                let receipt = next
+                    .receipts
+                    .iter()
+                    .find(|receipt| receipt.operation_id == *operation_id)
+                    .ok_or_else(|| replica_invariant("cleanup receipt disappeared"))?;
+                PreparedReplicaWrite::Put {
+                    row: stored_row(
+                        ReplicaStore::OperationReceipts,
+                        &plan.account_id,
+                        operation_id,
+                        receipt,
+                    )?,
+                }
             }
         });
     }

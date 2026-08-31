@@ -1692,7 +1692,7 @@ fn item_has_optimistic_owner(snapshot: &crate::replica::ReplicaSnapshot, item_id
     snapshot
         .operations
         .iter()
-        .any(|operation| operation.item_id == item_id)
+        .any(|operation| operation.target.item_id() == Some(item_id))
         || snapshot
             .attachment_move_preparations
             .iter()

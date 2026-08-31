@@ -193,6 +193,8 @@ impl Runtime {
         for lock in &execution_locks {
             execution_guards.push(lock.lock().await);
         }
+        self.best_effort_create_vault_remote_cleanup(&account_ids)
+            .await;
         match &scope {
             TeardownScope::Account { account_id } => {
                 self.retire_attachment_download_account(account_id).await;
@@ -405,6 +407,67 @@ impl Runtime {
                 .expect("observer lock poisoned")
                 .remove(&id);
             subscription.close_for_lifecycle();
+        }
+    }
+
+    async fn best_effort_create_vault_remote_cleanup(&self, account_ids: &[AccountId]) {
+        let port = self
+            .create_vault_cleanup_port
+            .lock()
+            .expect("create-Vault cleanup port lock poisoned")
+            .clone();
+        let Some(port) = port else { return };
+        let mut bindings = Vec::new();
+        let mut seen = BTreeSet::new();
+        for account_id in account_ids {
+            let Some(snapshot) = self.replica.snapshot(account_id) else {
+                continue;
+            };
+            for operation in &snapshot.operations {
+                let Some(intent) = &operation.create_vault else {
+                    continue;
+                };
+                let Some(image) = &intent.image else { continue };
+                if seen.insert((account_id.clone(), operation.operation_id.clone())) {
+                    bindings.push(super::create_vault_staging::CreateVaultStagingBinding {
+                        account_id: account_id.clone(),
+                        operation_id: operation.operation_id.clone(),
+                        vault_id: operation.vault_id().to_owned(),
+                        object_key: image.object_key.clone(),
+                        byte_length: image.byte_length,
+                        content_type: image.content_type.clone(),
+                        sha256: image.sha256.clone(),
+                    });
+                }
+            }
+            for receipt in &snapshot.receipts {
+                let Some(cleanup) = &receipt.create_vault_cleanup else {
+                    continue;
+                };
+                if !cleanup.remote_staging_pending
+                    || !seen.insert((account_id.clone(), receipt.operation_id.clone()))
+                {
+                    continue;
+                }
+                bindings.push(super::create_vault_staging::CreateVaultStagingBinding {
+                    account_id: account_id.clone(),
+                    operation_id: receipt.operation_id.clone(),
+                    vault_id: receipt.vault_id().to_owned(),
+                    object_key: cleanup.image.object_key.clone(),
+                    byte_length: cleanup.image.byte_length,
+                    content_type: cleanup.image.content_type.clone(),
+                    sha256: cleanup.image.sha256.clone(),
+                });
+            }
+        }
+        for binding in bindings {
+            if matches!(
+                port.cleanup_remote(&binding).await,
+                Err(super::create_vault_staging::CreateVaultStagingError::Unauthorized)
+            ) && port.renew_session().await.is_ok()
+            {
+                let _ = port.cleanup_remote(&binding).await;
+            }
         }
     }
 

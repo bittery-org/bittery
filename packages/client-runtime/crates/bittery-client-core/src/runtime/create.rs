@@ -7,7 +7,7 @@ use crate::{
         AttachmentMovePreparationRecord, AttachmentMoveProgress, AuthorityItemCategory,
         AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType, ImmutableHttpRequest,
         OperationKind, OperationSchedulingState, ProtectedShareCapabilityRecord, ReplicaSnapshot,
-        ReplicaState, Sha256Fingerprint,
+        ReplicaState, ResourceRef, Sha256Fingerprint,
     },
     server_contract::{CreateItemBody, FavoriteBody, ItemCategory, MoveItemBody, UpdateItemBody},
     CreateShareDraft, ItemDraft, ItemProjection, ShareAccessMode,
@@ -451,8 +451,10 @@ impl Runtime {
         let operation = OperationRecord {
             operation_id: operation_id.clone(),
             kind: OperationKind::CreateShare,
-            item_id: item_id.clone(),
-            vault_id: item.vault_id.clone(),
+            target: ResourceRef::Item {
+                item_id: item_id.clone(),
+                vault_id: item.vault_id.clone(),
+            },
             request: ImmutableHttpRequest {
                 method: HttpMethod::Post,
                 path: format!("/api/v1/items/{item_id}/share-links"),
@@ -461,6 +463,7 @@ impl Runtime {
             },
             request_fingerprint: share_operation_fingerprint(&item_id, &body),
             attachment_move_recovery: None,
+            create_vault: None,
             scheduling: OperationSchedulingState::default(),
         };
         let result = self
@@ -634,7 +637,7 @@ impl Runtime {
             projection,
         } = prepared;
         let operation_id = operation.operation_id.clone();
-        let item_id = operation.item_id.clone();
+        let item_id = operation.item_id().to_owned();
 
         // One transaction carries the Operation, its immutable bytes and fingerprint, its
         // scheduling state, and the encrypted overlay. `Accepted` is answered only after it
@@ -1059,8 +1062,10 @@ impl Runtime {
             operation: OperationRecord {
                 operation_id: operation_id.clone(),
                 kind: OperationKind::CreateItem,
-                item_id: item_id.clone(),
-                vault_id: vault_id.to_owned(),
+                target: ResourceRef::Item {
+                    item_id: item_id.clone(),
+                    vault_id: vault_id.to_owned(),
+                },
                 request: ImmutableHttpRequest {
                     method: HttpMethod::Put,
                     path,
@@ -1074,6 +1079,7 @@ impl Runtime {
                 },
                 request_fingerprint,
                 attachment_move_recovery: None,
+                create_vault: None,
                 scheduling: OperationSchedulingState::default(),
             },
             overlay: ReplicaItemRecord {
@@ -1446,8 +1452,10 @@ impl Runtime {
             operation: OperationRecord {
                 operation_id,
                 kind,
-                item_id: item_id.to_owned(),
-                vault_id: operation_vault_id,
+                target: ResourceRef::Item {
+                    item_id: item_id.to_owned(),
+                    vault_id: operation_vault_id,
+                },
                 request: ImmutableHttpRequest {
                     method,
                     path,
@@ -1456,6 +1464,7 @@ impl Runtime {
                 },
                 request_fingerprint,
                 attachment_move_recovery: None,
+                create_vault: None,
                 scheduling: OperationSchedulingState::default(),
             },
             overlay,

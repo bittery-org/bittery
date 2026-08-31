@@ -4001,7 +4001,9 @@ fn last_status_access(sink: &Sink, account_id: &AccountId) -> Option<AccountAcce
         .rev()
         .find_map(|projection| match projection {
             RuntimeProjection::RuntimeStatus(status) => Some(status.clone()),
-            RuntimeProjection::Items(_) | RuntimeProjection::PendingShareResults(_) => None,
+            RuntimeProjection::Items(_)
+            | RuntimeProjection::PendingShareResults(_)
+            | RuntimeProjection::WritableVaultCatalog(_) => None,
         })?
         .accounts
         .into_iter()

@@ -521,6 +521,106 @@ impl VaultImageIngressFacade {
         )
         .await
     }
+
+    /// Binds a host capability to Runtime-owned identities before create-Vault acceptance.
+    /// The host never learns or supplies the Runtime incarnation, Operation ID, or Vault ID.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the narrow Ticket 53 facade binds every immutable artifact authority field explicitly"
+    )]
+    pub(crate) async fn prepare_bound(
+        &self,
+        account_id: AccountId,
+        operation_id: String,
+        vault_id: String,
+        capability_id: String,
+        content_type: String,
+        byte_length: u64,
+        cancellation: &RequestCancellation,
+    ) -> Result<PreparedVaultImage, RuntimeError> {
+        self.prepare(
+            VaultImageSourceGrant {
+                runtime_incarnation: self.runtime_incarnation.clone(),
+                account_id,
+                operation_id,
+                vault_id,
+                capability_id,
+                content_type,
+                byte_length,
+            },
+            cancellation,
+        )
+        .await
+    }
+
+    #[allow(
+        dead_code,
+        reason = "Ticket 53 consumes accepted image bytes only through its test-gated staging executor"
+    )]
+    pub(crate) async fn read_published_bound(
+        &self,
+        account_id: AccountId,
+        operation_id: String,
+        vault_id: String,
+        byte_length: u64,
+        content_type: String,
+        sha256: String,
+    ) -> Result<Zeroizing<Vec<u8>>, RuntimeError> {
+        let metadata = VaultImageArtifactMetadata::new(
+            VaultImageArtifactScope::new(account_id, operation_id)?,
+            vault_id,
+            byte_length,
+            content_type,
+            sha256,
+        )?;
+        let mut bytes = Zeroizing::new(Vec::with_capacity(byte_length as usize));
+        let mut chunk_index = 0_u32;
+        while bytes.len() < byte_length as usize {
+            let chunk = self
+                .artifacts
+                .read_chunk(&metadata, chunk_index)
+                .await?
+                .ok_or_else(|| {
+                    invariant("Vault image artifact ended before its declared length")
+                })?;
+            bytes.extend_from_slice(&chunk);
+            chunk_index = chunk_index
+                .checked_add(1)
+                .ok_or_else(|| invariant("Vault image chunk index exhausted"))?;
+        }
+        if bytes.len() != byte_length as usize
+            || self
+                .artifacts
+                .read_chunk(&metadata, chunk_index)
+                .await?
+                .is_some()
+        {
+            return Err(invariant(
+                "Vault image artifact length changed after acceptance",
+            ));
+        }
+        let mut digest = Sha256::new();
+        digest.update(bytes.as_slice());
+        if format!("{:x}", digest.finalize()) != metadata.sha256() {
+            return Err(invariant(
+                "Vault image artifact digest changed after acceptance",
+            ));
+        }
+        Ok(bytes)
+    }
+    #[allow(
+        dead_code,
+        reason = "Ticket 53 consumes this narrow cleanup seam behind its test-only executor"
+    )]
+    pub(crate) async fn delete_bound(
+        &self,
+        account_id: AccountId,
+        operation_id: String,
+    ) -> Result<(), RuntimeError> {
+        self.artifacts
+            .delete(&VaultImageArtifactScope::new(account_id, operation_id)?)
+            .await
+    }
     pub async fn retire_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         let source = self
             .sources
@@ -701,7 +801,7 @@ fn validate_image_shape(length: u64, content_type: &str) -> Result<(), RuntimeEr
     }
     Ok(())
 }
-fn validate_identity(value: &str, label: &str) -> Result<(), RuntimeError> {
+pub(crate) fn validate_identity(value: &str, label: &str) -> Result<(), RuntimeError> {
     if value.is_empty()
         || value.len() > 128
         || !value

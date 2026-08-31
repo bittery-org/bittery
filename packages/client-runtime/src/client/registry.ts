@@ -200,9 +200,16 @@ export class ObservationRegistry {
 }
 
 function observationKey(request: ObservationRequest): string {
-	return request.type === "items"
-		? `items:${request.accountId}`
-		: `runtimeStatus:${request.accountId ?? ""}`;
+	switch (request.type) {
+		case "writableVaultCatalog":
+			return "writableVaultCatalog";
+		case "items":
+			return `items:${request.accountId}`;
+		case "pendingShareResults":
+			return `pendingShareResults:${request.accountId}`;
+		case "runtimeStatus":
+			return `runtimeStatus:${request.accountId ?? ""}`;
+	}
 }
 
 function projectionTypeFor(

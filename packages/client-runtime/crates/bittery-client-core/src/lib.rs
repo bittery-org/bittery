@@ -73,15 +73,17 @@ pub use platform_storage::SerializedPlatformStorageExecutor;
 pub use protocol::runtime_protocol_contract_schema;
 pub use protocol::{
     AccountAccessState, AccountDisplayIdentity, AccountId, AccountStatus, AccountWaitingReason,
-    Address, AttachmentProjection, AuthenticatorItemData, CreateShareDraft, CreditCardItemData,
-    CustomField, CustomFieldKind, IdentityItemData, Incarnation, ItemCategory, ItemDraft,
-    ItemProjection, ItemProjectionStatus, ItemsProjection, LoginItemData, ObservationRequest,
-    ObservationSink, Passkey, PasskeyStatus, PasskeyStatusReason, PasswordHistoryEntry,
-    PendingShareResult, PendingShareResultsProjection, PhoneNumber, RequestCancellation,
-    RuntimeError, RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest,
-    RuntimeResponse, RuntimeStatusProjection, SecureNoteItemData, ServerAccountDeletionOutcome,
-    ShareAccessMode, ShareExpiration, TeardownPhase, TeardownScope, TeardownStatus, TotpAlgorithm,
-    TotpDigits, VaultProjection, VaultProjectionRole, VaultProjectionType,
+    Address, AttachmentProjection, AuthenticatorItemData, CreateShareDraft, CreateVaultType,
+    CreditCardItemData, CustomField, CustomFieldKind, IdentityItemData, Incarnation, ItemCategory,
+    ItemDraft, ItemProjection, ItemProjectionStatus, ItemsProjection, LoginItemData,
+    ObservationRequest, ObservationSink, Passkey, PasskeyStatus, PasskeyStatusReason,
+    PasswordHistoryEntry, PendingShareResult, PendingShareResultsProjection, PhoneNumber,
+    RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeOutcome, RuntimeProjection,
+    RuntimeRequest, RuntimeResponse, RuntimeStatusProjection, SecureNoteItemData,
+    ServerAccountDeletionOutcome, ShareAccessMode, ShareExpiration, TeardownPhase, TeardownScope,
+    TeardownStatus, TotpAlgorithm, TotpDigits, VaultImageSourceInput, VaultProjection,
+    VaultProjectionRole, VaultProjectionType, WritableVaultCatalogProjection,
+    WritableVaultProjection,
 };
 
 #[cfg(feature = "persistence-contract-schema")]

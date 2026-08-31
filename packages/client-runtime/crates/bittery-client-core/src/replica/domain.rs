@@ -113,6 +113,8 @@ pub(crate) enum PlanMutation {
     /// The whole record travels so the Replica can prove the immutable half did not move. No
     /// mutation exists that can change an accepted Operation's identity, bytes, or fingerprint.
     RescheduleOperation(OperationRecord),
+    /// Advances only the closed create-Vault checkpoint while preserving its immutable intent.
+    CheckpointCreateVault(OperationRecord),
     RemoveOperation {
         operation_id: String,
     },
@@ -153,6 +155,15 @@ pub(crate) enum PlanMutation {
     ReconcileShareOutcome {
         outcome: ObservedOutcome,
         cursor: Option<CursorAdvance>,
+    },
+    ReconcileCreateVault {
+        outcome: ObservedOutcome,
+        vault: Option<AuthorityVaultRecord>,
+    },
+    CompleteCreateVaultCleanup {
+        operation_id: String,
+        local_artifact_done: bool,
+        remote_staging_done: bool,
     },
     /// Advances one complete Sync page after all of its event effects succeeded locally.
     ///
@@ -228,9 +239,24 @@ pub(crate) enum OperationOutcomeResult {
         base_share_url: String,
         expires_at: String,
     },
+    VaultApplied {
+        vault_id: String,
+    },
+    VaultRejected {
+        code: CreateVaultOperationRejectionCode,
+    },
     Rejected {
         code: OperationRejectionCode,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CreateVaultOperationRejectionCode {
+    VaultIdConflict,
+    TeamMembershipRequired,
+    VaultSharingEntitlementDenied,
+    SharedVaultLimitReached,
 }
 
 /// One observed semantic outcome, carrying the fingerprint it was answered for.
@@ -256,18 +282,59 @@ pub(crate) struct ObservedOutcome {
 pub(crate) struct OperationReceiptRecord {
     pub operation_id: String,
     pub kind: OperationKind,
-    pub item_id: String,
-    pub vault_id: String,
+    pub target: ResourceRef,
     pub request_fingerprint: Sha256Fingerprint,
     pub result: OperationOutcomeResult,
     #[serde(with = "decimal_u64")]
     pub completed_at_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create_vault_cleanup: Option<CreateVaultCleanupObligation>,
+}
+
+/// The closed durable address of the resource an Operation owns.
+///
+/// Vault work is never disguised as Item work, and adding another non-Item Operation requires an
+/// explicit new variant rather than a sentinel `item_id`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum ResourceRef {
+    Item { item_id: String, vault_id: String },
+    Vault { vault_id: String },
+}
+
+impl ResourceRef {
+    pub(crate) fn item_id(&self) -> Option<&str> {
+        match self {
+            Self::Item { item_id, .. } => Some(item_id),
+            Self::Vault { .. } => None,
+        }
+    }
+
+    pub(crate) fn vault_id(&self) -> &str {
+        match self {
+            Self::Item { vault_id, .. } | Self::Vault { vault_id } => vault_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateVaultCleanupObligation {
+    pub image: CreateVaultImageRecord,
+    pub local_artifact_pending: bool,
+    pub remote_staging_pending: bool,
 }
 
 /// The closed set of durable mutations this Runtime accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum OperationKind {
+    CreateVault,
     CreateItem,
     UpdateItem,
     SetItemFavorite,
@@ -311,8 +378,7 @@ pub(crate) struct OperationSchedulingState {
 pub(crate) struct OperationRecord {
     pub operation_id: String,
     pub kind: OperationKind,
-    pub item_id: String,
-    pub vault_id: String,
+    pub target: ResourceRef,
     pub request: ImmutableHttpRequest,
     /// Covers the request, never the Operation ID. A Server outcome that carries this Operation ID
     /// with another fingerprint is therefore a detectable identity reuse, not a replay.
@@ -320,7 +386,123 @@ pub(crate) struct OperationRecord {
     /// Opaque restart material retained by a prepared or stale-authority Attachment Move request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment_move_recovery: Option<AttachmentMoveRecovery>,
+    /// Durable intent and checkpoints. Presence is the `PendingVaultCreation` optimistic effect;
+    /// it never publishes Vault or key authority by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create_vault: Option<CreateVaultOperationRecord>,
     pub scheduling: OperationSchedulingState,
+}
+
+impl OperationRecord {
+    pub(crate) fn item_id(&self) -> &str {
+        self.target
+            .item_id()
+            .expect("Item-only Operation path received a non-Item target")
+    }
+
+    pub(crate) fn vault_id(&self) -> &str {
+        self.target.vault_id()
+    }
+}
+
+impl OperationReceiptRecord {
+    #[cfg(test)]
+    pub(crate) fn item_id(&self) -> &str {
+        self.target
+            .item_id()
+            .expect("Item-only receipt path received a non-Item target")
+    }
+
+    pub(crate) fn vault_id(&self) -> &str {
+        self.target.vault_id()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateVaultOperationRecord {
+    pub account_id: AccountId,
+    pub name: String,
+    pub vault_type: crate::CreateVaultType,
+    pub icon: String,
+    pub encrypted_vault_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<CreateVaultImageRecord>,
+    pub checkpoint: CreateVaultCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateVaultImageRecord {
+    pub byte_length: u64,
+    pub content_type: String,
+    pub sha256: String,
+    pub object_key: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CanonicalCreateVaultBody<'a> {
+    name: &'a str,
+    vault_type: &'a str,
+    encrypted_vault_key: &'a str,
+    icon: &'a str,
+    image_key: Option<&'a str>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CreateVaultCheckpoint {
+    ArtifactReady,
+    RemoteUploadConfirmed,
+    FinalRequestFrozen,
+}
+
+fn create_vault_fingerprint(path: &str, body: &[u8]) -> Sha256Fingerprint {
+    use sha2::{Digest, Sha256};
+
+    let mut digest = Sha256::new();
+    for value in [
+        b"bittery.operation.v1".as_slice(),
+        b"create_vault",
+        path.as_bytes(),
+        body,
+    ] {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value);
+    }
+    Sha256Fingerprint(digest.finalize().into())
+}
+
+pub(crate) struct CanonicalCreateVaultRequest {
+    pub path: String,
+    pub body: Vec<u8>,
+    pub fingerprint: Sha256Fingerprint,
+}
+
+pub(crate) fn canonical_create_vault_request(
+    vault_id: &str,
+    intent: &CreateVaultOperationRecord,
+) -> Result<CanonicalCreateVaultRequest, RuntimeError> {
+    let path = format!("/api/v1/vaults/{vault_id}");
+    let vault_type = match intent.vault_type {
+        crate::CreateVaultType::Personal => "personal",
+        crate::CreateVaultType::Shared => "team",
+    };
+    let body = serde_json::to_vec(&CanonicalCreateVaultBody {
+        name: &intent.name,
+        vault_type,
+        encrypted_vault_key: &intent.encrypted_vault_key,
+        icon: &intent.icon,
+        image_key: intent.image.as_ref().map(|image| image.object_key.as_str()),
+    })
+    .map_err(|_| replica_invariant("canonical create-Vault body could not be serialized"))?;
+    let fingerprint = create_vault_fingerprint(&path, &body);
+    Ok(CanonicalCreateVaultRequest {
+        path,
+        body,
+        fingerprint,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1151,6 +1333,7 @@ impl AccountReplica {
         let mut item_ids = HashSet::new();
         for operation in self.operations.values() {
             check_immutable_request(operation)?;
+            validate_create_vault_operation_context(operation, &self.account_id, &self.user_id)?;
             if let Some(recovery) = &operation.attachment_move_recovery {
                 let preparation = recovery.preparation();
                 self.check_attachment_move_preparation(preparation, false)?;
@@ -1169,7 +1352,10 @@ impl AccountReplica {
                 }
             }
             if !operation_ids.insert(operation.operation_id.clone())
-                || !item_ids.insert(operation.item_id.clone())
+                || operation
+                    .target
+                    .item_id()
+                    .is_some_and(|item_id| !item_ids.insert(item_id.to_owned()))
                 || self.receipts.contains_key(&operation.operation_id)
             {
                 return Err(replica_invariant(
@@ -1223,6 +1409,14 @@ impl AccountReplica {
             {
                 return Err(replica_invariant(
                     "Replica Attachment Move identity is inconsistent",
+                ));
+            }
+        }
+        for receipt in self.receipts.values() {
+            validate_operation_receipt(receipt, &self.user_id)?;
+            if receipt.completed_at_revision == 0 || receipt.completed_at_revision > self.revision {
+                return Err(replica_invariant(
+                    "Operation receipt completion revision is inconsistent",
                 ));
             }
         }
@@ -1670,19 +1864,27 @@ impl AccountReplica {
                     return Err(replica_invariant("completed Operation identity was reused"));
                 }
                 check_immutable_request(&operation)?;
-                if self
-                    .operations
-                    .values()
-                    .any(|active| active.item_id == operation.item_id)
-                    || self
-                        .attachment_move_preparations
+                validate_create_vault_operation_context(
+                    &operation,
+                    &self.account_id,
+                    &self.user_id,
+                )?;
+                if let Some(item_id) = operation.target.item_id() {
+                    if self
+                        .operations
                         .values()
-                        .any(|active| active.item_id == operation.item_id)
-                {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::InvariantViolation,
-                        "another active Operation already owns this Item",
-                    ));
+                        .filter_map(|active| active.target.item_id())
+                        .any(|active| active == item_id)
+                        || self
+                            .attachment_move_preparations
+                            .values()
+                            .any(|active| active.item_id == item_id)
+                    {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            "another active Operation already owns this Item",
+                        ));
+                    }
                 }
                 self.operations
                     .insert(operation.operation_id.clone(), operation);
@@ -1727,7 +1929,8 @@ impl AccountReplica {
                 if self
                     .operations
                     .values()
-                    .any(|active| active.item_id == preparation.item_id)
+                    .filter_map(|active| active.target.item_id())
+                    .any(|active| active == preparation.item_id)
                     || self
                         .attachment_move_preparations
                         .values()
@@ -1856,11 +2059,11 @@ impl AccountReplica {
                     .get(&operation.operation_id)
                     .ok_or_else(|| replica_invariant("cannot reschedule an unknown Operation"))?;
                 if existing.kind != operation.kind
-                    || existing.item_id != operation.item_id
-                    || existing.vault_id != operation.vault_id
+                    || existing.target != operation.target
                     || existing.request != operation.request
                     || existing.request_fingerprint != operation.request_fingerprint
                     || existing.attachment_move_recovery != operation.attachment_move_recovery
+                    || existing.create_vault != operation.create_vault
                 {
                     return Err(replica_invariant(
                         "rescheduling cannot change accepted Operation bytes",
@@ -1869,6 +2072,22 @@ impl AccountReplica {
                 if let Some(recovery) = &mut operation.attachment_move_recovery {
                     recovery.preparation_mut().scheduling = operation.scheduling;
                 }
+                self.operations
+                    .insert(operation.operation_id.clone(), operation);
+            }
+            PlanMutation::CheckpointCreateVault(operation) => {
+                let existing = self
+                    .operations
+                    .get(&operation.operation_id)
+                    .ok_or_else(|| {
+                        replica_invariant("cannot checkpoint an unknown create-Vault Operation")
+                    })?;
+                validate_create_vault_transition(existing, &operation)?;
+                validate_create_vault_operation_context(
+                    &operation,
+                    &self.account_id,
+                    &self.user_id,
+                )?;
                 self.operations
                     .insert(operation.operation_id.clone(), operation);
             }
@@ -1886,6 +2105,13 @@ impl AccountReplica {
                 cursor,
             } => {
                 let operation = self.operation_for(&outcome)?;
+                if operation.kind != OperationKind::CreateItem
+                    || operation.target.item_id().is_none()
+                {
+                    return Err(replica_invariant(
+                        "an applied create reconciliation needs a create-Item Operation",
+                    ));
+                }
                 let OperationOutcomeResult::Applied { entity_id, version } = &outcome.result else {
                     return Err(replica_invariant(
                         "an applied reconciliation needs an applied outcome",
@@ -1893,9 +2119,9 @@ impl AccountReplica {
                 };
                 // The outcome, the fetched Item, and the accepted Operation must describe one
                 // entity at one version. Anything else is not this Operation's authority.
-                if entity_id != &operation.item_id
-                    || item.id != operation.item_id
-                    || item.vault_id != operation.vault_id
+                if entity_id != operation.item_id()
+                    || item.id != operation.item_id()
+                    || item.vault_id != operation.vault_id()
                     || item.version != *version
                 {
                     return Err(replica_invariant(
@@ -1923,7 +2149,8 @@ impl AccountReplica {
                         | OperationKind::RestoreItem
                         | OperationKind::MoveItem
                         | OperationKind::PermanentlyDeleteItem
-                ) {
+                ) || operation.target.item_id().is_none()
+                {
                     return Err(replica_invariant(
                         "an existing-Item reconciliation needs an ordinary Item Operation",
                     ));
@@ -1931,15 +2158,15 @@ impl AccountReplica {
                 match (&outcome.result, item.as_deref()) {
                     (OperationOutcomeResult::Applied { entity_id, version }, Some(authority))
                         if operation.kind != OperationKind::PermanentlyDeleteItem
-                            && entity_id == &operation.item_id
-                            && authority.id == operation.item_id
-                            && authority.vault_id == operation.vault_id
+                            && entity_id == operation.item_id()
+                            && authority.id == operation.item_id()
+                            && authority.vault_id == operation.vault_id()
                             && authority.version == *version => {}
                     (OperationOutcomeResult::Applied { entity_id, .. }, None)
                         if operation.kind == OperationKind::PermanentlyDeleteItem
-                            && entity_id == &operation.item_id => {}
+                            && entity_id == operation.item_id() => {}
                     (OperationOutcomeResult::Rejected { .. }, Some(authority))
-                        if authority.id == operation.item_id => {}
+                        if authority.id == operation.item_id() => {}
                     (OperationOutcomeResult::Rejected { .. }, None) => {}
                     _ => {
                         return Err(replica_invariant(
@@ -1950,7 +2177,7 @@ impl AccountReplica {
                 self.retain_receipt(&operation, &outcome)?;
                 match item {
                     Some(item) => self.write_authoritative_item(*item)?,
-                    None => self.remove_authoritative_item(&operation.item_id)?,
+                    None => self.remove_authoritative_item(operation.item_id())?,
                 }
                 self.operations.remove(&operation.operation_id);
                 self.items
@@ -2041,6 +2268,108 @@ impl AccountReplica {
                     (None, _) => {}
                 }
                 self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::ReconcileCreateVault { outcome, vault } => {
+                let operation = self.operation_for(&outcome)?;
+                if operation.kind != OperationKind::CreateVault {
+                    return Err(replica_invariant(
+                        "a Vault reconciliation needs a create-Vault Operation",
+                    ));
+                }
+                let intent = operation
+                    .create_vault
+                    .as_ref()
+                    .ok_or_else(|| replica_invariant("create-Vault intent is missing"))?;
+                if intent.checkpoint != CreateVaultCheckpoint::FinalRequestFrozen {
+                    return Err(replica_invariant(
+                        "create-Vault cannot reconcile before its final request is frozen",
+                    ));
+                }
+                match (&outcome.result, vault) {
+                    (OperationOutcomeResult::VaultApplied { vault_id }, Some(authority))
+                        if vault_id == operation.vault_id()
+                            && authority.id == operation.vault_id()
+                            && authority.name == intent.name
+                            && authority.encrypted_vault_key == intent.encrypted_vault_key
+                            && authority.role == AuthorityVaultRole::Owner
+                            && authority.icon.as_deref() == Some(intent.icon.as_str())
+                            && authority.vault_type
+                                == match intent.vault_type {
+                                    crate::CreateVaultType::Personal => {
+                                        AuthorityVaultType::Personal
+                                    }
+                                    crate::CreateVaultType::Shared => AuthorityVaultType::Team,
+                                }
+                            && authority.image_url.is_some() == intent.image.is_some() =>
+                    {
+                        self.write_authoritative_vault(authority)?;
+                    }
+                    (OperationOutcomeResult::VaultRejected { .. }, None) => {}
+                    _ => {
+                        return Err(replica_invariant(
+                            "authoritative Vault does not match the create-Vault outcome",
+                        ))
+                    }
+                }
+                self.retain_receipt(&operation, &outcome)?;
+                if let Some(image) = intent.image.clone() {
+                    let receipt =
+                        self.receipts
+                            .get_mut(&operation.operation_id)
+                            .ok_or_else(|| {
+                                replica_invariant("create-Vault reconciliation kept no receipt")
+                            })?;
+                    receipt.create_vault_cleanup = Some(CreateVaultCleanupObligation {
+                        image,
+                        local_artifact_pending: true,
+                        remote_staging_pending: matches!(
+                            outcome.result,
+                            OperationOutcomeResult::VaultRejected { .. }
+                        ),
+                    });
+                    validate_operation_receipt(receipt, &self.user_id)?;
+                }
+                self.operations.remove(&operation.operation_id);
+            }
+            PlanMutation::CompleteCreateVaultCleanup {
+                operation_id,
+                local_artifact_done,
+                remote_staging_done,
+            } => {
+                let receipt = self
+                    .receipts
+                    .get_mut(&operation_id)
+                    .ok_or_else(|| replica_invariant("create-Vault cleanup receipt is missing"))?;
+                let cleanup = receipt.create_vault_cleanup.as_mut().ok_or_else(|| {
+                    replica_invariant("create-Vault cleanup obligation is missing")
+                })?;
+                let valid_transition = matches!(
+                    (
+                        cleanup.local_artifact_pending,
+                        cleanup.remote_staging_pending,
+                        local_artifact_done,
+                        remote_staging_done,
+                    ),
+                    (true, false, true, false)
+                        | (true, true, true, false)
+                        | (false, true, false, true)
+                );
+                if !valid_transition {
+                    return Err(replica_invariant(
+                        "create-Vault cleanup transition is invalid",
+                    ));
+                }
+                if local_artifact_done {
+                    cleanup.local_artifact_pending = false;
+                }
+                if remote_staging_done {
+                    cleanup.remote_staging_pending = false;
+                }
+                if !cleanup.local_artifact_pending && !cleanup.remote_staging_pending {
+                    receipt.create_vault_cleanup = None;
+                } else {
+                    validate_operation_receipt(receipt, &self.user_id)?;
+                }
             }
             PlanMutation::AdvanceSyncPageCursor {
                 operation_ids,
@@ -2243,16 +2572,17 @@ impl AccountReplica {
         let receipt = OperationReceiptRecord {
             operation_id: operation.operation_id.clone(),
             kind: operation.kind,
-            item_id: operation.item_id.clone(),
-            vault_id: operation.vault_id.clone(),
+            target: operation.target.clone(),
             request_fingerprint: operation.request_fingerprint,
             result: outcome.result.clone(),
             completed_at_revision: increment_revision(self.revision)?,
+            create_vault_cleanup: None,
         };
+        validate_operation_receipt(&receipt, &self.user_id)?;
         if let Some(existing) = self.receipts.get(&operation.operation_id) {
             if existing.request_fingerprint != receipt.request_fingerprint
                 || existing.result != receipt.result
-                || existing.item_id != receipt.item_id
+                || existing.target != receipt.target
             {
                 return Err(replica_invariant(
                     "a matching semantic outcome is immutable",
@@ -2290,6 +2620,26 @@ impl AccountReplica {
             return Ok(());
         }
         self.bootstrap.items.insert(key, item);
+        self.bootstrap.validate()
+    }
+
+    fn write_authoritative_vault(
+        &mut self,
+        vault: AuthorityVaultRecord,
+    ) -> Result<(), RuntimeError> {
+        if self.bootstrap.state != ReplicaState::Ready {
+            return Err(replica_invariant(
+                "Vault authority can only be written to a ready Replica",
+            ));
+        }
+        let generation_id =
+            self.bootstrap.active_generation.clone().ok_or_else(|| {
+                replica_invariant("ready Replica has no active Bootstrap generation")
+            })?;
+        validate_authority_page(std::slice::from_ref(&vault), &[])?;
+        self.bootstrap
+            .vaults
+            .insert((generation_id, vault.id.clone()), vault);
         self.bootstrap.validate()
     }
 
@@ -2350,16 +2700,29 @@ impl AccountReplica {
         let identity = self
             .operations
             .get(&item.operation_id)
-            .map(|operation| (&operation.item_id, &operation.vault_id))
+            .and_then(|operation| {
+                operation
+                    .target
+                    .item_id()
+                    .map(|item_id| (item_id, operation.vault_id()))
+            })
             .or_else(|| {
                 self.attachment_move_preparations
                     .get(&item.operation_id)
-                    .map(|preparation| (&preparation.item_id, &preparation.target_vault_id))
+                    .map(|preparation| {
+                        (
+                            preparation.item_id.as_str(),
+                            preparation.target_vault_id.as_str(),
+                        )
+                    })
             })
             .or_else(|| {
-                self.receipts
-                    .get(&item.operation_id)
-                    .map(|receipt| (&receipt.item_id, &receipt.vault_id))
+                self.receipts.get(&item.operation_id).and_then(|receipt| {
+                    receipt
+                        .target
+                        .item_id()
+                        .map(|item_id| (item_id, receipt.vault_id()))
+                })
             });
         let Some((operation_item_id, operation_vault_id)) = identity else {
             return Err(RuntimeError::new(
@@ -2367,7 +2730,7 @@ impl AccountReplica {
                 "optimistic overlay has no accepted Operation",
             ));
         };
-        if operation_item_id != &item.item_id || operation_vault_id != &item.vault_id {
+        if operation_item_id != item.item_id || operation_vault_id != item.vault_id {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "optimistic overlay does not match its Operation",
@@ -2630,8 +2993,10 @@ fn move_operation(
     let operation = OperationRecord {
         operation_id: preparation.operation_id.clone(),
         kind: OperationKind::MoveItem,
-        item_id: preparation.item_id.clone(),
-        vault_id: preparation.target_vault_id.clone(),
+        target: ResourceRef::Item {
+            item_id: preparation.item_id.clone(),
+            vault_id: preparation.target_vault_id.clone(),
+        },
         request: ImmutableHttpRequest {
             method: HttpMethod::Post,
             path: format!("/api/v1/items/{}/moves", preparation.item_id),
@@ -2649,6 +3014,7 @@ fn move_operation(
         },
         request_fingerprint,
         attachment_move_recovery: None,
+        create_vault: None,
         scheduling: preparation.scheduling,
     };
     check_immutable_request(&operation)?;
@@ -2664,6 +3030,7 @@ pub(crate) fn item_operation_fingerprint(
 ) -> Sha256Fingerprint {
     use sha2::{Digest, Sha256};
     let kind = match kind {
+        OperationKind::CreateVault => "create_vault",
         OperationKind::CreateItem => "create_item",
         OperationKind::UpdateItem => "update_item",
         OperationKind::SetItemFavorite => "set_item_favorite",
@@ -2691,13 +3058,22 @@ pub(crate) fn item_operation_fingerprint(
 
 /// Durable request bytes never carry a credential, and a durable route is never ambiguous.
 fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeError> {
-    if operation.operation_id.is_empty() || operation.item_id.is_empty() {
+    if operation.operation_id.is_empty()
+        || operation.vault_id().is_empty()
+        || operation.target.item_id().is_some_and(str::is_empty)
+    {
         return Err(replica_invariant("Operation identity is empty"));
     }
     if !operation.request.path.starts_with('/') {
         return Err(replica_invariant("Operation route path is not absolute"));
     }
+    let unfinished_vault = operation.kind == OperationKind::CreateVault
+        && operation
+            .create_vault
+            .as_ref()
+            .is_some_and(|record| record.checkpoint != CreateVaultCheckpoint::FinalRequestFrozen);
     if operation.request.body.is_empty()
+        && !unfinished_vault
         && !matches!(
             operation.kind,
             OperationKind::TrashItem
@@ -2706,6 +3082,27 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
         )
     {
         return Err(replica_invariant("Operation request body is empty"));
+    }
+    match (&operation.kind, &operation.create_vault) {
+        (OperationKind::CreateVault, Some(record))
+            if matches!(operation.target, ResourceRef::Vault { .. })
+                && !record.name.is_empty()
+                && !record.icon.is_empty()
+                && !record.encrypted_vault_key.is_empty() => {}
+        (OperationKind::CreateVault, _) => {
+            return Err(replica_invariant("create-Vault durable intent is invalid"));
+        }
+        (_, Some(_)) => {
+            return Err(replica_invariant(
+                "non-Vault Operation carries Vault intent",
+            ));
+        }
+        (_, None) if matches!(operation.target, ResourceRef::Item { .. }) => {}
+        (_, None) => {
+            return Err(replica_invariant(
+                "Item Operation carries a non-Item resource target",
+            ));
+        }
     }
     for header in &operation.request.headers {
         if header.name.eq_ignore_ascii_case("authorization")
@@ -2717,6 +3114,370 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
         }
     }
     Ok(())
+}
+
+fn validate_operation_receipt(
+    receipt: &OperationReceiptRecord,
+    user_id: &str,
+) -> Result<(), RuntimeError> {
+    let item_target = match &receipt.target {
+        ResourceRef::Item { item_id, vault_id } if !item_id.is_empty() && !vault_id.is_empty() => {
+            Some(item_id.as_str())
+        }
+        ResourceRef::Vault { vault_id } if !vault_id.is_empty() => None,
+        _ => return Err(replica_invariant("Operation receipt target is empty")),
+    };
+    if receipt.operation_id.is_empty() {
+        return Err(replica_invariant("Operation receipt identity is empty"));
+    }
+
+    let result_matches = match (receipt.kind, item_target, &receipt.result) {
+        (OperationKind::CreateVault, None, OperationOutcomeResult::VaultApplied { vault_id }) => {
+            vault_id == receipt.vault_id()
+        }
+        (OperationKind::CreateVault, None, OperationOutcomeResult::VaultRejected { .. }) => true,
+        (
+            OperationKind::CreateShare,
+            Some(_),
+            OperationOutcomeResult::ShareApplied {
+                share_link_id,
+                base_share_url,
+                expires_at,
+            },
+        ) => !share_link_id.is_empty() && !base_share_url.is_empty() && !expires_at.is_empty(),
+        (OperationKind::CreateShare, Some(_), OperationOutcomeResult::Rejected { code }) => {
+            matches!(
+                code,
+                OperationRejectionCode::ItemNotFound
+                    | OperationRejectionCode::VaultReadOnly
+                    | OperationRejectionCode::ShareEntitlementDenied
+                    | OperationRejectionCode::ShareLimitReached
+            )
+        }
+        (
+            OperationKind::CreateItem,
+            Some(item_id),
+            OperationOutcomeResult::Applied { entity_id, version },
+        ) => entity_id == item_id && *version >= 1,
+        (OperationKind::CreateItem, Some(_), OperationOutcomeResult::Rejected { code }) => {
+            matches!(
+                code,
+                OperationRejectionCode::InvalidCiphertext
+                    | OperationRejectionCode::VaultAccessDenied
+                    | OperationRejectionCode::VaultReadOnly
+                    | OperationRejectionCode::ItemIdConflict
+            )
+        }
+        (
+            OperationKind::UpdateItem
+            | OperationKind::SetItemFavorite
+            | OperationKind::TrashItem
+            | OperationKind::RestoreItem
+            | OperationKind::MoveItem
+            | OperationKind::PermanentlyDeleteItem,
+            Some(item_id),
+            OperationOutcomeResult::Applied { entity_id, version },
+        ) => entity_id == item_id && *version >= 1,
+        (kind, Some(_), OperationOutcomeResult::Rejected { code }) => {
+            receipt_rejection_allowed(kind, *code)
+        }
+        _ => false,
+    };
+    if !result_matches {
+        return Err(replica_invariant(
+            "Operation receipt kind, target, and result are inconsistent",
+        ));
+    }
+
+    if let Some(cleanup) = &receipt.create_vault_cleanup {
+        let valid_state = match &receipt.result {
+            OperationOutcomeResult::VaultApplied { .. } => {
+                cleanup.local_artifact_pending && !cleanup.remote_staging_pending
+            }
+            OperationOutcomeResult::VaultRejected { .. } => cleanup.remote_staging_pending,
+            _ => false,
+        };
+        if receipt.kind != OperationKind::CreateVault
+            || !valid_state
+            || validate_create_vault_image(
+                &cleanup.image,
+                user_id,
+                receipt.vault_id(),
+                &receipt.operation_id,
+            )
+            .is_err()
+        {
+            return Err(replica_invariant(
+                "create-Vault cleanup is not bound to its receipt",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_create_vault_operation_context(
+    operation: &OperationRecord,
+    account_id: &AccountId,
+    user_id: &str,
+) -> Result<(), RuntimeError> {
+    let Some(intent) = &operation.create_vault else {
+        return Ok(());
+    };
+    if intent.account_id != *account_id {
+        return Err(replica_invariant(
+            "create-Vault durable intent belongs to another Account",
+        ));
+    }
+    validate_create_vault_intent(
+        intent,
+        account_id,
+        &operation.operation_id,
+        operation.vault_id(),
+    )?;
+    if let Some(image) = &intent.image {
+        validate_create_vault_image(
+            image,
+            user_id,
+            operation.vault_id(),
+            &operation.operation_id,
+        )?;
+    }
+    let canonical = canonical_create_vault_request(operation.vault_id(), intent)?;
+    if operation.request.method != HttpMethod::Put
+        || operation.request.path != canonical.path
+        || operation.request.headers
+            != vec![HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }]
+        || operation.request_fingerprint != canonical.fingerprint
+    {
+        return Err(replica_invariant(
+            "create-Vault request identity is not canonical",
+        ));
+    }
+    match (intent.image.is_some(), intent.checkpoint) {
+        (false, CreateVaultCheckpoint::FinalRequestFrozen) => {
+            if operation.request.body != canonical.body {
+                return Err(replica_invariant(
+                    "final create-Vault request body is not canonical",
+                ));
+            }
+        }
+        (
+            true,
+            CreateVaultCheckpoint::ArtifactReady | CreateVaultCheckpoint::RemoteUploadConfirmed,
+        ) => {
+            if !operation.request.body.is_empty() {
+                return Err(replica_invariant(
+                    "unfinished create-Vault request already carries final bytes",
+                ));
+            }
+        }
+        (true, CreateVaultCheckpoint::FinalRequestFrozen) => {
+            if operation.request.body != canonical.body {
+                return Err(replica_invariant(
+                    "final create-Vault request body is not canonical",
+                ));
+            }
+        }
+        (false, _) => {
+            return Err(replica_invariant(
+                "image-free create-Vault intent has an image-staging checkpoint",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Reapplies the complete immutable acceptance policy anywhere durable create-Vault work enters
+/// Domain: initial acceptance, guarded checkpoints, serialized reconstruction, and SQLite load.
+const CREATE_VAULT_NAME_MAX_CHARS: usize = 200;
+const CREATE_VAULT_ICON_MAX_CHARS: usize = 128;
+const CREATE_VAULT_ENCRYPTED_KEY_MAX_BYTES: usize = 64 * 1024;
+
+pub(crate) fn validate_create_vault_text_fields(
+    name: &str,
+    icon: &str,
+) -> Result<(), &'static str> {
+    let name_chars = name.chars().count();
+    if name != name.trim() || !(2..=CREATE_VAULT_NAME_MAX_CHARS).contains(&name_chars) {
+        return Err("Vault name is outside the shared bound");
+    }
+    let icon_chars = icon.chars().count();
+    if icon != icon.trim() || !(1..=CREATE_VAULT_ICON_MAX_CHARS).contains(&icon_chars) {
+        return Err("Vault icon is outside the shared bound");
+    }
+    Ok(())
+}
+
+fn validate_create_vault_intent(
+    intent: &CreateVaultOperationRecord,
+    account_id: &AccountId,
+    operation_id: &str,
+    vault_id: &str,
+) -> Result<(), RuntimeError> {
+    for (value, label) in [
+        (account_id.as_str(), "Account"),
+        (operation_id, "Operation"),
+        (vault_id, "Vault"),
+    ] {
+        crate::vault_image::validate_identity(value, label)
+            .map_err(|_| replica_invariant(format!("create-Vault {label} identity is invalid")))?;
+    }
+    validate_create_vault_text_fields(&intent.name, &intent.icon).map_err(|message| {
+        replica_invariant(format!("create-Vault intent is invalid: {message}"))
+    })?;
+    if intent.encrypted_vault_key.trim().is_empty()
+        || intent.encrypted_vault_key.len() > CREATE_VAULT_ENCRYPTED_KEY_MAX_BYTES
+    {
+        return Err(replica_invariant(
+            "create-Vault wrapped key is outside the Server bound",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_create_vault_image(
+    image: &CreateVaultImageRecord,
+    user_id: &str,
+    vault_id: &str,
+    operation_id: &str,
+) -> Result<(), RuntimeError> {
+    let valid_sha = image.sha256.len() == 64
+        && image
+            .sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
+    let expected_key = format!(
+        "vaults/{user_id}/{vault_id}/create/{operation_id}-{}",
+        image.sha256
+    );
+    if !(1..=crate::vault_image::VAULT_IMAGE_MAX_BYTES).contains(&image.byte_length)
+        || !matches!(
+            image.content_type.as_str(),
+            "image/jpeg" | "image/png" | "image/webp" | "image/gif" | "image/avif"
+        )
+        || !valid_sha
+        || image.object_key != expected_key
+    {
+        return Err(replica_invariant(
+            "create-Vault image is not canonical for its owner",
+        ));
+    }
+    Ok(())
+}
+
+fn receipt_rejection_allowed(kind: OperationKind, code: OperationRejectionCode) -> bool {
+    use OperationKind::{
+        MoveItem, PermanentlyDeleteItem, RestoreItem, SetItemFavorite, TrashItem, UpdateItem,
+    };
+    use OperationRejectionCode::{
+        AttachmentStateConflict, InvalidCiphertext, ItemNotFound, ItemNotTrashed, ItemTrashed,
+        ItemVersionConflict, SourceVaultMismatch, TargetVaultAccessDenied, TargetVaultReadOnly,
+        VaultAccessDenied, VaultReadOnly,
+    };
+    match kind {
+        UpdateItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | ItemVersionConflict
+        ),
+        SetItemFavorite => matches!(
+            code,
+            VaultAccessDenied | VaultReadOnly | ItemNotFound | ItemVersionConflict
+        ),
+        TrashItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | ItemVersionConflict
+        ),
+        RestoreItem | PermanentlyDeleteItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | ItemNotTrashed
+                | ItemVersionConflict
+        ),
+        MoveItem => matches!(
+            code,
+            InvalidCiphertext
+                | VaultAccessDenied
+                | VaultReadOnly
+                | ItemNotFound
+                | SourceVaultMismatch
+                | ItemTrashed
+                | TargetVaultAccessDenied
+                | TargetVaultReadOnly
+                | ItemVersionConflict
+                | AttachmentStateConflict
+        ),
+        _ => false,
+    }
+}
+
+fn validate_create_vault_transition(
+    existing: &OperationRecord,
+    next: &OperationRecord,
+) -> Result<(), RuntimeError> {
+    let (Some(existing_intent), Some(next_intent)) = (&existing.create_vault, &next.create_vault)
+    else {
+        return Err(replica_invariant(
+            "create-Vault checkpoint has no durable intent",
+        ));
+    };
+    let mut expected_intent = existing_intent.clone();
+    expected_intent.checkpoint = next_intent.checkpoint;
+    if existing.kind != OperationKind::CreateVault
+        || next.kind != OperationKind::CreateVault
+        || existing.operation_id != next.operation_id
+        || existing.target != next.target
+        || existing.attachment_move_recovery.is_some()
+        || next.attachment_move_recovery.is_some()
+        || expected_intent != *next_intent
+        || existing.scheduling != next.scheduling
+    {
+        return Err(replica_invariant(
+            "create-Vault checkpoint changed immutable intent",
+        ));
+    }
+    let allowed = matches!(
+        (existing_intent.checkpoint, next_intent.checkpoint),
+        (
+            CreateVaultCheckpoint::ArtifactReady,
+            CreateVaultCheckpoint::RemoteUploadConfirmed
+        ) | (
+            CreateVaultCheckpoint::RemoteUploadConfirmed,
+            CreateVaultCheckpoint::FinalRequestFrozen
+        )
+    );
+    if !allowed {
+        return Err(replica_invariant(
+            "create-Vault checkpoint transition is invalid",
+        ));
+    }
+    if next_intent.checkpoint == CreateVaultCheckpoint::FinalRequestFrozen {
+        if next.request.body.is_empty() {
+            return Err(replica_invariant(
+                "frozen create-Vault request body is empty",
+            ));
+        }
+    } else if existing.request != next.request
+        || existing.request_fingerprint != next.request_fingerprint
+    {
+        return Err(replica_invariant(
+            "pre-freeze create-Vault checkpoint changed request identity",
+        ));
+    }
+    check_immutable_request(next)
 }
 
 #[allow(dead_code, reason = "the persistence wire invokes this model next")]
@@ -3134,8 +3895,10 @@ mod share_capability_invariant_tests {
         OperationRecord {
             operation_id: "share-operation".into(),
             kind,
-            item_id: "item-1".into(),
-            vault_id: "vault-1".into(),
+            target: ResourceRef::Item {
+                item_id: "item-1".into(),
+                vault_id: "vault-1".into(),
+            },
             request: ImmutableHttpRequest {
                 method: HttpMethod::Post,
                 path: "/api/v1/items/item-1/share-links".into(),
@@ -3144,6 +3907,7 @@ mod share_capability_invariant_tests {
             },
             request_fingerprint: Sha256Fingerprint([1; 32]),
             attachment_move_recovery: None,
+            create_vault: None,
             scheduling: OperationSchedulingState::default(),
         }
     }
@@ -3425,6 +4189,399 @@ mod attachment_move_reconciliation_tests {
         (state, account_id, preparation)
     }
 
+    fn unrelated_vault_operation(account_id: &AccountId) -> OperationRecord {
+        let body = br#"{"name":"New vault","vaultType":"personal","encryptedVaultKey":"wrapped-key","icon":"lock","imageKey":null}"#.to_vec();
+        OperationRecord {
+            operation_id: "vault-operation".into(),
+            kind: OperationKind::CreateVault,
+            target: ResourceRef::Vault {
+                vault_id: "vault-new".into(),
+            },
+            request: ImmutableHttpRequest {
+                method: HttpMethod::Put,
+                path: "/api/v1/vaults/vault-new".into(),
+                headers: vec![HttpHeader {
+                    name: "Content-Type".into(),
+                    value: "application/json".into(),
+                }],
+                body: body.clone(),
+            },
+            request_fingerprint: Sha256Fingerprint([
+                0x02, 0x4f, 0xc4, 0x33, 0x2e, 0x9a, 0xce, 0x87, 0x24, 0xbe, 0x1e, 0x09, 0x4b, 0x35,
+                0xd3, 0xfb, 0xe3, 0x66, 0x7c, 0xa8, 0x60, 0x6a, 0x0a, 0x58, 0xa0, 0x8e, 0xc6, 0x0e,
+                0xcb, 0x1b, 0xb1, 0xbb,
+            ]),
+            attachment_move_recovery: None,
+            create_vault: Some(CreateVaultOperationRecord {
+                account_id: account_id.clone(),
+                name: "New vault".into(),
+                vault_type: crate::CreateVaultType::Personal,
+                icon: "lock".into(),
+                encrypted_vault_key: "wrapped-key".into(),
+                image: None,
+                checkpoint: CreateVaultCheckpoint::FinalRequestFrozen,
+            }),
+            scheduling: OperationSchedulingState::default(),
+        }
+    }
+
+    fn image_vault_operation(
+        account_id: &AccountId,
+        checkpoint: CreateVaultCheckpoint,
+    ) -> OperationRecord {
+        let digest = "1234567890abcdef".repeat(4);
+        let mut operation = unrelated_vault_operation(account_id);
+        operation.operation_id = "operation-image-final".into();
+        operation.create_vault.as_mut().unwrap().image = Some(CreateVaultImageRecord {
+            byte_length: 11,
+            content_type: "image/png".into(),
+            sha256: digest.clone(),
+            object_key: format!(
+                "vaults/user-final-request/vault-new/create/operation-image-final-{digest}"
+            ),
+        });
+        operation.create_vault.as_mut().unwrap().checkpoint = checkpoint;
+        let canonical = canonical_create_vault_request(
+            operation.vault_id(),
+            operation.create_vault.as_ref().unwrap(),
+        )
+        .unwrap();
+        operation.request.path = canonical.path;
+        operation.request.body = canonical.body;
+        if checkpoint != CreateVaultCheckpoint::FinalRequestFrozen {
+            operation.request.body.clear();
+        }
+        operation.request_fingerprint = canonical.fingerprint;
+        operation
+    }
+
+    #[test]
+    fn active_attachment_move_preparation_and_create_vault_own_distinct_resources() {
+        let (state, account_id, preparation) = active_preparation();
+        let before = state.snapshot(&account_id).unwrap();
+        let vault_operation = unrelated_vault_operation(&account_id);
+
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                before.incarnation,
+                before.revision,
+                before.lock_epoch,
+                vec![PlanMutation::AcceptOperation(vault_operation.clone())],
+            ))
+            .unwrap();
+
+        let after = state.snapshot(&account_id).unwrap();
+        assert!(after
+            .attachment_move_preparations
+            .iter()
+            .any(|active| active.operation_id == preparation.operation_id));
+        assert!(after
+            .operations
+            .iter()
+            .any(|active| active.operation_id == vault_operation.operation_id));
+        AccountReplica::from_snapshot(after)
+            .validate_durable_work()
+            .unwrap();
+    }
+
+    #[test]
+    fn final_create_vault_acceptance_rejects_byte_noncanonical_request_without_mutation() {
+        let account_id = AccountId::from("account-final-request");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account_id.clone(),
+                "user-final-request".into(),
+                Incarnation::from("incarnation-final-request"),
+            )
+            .unwrap();
+        let initial = state.snapshot(&account_id).unwrap();
+        let mut operation = unrelated_vault_operation(&account_id);
+        operation.request.body = br#"{ "name":"New vault","vaultType":"personal","encryptedVaultKey":"wrapped-key","icon":"lock","imageKey":null }"#.to_vec();
+        operation.request_fingerprint = Sha256Fingerprint([
+            0x46, 0x5b, 0x86, 0x7e, 0xc8, 0xc1, 0xd9, 0x36, 0xdb, 0xbe, 0xa7, 0x47, 0x89, 0xd5,
+            0x58, 0xf8, 0xc3, 0xea, 0x1a, 0x77, 0x1f, 0x20, 0xa4, 0x4d, 0x89, 0x16, 0x05, 0x05,
+            0x13, 0x50, 0x76, 0xe4,
+        ]);
+
+        let error = state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                initial.incarnation.clone(),
+                initial.revision,
+                initial.lock_epoch,
+                vec![PlanMutation::AcceptOperation(operation)],
+            ))
+            .unwrap_err();
+
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert_eq!(state.snapshot(&account_id).unwrap(), initial);
+    }
+
+    #[test]
+    fn final_create_vault_checkpoint_rejects_every_noncanonical_identity_without_mutation() {
+        let account_id = AccountId::from("account-final-request");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account_id.clone(),
+                "user-final-request".into(),
+                Incarnation::from("incarnation-final-request"),
+            )
+            .unwrap();
+        let initial = state.snapshot(&account_id).unwrap();
+        let artifact = image_vault_operation(&account_id, CreateVaultCheckpoint::ArtifactReady);
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                initial.incarnation,
+                initial.revision,
+                initial.lock_epoch,
+                vec![PlanMutation::AcceptOperation(artifact.clone())],
+            ))
+            .unwrap();
+        let accepted = state.snapshot(&account_id).unwrap();
+        let mut remote = artifact;
+        remote.create_vault.as_mut().unwrap().checkpoint =
+            CreateVaultCheckpoint::RemoteUploadConfirmed;
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                accepted.incarnation.clone(),
+                accepted.revision,
+                accepted.lock_epoch,
+                vec![PlanMutation::CheckpointCreateVault(remote.clone())],
+            ))
+            .unwrap();
+        let confirmed = state.snapshot(&account_id).unwrap();
+        let exact = image_vault_operation(&account_id, CreateVaultCheckpoint::FinalRequestFrozen);
+
+        let mut cases = Vec::new();
+        let mut wrong_method = exact.clone();
+        wrong_method.request.method = HttpMethod::Post;
+        cases.push(wrong_method);
+        for path in [
+            "api/v1/vaults/vault-new",
+            "/api/v1/vaults/vault-other",
+            "https://example.invalid/api/v1/vaults/vault-new",
+        ] {
+            let mut operation = exact.clone();
+            operation.request.path = path.into();
+            cases.push(operation);
+        }
+        for body in [
+            br#"{ \"name\":\"New vault\",\"vaultType\":\"personal\",\"encryptedVaultKey\":\"wrapped-key\",\"icon\":\"lock\",\"imageKey\":\"vaults/user-final-request/vault-new/create/operation-image-final-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\" }"#.as_slice(),
+            br#"{\"vaultType\":\"personal\",\"name\":\"New vault\",\"encryptedVaultKey\":\"wrapped-key\",\"icon\":\"lock\",\"imageKey\":\"vaults/user-final-request/vault-new/create/operation-image-final-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\"}"#,
+            br#"{\"name\":\"New\\u0020vault\",\"vaultType\":\"personal\",\"encryptedVaultKey\":\"wrapped-key\",\"icon\":\"lock\",\"imageKey\":\"vaults/user-final-request/vault-new/create/operation-image-final-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\"}"#,
+            br#"{\"name\":\"Changed\",\"vaultType\":\"personal\",\"encryptedVaultKey\":\"wrapped-key\",\"icon\":\"lock\",\"imageKey\":null}"#,
+        ] {
+            let mut operation = exact.clone();
+            operation.request.body = body.to_vec();
+            cases.push(operation);
+        }
+        let mut raw_sha = exact.clone();
+        raw_sha.request_fingerprint = Sha256Fingerprint::of_bytes(&raw_sha.request.body);
+        cases.push(raw_sha);
+        let mut wrong_fingerprint = exact.clone();
+        wrong_fingerprint.request_fingerprint = Sha256Fingerprint([0x5a; 32]);
+        cases.push(wrong_fingerprint);
+        for operation in cases {
+            let error = state
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    confirmed.incarnation.clone(),
+                    confirmed.revision,
+                    confirmed.lock_epoch,
+                    vec![PlanMutation::CheckpointCreateVault(operation)],
+                ))
+                .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+            assert_eq!(state.snapshot(&account_id).unwrap(), confirmed);
+        }
+
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id,
+                confirmed.incarnation,
+                confirmed.revision,
+                confirmed.lock_epoch,
+                vec![PlanMutation::CheckpointCreateVault(exact)],
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn item_reconciliation_plans_reject_a_vault_operation_without_panicking_or_mutating() {
+        let account_id = AccountId::from("account-vault-plan");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account_id.clone(),
+                "user-vault-plan".into(),
+                Incarnation::from("incarnation-vault-plan"),
+            )
+            .unwrap();
+        let operation = unrelated_vault_operation(&account_id);
+        let initial = state.snapshot(&account_id).unwrap();
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                initial.incarnation,
+                initial.revision,
+                initial.lock_epoch,
+                vec![PlanMutation::AcceptOperation(operation.clone())],
+            ))
+            .unwrap();
+        let accepted = state.snapshot(&account_id).unwrap();
+        let outcome = ObservedOutcome {
+            operation_id: operation.operation_id.clone(),
+            request_fingerprint: operation.request_fingerprint,
+            result: OperationOutcomeResult::Applied {
+                entity_id: "item-foreign".into(),
+                version: 1,
+            },
+        };
+
+        for mutation in [
+            PlanMutation::ReconcileAppliedCreate {
+                outcome: outcome.clone(),
+                item: Box::new(AuthorityItemRecord {
+                    id: "item-foreign".into(),
+                    vault_id: "vault-new".into(),
+                    ..authority_item(1)
+                }),
+                cursor: None,
+            },
+            PlanMutation::ReconcileItemMutation {
+                outcome: outcome.clone(),
+                item: None,
+                cursor: None,
+            },
+        ] {
+            let error = state
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    accepted.incarnation.clone(),
+                    accepted.revision,
+                    accepted.lock_epoch,
+                    vec![mutation],
+                ))
+                .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+            assert_eq!(state.snapshot(&account_id).unwrap(), accepted);
+        }
+    }
+
+    #[test]
+    fn create_vault_acceptance_binds_image_to_account_user_vault_operation_and_policy() {
+        let account_id = AccountId::from("account-image-context");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account_id.clone(),
+                "user-image-context".into(),
+                Incarnation::from("incarnation-image-context"),
+            )
+            .unwrap();
+        let initial = state.snapshot(&account_id).unwrap();
+        let digest = "1234567890abcdef".repeat(4);
+        let mut valid = unrelated_vault_operation(&account_id);
+        valid.operation_id = "operation-image-context".into();
+        valid.create_vault.as_mut().unwrap().image = Some(CreateVaultImageRecord {
+            byte_length: 2_097_152,
+            content_type: "image/webp".into(),
+            sha256: digest.clone(),
+            object_key: format!(
+                "vaults/user-image-context/vault-new/create/operation-image-context-{digest}"
+            ),
+        });
+
+        let mut cases = Vec::new();
+        let mut foreign_account = valid.clone();
+        foreign_account.create_vault.as_mut().unwrap().account_id =
+            AccountId::from("account-other");
+        cases.push(foreign_account);
+        for key in [
+            format!("vaults/user-other/vault-new/create/operation-image-context-{digest}"),
+            format!(
+                "vaults/user-image-context/vault-other/create/operation-image-context-{digest}"
+            ),
+            format!("vaults/user-image-context/vault-new/create/operation-other-{digest}"),
+        ] {
+            let mut operation = valid.clone();
+            operation
+                .create_vault
+                .as_mut()
+                .unwrap()
+                .image
+                .as_mut()
+                .unwrap()
+                .object_key = key;
+            cases.push(operation);
+        }
+        let mut zero = valid.clone();
+        zero.create_vault
+            .as_mut()
+            .unwrap()
+            .image
+            .as_mut()
+            .unwrap()
+            .byte_length = 0;
+        cases.push(zero);
+        let mut mime = valid.clone();
+        mime.create_vault
+            .as_mut()
+            .unwrap()
+            .image
+            .as_mut()
+            .unwrap()
+            .content_type = "image/bmp".into();
+        cases.push(mime);
+        let mut sha = valid.clone();
+        sha.create_vault
+            .as_mut()
+            .unwrap()
+            .image
+            .as_mut()
+            .unwrap()
+            .sha256 = "g".repeat(64);
+        cases.push(sha);
+
+        for operation in cases {
+            let error = state
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    initial.incarnation.clone(),
+                    initial.revision,
+                    initial.lock_epoch,
+                    vec![PlanMutation::AcceptOperation(operation)],
+                ))
+                .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+            assert_eq!(state.snapshot(&account_id).unwrap(), initial);
+        }
+
+        let canonical =
+            canonical_create_vault_request(valid.vault_id(), valid.create_vault.as_ref().unwrap())
+                .unwrap();
+        valid.request.path = canonical.path;
+        valid.request.body = canonical.body;
+        valid.request_fingerprint = canonical.fingerprint;
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                initial.incarnation,
+                initial.revision,
+                initial.lock_epoch,
+                vec![PlanMutation::AcceptOperation(valid)],
+            ))
+            .unwrap();
+        AccountReplica::from_snapshot(state.snapshot(&account_id).unwrap())
+            .validate_durable_work()
+            .unwrap();
+    }
+
     #[test]
     fn sync_page_cursor_cannot_pass_a_real_active_attachment_move_preparation() {
         let (state, account_id, preparation) = active_preparation();
@@ -3481,7 +4638,7 @@ mod attachment_move_reconciliation_tests {
             operation_id: operation.operation_id.clone(),
             request_fingerprint: operation.request_fingerprint,
             result: OperationOutcomeResult::Applied {
-                entity_id: operation.item_id.clone(),
+                entity_id: operation.item_id().to_owned(),
                 version: 2,
             },
         };

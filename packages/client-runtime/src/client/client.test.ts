@@ -235,6 +235,45 @@ describe("Runtime client requests", () => {
 		});
 	});
 
+	test("forwards the closed create-Vault request and exposes one shared writable catalog", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const store = client.writableVaults();
+		const sameStore = client.writableVaults();
+		expect(sameStore).toBe(store);
+
+		const creating = client.createVault({
+			accountId: "account-1",
+			name: "Shared secrets",
+			vaultType: "shared",
+			icon: "users",
+			imageSource: null,
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "createVault",
+			accountId: "account-1",
+			name: "Shared secrets",
+			vaultType: "shared",
+			icon: "users",
+			imageSource: null,
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "vaultCreationAccepted",
+				operationId: "operation-vault",
+				vaultId: "vault-new",
+				replicaRevision: "12",
+			},
+		});
+		expect(await creating).toEqual({
+			operationId: "operation-vault",
+			vaultId: "vault-new",
+			replicaRevision: "12",
+		});
+	});
+
 	test("removes one named Account and answers the whole teardown outcome", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });

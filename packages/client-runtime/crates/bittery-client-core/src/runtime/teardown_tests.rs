@@ -40,9 +40,10 @@ enum Fault {
     CatalogDetach,
 }
 
-struct ReplicaPort {
+pub(super) struct ReplicaPort {
     inner: Arc<InMemoryReplica>,
     fail: AtomicBool,
+    fail_commit: AtomicBool,
     events: Arc<Mutex<Vec<&'static str>>>,
 }
 
@@ -52,6 +53,14 @@ impl ReplicaPersistence for ReplicaPort {
         &self,
         request: ReplicaPersistenceRequest,
     ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+        if matches!(request, ReplicaPersistenceRequest::Commit { .. })
+            && self.fail_commit.swap(false, Ordering::SeqCst)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "injected guarded commit failure",
+            ));
+        }
         if matches!(
             request,
             ReplicaPersistenceRequest::DeleteAccount { .. } | ReplicaPersistenceRequest::WipeDevice
@@ -248,6 +257,18 @@ fn teardown_harness(fault: Fault) -> Harness {
     build_teardown_harness(fault, true)
 }
 
+impl ReplicaPort {
+    pub(super) fn fail_next_guarded_commit(&self) {
+        self.fail_commit.store(true, Ordering::SeqCst);
+    }
+}
+
+pub(super) fn create_vault_teardown_harness(
+) -> (Arc<Runtime>, Arc<InMemoryReplica>, Arc<ReplicaPort>) {
+    let harness = teardown_harness(Fault::None);
+    (harness.runtime, harness.persistence, harness.replica_port)
+}
+
 /// A Runtime that has not finished `open()`. A user reaches for "wipe this Device" exactly here,
 /// so every Device phase has to work with no restored Account and no Replica cache.
 fn wedged_teardown_harness(fault: Fault) -> Harness {
@@ -274,6 +295,7 @@ fn build_teardown_harness(fault: Fault, opened: bool) -> Harness {
     let replica = Arc::new(ReplicaPort {
         inner: Arc::clone(&persistence),
         fail: AtomicBool::new(matches!(fault, Fault::Replica | Fault::PlatformAndReplica)),
+        fail_commit: AtomicBool::new(false),
         events: Arc::clone(&events),
     });
     let platform = Arc::new(PlatformPort {

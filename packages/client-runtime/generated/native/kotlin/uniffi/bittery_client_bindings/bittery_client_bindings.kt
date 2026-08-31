@@ -10460,6 +10460,49 @@ public object FfiConverterTypeVaultImagePreparationRequest: FfiConverterRustBuff
 
 
 
+data class VaultImageSourceInput (
+    var `capabilityId`: kotlin.String
+    ,
+    var `byteLength`: kotlin.ULong
+    ,
+    var `contentType`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultImageSourceInput: FfiConverterRustBuffer<VaultImageSourceInput> {
+    override fun read(buf: ByteBuffer): VaultImageSourceInput {
+        return VaultImageSourceInput(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VaultImageSourceInput) = (
+            FfiConverterString.allocationSize(value.`capabilityId`) +
+            FfiConverterULong.allocationSize(value.`byteLength`) +
+            FfiConverterString.allocationSize(value.`contentType`)
+    )
+
+    override fun write(value: VaultImageSourceInput, buf: ByteBuffer) {
+            FfiConverterString.write(value.`capabilityId`, buf)
+            FfiConverterULong.write(value.`byteLength`, buf)
+            FfiConverterString.write(value.`contentType`, buf)
+    }
+}
+
+
+
 /**
  * One Vault as an Items reader needs it. Plain data: a Vault name has never been ciphertext.
  */
@@ -10513,6 +10556,107 @@ public object FfiConverterTypeVaultProjection: FfiConverterRustBuffer<VaultProje
     )
 
     override fun write(value: VaultProjection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterTypeVaultProjectionType.write(value.`vaultType`, buf)
+            FfiConverterOptionalString.write(value.`icon`, buf)
+            FfiConverterOptionalString.write(value.`imageUrl`, buf)
+            FfiConverterTypeVaultProjectionRole.write(value.`role`, buf)
+    }
+}
+
+
+
+data class WritableVaultCatalogProjection (
+    var `revision`: kotlin.ULong
+    ,
+    var `vaults`: List<WritableVaultProjection>
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWritableVaultCatalogProjection: FfiConverterRustBuffer<WritableVaultCatalogProjection> {
+    override fun read(buf: ByteBuffer): WritableVaultCatalogProjection {
+        return WritableVaultCatalogProjection(
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceTypeWritableVaultProjection.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: WritableVaultCatalogProjection) = (
+            FfiConverterULong.allocationSize(value.`revision`) +
+            FfiConverterSequenceTypeWritableVaultProjection.allocationSize(value.`vaults`)
+    )
+
+    override fun write(value: WritableVaultCatalogProjection, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`revision`, buf)
+            FfiConverterSequenceTypeWritableVaultProjection.write(value.`vaults`, buf)
+    }
+}
+
+
+
+data class WritableVaultProjection (
+    var `accountId`: kotlin.String
+    ,
+    var `vaultId`: kotlin.String
+    ,
+    var `name`: kotlin.String
+    ,
+    var `vaultType`: VaultProjectionType
+    ,
+    var `icon`: kotlin.String?
+    ,
+    var `imageUrl`: kotlin.String?
+    ,
+    var `role`: VaultProjectionRole
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWritableVaultProjection: FfiConverterRustBuffer<WritableVaultProjection> {
+    override fun read(buf: ByteBuffer): WritableVaultProjection {
+        return WritableVaultProjection(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeVaultProjectionType.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterTypeVaultProjectionRole.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: WritableVaultProjection) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterTypeVaultProjectionType.allocationSize(value.`vaultType`) +
+            FfiConverterOptionalString.allocationSize(value.`icon`) +
+            FfiConverterOptionalString.allocationSize(value.`imageUrl`) +
+            FfiConverterTypeVaultProjectionRole.allocationSize(value.`role`)
+    )
+
+    override fun write(value: WritableVaultProjection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
             FfiConverterString.write(value.`vaultId`, buf)
             FfiConverterString.write(value.`name`, buf)
             FfiConverterTypeVaultProjectionType.write(value.`vaultType`, buf)
@@ -10656,6 +10800,40 @@ public object FfiConverterTypeBindingError : FfiConverterRustBuffer<BindingExcep
     }
 
 }
+
+
+
+
+enum class CreateVaultType {
+
+    PERSONAL,
+    SHARED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCreateVaultType: FfiConverterRustBuffer<CreateVaultType> {
+    override fun read(buf: ByteBuffer) = try {
+        CreateVaultType.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: CreateVaultType) = 4UL
+
+    override fun write(value: CreateVaultType, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 
@@ -10928,6 +11106,9 @@ public object FfiConverterTypeItemProjectionStatus: FfiConverterRustBuffer<ItemP
 
 sealed class ObservationRequest {
 
+    object WritableVaultCatalog : ObservationRequest()
+
+
     data class Items(
         val `accountId`: kotlin.String) : ObservationRequest()
 
@@ -10971,13 +11152,14 @@ sealed class ObservationRequest {
 public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<ObservationRequest>{
     override fun read(buf: ByteBuffer): ObservationRequest {
         return when(buf.getInt()) {
-            1 -> ObservationRequest.Items(
+            1 -> ObservationRequest.WritableVaultCatalog
+            2 -> ObservationRequest.Items(
                 FfiConverterString.read(buf),
                 )
-            2 -> ObservationRequest.PendingShareResults(
+            3 -> ObservationRequest.PendingShareResults(
                 FfiConverterString.read(buf),
                 )
-            3 -> ObservationRequest.RuntimeStatus(
+            4 -> ObservationRequest.RuntimeStatus(
                 FfiConverterOptionalString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -10985,6 +11167,12 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
     }
 
     override fun allocationSize(value: ObservationRequest) = when(value) {
+        is ObservationRequest.WritableVaultCatalog -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
         is ObservationRequest.Items -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -11010,18 +11198,22 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
 
     override fun write(value: ObservationRequest, buf: ByteBuffer) {
         when(value) {
-            is ObservationRequest.Items -> {
+            is ObservationRequest.WritableVaultCatalog -> {
                 buf.putInt(1)
-                FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
-            is ObservationRequest.PendingShareResults -> {
+            is ObservationRequest.Items -> {
                 buf.putInt(2)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
-            is ObservationRequest.RuntimeStatus -> {
+            is ObservationRequest.PendingShareResults -> {
                 buf.putInt(3)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is ObservationRequest.RuntimeStatus -> {
+                buf.putInt(4)
                 FfiConverterOptionalString.write(value.`accountId`, buf)
                 Unit
             }
@@ -11153,6 +11345,15 @@ public object FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer<RuntimeEr
 
 sealed class RuntimeProjection: Disposable  {
 
+    data class WritableVaultCatalog(
+        val `value`: uniffi.bittery_client_bindings.WritableVaultCatalogProjection) : RuntimeProjection()
+
+    {
+
+
+        companion object
+    }
+
     data class Items(
         val `value`: uniffi.bittery_client_bindings.ItemsProjection) : RuntimeProjection()
 
@@ -11185,6 +11386,13 @@ sealed class RuntimeProjection: Disposable  {
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
     override fun destroy() {
         when(this) {
+            is RuntimeProjection.WritableVaultCatalog -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
             is RuntimeProjection.Items -> {
 
     Disposable.destroy(
@@ -11223,13 +11431,16 @@ sealed class RuntimeProjection: Disposable  {
 public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<RuntimeProjection>{
     override fun read(buf: ByteBuffer): RuntimeProjection {
         return when(buf.getInt()) {
-            1 -> RuntimeProjection.Items(
+            1 -> RuntimeProjection.WritableVaultCatalog(
+                FfiConverterTypeWritableVaultCatalogProjection.read(buf),
+                )
+            2 -> RuntimeProjection.Items(
                 FfiConverterTypeItemsProjection.read(buf),
                 )
-            2 -> RuntimeProjection.PendingShareResults(
+            3 -> RuntimeProjection.PendingShareResults(
                 FfiConverterTypePendingShareResultsProjection.read(buf),
                 )
-            3 -> RuntimeProjection.RuntimeStatus(
+            4 -> RuntimeProjection.RuntimeStatus(
                 FfiConverterTypeRuntimeStatusProjection.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -11237,6 +11448,13 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
     }
 
     override fun allocationSize(value: RuntimeProjection) = when(value) {
+        is RuntimeProjection.WritableVaultCatalog -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeWritableVaultCatalogProjection.allocationSize(value.`value`)
+            )
+        }
         is RuntimeProjection.Items -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -11262,18 +11480,23 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
 
     override fun write(value: RuntimeProjection, buf: ByteBuffer) {
         when(value) {
-            is RuntimeProjection.Items -> {
+            is RuntimeProjection.WritableVaultCatalog -> {
                 buf.putInt(1)
+                FfiConverterTypeWritableVaultCatalogProjection.write(value.`value`, buf)
+                Unit
+            }
+            is RuntimeProjection.Items -> {
+                buf.putInt(2)
                 FfiConverterTypeItemsProjection.write(value.`value`, buf)
                 Unit
             }
             is RuntimeProjection.PendingShareResults -> {
-                buf.putInt(2)
+                buf.putInt(3)
                 FfiConverterTypePendingShareResultsProjection.write(value.`value`, buf)
                 Unit
             }
             is RuntimeProjection.RuntimeStatus -> {
-                buf.putInt(3)
+                buf.putInt(4)
                 FfiConverterTypeRuntimeStatusProjection.write(value.`value`, buf)
                 Unit
             }
@@ -11350,6 +11573,19 @@ sealed class RuntimeRequest: Disposable  {
 
     object Wipe : RuntimeRequest()
 
+
+    data class CreateVault(
+        val `accountId`: kotlin.String,
+        val `name`: kotlin.String,
+        val `vaultType`: uniffi.bittery_client_bindings.CreateVaultType,
+        val `icon`: kotlin.String,
+        val `imageSource`: uniffi.bittery_client_bindings.VaultImageSourceInput?) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
 
     data class CreateItem(
         val `accountId`: kotlin.String,
@@ -11547,6 +11783,17 @@ sealed class RuntimeRequest: Disposable  {
             }
             is RuntimeRequest.Wipe -> {// Nothing to destroy
             }
+            is RuntimeRequest.CreateVault -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`name`,
+        this.`vaultType`,
+        this.`icon`,
+        this.`imageSource`
+    )
+
+            }
             is RuntimeRequest.CreateItem -> {
 
     Disposable.destroy(
@@ -11704,62 +11951,69 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterString.read(buf),
                 )
             7 -> RuntimeRequest.Wipe
-            8 -> RuntimeRequest.CreateItem(
+            8 -> RuntimeRequest.CreateVault(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeCreateVaultType.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterOptionalTypeVaultImageSourceInput.read(buf),
+                )
+            9 -> RuntimeRequest.CreateItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeItemDraft.read(buf),
                 )
-            9 -> RuntimeRequest.UpdateItem(
+            10 -> RuntimeRequest.UpdateItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeItemDraft.read(buf),
                 )
-            10 -> RuntimeRequest.SetItemFavorite(
+            11 -> RuntimeRequest.SetItemFavorite(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            11 -> RuntimeRequest.TrashItem(
+            12 -> RuntimeRequest.TrashItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            12 -> RuntimeRequest.RestoreItem(
+            13 -> RuntimeRequest.RestoreItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            13 -> RuntimeRequest.MoveItem(
+            14 -> RuntimeRequest.MoveItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            14 -> RuntimeRequest.PermanentlyDeleteItem(
+            15 -> RuntimeRequest.PermanentlyDeleteItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            15 -> RuntimeRequest.CreateShare(
+            16 -> RuntimeRequest.CreateShare(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeCreateShareDraft.read(buf),
                 )
-            16 -> RuntimeRequest.AcknowledgeShareResult(
+            17 -> RuntimeRequest.AcknowledgeShareResult(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            17 -> RuntimeRequest.RenameAttachment(
+            18 -> RuntimeRequest.RenameAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeAttachmentName.read(buf),
                 )
-            18 -> RuntimeRequest.DeleteAttachment(
+            19 -> RuntimeRequest.DeleteAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            19 -> RuntimeRequest.DownloadAttachment(
+            20 -> RuntimeRequest.DownloadAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            20 -> RuntimeRequest.UploadAttachment(
+            21 -> RuntimeRequest.UploadAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeAttachmentUploadMetadata.read(buf),
@@ -11824,6 +12078,17 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
                 4UL
+            )
+        }
+        is RuntimeRequest.CreateVault -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`name`)
+                + FfiConverterTypeCreateVaultType.allocationSize(value.`vaultType`)
+                + FfiConverterString.allocationSize(value.`icon`)
+                + FfiConverterOptionalTypeVaultImageSourceInput.allocationSize(value.`imageSource`)
             )
         }
         is RuntimeRequest.CreateItem -> {
@@ -11985,87 +12250,96 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 buf.putInt(7)
                 Unit
             }
-            is RuntimeRequest.CreateItem -> {
+            is RuntimeRequest.CreateVault -> {
                 buf.putInt(8)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                FfiConverterTypeCreateVaultType.write(value.`vaultType`, buf)
+                FfiConverterString.write(value.`icon`, buf)
+                FfiConverterOptionalTypeVaultImageSourceInput.write(value.`imageSource`, buf)
+                Unit
+            }
+            is RuntimeRequest.CreateItem -> {
+                buf.putInt(9)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterTypeItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.UpdateItem -> {
-                buf.putInt(9)
+                buf.putInt(10)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.SetItemFavorite -> {
-                buf.putInt(10)
+                buf.putInt(11)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterBoolean.write(value.`favorite`, buf)
                 Unit
             }
             is RuntimeRequest.TrashItem -> {
-                buf.putInt(11)
-                FfiConverterString.write(value.`accountId`, buf)
-                FfiConverterString.write(value.`itemId`, buf)
-                Unit
-            }
-            is RuntimeRequest.RestoreItem -> {
                 buf.putInt(12)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
-            is RuntimeRequest.MoveItem -> {
+            is RuntimeRequest.RestoreItem -> {
                 buf.putInt(13)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                Unit
+            }
+            is RuntimeRequest.MoveItem -> {
+                buf.putInt(14)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`targetVaultId`, buf)
                 Unit
             }
             is RuntimeRequest.PermanentlyDeleteItem -> {
-                buf.putInt(14)
+                buf.putInt(15)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.CreateShare -> {
-                buf.putInt(15)
+                buf.putInt(16)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeCreateShareDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.AcknowledgeShareResult -> {
-                buf.putInt(16)
+                buf.putInt(17)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
             is RuntimeRequest.RenameAttachment -> {
-                buf.putInt(17)
+                buf.putInt(18)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterTypeAttachmentName.write(value.`name`, buf)
                 Unit
             }
             is RuntimeRequest.DeleteAttachment -> {
-                buf.putInt(18)
+                buf.putInt(19)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeRequest.DownloadAttachment -> {
-                buf.putInt(19)
+                buf.putInt(20)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterString.write(value.`sinkCapabilityId`, buf)
                 Unit
             }
             is RuntimeRequest.UploadAttachment -> {
-                buf.putInt(20)
+                buf.putInt(21)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeAttachmentUploadMetadata.write(value.`metadata`, buf)
@@ -12117,6 +12391,17 @@ sealed class RuntimeResponse {
     data class Accepted(
         val `operationId`: kotlin.String,
         val `itemId`: kotlin.String,
+        val `replicaRevision`: kotlin.ULong) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultCreationAccepted(
+        val `operationId`: kotlin.String,
+        val `vaultId`: kotlin.String,
         val `replicaRevision`: kotlin.ULong) : RuntimeResponse()
 
     {
@@ -12220,27 +12505,32 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            5 -> RuntimeResponse.ShareResultAcknowledged(
+            5 -> RuntimeResponse.VaultCreationAccepted(
                 FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            6 -> RuntimeResponse.AttachmentRenamed(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            7 -> RuntimeResponse.AttachmentDeleted(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            8 -> RuntimeResponse.AttachmentDownloaded(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            9 -> RuntimeResponse.AttachmentUploaded(
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            10 -> RuntimeResponse.Teardown(
+            6 -> RuntimeResponse.ShareResultAcknowledged(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            7 -> RuntimeResponse.AttachmentRenamed(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            8 -> RuntimeResponse.AttachmentDeleted(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            9 -> RuntimeResponse.AttachmentDownloaded(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            10 -> RuntimeResponse.AttachmentUploaded(
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            11 -> RuntimeResponse.Teardown(
                 FfiConverterTypeTeardownScope.read(buf),
                 FfiConverterTypeTeardownStatus.read(buf),
                 FfiConverterSequenceTypeTeardownPhase.read(buf),
@@ -12281,6 +12571,15 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 4UL
                 + FfiConverterString.allocationSize(value.`operationId`)
                 + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterULong.allocationSize(value.`replicaRevision`)
+            )
+        }
+        is RuntimeResponse.VaultCreationAccepted -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`operationId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
                 + FfiConverterULong.allocationSize(value.`replicaRevision`)
             )
         }
@@ -12363,38 +12662,45 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
-            is RuntimeResponse.ShareResultAcknowledged -> {
+            is RuntimeResponse.VaultCreationAccepted -> {
                 buf.putInt(5)
+                FfiConverterString.write(value.`operationId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterULong.write(value.`replicaRevision`, buf)
+                Unit
+            }
+            is RuntimeResponse.ShareResultAcknowledged -> {
+                buf.putInt(6)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentRenamed -> {
-                buf.putInt(6)
-                FfiConverterString.write(value.`accountId`, buf)
-                FfiConverterString.write(value.`attachmentId`, buf)
-                Unit
-            }
-            is RuntimeResponse.AttachmentDeleted -> {
                 buf.putInt(7)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
-            is RuntimeResponse.AttachmentDownloaded -> {
+            is RuntimeResponse.AttachmentDeleted -> {
                 buf.putInt(8)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
-            is RuntimeResponse.AttachmentUploaded -> {
+            is RuntimeResponse.AttachmentDownloaded -> {
                 buf.putInt(9)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`attachmentId`, buf)
+                Unit
+            }
+            is RuntimeResponse.AttachmentUploaded -> {
+                buf.putInt(10)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
             is RuntimeResponse.Teardown -> {
-                buf.putInt(10)
+                buf.putInt(11)
                 FfiConverterTypeTeardownScope.write(value.`scope`, buf)
                 FfiConverterTypeTeardownStatus.write(value.`status`, buf)
                 FfiConverterSequenceTypeTeardownPhase.write(value.`failures`, buf)
@@ -12900,6 +13206,38 @@ public object FfiConverterOptionalTypeAccountDisplayIdentity: FfiConverterRustBu
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeVaultImageSourceInput: FfiConverterRustBuffer<VaultImageSourceInput?> {
+    override fun read(buf: ByteBuffer): VaultImageSourceInput? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeVaultImageSourceInput.read(buf)
+    }
+
+    override fun allocationSize(value: VaultImageSourceInput?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeVaultImageSourceInput.allocationSize(value)
+        }
+    }
+
+    override fun write(value: VaultImageSourceInput?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeVaultImageSourceInput.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeAccountWaitingReason: FfiConverterRustBuffer<AccountWaitingReason?> {
     override fun read(buf: ByteBuffer): AccountWaitingReason? {
         if (buf.get().toInt() == 0) {
@@ -13390,6 +13728,34 @@ public object FfiConverterSequenceTypeVaultProjection: FfiConverterRustBuffer<Li
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeVaultProjection.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeWritableVaultProjection: FfiConverterRustBuffer<List<WritableVaultProjection>> {
+    override fun read(buf: ByteBuffer): List<WritableVaultProjection> {
+        val len = buf.getInt()
+        return List<WritableVaultProjection>(len) {
+            FfiConverterTypeWritableVaultProjection.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<WritableVaultProjection>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeWritableVaultProjection.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<WritableVaultProjection>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeWritableVaultProjection.write(it, buf)
         }
     }
 }

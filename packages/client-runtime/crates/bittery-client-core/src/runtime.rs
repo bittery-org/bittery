@@ -30,6 +30,12 @@ mod bootstrap;
 mod create;
 #[cfg(test)]
 mod create_tests;
+mod create_vault;
+mod create_vault_cleanup;
+mod create_vault_executor;
+mod create_vault_staging;
+#[cfg(test)]
+mod create_vault_tests;
 mod dispatch;
 #[cfg(test)]
 mod dispatch_tests;
@@ -95,6 +101,7 @@ use crate::{
     RuntimeError, RuntimeErrorCode, RuntimeProjection, RuntimeRequest, RuntimeResponse,
     RuntimeStatusProjection, TeardownPhase, TeardownScope, TeardownStatus, VaultImageIngressFacade,
     VaultImageSourceGrant, VaultProjection, VaultProjectionRole, VaultProjectionType,
+    WritableVaultCatalogProjection, WritableVaultProjection,
 };
 use std::{
     cell::RefCell,
@@ -528,6 +535,8 @@ pub struct Runtime {
     attachment_download: Mutex<Option<AttachmentDownloadFacade>>,
     attachment_upload: Mutex<Option<AttachmentUploadFacade>>,
     vault_image_ingress: Mutex<Option<VaultImageIngressFacade>>,
+    pending_vault_image_acceptance_cleanup: Mutex<HashSet<(AccountId, String)>>,
+    create_vault_cleanup_port: Mutex<Option<Arc<dyn create_vault_cleanup::CreateVaultCleanupPort>>>,
     clock: Arc<dyn Clock>,
     device_timer: Arc<dyn DeviceTimer>,
     /// Wakes the dispatcher when something that can change eligibility happened: work was
@@ -923,6 +932,8 @@ impl Runtime {
             attachment_download: Mutex::new(None),
             attachment_upload: Mutex::new(None),
             vault_image_ingress: Mutex::new(None),
+            pending_vault_image_acceptance_cleanup: Mutex::new(HashSet::new()),
+            create_vault_cleanup_port: Mutex::new(None),
             clock,
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
@@ -1007,6 +1018,20 @@ impl Runtime {
             .expect("Vault image ingress lock poisoned") = Some(facade);
     }
 
+    #[allow(
+        dead_code,
+        reason = "Ticket 53 composes the cleanup port only in tests before Ticket 54 opens production staging"
+    )]
+    pub(crate) fn install_create_vault_cleanup_port(
+        &self,
+        port: Arc<dyn create_vault_cleanup::CreateVaultCleanupPort>,
+    ) {
+        *self
+            .create_vault_cleanup_port
+            .lock()
+            .expect("create-Vault cleanup port lock poisoned") = Some(port);
+    }
+
     #[doc(hidden)]
     pub async fn prepare_vault_image(
         &self,
@@ -1069,6 +1094,47 @@ impl Runtime {
         facade.end_acceptance(account_id, operation_id).await
     }
 
+    async fn finish_vault_image_acceptance_cleanup(
+        &self,
+        account_id: &AccountId,
+        operation_id: &str,
+    ) {
+        let identity = (account_id.clone(), operation_id.to_owned());
+        if self
+            .end_vault_image_acceptance(account_id, operation_id)
+            .await
+            .is_ok()
+        {
+            self.pending_vault_image_acceptance_cleanup
+                .lock()
+                .expect("Vault image acceptance cleanup lock poisoned")
+                .remove(&identity);
+        } else {
+            self.pending_vault_image_acceptance_cleanup
+                .lock()
+                .expect("Vault image acceptance cleanup lock poisoned")
+                .insert(identity);
+        }
+    }
+
+    #[allow(
+        dead_code,
+        reason = "Ticket 53 proves retained cleanup retry before the production lifecycle scheduler is opened"
+    )]
+    pub(crate) async fn retry_pending_vault_image_acceptance_cleanup(&self) {
+        let pending: Vec<_> = self
+            .pending_vault_image_acceptance_cleanup
+            .lock()
+            .expect("Vault image acceptance cleanup lock poisoned")
+            .iter()
+            .cloned()
+            .collect();
+        for (account_id, operation_id) in pending {
+            self.finish_vault_image_acceptance_cleanup(&account_id, &operation_id)
+                .await;
+        }
+    }
+
     async fn sweep_vault_images_for_snapshot(
         &self,
         snapshot: &crate::replica::ReplicaSnapshot,
@@ -1079,6 +1145,21 @@ impl Runtime {
             .expect("Vault image ingress lock poisoned")
             .clone();
         let Some(facade) = facade else { return Ok(()) };
+        for operation in snapshot.operations.iter().filter(|operation| {
+            operation
+                .create_vault
+                .as_ref()
+                .is_some_and(|intent| intent.image.is_some())
+        }) {
+            // The accepted Operation is the durable discovery record for a response-lost
+            // end-acceptance cleanup. Restart can therefore repeat the idempotent release without
+            // inventing a second local obligation or accepting the request again.
+            self.finish_vault_image_acceptance_cleanup(
+                &snapshot.account_id,
+                &operation.operation_id,
+            )
+            .await;
+        }
         let referenced_operations = snapshot
             .operations
             .iter()
@@ -1696,6 +1777,24 @@ impl Runtime {
             } => {
                 self.delete_server_account(account_id, confirm_email, request_id, cancellation)
                     .await
+            }
+            RuntimeRequest::CreateVault {
+                account_id,
+                name,
+                vault_type,
+                icon,
+                image_source,
+            } => {
+                self.accept_create_vault(
+                    account_id,
+                    name,
+                    vault_type,
+                    icon,
+                    image_source,
+                    cancellation,
+                    accepted,
+                )
+                .await
             }
             RuntimeRequest::CreateItem {
                 account_id,
@@ -2419,6 +2518,48 @@ impl Runtime {
         request: &ObservationRequest,
     ) -> Result<ProjectedDelivery, RuntimeError> {
         match request {
+            ObservationRequest::WritableVaultCatalog => {
+                let access = self
+                    .account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .clone();
+                let mut vaults = Vec::new();
+                for snapshot in self.replica.snapshots() {
+                    if access.get(&snapshot.account_id) != Some(&AccountAccessState::Unlocked) {
+                        continue;
+                    }
+                    vaults.extend(visible_vaults(&snapshot).into_iter().filter_map(|vault| {
+                        (vault.role != VaultProjectionRole::ReadOnly).then_some(
+                            WritableVaultProjection {
+                                account_id: snapshot.account_id.clone(),
+                                vault_id: vault.vault_id,
+                                name: vault.name,
+                                vault_type: vault.vault_type,
+                                icon: vault.icon,
+                                image_url: vault.image_url,
+                                role: vault.role,
+                            },
+                        )
+                    }));
+                }
+                vaults.sort_by(|left, right| {
+                    left.account_id
+                        .as_str()
+                        .cmp(right.account_id.as_str())
+                        .then_with(|| left.vault_id.cmp(&right.vault_id))
+                });
+                Ok(ProjectedDelivery {
+                    projection: RuntimeProjection::WritableVaultCatalog(
+                        WritableVaultCatalogProjection {
+                            revision: self.device_revision.load(Ordering::SeqCst),
+                            vaults,
+                        },
+                    ),
+                    generation: None,
+                    token: None,
+                })
+            }
             ObservationRequest::Items { account_id } => {
                 let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
                     RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
@@ -2595,9 +2736,15 @@ impl Runtime {
                             ));
                         }
                     }
+                    let item_id = receipt.target.item_id().ok_or_else(|| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            "the pending Share receipt has a non-Item target",
+                        )
+                    })?;
                     results.push(PendingShareResult {
                         operation_id: capability.operation_id.clone(),
-                        item_id: receipt.item_id.clone(),
+                        item_id: item_id.to_owned(),
                         share_link_id: applied.share_link_id.clone(),
                         share_url: format!(
                             "{}{}#{}",

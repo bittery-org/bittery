@@ -39,13 +39,15 @@ const { stdout } = await run(
 const schema = JSON.parse(stdout);
 schema.$id = schemaId;
 const schemaText = `${JSON.stringify(schema, null, 2)}\n`;
-const typesText = await compile(schema, "RuntimeProtocolContract", {
-	additionalProperties: false,
-	bannerComment:
-		"/* eslint-disable */\n/* This file is generated. Do not edit. */",
-	format: false,
-	unknownAny: false,
-});
+const typesText = (
+	await compile(schema, "RuntimeProtocolContract", {
+		additionalProperties: false,
+		bannerComment:
+			"/* eslint-disable */\n/* This file is generated. Do not edit. */",
+		format: false,
+		unknownAny: false,
+	})
+).replace(/[ \t]+$/gm, "");
 
 const ajv = new Ajv2020({
 	allErrors: false,

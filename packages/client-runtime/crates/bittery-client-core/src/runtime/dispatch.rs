@@ -123,6 +123,9 @@ impl Runtime {
         session: &mut CurrentSessionDocument,
         auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
+        if operation.kind == OperationKind::CreateVault {
+            return CompletionResult::Retry;
+        }
         match self
             .send_exact_operation_fenced(snapshot, operation, http, session, auth_budget)
             .await
@@ -313,6 +316,11 @@ impl Runtime {
                 continue;
             }
             for operation in &snapshot.operations {
+                // Ticket 53 installs create-Vault persistence and test adapters only. Ticket 54
+                // opens this production eligibility gate atomically with the real staging ports.
+                if operation.kind == OperationKind::CreateVault {
+                    continue;
+                }
                 if operation.scheduling.not_before_ms > now_ms {
                     earliest = Some(
                         earliest.map_or(operation.scheduling.not_before_ms, |current| {

@@ -18,15 +18,16 @@ use super::{
     AuthorityAttachmentRecord, AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord,
     AuthorityVaultRole, AuthorityVaultType, BeginBootstrapPlan, BootstrapContinuation,
     BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity,
-    CursorAdvance, GuardedCommitPlan, ImmutableHttpRequest, ObservedOutcome, OperationKind,
+    CreateVaultCheckpoint, CreateVaultImageRecord, CreateVaultOperationRecord, CursorAdvance,
+    GuardedCommitPlan, ImmutableHttpRequest, ObservedOutcome, OperationKind,
     OperationOutcomeResult, OperationRecord, OperationRejectionCode, OperationSchedulingState,
     PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan, ReplicaItemRecord,
-    ReplicaSnapshot, Sha256Fingerprint, StageBootstrapPagePlan, SyncCursor,
+    ReplicaSnapshot, ResourceRef, Sha256Fingerprint, StageBootstrapPagePlan, SyncCursor,
 };
 use crate::{
     http_transport::{HttpHeader, HttpMethod},
     protocol::Incarnation,
-    AccountId, RuntimeError, RuntimeErrorCode,
+    AccountId, CreateVaultType, RuntimeError, RuntimeErrorCode,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -435,8 +436,10 @@ fn operation(operation_id: &str, item_id: &str) -> OperationRecord {
     OperationRecord {
         operation_id: operation_id.to_owned(),
         kind: OperationKind::CreateItem,
-        item_id: item_id.to_owned(),
-        vault_id: "vault-1".to_owned(),
+        target: ResourceRef::Item {
+            item_id: item_id.to_owned(),
+            vault_id: "vault-1".to_owned(),
+        },
         request: ImmutableHttpRequest {
             method: HttpMethod::Put,
             path: format!("/api/v1/vaults/vault-1/items/{item_id}"),
@@ -448,6 +451,42 @@ fn operation(operation_id: &str, item_id: &str) -> OperationRecord {
         },
         request_fingerprint: Sha256Fingerprint::of_bytes(&body),
         attachment_move_recovery: None,
+        create_vault: None,
+        scheduling: OperationSchedulingState::default(),
+    }
+}
+
+fn create_vault_operation(account_id: &str) -> OperationRecord {
+    let vault_id = "vault-created";
+    let intent = CreateVaultOperationRecord {
+        account_id: AccountId::from(account_id),
+        name: "Created".to_owned(),
+        vault_type: CreateVaultType::Personal,
+        icon: "lock".to_owned(),
+        encrypted_vault_key: "opaque-created-key".to_owned(),
+        image: None,
+        checkpoint: CreateVaultCheckpoint::FinalRequestFrozen,
+    };
+    let canonical = super::canonical_create_vault_request(vault_id, &intent).unwrap();
+    let request = ImmutableHttpRequest {
+        method: HttpMethod::Put,
+        path: canonical.path,
+        headers: vec![HttpHeader {
+            name: "Content-Type".to_owned(),
+            value: "application/json".to_owned(),
+        }],
+        body: canonical.body,
+    };
+    OperationRecord {
+        operation_id: "operation-create-vault".to_owned(),
+        kind: OperationKind::CreateVault,
+        target: ResourceRef::Vault {
+            vault_id: vault_id.to_owned(),
+        },
+        request,
+        request_fingerprint: canonical.fingerprint,
+        attachment_move_recovery: None,
+        create_vault: Some(intent),
         scheduling: OperationSchedulingState::default(),
     }
 }
@@ -681,6 +720,150 @@ fn installation_history() -> Result<History, RuntimeError> {
         ReplicaPersistenceResponse::Committed {
             result: PlanResult::Stale { actual_revision: 2 },
         },
+    )?;
+    Ok(history.finish())
+}
+
+fn vault_target_operation_history() -> Result<History, RuntimeError> {
+    let account_id = "account-vault-operation";
+    let mut history = HistoryBuilder::new(
+        "vault-target-operation-persists-and-reconciles-without-item-projections",
+        &[
+            "closed Vault resource target",
+            "no Item identity sentinel or duplicate projection",
+            "Vault-target Operation and receipt round-trip",
+        ],
+        &[account_id],
+    );
+    history.install("install Vault Operation Account", account_id, "first")?;
+    history.begin_bootstrap(
+        "begin Vault-operation Bootstrap authority",
+        BeginBootstrapPlan {
+            guard: guard(account_id, 0, 0),
+            generation_id: BootstrapGenerationId("generation-1".to_owned()),
+        },
+    )?;
+    history.stage_bootstrap(
+        "stage Vault-operation Vault page",
+        stage_page(
+            account_id,
+            1,
+            0,
+            BootstrapPageCursor::VaultsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "vault-operation-authority",
+        ),
+    )?;
+    history.stage_bootstrap(
+        "stage Vault-operation Item page",
+        stage_page(
+            account_id,
+            1,
+            0,
+            BootstrapPageCursor::ItemsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "vault-operation-authority",
+        ),
+    )?;
+    history.promote_bootstrap(
+        "promote Vault-operation Bootstrap authority",
+        PromoteBootstrapPlan {
+            guard: guard(account_id, 1, 0),
+            generation_id: BootstrapGenerationId("generation-1".to_owned()),
+        },
+    )?;
+    let mut final_operation = create_vault_operation(account_id);
+    final_operation.create_vault.as_mut().unwrap().image = Some(CreateVaultImageRecord {
+        byte_length: 11,
+        content_type: "image/png".to_owned(),
+        sha256: "0".repeat(64),
+        object_key: "vaults/user-account-vault-operation/vault-created/create/operation-create-vault-0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+    });
+    let canonical = super::canonical_create_vault_request(
+        final_operation.vault_id(),
+        final_operation.create_vault.as_ref().unwrap(),
+    )?;
+    final_operation.request.path = canonical.path;
+    final_operation.request.body = canonical.body;
+    final_operation.request_fingerprint = canonical.fingerprint;
+    let mut artifact_ready = final_operation.clone();
+    artifact_ready.request.body.clear();
+    artifact_ready.create_vault.as_mut().unwrap().checkpoint = CreateVaultCheckpoint::ArtifactReady;
+    let mut remote_confirmed = artifact_ready.clone();
+    remote_confirmed.create_vault.as_mut().unwrap().checkpoint =
+        CreateVaultCheckpoint::RemoteUploadConfirmed;
+    history.commit_plan(
+        "accept image Vault-target Operation at artifact-ready checkpoint",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            2,
+            0,
+            vec![PlanMutation::AcceptOperation(artifact_ready)],
+        ),
+    )?;
+    history.commit_plan(
+        "checkpoint exact remote image confirmation",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            3,
+            0,
+            vec![PlanMutation::CheckpointCreateVault(remote_confirmed)],
+        ),
+    )?;
+    history.commit_plan(
+        "freeze final immutable create-Vault request",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            4,
+            0,
+            vec![PlanMutation::CheckpointCreateVault(final_operation.clone())],
+        ),
+    )?;
+    history.commit_plan(
+        "reconcile exact applied Vault authority and local cleanup obligation",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            5,
+            0,
+            vec![PlanMutation::ReconcileCreateVault {
+                outcome: ObservedOutcome {
+                    operation_id: final_operation.operation_id.clone(),
+                    request_fingerprint: final_operation.request_fingerprint,
+                    result: OperationOutcomeResult::VaultApplied {
+                        vault_id: final_operation.vault_id().to_owned(),
+                    },
+                },
+                vault: Some(AuthorityVaultRecord {
+                    id: final_operation.vault_id().to_owned(),
+                    name: "Created".to_owned(),
+                    vault_type: AuthorityVaultType::Personal,
+                    icon: Some("lock".to_owned()),
+                    image_url: Some("https://example.invalid/vault-image".to_owned()),
+                    encrypted_vault_key: "opaque-created-key".to_owned(),
+                    role: AuthorityVaultRole::Owner,
+                }),
+            }],
+        ),
+    )?;
+    history.commit_plan(
+        "complete idempotent local image cleanup checkpoint",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            6,
+            0,
+            vec![PlanMutation::CompleteCreateVaultCleanup {
+                operation_id: final_operation.operation_id,
+                local_artifact_done: true,
+                remote_staging_done: false,
+            }],
+        ),
     )?;
     Ok(history.finish())
 }
@@ -989,7 +1172,7 @@ fn operation_history() -> Result<History, RuntimeError> {
                     operation_id: accepted.operation_id.clone(),
                     request_fingerprint: accepted.request_fingerprint,
                     result: OperationOutcomeResult::Applied {
-                        entity_id: accepted.item_id.clone(),
+                        entity_id: accepted.item_id().to_owned(),
                         version: 1,
                     },
                 },
@@ -1249,10 +1432,10 @@ fn ordinary_item_reconciliation_history() -> Result<History, RuntimeError> {
             0,
             vec![PlanMutation::ReconcileItemMutation {
                 outcome: ObservedOutcome {
-                    operation_id: applied.operation_id,
+                    operation_id: applied.operation_id.clone(),
                     request_fingerprint: applied.request_fingerprint,
                     result: OperationOutcomeResult::Applied {
-                        entity_id: applied.item_id,
+                        entity_id: applied.item_id().to_owned(),
                         version: 2,
                     },
                 },
@@ -1338,6 +1521,7 @@ fn build_corpus() -> Result<Corpus, RuntimeError> {
         forbidden_durable_row_markers: vec![KNOWN_PLAINTEXT_MARKER.to_owned()],
         histories: vec![
             installation_history()?,
+            vault_target_operation_history()?,
             deletion_history()?,
             bootstrap_history()?,
             five_category_authority_history()?,
@@ -1465,8 +1649,10 @@ fn known_plaintext_marker_is_encrypted_before_the_create_plan_reaches_durable_ro
             PlanMutation::AcceptOperation(OperationRecord {
                 operation_id: "operation-plaintext-proof".to_owned(),
                 kind: OperationKind::CreateItem,
-                item_id: "item-plaintext-proof".to_owned(),
-                vault_id: "vault-1".to_owned(),
+                target: ResourceRef::Item {
+                    item_id: "item-plaintext-proof".to_owned(),
+                    vault_id: "vault-1".to_owned(),
+                },
                 request: ImmutableHttpRequest {
                     method: HttpMethod::Put,
                     path: "/api/v1/vaults/vault-1/items/item-plaintext-proof".to_owned(),
@@ -1475,6 +1661,7 @@ fn known_plaintext_marker_is_encrypted_before_the_create_plan_reaches_durable_ro
                 },
                 request_fingerprint,
                 attachment_move_recovery: None,
+                create_vault: None,
                 scheduling: OperationSchedulingState::default(),
             }),
             PlanMutation::PutOptimisticItem(ReplicaItemRecord {

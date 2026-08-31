@@ -18,6 +18,8 @@ use crate::{
     server_contract::{
         CreateShareOperationRejectionCode as WireShareRejectionCode,
         CreateShareOperationResult as WireCreateShareOperationResult,
+        CreateVaultOperationRejectionCode as WireVaultRejectionCode,
+        CreateVaultOperationResult as WireCreateVaultOperationResult,
         ItemOperationResult as WireItemOperationResult, OperationOutcome as WireOperationOutcome,
         OperationRejectionCode as WireOperationRejectionCode,
     },
@@ -334,6 +336,13 @@ impl Runtime {
         auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
         let observed = outcome.clone();
+        if !outcome_matches_operation_shape(operation, &outcome.result) {
+            return if fence_already_held {
+                self.fail_account_module_fenced(account_id).await
+            } else {
+                self.fail_account_module(account_id).await
+            };
+        }
         let expected_category = self.replica.snapshot(account_id).and_then(|snapshot| {
             snapshot
                 .items
@@ -385,8 +394,8 @@ impl Runtime {
                     let valid = match (&item, operation.kind) {
                         (None, OperationKind::PermanentlyDeleteItem) => true,
                         (Some(item), kind) if kind != OperationKind::PermanentlyDeleteItem => {
-                            item.id == operation.item_id
-                                && item.vault_id == operation.vault_id
+                            item.id == operation.item_id()
+                                && item.vault_id == operation.vault_id()
                                 && item.version == *version
                                 && expected_category.as_ref() == Some(&item.category)
                                 && self.validate_authoritative_item(account_id, item).is_ok()
@@ -414,8 +423,8 @@ impl Runtime {
                         Ok(None) => return CompletionResult::Retry,
                         Err(result) => return result,
                     };
-                    if item.id != operation.item_id
-                        || item.vault_id != operation.vault_id
+                    if item.id != operation.item_id()
+                        || item.vault_id != operation.vault_id()
                         || item.version != *version
                         || expected_category.as_ref() != Some(&item.category)
                         || self.validate_authoritative_item(account_id, &item).is_err()
@@ -438,6 +447,13 @@ impl Runtime {
             OperationOutcomeResult::ShareApplied { .. } => {
                 PlanMutation::ReconcileShareOutcome { outcome, cursor }
             }
+            OperationOutcomeResult::VaultApplied { .. }
+            | OperationOutcomeResult::VaultRejected { .. } => {
+                // Ticket 53 keeps create-Vault production dispatch closed. Its test-only executor
+                // owns the bounded Vault/key fetch and guarded reconciliation until the atomic
+                // Server/Web cutover installs the production route.
+                return CompletionResult::Retry;
+            }
             OperationOutcomeResult::Rejected { .. } => {
                 if operation.kind == OperationKind::CreateShare {
                     PlanMutation::ReconcileShareOutcome { outcome, cursor }
@@ -445,7 +461,7 @@ impl Runtime {
                     let mut item = match self
                         .fetch_authoritative_item(
                             account_id,
-                            &operation.item_id,
+                            operation.item_id(),
                             http,
                             session,
                             auth_budget,
@@ -460,7 +476,7 @@ impl Runtime {
                             let attachments = match self
                                 .fetch_move_attachments(
                                     account_id,
-                                    &operation.item_id,
+                                    operation.item_id(),
                                     authority,
                                     http,
                                     session,
@@ -933,6 +949,38 @@ impl Runtime {
     }
 }
 
+fn outcome_matches_operation_shape(
+    operation: &OperationRecord,
+    result: &OperationOutcomeResult,
+) -> bool {
+    let item_target = operation.target.item_id().is_some();
+    match result {
+        OperationOutcomeResult::Applied { .. } => {
+            item_target
+                && matches!(
+                    operation.kind,
+                    OperationKind::CreateItem
+                        | OperationKind::UpdateItem
+                        | OperationKind::SetItemFavorite
+                        | OperationKind::TrashItem
+                        | OperationKind::RestoreItem
+                        | OperationKind::MoveItem
+                        | OperationKind::PermanentlyDeleteItem
+                )
+        }
+        OperationOutcomeResult::Rejected { .. } => {
+            item_target && operation.kind != OperationKind::CreateVault
+        }
+        OperationOutcomeResult::ShareApplied { .. } => {
+            item_target && operation.kind == OperationKind::CreateShare
+        }
+        OperationOutcomeResult::VaultApplied { .. }
+        | OperationOutcomeResult::VaultRejected { .. } => {
+            !item_target && operation.kind == OperationKind::CreateVault
+        }
+    }
+}
+
 /// Reads one wire outcome as this Operation's outcome, or refuses it.
 ///
 /// The lookup route answers one union tagged on `kind`, so the first thing that happens here is
@@ -953,9 +1001,12 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
             operation_id,
             result,
         } => {
+            if operation.kind != OperationKind::CreateItem || operation.target.item_id().is_none() {
+                return SemanticAnswer::IdentityReused;
+            }
             let result = match result {
                 WireItemOperationResult::Applied { item_id, version } => {
-                    if item_id != operation.item_id || version < 1 {
+                    if item_id != operation.item_id() || version < 1 {
                         return SemanticAnswer::IdentityReused;
                     }
                     OperationOutcomeResult::Applied {
@@ -1025,10 +1076,27 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
             };
             (operation_id, OperationKind::CreateShare, result)
         }
-        WireOperationOutcome::CreateVault { .. } => {
-            // This foundation can read the closed Server union, but no production Runtime request
-            // can accept create-Vault work until its later lifecycle slice opens that gate.
-            return SemanticAnswer::IdentityReused;
+        WireOperationOutcome::CreateVault {
+            operation_id,
+            result,
+        } => {
+            if !matches!(operation.target, crate::replica::ResourceRef::Vault { .. }) {
+                return SemanticAnswer::IdentityReused;
+            }
+            let result = match result {
+                WireCreateVaultOperationResult::Applied { vault_id } => {
+                    if vault_id != operation.vault_id() {
+                        return SemanticAnswer::IdentityReused;
+                    }
+                    OperationOutcomeResult::VaultApplied { vault_id }
+                }
+                WireCreateVaultOperationResult::Rejected { code } => {
+                    OperationOutcomeResult::VaultRejected {
+                        code: vault_rejection_code(code),
+                    }
+                }
+            };
+            (operation_id, OperationKind::CreateVault, result)
         }
     };
     if operation_id != operation.operation_id || operation.kind != expected_kind {
@@ -1043,15 +1111,32 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
     })
 }
 
+fn vault_rejection_code(
+    code: WireVaultRejectionCode,
+) -> crate::replica::CreateVaultOperationRejectionCode {
+    use crate::replica::CreateVaultOperationRejectionCode as Local;
+    match code {
+        WireVaultRejectionCode::VaultIdConflict => Local::VaultIdConflict,
+        WireVaultRejectionCode::TeamMembershipRequired => Local::TeamMembershipRequired,
+        WireVaultRejectionCode::VaultSharingEntitlementDenied => {
+            Local::VaultSharingEntitlementDenied
+        }
+        WireVaultRejectionCode::SharedVaultLimitReached => Local::SharedVaultLimitReached,
+    }
+}
+
 fn ordinary_item_outcome(
     operation: &OperationRecord,
     operation_id: String,
     kind: OperationKind,
     result: WireItemOperationResult,
 ) -> Option<(String, OperationKind, OperationOutcomeResult)> {
+    if operation.kind != kind || operation.target.item_id().is_none() {
+        return None;
+    }
     let result = match result {
         WireItemOperationResult::Applied { item_id, version } => {
-            if item_id != operation.item_id || version < 1 {
+            if item_id != operation.item_id() || version < 1 {
                 return None;
             }
             OperationOutcomeResult::Applied {
@@ -1123,7 +1208,9 @@ fn rejection_allowed(kind: OperationKind, code: OperationRejectionCode) -> bool 
                 | ItemVersionConflict
                 | AttachmentStateConflict
         ),
-        OperationKind::CreateItem | OperationKind::CreateShare => false,
+        OperationKind::CreateVault | OperationKind::CreateItem | OperationKind::CreateShare => {
+            false
+        }
     }
 }
 

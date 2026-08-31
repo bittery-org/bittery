@@ -1895,6 +1895,101 @@ async fn seeded_attachment() -> AttachmentHarness {
     seeded_attachment_with_role(AuthorityVaultRole::Owner).await
 }
 
+async fn accept_unrelated_vault_creation(harness: &AttachmentHarness) {
+    let response = harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Unrelated vault".into(),
+                vault_type: crate::CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: None,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        response,
+        RuntimeResponse::VaultCreationAccepted { .. }
+    ));
+}
+
+#[tokio::test]
+async fn foreground_attachment_writes_ignore_an_unrelated_active_vault_operation() {
+    let upload = seeded_attachment().await;
+    accept_unrelated_vault_creation(&upload).await;
+    let plaintext = b"upload bytes".to_vec();
+    upload
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            Arc::new(TestUploadSourcePort {
+                bytes: plaintext.clone(),
+                claims: Arc::new(Mutex::new(Vec::new())),
+                closed: Arc::new(AtomicUsize::new(0)),
+            }),
+            Arc::new(TestUploadTransfer {
+                bytes: Arc::new(Mutex::new(Vec::new())),
+                expected: Arc::new(AtomicUsize::new(0)),
+                finish_outcome: TestUploadFinishOutcome::Uploaded,
+            }),
+        ));
+    assert!(matches!(
+        upload
+            .runtime
+            .request(
+                RuntimeRequest::UploadAttachment {
+                    account_id: upload.account_id.clone(),
+                    item_id: ITEM_ID.into(),
+                    name: "coexisting.txt".into(),
+                    content_type: "text/plain".into(),
+                    file_size: plaintext.len() as u64,
+                    source_capability_id: "source-coexisting".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::AttachmentUploaded { .. }
+    ));
+
+    let delete = seeded_attachment().await;
+    accept_unrelated_vault_creation(&delete).await;
+    assert!(matches!(
+        delete
+            .runtime
+            .request(
+                RuntimeRequest::DeleteAttachment {
+                    account_id: delete.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::AttachmentDeleted { .. }
+    ));
+
+    let rename = seeded_attachment().await;
+    accept_unrelated_vault_creation(&rename).await;
+    assert!(matches!(
+        rename
+            .runtime
+            .request(
+                RuntimeRequest::RenameAttachment {
+                    account_id: rename.account_id.clone(),
+                    attachment_id: ATTACHMENT_ID.into(),
+                    name: "renamed-with-vault.txt".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::AttachmentRenamed { .. }
+    ));
+}
+
 async fn seeded_attachment_with_role(role: AuthorityVaultRole) -> AttachmentHarness {
     seeded_attachment_for_category(
         role,

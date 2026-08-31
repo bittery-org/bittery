@@ -49,7 +49,7 @@ struct RecordingExecutor {
     cancel_after_commit: Mutex<Option<RequestCancellation>>,
 }
 
-struct SuccessfulDeletePlatform;
+pub(super) struct SuccessfulDeletePlatform;
 
 #[async_trait]
 impl SerializedPlatformStorageExecutor for SuccessfulDeletePlatform {
@@ -67,7 +67,7 @@ impl SerializedPlatformStorageExecutor for SuccessfulDeletePlatform {
     }
 }
 
-struct UnusedHttp;
+pub(super) struct UnusedHttp;
 
 #[async_trait]
 impl SerializedHttpExecutor for UnusedHttp {
@@ -258,6 +258,22 @@ impl RecordingExecutor {
     fn recorded(&self) -> Vec<String> {
         self.requests.lock().unwrap().clone()
     }
+}
+
+pub(super) fn create_vault_restart_executor() -> Arc<dyn SerializedReplicaExecutor> {
+    RecordingExecutor::seeded()
+}
+
+pub(super) fn create_vault_fenced_executor() -> Arc<dyn SerializedReplicaExecutor> {
+    let executor = RecordingExecutor::seeded();
+    executor.fence_before_commit.store(true, Ordering::SeqCst);
+    executor
+}
+
+pub(super) fn create_vault_failing_executor() -> Arc<dyn SerializedReplicaExecutor> {
+    let executor = RecordingExecutor::seeded();
+    executor.fail_commits.store(true, Ordering::SeqCst);
+    executor
 }
 
 #[async_trait]
@@ -497,7 +513,7 @@ async fn accepted_share_is_one_explicit_account_scoped_durable_operation() {
     assert_eq!(snapshot.revision, replica_revision);
     assert_eq!(snapshot.operations.len(), 1);
     assert_eq!(snapshot.operations[0].operation_id, operation_id);
-    assert_eq!(snapshot.operations[0].item_id, item_id);
+    assert_eq!(snapshot.operations[0].item_id(), item_id);
     assert_eq!(snapshot.operations[0].kind, OperationKind::CreateShare);
 }
 
@@ -1264,8 +1280,8 @@ async fn accepted_create_seals_the_draft_under_the_existing_item_aad() {
     assert_eq!(operation.kind, OperationKind::CreateItem);
     // One canonical Item ID binds the response, the route, the overlay, and the AAD. There is no
     // temporary identity anywhere in this path.
-    assert_eq!(operation.item_id, item_id);
-    assert_eq!(operation.vault_id, TEST_VAULT_ID);
+    assert_eq!(operation.item_id(), item_id);
+    assert_eq!(operation.vault_id(), TEST_VAULT_ID);
     assert_eq!(
         operation.request.path,
         create_item_path(TEST_VAULT_ID, &item_id)
@@ -2307,7 +2323,7 @@ async fn remaining_item_kinds_are_durably_accepted_under_explicit_account_scope(
         let operation = snapshot.operations[0].clone();
         let overlay = snapshot.items[0].clone();
         assert_eq!(operation.kind, case.operation_kind());
-        assert_eq!(operation.item_id, "item-existing");
+        assert_eq!(operation.item_id(), "item-existing");
         assert_eq!(operation.request.method, case.method());
         assert_eq!(operation.request.path, case.path());
         assert_eq!(overlay.version, 2);

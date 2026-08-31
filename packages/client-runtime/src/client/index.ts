@@ -14,6 +14,7 @@ import type {
 	RuntimeRequest,
 	RuntimeResponse,
 	RuntimeStatusProjection,
+	WritableVaultCatalogProjection,
 } from "../../generated/runtime-protocol/contract";
 import {
 	ObservationRegistry,
@@ -32,6 +33,7 @@ import { RuntimeRequestError, type RuntimeTransport } from "./transport";
 export type {
 	Address,
 	AuthenticatorItemData,
+	CreateVaultType,
 	CreditCardItemData,
 	IdentityItemData,
 	ItemDraft,
@@ -45,6 +47,9 @@ export type {
 	SecureNoteItemData,
 	TotpAlgorithm,
 	TotpDigits,
+	VaultImageSourceInput,
+	WritableVaultCatalogProjection,
+	WritableVaultProjection,
 } from "../../generated/runtime-protocol/contract";
 
 export { DEFAULT_RELEASE_GRACE_MS, type Schedule } from "./registry";
@@ -107,6 +112,14 @@ export type CreateItemInput = Omit<
 >;
 export type UpdateItemInput = Omit<
 	Extract<RuntimeRequest, { type: "updateItem" }>,
+	"type"
+>;
+export type CreateVaultInput = Omit<
+	Extract<RuntimeRequest, { type: "createVault" }>,
+	"type"
+>;
+export type RuntimeVaultCreationAccepted = Omit<
+	Extract<RuntimeResponse, { type: "vaultCreationAccepted" }>,
 	"type"
 >;
 export interface CreateShareInput {
@@ -183,6 +196,10 @@ export interface RuntimeClient {
 	): Promise<RuntimeServerAccountDeletion>;
 	/** Destroys every Account and all Runtime state on this Device. Irreversible. */
 	wipe(options?: RuntimeCallOptions): Promise<RuntimeTeardown>;
+	createVault(
+		input: CreateVaultInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeVaultCreationAccepted>;
 	createItem(
 		input: CreateItemInput,
 		options?: RuntimeCallOptions,
@@ -205,6 +222,8 @@ export interface RuntimeClient {
 	pendingShareResults(
 		accountId: string,
 	): RuntimeStore<PendingShareResultsProjection>;
+	/** Authority-only writable Vault metadata across all unlocked Accounts on this Device. */
+	writableVaults(): RuntimeStore<WritableVaultCatalogProjection>;
 	/** One Account's status, or the Device aggregate when no Account is named. */
 	status(accountId?: string | null): RuntimeStore<RuntimeStatusProjection>;
 	/**
@@ -328,6 +347,14 @@ export function createRuntimeClient(
 				await call({ type: "wipe" }, "teardown", callOptions),
 			);
 		},
+		async createVault(input, callOptions) {
+			const { operationId, vaultId, replicaRevision } = await call(
+				{ type: "createVault", ...input },
+				"vaultCreationAccepted",
+				callOptions,
+			);
+			return { operationId, vaultId, replicaRevision };
+		},
 		async createItem(input, callOptions) {
 			const { operationId, itemId, replicaRevision } = await call(
 				{ type: "createItem", ...input },
@@ -370,6 +397,11 @@ export function createRuntimeClient(
 			return registry.store<PendingShareResultsProjection>({
 				type: "pendingShareResults",
 				accountId,
+			} satisfies ObservationRequest);
+		},
+		writableVaults() {
+			return registry.store<WritableVaultCatalogProjection>({
+				type: "writableVaultCatalog",
 			} satisfies ObservationRequest);
 		},
 		status(accountId) {
