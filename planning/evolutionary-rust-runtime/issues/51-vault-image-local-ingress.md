@@ -1,7 +1,7 @@
 # Add durable local Vault-image ingress
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 50
 Parent: [28 — finalized E1–E10 frontier](28-remaining-item-write-kinds.md#2026-08-30--final-web-item-and-import-frontier-resolved)
 
@@ -57,3 +57,32 @@ dispatch, or expose a registry from `apps/web`.
 - Run focused Core, binding, SQLite, TypeScript, generated-contract, and actual-Chromium IndexedDB
   tests; then client-runtime type/generation checks, `pnpm check:ci`, `pnpm check:ci:rust`, and
   `git diff --check`.
+
+## Comments
+
+### 2026-08-31 — resolved
+
+Commit `3d6a56e9` adds the distinct bounded Vault-image source and durable plaintext artifact ports.
+Runtime enforces the exact five-MIME allowlist, 1–2,097,152-byte declaration, 256 KiB read bound,
+exact EOF, and Rust-computed lowercase SHA-256. In-memory, native SQLite BLOB, and browser IndexedDB
+adapters cover publication, replay/conflict, deletion, exclusive startup orphan sweep, and injected
+failure histories. Source claims and artifacts are fenced to the Runtime incarnation, Account,
+prepared Operation, and exact request; the implementation also enforces the inclusive lifecycle,
+tombstone, capacity, grant-expiry, acceptance-fence, retirement-drain, cleanup-retry, and failed-open
+reconstruction invariants.
+
+The generated native and WASM ports and the private Web composition remain shallow. Zeroization is
+limited to Runtime-owned or transferred plaintext buffers, including sensitive Base64 material at
+the native binding boundary; it makes no claim about original host storage or physical media. The
+Attachment ciphertext artifact port cannot satisfy this contract. This slice adds no Server or
+network behavior, accepts no `create_vault` Operation, and exposes no registry from `apps/web`.
+Independent review approved the final implementation after correction rounds with no remaining
+findings.
+
+The final `pnpm check:ci:rust` passed end to end. Its coverage included 526 Client Runtime Core tests,
+48 binding tests plus five generated-contract tests, 34 generator tests, Desktop's 89 and 50 test
+suites, and 139 Crypto Core tests. IndexedDB passed 10/10 tests with 59 assertions; actual Chromium
+passed 3/3; the focused native suite passed 3/3. Earlier verification also passed all 349 Runtime
+TypeScript tests, type checking, generated/native/WASM drift checks, and `git diff --check`. Root
+`pnpm check:ci` did not complete: it stopped only on preserved Ticket 58 Biome errors and reported no
+Ticket 51 diagnostic, so this ticket does not claim a clean-tree root CI pass.
