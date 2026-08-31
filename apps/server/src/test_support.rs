@@ -31,6 +31,57 @@ use crate::integrations::storage::{
 };
 use crate::{create_app, db, AppState, EdgeHttpConfig};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum VaultImageDatabaseBoundary {
+    ReplayRenewal,
+    GenerationAdvance,
+    GenerationInsert,
+    QuotaRead,
+    QuotaAdmission,
+    GrantCommit,
+    StatusRenewal,
+    StatusCommit,
+    Confirmation,
+    ConfirmationCommit,
+    CleanupRequest,
+    CleanupRequestCommit,
+    ExpiryMark,
+    CandidateSelection,
+    RowSelection,
+    FinalDelete,
+    CleanupCommit,
+}
+
+static VAULT_IMAGE_DATABASE_FAILPOINTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<(String, VaultImageDatabaseBoundary)>>,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_vault_image_database_failpoint(
+    operation_id: &str,
+    boundary: VaultImageDatabaseBoundary,
+) {
+    VAULT_IMAGE_DATABASE_FAILPOINTS
+        .lock()
+        .expect("Vault image database failpoints lock")
+        .insert((operation_id.to_owned(), boundary));
+}
+
+pub(crate) fn fail_vault_image_database_boundary(
+    operation_id: &str,
+    boundary: VaultImageDatabaseBoundary,
+) -> Result<(), sqlx::Error> {
+    if VAULT_IMAGE_DATABASE_FAILPOINTS
+        .lock()
+        .expect("Vault image database failpoints lock")
+        .remove(&(operation_id.to_owned(), boundary))
+    {
+        return Err(sqlx::Error::Protocol(format!(
+            "injected Vault image database failure at {boundary:?}"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Default)]
 pub(crate) struct AttachmentMovePreflightControl {
     claimed: std::sync::atomic::AtomicBool,
@@ -270,6 +321,11 @@ pub(crate) struct RecordingObjectStorage {
     fail: bool,
     public_base: Option<String>,
     object_size: i64,
+    object_content_type: Option<String>,
+    object_sha256: Option<String>,
+    upload_key_override: Option<String>,
+    object_present: bool,
+    fail_delete: bool,
     delete_started: Option<std::sync::Arc<tokio::sync::Notify>>,
     delete_release: Option<std::sync::Arc<tokio::sync::Notify>>,
 }
@@ -284,6 +340,11 @@ impl RecordingObjectStorage {
             fail: false,
             public_base: public_base.map(str::to_owned),
             object_size: 1,
+            object_content_type: None,
+            object_sha256: None,
+            upload_key_override: None,
+            object_present: true,
+            fail_delete: false,
             delete_started: None,
             delete_release: None,
         }
@@ -291,6 +352,36 @@ impl RecordingObjectStorage {
     pub(crate) fn succeeding_with_object_size(object_size: i64) -> Self {
         Self {
             object_size,
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_exact_object(
+        object_size: i64,
+        content_type: &str,
+        sha256: &str,
+    ) -> Self {
+        Self {
+            object_size,
+            object_content_type: Some(content_type.to_owned()),
+            object_sha256: Some(sha256.to_owned()),
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_with_wrong_upload_key(key: &str) -> Self {
+        Self {
+            upload_key_override: Some(key.to_owned()),
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_with_absent_object() -> Self {
+        Self {
+            object_present: false,
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn failing_delete() -> Self {
+        Self {
+            fail_delete: true,
             ..Self::succeeding(None)
         }
     }
@@ -352,7 +443,10 @@ impl ObjectStorage for RecordingObjectStorage {
             ));
         self.record(format!("presign_upload:{key}"))?;
         Ok(PresignedUploadResult {
-            key: key.into(),
+            key: self
+                .upload_key_override
+                .clone()
+                .unwrap_or_else(|| key.to_owned()),
             upload_url: format!("https://upload.invalid/{key}"),
             public_url: self.public_url(key),
         })
@@ -367,13 +461,22 @@ impl ObjectStorage for RecordingObjectStorage {
     }
     async fn head(&self, key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
         self.record(format!("head:{key}"))?;
+        if !self.object_present {
+            return Ok(None);
+        }
         Ok(Some(StorageObjectHead {
             size: self.object_size,
-            content_type: None,
+            content_type: self.object_content_type.clone(),
+            payload_sha256: self.object_sha256.clone(),
         }))
     }
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         self.record(format!("delete:{key}"))?;
+        if self.fail_delete {
+            return Err(StorageError::DeleteObject(
+                "injected delete failure".to_owned(),
+            ));
+        }
         if let (Some(started), Some(release)) = (&self.delete_started, &self.delete_release) {
             started.notify_one();
             release.notified().await;

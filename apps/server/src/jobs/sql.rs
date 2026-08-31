@@ -316,6 +316,96 @@ pub async fn cleanup_attachment_move_staging(
     Ok(deleted)
 }
 
+/// Deletes expired unconfirmed or explicitly abandoned Vault-image staging objects.
+///
+/// The Operation advisory lock remains held across the idempotent object delete. The stable object
+/// key can therefore never be rebound to a later generation while an old delete is in flight.
+pub async fn cleanup_vault_image_staging(
+    pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
+) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(test)]
+    {
+        let expired = query_scalar::<_, String>("UPDATE vault_image_staging SET state = 'cleanup_pending', updated_at = NOW() WHERE state = 'unconfirmed' AND lease_expires_at <= NOW() RETURNING operation_id")
+            .fetch_all(pool)
+            .await?;
+        for operation_id in &expired {
+            crate::test_support::fail_vault_image_database_boundary(
+                operation_id,
+                crate::test_support::VaultImageDatabaseBoundary::ExpiryMark,
+            )?;
+        }
+    }
+    #[cfg(not(test))]
+    query("UPDATE vault_image_staging SET state = 'cleanup_pending', updated_at = NOW() WHERE state = 'unconfirmed' AND lease_expires_at <= NOW()")
+        .execute(pool)
+        .await?;
+    let candidates = query_as::<_, (String, String, i64)>(
+        "SELECT user_id, operation_id, generation FROM vault_image_staging WHERE state = 'cleanup_pending' ORDER BY updated_at, user_id, operation_id LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await?;
+    #[cfg(test)]
+    for (_, operation_id, _) in &candidates {
+        crate::test_support::fail_vault_image_database_boundary(
+            operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::CandidateSelection,
+        )?;
+    }
+    let mut deleted = 0;
+    for (user_id, operation_id, selected_generation) in candidates {
+        let mut transaction = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *transaction,
+            &user_id,
+            &operation_id,
+            "Failed to lock Vault image staging cleanup",
+        )
+        .await?;
+        let row = query_as::<_, (String, i64)>(
+            "SELECT object_key, generation FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND state = 'cleanup_pending' AND generation = $3 FOR UPDATE",
+        )
+        .bind(&user_id)
+        .bind(&operation_id)
+        .bind(selected_generation)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some((object_key, generation)) = row else {
+            transaction.rollback().await?;
+            continue;
+        };
+        #[cfg(test)]
+        crate::test_support::fail_vault_image_database_boundary(
+            &operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::RowSelection,
+        )?;
+        if let Err(error) = object_storage.delete(&object_key).await {
+            transaction.rollback().await?;
+            error!(%error, %object_key, "vault-image-staging cleanup will retry object deletion");
+            continue;
+        }
+        let result = query("DELETE FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND generation = $3 AND state = 'cleanup_pending'")
+            .bind(&user_id)
+            .bind(&operation_id)
+            .bind(generation)
+            .execute(&mut *transaction)
+            .await?;
+        #[cfg(test)]
+        crate::test_support::fail_vault_image_database_boundary(
+            &operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::FinalDelete,
+        )?;
+        #[cfg(test)]
+        crate::test_support::fail_vault_image_database_boundary(
+            &operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::CleanupCommit,
+        )?;
+        transaction.commit().await?;
+        deleted += result.rows_affected();
+    }
+    Ok(deleted)
+}
+
 pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let cutoff = OffsetDateTime::now_utc() - Duration::days(TOMBSTONE_RETENTION_DAYS);
     let mut total_deleted = 0;

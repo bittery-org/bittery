@@ -21,6 +21,8 @@ pub enum AppErrorCode {
     AttachmentStagingMismatch,
     AttachmentAuthorityStale,
     AttachmentQuotaExceeded,
+    OperationIdReused,
+    VaultImageStagingQuotaExceeded,
     #[serde(rename = "TOO_MANY_REQUESTS")]
     TooManyRequests,
     #[serde(rename = "PAYLOAD_TOO_LARGE")]
@@ -118,6 +120,20 @@ impl AppError {
     pub(crate) fn attachment_quota_exceeded(message: impl Into<String>) -> Self {
         Self {
             code: AppErrorCode::AttachmentQuotaExceeded,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn operation_id_reused(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::OperationIdReused,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn vault_image_staging_quota_exceeded(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::VaultImageStagingQuotaExceeded,
             message: message.into(),
         }
     }

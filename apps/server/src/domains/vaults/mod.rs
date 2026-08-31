@@ -25,6 +25,8 @@ mod pagination;
 pub(crate) mod rotation;
 pub(crate) mod shapes;
 pub(crate) mod travel_mode;
+#[allow(dead_code)] // The production dispatcher opens this private foundation in Ticket 54.
+mod vault_image_staging;
 
 pub(crate) use attachments::{
     create_attachment_move_manifest, create_vault_attachment, create_vault_attachment_upload,
@@ -47,6 +49,12 @@ pub(crate) use members::{
     add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
 };
 pub(crate) use pagination::ByteBoundedPage;
+#[allow(unused_imports)]
+pub(crate) use vault_image_staging::{
+    confirm_vault_image_staging, grant_vault_image_staging, request_vault_image_staging_cleanup,
+    status_vault_image_staging, VaultImageStagingBinding, VaultImageStagingGrant,
+    VaultImageStagingState, VaultImageStagingStatus,
+};
 
 #[cfg(test)]
 use access::assert_item_write_access;

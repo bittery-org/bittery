@@ -4,11 +4,12 @@ use super::{
 };
 use crate::db::enums::VaultRole;
 use crate::error::AppErrorCode;
-use crate::jobs::sql::cleanup_attachment_move_staging;
+use crate::jobs::sql::{cleanup_attachment_move_staging, cleanup_vault_image_staging};
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, install_attachment_move_preflight_hook,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
-    with_api_test_app_state, with_test_config, RecordingObjectStorage,
+    install_vault_image_database_failpoint, seed_item, seed_team, seed_user, seed_vault,
+    seed_vault_key, with_api_test_app, with_api_test_app_state, with_test_config,
+    RecordingObjectStorage, VaultImageDatabaseBoundary,
 };
 use axum::http::{
     header::{CONTENT_TYPE, ETAG, IF_MATCH},
@@ -19,6 +20,1727 @@ use sqlx::{query, query_as, query_scalar, PgPool};
 use time::{Duration, OffsetDateTime};
 
 use std::sync::Arc;
+
+fn vault_image_binding(operation_id: &str) -> super::VaultImageStagingBinding {
+    super::VaultImageStagingBinding {
+        operation_id: operation_id.to_owned(),
+        vault_id: "vault_image_target".to_owned(),
+        raw_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+        raw_length: 2_097_152,
+        content_type: "image/png".to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn vault_image_exact_grant_replay_is_stable_and_consumes_quota_once() {
+    with_api_test_app("vault_image_exact_grant_replay", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_user",
+            "Vault Image User",
+            "vault-image@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let binding = vault_image_binding("vault_image_operation");
+
+        let first = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_user",
+            binding.clone(),
+        )
+        .await
+        .expect("first exact grant should bind");
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_user",
+            binding,
+        )
+        .await
+        .expect("exact replay should renew the same binding");
+
+        assert_eq!(first.object_key, "vaults/vault_image_user/vault_image_target/create/vault_image_operation-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(replay.object_key, first.object_key);
+        assert_eq!(replay.generation, first.generation);
+        assert!(replay.lease_expires_at >= first.lease_expires_at);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("quota row should count"),
+            1
+        );
+        assert_eq!(storage.upload_requests().len(), 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_exact_grant_replay_returns_the_database_persisted_rolling_lease() {
+    with_api_test_app("vault_image_grant_database_clock", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_grant_clock_user",
+            "Vault Image Grant Clock User",
+            "vault-image-grant-clock@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let binding = vault_image_binding("vault_image_grant_clock_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_grant_clock_user",
+            binding.clone(),
+        )
+        .await
+        .expect("initial grant should bind");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_grant_clock_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten");
+        query("CREATE FUNCTION normalize_vault_image_lease() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.lease_expires_at := date_trunc('second', NEW.lease_expires_at); NEW.updated_at := NEW.lease_expires_at - INTERVAL '24 hours'; RETURN NEW; END $$")
+            .execute(&app.pool)
+            .await
+            .expect("lease normalizer should create");
+        query("CREATE TRIGGER normalize_vault_image_lease BEFORE UPDATE ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION normalize_vault_image_lease()")
+            .execute(&app.pool)
+            .await
+            .expect("lease normalizer should install");
+
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_grant_clock_user",
+            binding,
+        )
+        .await
+        .expect("exact grant should renew");
+        let persisted = query_as::<_, (OffsetDateTime, OffsetDateTime)>(
+            "SELECT lease_expires_at, updated_at FROM vault_image_staging WHERE user_id = 'vault_image_grant_clock_user'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("renewed lease should load");
+
+        assert_eq!(replay.lease_expires_at, persisted.0);
+        assert_eq!(persisted.0 - persisted.1, Duration::hours(24));
+        assert!(persisted.0 > OffsetDateTime::now_utc() + Duration::hours(23));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_changed_binding_is_operation_id_reused_before_object_access() {
+    with_api_test_app("vault_image_changed_binding", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_reuse_user",
+            "Vault Image Reuse User",
+            "vault-image-reuse@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let binding = vault_image_binding("vault_image_reused_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_reuse_user",
+            binding.clone(),
+        )
+        .await
+        .expect("first binding should succeed");
+        let mut changed = binding;
+        changed.content_type = "image/webp".to_owned();
+
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_reuse_user",
+            changed,
+        )
+        .await
+        .expect_err("changed binding must be rejected");
+
+        assert_eq!(error.code, AppErrorCode::OperationIdReused);
+        assert_eq!(storage.upload_requests().len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_user_quota_is_inclusive_at_64_slots_and_128_mib() {
+    with_api_test_app("vault_image_quota_edges", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_quota_user",
+            "Vault Image Quota User",
+            "vault-image-quota@example.com",
+        )
+        .await;
+        query(
+            "INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_quota_user', 'quota_operation_' || value, repeat('b', 64), 1 FROM generate_series(1, 63) value",
+        )
+        .execute(&app.pool)
+        .await
+        .expect("quota generations should seed");
+        query(
+            "INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_quota_user', 'quota_operation_' || value, 'vault_image_target', 'vaults/vault_image_quota_user/vault_image_target/create/quota_operation_' || value || '-' || repeat('b', 64), repeat('b', 64), 2097152, 'image/png', 'unconfirmed', 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 63) value",
+        )
+        .execute(&app.pool)
+        .await
+        .expect("quota rows should seed");
+        let storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_quota_user",
+            vault_image_binding("quota_operation_64"),
+        )
+        .await
+        .expect("the inclusive 64th slot and 128 MiB byte should succeed");
+
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_quota_user",
+            vault_image_binding("quota_operation_65"),
+        )
+        .await
+        .expect_err("the 65th slot must fail before storage");
+
+        assert_eq!(error.code, AppErrorCode::VaultImageStagingQuotaExceeded);
+        assert_eq!(storage.upload_requests().len(), 1);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_quota_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should be readable"),
+            0,
+            "quota rejection is not a semantic Operation outcome"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_slot_quota_counts_cleanup_pending_even_with_one_byte_rows() {
+    with_api_test_app("vault_image_independent_quota_edges", |app| async move {
+        seed_user(&app.pool, "vault_image_slot_user", "Vault Image Quota User", "vault-image-slot@example.com").await;
+        query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_slot_user', 'slot_operation_' || value, repeat('b', 64), 1 FROM generate_series(1, 64) value")
+            .execute(&app.pool).await.expect("slot generations should seed");
+        query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_slot_user', 'slot_operation_' || value, 'vault_image_target', 'vaults/vault_image_slot_user/vault_image_target/create/slot_operation_' || value || '-' || repeat('b', 64), repeat('b', 64), 1, 'image/png', CASE WHEN value = 1 THEN 'cleanup_pending' ELSE 'unconfirmed' END, 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 64) value")
+            .execute(&app.pool).await.expect("slot rows should seed");
+
+        let storage = RecordingObjectStorage::succeeding(None);
+        let mut one_byte = vault_image_binding("slot_operation_65");
+        one_byte.raw_length = 1;
+        let slot_error = super::grant_vault_image_staging(
+            &app.pool, &storage, "vault_image_slot_user", one_byte,
+        ).await.expect_err("cleanup-pending row still consumes the 64th outstanding slot");
+        assert_eq!(slot_error.code, AppErrorCode::VaultImageStagingQuotaExceeded);
+
+        assert!(storage.calls().is_empty(), "quota rejects before object access");
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_concurrent_grants_serialize_at_the_inclusive_user_quota_boundary() {
+    with_api_test_app("vault_image_concurrent_quota", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_concurrent_quota_user",
+            "Vault Image Concurrent Quota User",
+            "vault-image-concurrent-quota@example.com",
+        )
+        .await;
+        query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_concurrent_quota_user', 'concurrent_quota_' || value, repeat('b', 64), 1 FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("quota generations should seed");
+        query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_concurrent_quota_user', 'concurrent_quota_' || value, 'vault_image_target', 'vaults/vault_image_concurrent_quota_user/vault_image_target/create/concurrent_quota_' || value || '-' || repeat('b', 64), repeat('b', 64), 2097152, 'image/png', 'unconfirmed', 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("quota rows should seed");
+
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let mut tasks = Vec::new();
+        for operation_id in ["concurrent_quota_64_a", "concurrent_quota_64_b"] {
+            let pool = app.pool.clone();
+            let storage = storage.clone();
+            let barrier = barrier.clone();
+            let binding = vault_image_binding(operation_id);
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                super::grant_vault_image_staging(
+                    &pool,
+                    storage.as_ref(),
+                    "vault_image_concurrent_quota_user",
+                    binding,
+                )
+                .await
+            }));
+        }
+        barrier.wait().await;
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.expect("concurrent grant should join"));
+        }
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter_map(|result| result.as_ref().err())
+                .map(|error| error.code)
+                .collect::<Vec<_>>(),
+            vec![AppErrorCode::VaultImageStagingQuotaExceeded]
+        );
+        assert_eq!(
+            query_as::<_, (i64, i64)>("SELECT COUNT(*)::bigint, SUM(raw_length)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_concurrent_quota_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("serialized quota should load"),
+            (64, 128 * 1024 * 1024)
+        );
+        assert_eq!(storage.upload_requests().len(), 1);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_concurrent_quota_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_concurrent_exact_grant_replays_keep_one_generation_and_quota_row() {
+    with_api_test_app("vault_image_concurrent_replay", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_concurrent_replay_user",
+            "Vault Image Concurrent Replay User",
+            "vault-image-concurrent-replay@example.com",
+        )
+        .await;
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        let binding = vault_image_binding("vault_image_concurrent_replay_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            storage.as_ref(),
+            "vault_image_concurrent_replay_user",
+            binding.clone(),
+        )
+        .await
+        .expect("initial grant should bind");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_concurrent_replay_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten");
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let pool = app.pool.clone();
+            let storage = storage.clone();
+            let binding = binding.clone();
+            let barrier = barrier.clone();
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                super::grant_vault_image_staging(
+                    &pool,
+                    storage.as_ref(),
+                    "vault_image_concurrent_replay_user",
+                    binding,
+                )
+                .await
+            }));
+        }
+        barrier.wait().await;
+        let first = tasks
+            .remove(0)
+            .await
+            .expect("first replay should join")
+            .expect("first replay should succeed");
+        let second = tasks
+            .remove(0)
+            .await
+            .expect("second replay should join")
+            .expect("second replay should succeed");
+
+        assert_eq!(first.generation, 1);
+        assert_eq!(second.generation, 1);
+        assert_eq!(first.object_key, second.object_key);
+        assert!(first.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        assert!(second.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        assert_eq!(
+            query_as::<_, (i64, i64, i64)>("SELECT COUNT(*)::bigint, SUM(raw_length)::bigint, MAX(generation)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_concurrent_replay_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("replay authority should load"),
+            (1, binding.raw_length, 1)
+        );
+        assert_eq!(storage.upload_requests().len(), 3);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_valid_row_bounds_make_byte_quota_equivalent_at_the_slot_boundary() {
+    with_api_test_app("vault_image_quota_equivalence", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_quota_equivalence_user",
+            "Vault Image Quota Equivalence User",
+            "vault-image-quota-equivalence@example.com",
+        )
+        .await;
+        query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_quota_equivalence_user', 'quota_equivalence_' || value, repeat('b', 64), 1 FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("quota generations should seed");
+        query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_quota_equivalence_user', 'quota_equivalence_' || value, 'vault_image_target', 'vaults/vault_image_quota_equivalence_user/vault_image_target/create/quota_equivalence_' || value || '-' || repeat('b', 64), repeat('b', 64), 2097152, 'image/png', 'unconfirmed', 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("valid maximum-size rows should seed");
+
+        let (slots, bytes, maximum_valid_row) = query_as::<_, (i64, i64, i64)>(
+            "SELECT COUNT(*)::bigint, SUM(raw_length)::bigint, MAX(raw_length)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_quota_equivalence_user'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("valid row bounds should load");
+        // The database's 2 MiB row bound makes a byte-only overflow below 64 slots
+        // unreachable: 63 maximum rows total 126 MiB and the 64th reaches 128 MiB.
+        assert_eq!((slots, bytes, maximum_valid_row), (63, 126 * 1024 * 1024, 2 * 1024 * 1024));
+        assert_eq!(bytes + maximum_valid_row, 128 * 1024 * 1024);
+        assert!(slots < 64);
+        assert!(bytes + maximum_valid_row <= 128 * 1024 * 1024);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_binding_accepts_only_canonical_ids_bounds_digest_and_exact_mime_set() {
+    with_api_test_app("vault_image_binding_validation", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_validation_user",
+            "Vault Image Validation User",
+            "vault-image-validation@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        for (index, content_type) in [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif",
+            "image/avif",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut binding = vault_image_binding(&format!("validation_operation_{index}"));
+            binding.content_type = content_type.to_owned();
+            binding.raw_length = if index == 0 { 1 } else { 2_097_152 };
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_validation_user",
+                binding,
+            )
+            .await
+            .expect("every exact allowed MIME and inclusive byte bound should pass");
+        }
+
+        let mut invalid = Vec::new();
+        let mut value = vault_image_binding("validation_invalid_mime");
+        value.content_type = "image/png; charset=binary".to_owned();
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_alias");
+        value.content_type = "image/jpg".to_owned();
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_empty");
+        value.raw_length = 0;
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_large");
+        value.raw_length = 2_097_153;
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_digest");
+        value.raw_sha256 = value.raw_sha256.to_ascii_uppercase();
+        invalid.push(value);
+        let mut value = vault_image_binding("short");
+        value.operation_id = "short".to_owned();
+        invalid.push(value);
+        for binding in invalid {
+            let error = super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_validation_user",
+                binding,
+            )
+            .await
+            .expect_err("non-canonical binding must fail before persistence and storage");
+            assert_eq!(error.code, AppErrorCode::BadRequest);
+        }
+        assert_eq!(storage.upload_requests().len(), 5);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_object_store_failures_preserve_exact_retry_authority() {
+    with_api_test_app("vault_image_object_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_object_failure_user",
+            "Vault Image Object Failure User",
+            "vault-image-object-failure@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_object_failure_operation");
+        let failing = RecordingObjectStorage::failing();
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &failing,
+            "vault_image_object_failure_user",
+            binding.clone(),
+        )
+        .await
+        .expect_err("credential failure should surface as infrastructure");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_as::<_, (String, i64)>("SELECT state, generation FROM vault_image_staging WHERE user_id = 'vault_image_object_failure_user'")
+                .fetch_one(&app.pool).await.expect("binding should remain durable"),
+            ("unconfirmed".to_owned(), 1)
+        );
+
+        let exact = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_object_failure_user",
+            binding.clone(),
+        )
+        .await
+        .expect("credential retry should replay generation one");
+        assert_eq!(replay.generation, 1);
+
+        let error = super::confirm_vault_image_staging(
+            &app.pool,
+            &failing,
+            "vault_image_object_failure_user",
+            &binding,
+        )
+        .await
+        .expect_err("HEAD failure should remain infrastructure");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_object_failure_user'")
+                .fetch_one(&app.pool).await.expect("state should survive"),
+            "unconfirmed"
+        );
+        let confirmed = super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_object_failure_user",
+            &binding,
+        )
+        .await
+        .expect("exact confirmation retry should converge");
+        assert_eq!(confirmed.state, super::VaultImageStagingState::Confirmed);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_object_failure_user'")
+                .fetch_one(&app.pool).await.expect("outcomes should load"),
+            0
+        );
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_wrong_credential_key_and_absent_head_preserve_exact_retry_authority() {
+    with_api_test_app("vault_image_object_boundary_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_object_boundary_user",
+            "Vault Image Object Boundary User",
+            "vault-image-object-boundary@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_object_boundary_operation");
+        let wrong_key = RecordingObjectStorage::succeeding_with_wrong_upload_key(
+            "vaults/foreign/vault/create/wrong-object",
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &wrong_key,
+            "vault_image_object_boundary_user",
+            binding.clone(),
+        )
+        .await
+        .expect_err("credential for a different key must fail closed");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_as::<_, (String, i64)>("SELECT state, generation FROM vault_image_staging WHERE user_id = 'vault_image_object_boundary_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("binding should survive wrong-key credentials"),
+            ("unconfirmed".to_owned(), 1)
+        );
+
+        let absent = RecordingObjectStorage::succeeding_with_absent_object();
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &absent,
+            "vault_image_object_boundary_user",
+            binding.clone(),
+        )
+        .await
+        .expect("exact credential retry should retain generation one");
+        assert_eq!(replay.generation, 1);
+        let lease_before_absent_head = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_object_boundary_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("lease should load");
+        let error = super::confirm_vault_image_staging(
+            &app.pool,
+            &absent,
+            "vault_image_object_boundary_user",
+            &binding,
+        )
+        .await
+        .expect_err("absent HEAD must not confirm");
+        assert_eq!(error.code, AppErrorCode::Conflict);
+        assert_eq!(
+            query_as::<_, (String, OffsetDateTime)>("SELECT state, lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_object_boundary_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("absent HEAD authority should survive"),
+            ("unconfirmed".to_owned(), lease_before_absent_head)
+        );
+
+        let exact = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        let confirmed = super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_object_boundary_user",
+            &binding,
+        )
+        .await
+        .expect("exact HEAD retry should confirm generation one");
+        assert_eq!(confirmed.generation, 1);
+        assert_eq!(confirmed.state, super::VaultImageStagingState::Confirmed);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_object_boundary_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_database_failures_precede_or_preserve_object_work_at_each_boundary() {
+    with_api_test_app("vault_image_database_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_database_failure_user",
+            "Vault Image Database Failure User",
+            "vault-image-database-failure@example.com",
+        )
+        .await;
+        query("CREATE FUNCTION fail_vault_image_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected insert failure'; END $$")
+            .execute(&app.pool).await.expect("insert failpoint should create");
+        query("CREATE TRIGGER fail_vault_image_insert BEFORE INSERT ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION fail_vault_image_insert()")
+            .execute(&app.pool).await.expect("insert trigger should create");
+        let binding = vault_image_binding("vault_image_database_failure_operation");
+        let storage = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool, &storage, "vault_image_database_failure_user", binding.clone(),
+        ).await.expect_err("database insert failure should abort before credentials");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert!(storage.calls().is_empty());
+        assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging_generation WHERE user_id = 'vault_image_database_failure_user'").fetch_one(&app.pool).await.expect("generation count should load"), 0);
+        query("DROP TRIGGER fail_vault_image_insert ON vault_image_staging")
+            .execute(&app.pool).await.expect("insert trigger should drop");
+        query("DROP FUNCTION fail_vault_image_insert()")
+            .execute(&app.pool).await.expect("insert function should drop");
+
+        super::grant_vault_image_staging(
+            &app.pool, &storage, "vault_image_database_failure_user", binding.clone(),
+        ).await.expect("binding should retry");
+        query("CREATE FUNCTION fail_vault_image_confirm() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.state = 'confirmed' THEN RAISE EXCEPTION 'injected confirmation failure'; END IF; RETURN NEW; END $$")
+            .execute(&app.pool).await.expect("confirm failpoint should create");
+        query("CREATE TRIGGER fail_vault_image_confirm BEFORE UPDATE ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION fail_vault_image_confirm()")
+            .execute(&app.pool).await.expect("confirm trigger should create");
+        let calls_before_confirm = storage.calls().len();
+        let error = super::confirm_vault_image_staging(
+            &app.pool, &storage, "vault_image_database_failure_user", &binding,
+        ).await.expect_err("database confirmation failure should leave the object retryable");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(storage.calls().len(), calls_before_confirm + 1, "HEAD precedes confirmation DB write");
+        assert_eq!(query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_database_failure_user'").fetch_one(&app.pool).await.expect("state should load"), "unconfirmed");
+        query("DROP TRIGGER fail_vault_image_confirm ON vault_image_staging")
+            .execute(&app.pool).await.expect("confirm trigger should drop");
+        query("DROP FUNCTION fail_vault_image_confirm()")
+            .execute(&app.pool).await.expect("confirm function should drop");
+
+        super::request_vault_image_staging_cleanup(
+            &app.pool, "vault_image_database_failure_user", &binding,
+        ).await.expect("cleanup should queue");
+        query("CREATE FUNCTION fail_vault_image_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected delete failure'; END $$")
+            .execute(&app.pool).await.expect("delete failpoint should create");
+        query("CREATE TRIGGER fail_vault_image_delete BEFORE DELETE ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION fail_vault_image_delete()")
+            .execute(&app.pool).await.expect("delete trigger should create");
+        let calls_before_delete = storage.calls().len();
+        assert!(cleanup_vault_image_staging(&app.pool, &storage).await.is_err());
+        assert_eq!(storage.calls().len(), calls_before_delete + 1, "object delete precedes final DB deletion");
+        assert_eq!(query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_database_failure_user'").fetch_one(&app.pool).await.expect("cleanup state should survive"), "cleanup_pending");
+        query("DROP TRIGGER fail_vault_image_delete ON vault_image_staging")
+            .execute(&app.pool).await.expect("delete trigger should drop");
+        query("DROP FUNCTION fail_vault_image_delete()")
+            .execute(&app.pool).await.expect("delete function should drop");
+        assert_eq!(cleanup_vault_image_staging(&app.pool, &storage).await.expect("cleanup retry should converge"), 1);
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_deferred_commit_failures_roll_back_each_mutation_for_exact_retry() {
+    with_api_test_app("vault_image_deferred_commit_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            "Vault Image Deferred Commit User",
+            "vault-image-deferred-commit@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_deferred_commit_operation");
+        let exact = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        query("CREATE FUNCTION fail_vault_image_deferred_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected deferred commit failure'; END $$")
+            .execute(&app.pool)
+            .await
+            .expect("deferred commit function should create");
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER INSERT ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("grant commit trigger should create");
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            binding.clone(),
+        )
+        .await
+        .expect_err("grant commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert!(exact.calls().is_empty(), "failed commit must precede credentials");
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging_generation WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back generation count should load"),
+            0
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("grant commit trigger should drop");
+        let grant = super::grant_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should retry");
+        assert_eq!(grant.generation, 1);
+
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_deferred_commit_user'")
+            .execute(&app.pool)
+            .await
+            .expect("status lease should shorten");
+        let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("shortened lease should load");
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER UPDATE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("status commit trigger should create");
+        let error = super::status_vault_image_staging(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect_err("status commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back status lease should load"),
+            shortened
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("status commit trigger should drop");
+        super::status_vault_image_staging(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect("status should retry")
+        .expect("status should remain present");
+
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER UPDATE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("confirmation commit trigger should create");
+        let error = super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect_err("confirmation commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back confirmation should load"),
+            "unconfirmed"
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("confirmation commit trigger should drop");
+        super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect("confirmation should retry");
+
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER UPDATE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup request commit trigger should create");
+        let error = super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect_err("cleanup request commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back cleanup request should load"),
+            "confirmed"
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup request commit trigger should drop");
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect("cleanup request should retry");
+
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER DELETE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup commit trigger should create");
+        let calls_before_cleanup = exact.calls().len();
+        assert!(cleanup_vault_image_staging(&app.pool, &exact).await.is_err());
+        assert_eq!(exact.calls().len(), calls_before_cleanup + 1);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back final delete should load"),
+            "cleanup_pending"
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup commit trigger should drop");
+        query("DROP FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("deferred commit function should drop");
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &exact)
+                .await
+                .expect("final delete should retry"),
+            1
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_grant_database_failpoints_roll_back_and_retry_without_generation_drift() {
+    with_api_test_app("vault_image_grant_failpoint_matrix", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_grant_failpoint_user",
+            "Vault Image Grant Failpoint User",
+            "vault-image-grant-failpoint@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::GenerationInsert,
+            VaultImageDatabaseBoundary::QuotaRead,
+            VaultImageDatabaseBoundary::QuotaAdmission,
+            VaultImageDatabaseBoundary::GrantCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_grant_failpoint_{index}"));
+            let storage_calls_before = storage.calls().len();
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let error = super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_grant_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect_err("injected grant database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging_generation WHERE user_id = 'vault_image_grant_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("generation count should load"),
+                0,
+                "{boundary:?} must roll back generation authority"
+            );
+            assert_eq!(
+                storage.calls().len(),
+                storage_calls_before,
+                "{boundary:?} must precede credentials"
+            );
+            let retry = super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_grant_failpoint_user",
+                binding,
+            )
+            .await
+            .expect("exact grant retry should succeed");
+            assert_eq!(retry.generation, 1, "{boundary:?}");
+        }
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_grant_failpoint_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_replay_and_generation_advance_failpoints_preserve_exact_retry() {
+    with_api_test_app("vault_image_replay_advance_failpoints", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_replay_failpoint_user",
+            "Vault Image Replay Failpoint User",
+            "vault-image-replay-failpoint@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let replay_binding = vault_image_binding("vault_image_replay_failpoint_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            replay_binding.clone(),
+        )
+        .await
+        .expect("initial replay binding should succeed");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+            .bind(&replay_binding.operation_id)
+            .execute(&app.pool)
+            .await
+            .expect("replay lease should shorten");
+        let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+            .bind(&replay_binding.operation_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("shortened lease should load");
+        install_vault_image_database_failpoint(
+            &replay_binding.operation_id,
+            VaultImageDatabaseBoundary::ReplayRenewal,
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            replay_binding.clone(),
+        )
+        .await
+        .expect_err("replay renewal failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+                .bind(&replay_binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back lease should load"),
+            shortened
+        );
+        assert_eq!(
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_replay_failpoint_user",
+                replay_binding,
+            )
+            .await
+            .expect("replay renewal should retry")
+            .generation,
+            1
+        );
+
+        let advance_binding = vault_image_binding("vault_image_advance_failpoint_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            advance_binding.clone(),
+        )
+        .await
+        .expect("initial generation should bind");
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_replay_failpoint_user",
+            &advance_binding,
+        )
+        .await
+        .expect("cleanup should queue");
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &storage)
+                .await
+                .expect("initial generation should clean"),
+            1
+        );
+        install_vault_image_database_failpoint(
+            &advance_binding.operation_id,
+            VaultImageDatabaseBoundary::GenerationAdvance,
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            advance_binding.clone(),
+        )
+        .await
+        .expect_err("generation advance failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT generation FROM vault_image_staging_generation WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+                .bind(&advance_binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("generation should load"),
+            1
+        );
+        assert_eq!(
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_replay_failpoint_user",
+                advance_binding,
+            )
+            .await
+            .expect("generation advance should retry")
+            .generation,
+            2
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_status_confirmation_and_cleanup_failpoints_roll_back_for_exact_retry() {
+    with_api_test_app("vault_image_mutation_failpoint_matrix", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_mutation_failpoint_user",
+            "Vault Image Mutation Failpoint User",
+            "vault-image-mutation-failpoint@example.com",
+        )
+        .await;
+        let grant_storage = RecordingObjectStorage::succeeding(None);
+        let status_binding = vault_image_binding("vault_image_status_failpoint_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &grant_storage,
+            "vault_image_mutation_failpoint_user",
+            status_binding.clone(),
+        )
+        .await
+        .expect("status binding should stage");
+        for boundary in [
+            VaultImageDatabaseBoundary::StatusRenewal,
+            VaultImageDatabaseBoundary::StatusCommit,
+        ] {
+            query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&status_binding.operation_id)
+                .execute(&app.pool)
+                .await
+                .expect("status lease should shorten");
+            let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&status_binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("status lease should load");
+            install_vault_image_database_failpoint(&status_binding.operation_id, boundary);
+            let error = super::status_vault_image_staging(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &status_binding,
+            )
+            .await
+            .expect_err("status database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                    .bind(&status_binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("rolled-back status lease should load"),
+                shortened,
+                "{boundary:?}"
+            );
+            let retried = super::status_vault_image_staging(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &status_binding,
+            )
+            .await
+            .expect("status should retry")
+            .expect("status row should remain");
+            assert!(retried.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        }
+
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::Confirmation,
+            VaultImageDatabaseBoundary::ConfirmationCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_confirmation_failpoint_{index}"));
+            let storage = RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length,
+                &binding.content_type,
+                &binding.raw_sha256,
+            );
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_mutation_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect("confirmation binding should stage");
+            query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&binding.operation_id)
+                .execute(&app.pool)
+                .await
+                .expect("confirmation lease should shorten");
+            let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("confirmation lease should load");
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let error = super::confirm_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_mutation_failpoint_user",
+                &binding,
+            )
+            .await
+            .expect_err("confirmation database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_as::<_, (String, OffsetDateTime)>("SELECT state, lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("rolled-back confirmation should load"),
+                ("unconfirmed".to_owned(), shortened),
+                "{boundary:?}"
+            );
+            assert_eq!(
+                super::confirm_vault_image_staging(
+                    &app.pool,
+                    &storage,
+                    "vault_image_mutation_failpoint_user",
+                    &binding,
+                )
+                .await
+                .expect("confirmation should retry")
+                .state,
+                super::VaultImageStagingState::Confirmed
+            );
+        }
+
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::CleanupRequest,
+            VaultImageDatabaseBoundary::CleanupRequestCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_cleanup_request_failpoint_{index}"));
+            super::grant_vault_image_staging(
+                &app.pool,
+                &grant_storage,
+                "vault_image_mutation_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect("cleanup binding should stage");
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let error = super::request_vault_image_staging_cleanup(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &binding,
+            )
+            .await
+            .expect_err("cleanup request database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("rolled-back cleanup state should load"),
+                "unconfirmed",
+                "{boundary:?}"
+            );
+            super::request_vault_image_staging_cleanup(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &binding,
+            )
+            .await
+            .expect("cleanup request should retry");
+        }
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_mutation_failpoint_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_status_and_exact_confirmation_renew_and_confirm() {
+    with_api_test_app("vault_image_status_confirmation", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_confirm_user",
+            "Vault Image Confirm User",
+            "vault-image-confirm@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_confirm_operation");
+        let storage = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_confirm_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should succeed");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_confirm_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten");
+
+        let status = super::status_vault_image_staging(
+            &app.pool,
+            "vault_image_confirm_user",
+            &binding,
+        )
+        .await
+        .expect("exact status should succeed")
+        .expect("binding should exist");
+        assert_eq!(status.state, super::VaultImageStagingState::Unconfirmed);
+        assert!(status.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_confirm_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten again");
+        let confirmed = super::confirm_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_confirm_user",
+            &binding,
+        )
+        .await
+        .expect("exact object confirmation should succeed");
+        assert_eq!(confirmed.state, super::VaultImageStagingState::Confirmed);
+        assert!(confirmed.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        assert_eq!(
+            storage.calls().last().cloned(),
+            Some(format!("head:{}", confirmed.object_key))
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_confirmation_rejects_length_type_and_digest_mismatch() {
+    with_api_test_app("vault_image_confirmation_mismatch", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_mismatch_user",
+            "Vault Image Mismatch User",
+            "vault-image-mismatch@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_mismatch_operation");
+        let grant_storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &grant_storage,
+            "vault_image_mismatch_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should succeed");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '2 hours' WHERE user_id = 'vault_image_mismatch_user'")
+            .execute(&app.pool)
+            .await
+            .expect("mismatch lease should fix");
+        let fixed_lease = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mismatch_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("fixed mismatch lease should load");
+
+        for storage in [
+            RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length - 1,
+                &binding.content_type,
+                &binding.raw_sha256,
+            ),
+            RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length,
+                "image/webp",
+                &binding.raw_sha256,
+            ),
+            RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length,
+                &binding.content_type,
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+        ] {
+            let error = super::confirm_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_mismatch_user",
+                &binding,
+            )
+            .await
+            .expect_err("non-exact object must not confirm");
+            assert_eq!(error.code, AppErrorCode::Conflict);
+            assert_eq!(
+                query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mismatch_user'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("mismatched confirmation lease should load"),
+                fixed_lease,
+                "non-exact confirmation must not renew"
+            );
+        }
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_mismatch_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("state should load"),
+            "unconfirmed"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_cleanup_does_not_renew_and_is_idempotent_across_restart() {
+    with_api_test_app("vault_image_cleanup_restart", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_cleanup_user",
+            "Vault Image Cleanup User",
+            "vault-image-cleanup@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_cleanup_operation");
+        let grant_storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &grant_storage,
+            "vault_image_cleanup_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should succeed");
+        let fixed_lease = OffsetDateTime::now_utc() + Duration::hours(3);
+        query("UPDATE vault_image_staging SET lease_expires_at = $1 WHERE user_id = 'vault_image_cleanup_user'")
+            .bind(fixed_lease)
+            .execute(&app.pool)
+            .await
+            .expect("lease should fix");
+        let fixed_lease = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("stored lease should load");
+
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_cleanup_user",
+            &binding,
+        )
+        .await
+        .expect("cleanup request should succeed");
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_cleanup_user",
+            &binding,
+        )
+        .await
+        .expect("cleanup request replay should succeed");
+        let row = query_as::<_, (String, OffsetDateTime)>("SELECT state, lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("cleanup row should load");
+        assert_eq!(row.0, "cleanup_pending");
+        assert_eq!(row.1, fixed_lease, "cleanup must not renew the lease");
+
+        let failing = RecordingObjectStorage::failing_delete();
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &failing)
+                .await
+                .expect("storage failure remains a durable retry"),
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("pending row should survive"),
+            1
+        );
+
+        let succeeding = RecordingObjectStorage::succeeding(None);
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &succeeding)
+                .await
+                .expect("restart should converge"),
+            1
+        );
+        assert_eq!(cleanup_vault_image_staging(&app.pool, &succeeding).await.expect("cleanup replay should be a no-op"), 0);
+        assert_eq!(succeeding.calls().len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_cleanup_database_failpoints_preserve_generation_fenced_retry() {
+    with_api_test_app("vault_image_cleanup_failpoint_matrix", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_cleanup_failpoint_user",
+            "Vault Image Cleanup Failpoint User",
+            "vault-image-cleanup-failpoint@example.com",
+        )
+        .await;
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::ExpiryMark,
+            VaultImageDatabaseBoundary::CandidateSelection,
+            VaultImageDatabaseBoundary::RowSelection,
+            VaultImageDatabaseBoundary::FinalDelete,
+            VaultImageDatabaseBoundary::CleanupCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_cleanup_failpoint_{index}"));
+            let grant_storage = RecordingObjectStorage::succeeding(None);
+            super::grant_vault_image_staging(
+                &app.pool,
+                &grant_storage,
+                "vault_image_cleanup_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect("cleanup failpoint binding should stage");
+            if boundary == VaultImageDatabaseBoundary::ExpiryMark {
+                query("UPDATE vault_image_staging SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE user_id = 'vault_image_cleanup_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .execute(&app.pool)
+                    .await
+                    .expect("lease should expire");
+            } else {
+                super::request_vault_image_staging_cleanup(
+                    &app.pool,
+                    "vault_image_cleanup_failpoint_user",
+                    &binding,
+                )
+                .await
+                .expect("cleanup should queue");
+            }
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let storage = RecordingObjectStorage::succeeding(None);
+            let error = cleanup_vault_image_staging(&app.pool, &storage)
+                .await
+                .expect_err("cleanup database failpoint should surface");
+            assert!(
+                error.to_string().contains("injected Vault image database failure"),
+                "{boundary:?}: {error}"
+            );
+            assert_eq!(
+                query_as::<_, (String, i64)>("SELECT state, generation FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("cleanup authority should survive"),
+                ("cleanup_pending".to_owned(), 1),
+                "{boundary:?}"
+            );
+            let delete_calls_after_failure = storage.calls().len();
+            assert_eq!(
+                delete_calls_after_failure,
+                usize::from(matches!(
+                    boundary,
+                    VaultImageDatabaseBoundary::FinalDelete
+                        | VaultImageDatabaseBoundary::CleanupCommit
+                )),
+                "{boundary:?}"
+            );
+            assert_eq!(
+                cleanup_vault_image_staging(&app.pool, &storage)
+                    .await
+                    .expect("cleanup should retry"),
+                1,
+                "{boundary:?}"
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM vault_image_staging_generation WHERE user_id = 'vault_image_cleanup_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("generation fence should survive"),
+                1,
+                "{boundary:?}"
+            );
+            let rebound = super::grant_vault_image_staging(
+                &app.pool,
+                &grant_storage,
+                "vault_image_cleanup_failpoint_user",
+                binding,
+            )
+            .await
+            .expect("cleaned binding should rebind");
+            assert_eq!(rebound.generation, 2, "{boundary:?}");
+        }
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_cleanup_failpoint_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_sweep_expires_only_unconfirmed_bindings() {
+    with_api_test_app("vault_image_expiry_scope", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_expiry_user",
+            "Vault Image Expiry User",
+            "vault-image-expiry@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let unconfirmed = vault_image_binding("vault_image_expired_unconfirmed");
+        let confirmed = vault_image_binding("vault_image_expired_confirmed");
+        for binding in [&unconfirmed, &confirmed] {
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_expiry_user",
+                binding.clone(),
+            )
+            .await
+            .expect("binding should stage");
+        }
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE user_id = 'vault_image_expiry_user'")
+            .execute(&app.pool)
+            .await
+            .expect("leases should expire");
+        query("UPDATE vault_image_staging SET state = 'confirmed' WHERE operation_id = $1")
+            .bind(&confirmed.operation_id)
+            .execute(&app.pool)
+            .await
+            .expect("one row should confirm");
+
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &storage)
+                .await
+                .expect("expiry sweep should succeed"),
+            1
+        );
+        assert_eq!(
+            query_scalar::<_, Vec<String>>("SELECT ARRAY_AGG(operation_id ORDER BY operation_id) FROM vault_image_staging WHERE user_id = 'vault_image_expiry_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("remaining operations should load"),
+            vec![confirmed.operation_id]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_cleanup_delete_is_generation_fenced_before_rebind() {
+    with_api_test_app("vault_image_cleanup_generation_fence", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_fence_user",
+            "Vault Image Fence User",
+            "vault-image-fence@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_fence_operation");
+        let initial_storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &initial_storage,
+            "vault_image_fence_user",
+            binding.clone(),
+        )
+        .await
+        .expect("first generation should stage");
+        super::request_vault_image_staging_cleanup(&app.pool, "vault_image_fence_user", &binding)
+            .await
+            .expect("cleanup should queue");
+
+        let delete_started = Arc::new(tokio::sync::Notify::new());
+        let delete_release = Arc::new(tokio::sync::Notify::new());
+        let cleanup_storage = Arc::new(RecordingObjectStorage::succeeding_with_delayed_delete(
+            binding.raw_length,
+            delete_started.clone(),
+            delete_release.clone(),
+        ));
+        let cleanup_pool = app.pool.clone();
+        let cleanup_storage_task = cleanup_storage.clone();
+        let cleanup = tokio::spawn(async move {
+            cleanup_vault_image_staging(&cleanup_pool, cleanup_storage_task.as_ref()).await
+        });
+        delete_started.notified().await;
+
+        let rebind_pool = app.pool.clone();
+        let rebind_binding = binding.clone();
+        let rebind = tokio::spawn(async move {
+            let storage = RecordingObjectStorage::succeeding(None);
+            super::grant_vault_image_staging(
+                &rebind_pool,
+                &storage,
+                "vault_image_fence_user",
+                rebind_binding,
+            )
+            .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !rebind.is_finished(),
+            "rebind must wait behind the deletion fence"
+        );
+        delete_release.notify_one();
+        assert_eq!(
+            cleanup
+                .await
+                .expect("cleanup task should join")
+                .expect("cleanup should succeed"),
+            1
+        );
+        let rebound = rebind
+            .await
+            .expect("rebind task should join")
+            .expect("rebind should succeed after cleanup");
+        assert_eq!(rebound.generation, 2);
+        assert_eq!(cleanup_storage.calls().len(), 1);
+    })
+    .await;
+}
 
 fn with_if_match(mut headers: HeaderMap, version: impl std::fmt::Display) -> HeaderMap {
     headers.insert(

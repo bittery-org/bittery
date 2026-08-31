@@ -279,6 +279,20 @@ impl From<AppError> for ApiError {
                 error.message,
                 true,
             ),
+            AppErrorCode::OperationIdReused => (
+                StatusCode::CONFLICT,
+                ErrorCode::OperationIdReused,
+                "Operation ID reused",
+                error.message,
+                false,
+            ),
+            AppErrorCode::VaultImageStagingQuotaExceeded => (
+                StatusCode::FORBIDDEN,
+                ErrorCode::AttachmentQuotaExceeded,
+                "Vault image staging quota exceeded",
+                error.message,
+                false,
+            ),
             AppErrorCode::AttachmentStagingBusy => (
                 StatusCode::CONFLICT,
                 ErrorCode::AttachmentStagingBusy,
