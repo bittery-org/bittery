@@ -79,6 +79,8 @@
 		"test:binary-transfer:chromium": "node ./scripts/test-chromium.mjs binary-transfer",
 		"test:attachment-download-sink:chromium": "node ./scripts/test-chromium.mjs attachment-download-sink",
 		"test:vault-image-artifact:chromium": "node ./scripts/test-chromium.mjs vault-image-artifact",
+		"test:vault-image-http:chromium": "node ./scripts/test-chromium.mjs vault-image-http",
+		"test:create-vault:chromium": "node ./scripts/test-chromium.mjs create-vault",
 		"check-types": "tsc --noEmit",
 		"test": "bun test src"
 	},

@@ -24,6 +24,81 @@ const claim = (capabilityId: string, overrides: Record<string, unknown> = {}) =>
 	});
 
 describe("Web Vault-image source registry", () => {
+	test("merges a provisional browser source into the first exact Runtime claim", async () => {
+		const registry = new WebVaultImageSourceRegistry({
+			identity: () => "provisional-capability",
+		});
+		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
+		const capabilityId = registry.grant({
+			accountId: "account-a",
+			contentType: "image/png",
+			byteLength: 1n,
+			source: { read: async () => null, close: async () => {} },
+		});
+		expect(
+			(
+				await registry.invoke(
+					claim(capabilityId, {
+						accountId: "account-a",
+						operationId: "operation-rust",
+						vaultId: "vault-rust",
+						contentType: "image/png",
+						byteLength: "1",
+					}),
+					"runtime-a",
+				)
+			).type,
+		).toBe("claimed");
+		expect(
+			(
+				await registry.invoke(
+					claim(capabilityId, {
+						accountId: "account-a",
+						operationId: "operation-other",
+						vaultId: "vault-rust",
+						contentType: "image/png",
+						byteLength: "1",
+					}),
+					"runtime-a",
+				)
+			).type,
+		).toBe("sourceFailure");
+	});
+	test("does not bind provisional identities from an invalid first claim", async () => {
+		const registry = new WebVaultImageSourceRegistry({
+			identity: () => "provisional-capability",
+		});
+		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
+		const capabilityId = registry.grant({
+			accountId: "account-a",
+			contentType: "image/png",
+			byteLength: 1n,
+			source: source(),
+		});
+		expect(
+			(
+				await registry.invoke(
+					claim(capabilityId, {
+						operationId: "operation-hostile",
+						vaultId: "vault-hostile",
+						contentType: "image/jpeg",
+					}),
+					"runtime-a",
+				)
+			).type,
+		).toBe("sourceFailure");
+		expect(
+			(
+				await registry.invoke(
+					claim(capabilityId, {
+						operationId: "operation-rust",
+						vaultId: "vault-rust",
+					}),
+					"runtime-a",
+				)
+			).type,
+		).toBe("claimed");
+	});
 	test("binds a single-use claim to the actual incarnation and exact request", async () => {
 		const registry = new WebVaultImageSourceRegistry({
 			identity: () => "cap-a",
@@ -95,6 +170,19 @@ describe("Web Vault-image source registry", () => {
 		expect((await registry.invoke(claim(capabilityId), "runtime-a")).type).toBe(
 			"sourceFailure",
 		);
+	});
+
+	test("allows the Runtime retirement handshake after host close begins", async () => {
+		const registry = new WebVaultImageSourceRegistry();
+		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
+		registry.beginClose();
+		expect(
+			await registry.invoke('{"type":"retireRuntime"}', "runtime-a"),
+		).toEqual({ type: "retired" });
+		expect(
+			await registry.invoke('{"type":"retireRuntime"}', "runtime-a"),
+		).toEqual({ type: "retired" });
+		await registry.drainClose();
 	});
 
 	test("uses one inclusive 1024 identity budget", async () => {

@@ -1,4 +1,4 @@
-import type { BrowserContext, Locator, Page } from "@playwright/test";
+import type { BrowserContext, Locator, Page, Request } from "@playwright/test";
 import { nanoid } from "nanoid";
 import { expect, generateTestUser, signUp, test } from "../fixtures/auth";
 import {
@@ -306,7 +306,70 @@ async function importedVaultItemTitles(
 	return titles.map((title) => title ?? "").sort();
 }
 
-test("a .bttrx export round-trips: the archive carries the account, and importing it brings the items back", async () => {
+test("a create-target import parks its visible draft after Runtime accepts the Vault", async () => {
+	test.setTimeout(IMPORT_BUDGET_MS);
+	const dialog = await openImportDialog();
+	await chooseProvider(dialog, "chrome");
+	await uploadExport(dialog, sharedFixture.chromeCsv);
+	const targetVaultNames = await prefixTargetVaultNames(
+		dialog,
+		`parked-${suffix}`,
+		1,
+	);
+	const targetVaultName = targetVaultNames[0];
+	if (!targetVaultName) throw new Error("parked Import target name is missing");
+	let legacyImportRequests = 0;
+	const observeRequest = (request: Request) => {
+		if (request.url().includes("/item-imports")) legacyImportRequests += 1;
+	};
+	page.on("request", observeRequest);
+	try {
+		await dialog.getByTestId("import-confirm-button").click();
+		await expect(
+			dialog.getByText(uiText("vaults_import_error_runtime_pending")),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		await expect(
+			dialog.getByPlaceholder(
+				uiText("vaults_import_mapping_placeholder_new_vault_name"),
+			),
+		).toHaveValue(targetVaultName);
+		await expect(
+			dialog.getByRole("heading", {
+				name: uiText("vaults_import_summary_title"),
+			}),
+		).toBeHidden();
+		expect(legacyImportRequests).toBe(0);
+
+		await page.keyboard.press("Escape");
+		await expect(dialog).toBeHidden();
+		await gotoRoute(
+			page,
+			"/vaults",
+			page.getByTestId("vault-nav-link").first(),
+		);
+		const reopened = await openImportDialog();
+		await expect(
+			reopened.getByText(uiText("vaults_import_error_runtime_pending")),
+		).toBeVisible();
+		await expect(
+			reopened.getByPlaceholder(
+				uiText("vaults_import_mapping_placeholder_new_vault_name"),
+			),
+		).toHaveValue(targetVaultName);
+		await expect(
+			reopened.getByRole("heading", {
+				name: uiText("vaults_import_summary_title"),
+			}),
+		).toBeHidden();
+		expect(legacyImportRequests).toBe(0);
+	} finally {
+		page.off("request", observeRequest);
+	}
+});
+
+// Ticket 55 re-enables the end-to-end success matrix when durable Runtime import owns the parked
+// draft. Ticket 54 deliberately keeps these legacy-success expectations non-executable.
+test.skip("a .bttrx export round-trips: the archive carries the account, and importing it brings the items back", async () => {
 	test.setTimeout(IMPORT_BUDGET_MS);
 	const prefix = `bttrx-${suffix}`;
 
@@ -373,7 +436,7 @@ test("a .bttrx export round-trips: the archive carries the account, and importin
 	).toEqual([seed.loginTitle, seed.noteTitle].sort());
 });
 
-test("a 1Password .1pux import maps two vaults, skips the archived item and warns about it", async () => {
+test.skip("a 1Password .1pux import maps two vaults, skips the archived item and warns about it", async () => {
 	test.setTimeout(IMPORT_BUDGET_MS);
 	const prefix = `1pux-${suffix}`;
 	const archivePath = await buildOnePasswordArchive(scratchDir);
@@ -413,7 +476,7 @@ test("a 1Password .1pux import maps two vaults, skips the archived item and warn
 	]);
 });
 
-test("a Bitwarden .json import drops the empty folder, warns twice and imports every supported category", async () => {
+test.skip("a Bitwarden .json import drops the empty folder, warns twice and imports every supported category", async () => {
 	test.setTimeout(IMPORT_BUDGET_MS);
 	const prefix = `bwjson-${suffix}`;
 
@@ -475,7 +538,7 @@ test("a Bitwarden .json import drops the empty folder, warns twice and imports e
 	);
 });
 
-test("the same Bitwarden vault as .csv imports cleanly, with no warnings and no skipped rows", async () => {
+test.skip("the same Bitwarden vault as .csv imports cleanly, with no warnings and no skipped rows", async () => {
 	test.setTimeout(IMPORT_BUDGET_MS);
 	const prefix = `bwcsv-${suffix}`;
 
@@ -504,7 +567,7 @@ test("the same Bitwarden vault as .csv imports cleanly, with no warnings and no 
 	);
 });
 
-test("a Chrome .csv import puts every row, duplicates included, into one vault", async () => {
+test.skip("a Chrome .csv import puts every row, duplicates included, into one vault", async () => {
 	test.setTimeout(IMPORT_BUDGET_MS);
 	const prefix = `chrome-${suffix}`;
 
@@ -539,7 +602,7 @@ test("a Chrome .csv import puts every row, duplicates included, into one vault",
 	]);
 });
 
-test("a Firefox .csv import skips the Sync account entry and says so", async () => {
+test.skip("a Firefox .csv import skips the Sync account entry and says so", async () => {
 	test.setTimeout(IMPORT_BUDGET_MS);
 	const prefix = `firefox-${suffix}`;
 
@@ -577,7 +640,7 @@ test("a Firefox .csv import skips the Sync account entry and says so", async () 
 	);
 });
 
-test("a KeePassXC .csv import turns every group path into its own vault", async () => {
+test.skip("a KeePassXC .csv import turns every group path into its own vault", async () => {
 	test.setTimeout(IMPORT_BUDGET_MS);
 	const prefix = `kpxc-${suffix}`;
 

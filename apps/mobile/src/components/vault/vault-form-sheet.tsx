@@ -1,40 +1,23 @@
 /**
- * Creating and editing a vault, as one bottom sheet with two modes.
+ * Editing a vault in a native bottom sheet.
  *
- * There is no prior mobile art for this: `apps/mobile`'s Vaults tab answered "+" with a
- * "coming soon" toast (`apps/mobile/app/(tabs)/vaults.tsx`), so mobile has never been able to
- * make a vault at all. `@bittery/ui`'s `CreateVaultDialog` is 486 lines of desktop form —
- * drag-and-drop image upload, a hover ring, a `Select` for the account, `size-9` icon buttons —
- * so this is a mobile presentation over the same three hooks desktop uses (`useCreateVault`,
- * `useUpdateVault`, `useDeleteVault`) rather than a fork of that component.
- *
- * Kept identical to desktop on purpose: the icon set (`vaultIconOptions`), the 2MB image cap,
- * the `image/*` requirement, and the fact that a vault's *type* is fixed at creation — the
- * server has a separate conversion flow for changing it, which desktop does not expose either.
+ * Native Vault creation stays absent until the later Runtime host slice, so this sheet only
+ * edits an existing Vault's identity.
  */
 
-import {
-	type CreateVaultInput,
-	useCreateVault,
-	useUpdateVault,
-} from "@bittery/core/hooks";
+import { useUpdateVault } from "@bittery/core/hooks";
 import { toast, VaultAvatar, vaultIconOptions } from "@bittery/ui";
-import { IconImagePlus, IconUser, IconUsers, IconX } from "@bittery/ui/icons";
+import { IconImagePlus, IconX } from "@bittery/ui/icons";
 import { cn } from "@bittery/ui/lib/utils";
 import { useState } from "react";
 import {
-	AccountAvatar,
 	BrandButton,
-	getAccountLabel,
 	iconClass,
-	ListCard,
-	ListRow,
 	MobileSheet,
 	Pressable,
 	SectionLabel,
 	TextField,
 } from "@/components/ui";
-import { useAccount } from "@/contexts/account-context";
 import { IMAGE_EXTENSIONS, type PickedFile, pickFile } from "@/lib/file-picker";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -50,7 +33,7 @@ interface PickedImage {
 	previewUrl: string;
 }
 
-/** Shared by both modes: avatar preview, image picker, icon grid, name field. */
+/** Identity fields shared by the existing-Vault edit flow. */
 function VaultIdentityFields({
 	name,
 	onNameChange,
@@ -178,203 +161,6 @@ function VaultIdentityFields({
 				</div>
 			</section>
 		</>
-	);
-}
-
-interface CreateVaultSheetProps {
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	/** Called with the new vault's id once the server has it. */
-	onCreated: (vaultId: string) => void;
-}
-
-export function CreateVaultSheet({
-	open,
-	onOpenChange,
-	onCreated,
-}: CreateVaultSheetProps) {
-	const { m } = useI18n();
-	const { activeAccount, allAccounts } = useAccount();
-	const createVault = useCreateVault();
-
-	const [name, setName] = useState("");
-	const [icon, setIcon] = useState("lock");
-	const [type, setType] = useState<CreateVaultInput["type"]>("personal");
-	const [image, setImage] = useState<PickedImage | null>(null);
-	const [accountId, setAccountId] = useState<string | null>(null);
-
-	const selectedAccountId =
-		accountId ?? activeAccount?.accountId ?? allAccounts[0]?.accountId ?? null;
-	const isSubmitting = createVault.isPending;
-
-	const replaceImage = (next: PickedImage | null) => {
-		setImage((current) => {
-			if (current) URL.revokeObjectURL(current.previewUrl);
-			return next;
-		});
-	};
-
-	const reset = () => {
-		setName("");
-		setIcon("lock");
-		setType("personal");
-		replaceImage(null);
-		setAccountId(null);
-	};
-
-	const handleSubmit = async () => {
-		const trimmedName = name.trim();
-		if (!trimmedName || !selectedAccountId) return;
-
-		try {
-			const bytes = image ? await image.file.arrayBuffer() : undefined;
-			const result = await createVault.mutateAsync({
-				name: trimmedName,
-				type,
-				icon,
-				// `createVault` reads `.type` and `.name` off whatever it is given, so a named
-				// Blob satisfies it without a `File` constructor — which older Android WebViews
-				// on the minSdk 24 floor do not all have.
-				imageFile:
-					bytes && image
-						? Object.assign(new Blob([bytes], { type: image.file.type }), {
-								name: image.file.name,
-							})
-						: undefined,
-				accountId: selectedAccountId,
-			});
-			toast.success(m.vaults_create_dialog_toast_created());
-			onOpenChange(false);
-			setTimeout(reset, 220);
-			onCreated(result.vaultId);
-		} catch (error) {
-			toast.error(
-				error instanceof Error
-					? error.message
-					: m.vaults_create_dialog_toast_create_failed(),
-			);
-		}
-	};
-
-	return (
-		<MobileSheet
-			open={open}
-			onOpenChange={(next) => {
-				if (isSubmitting) return;
-				onOpenChange(next);
-				if (!next) setTimeout(reset, 220);
-			}}
-			title={m.mob_vault_create_title()}
-			description={m.mob_vault_create_description()}
-		>
-			<form
-				onSubmit={(event) => {
-					event.preventDefault();
-					void handleSubmit();
-				}}
-				className="flex flex-col gap-5 px-4 pt-1 pb-6"
-			>
-				<VaultIdentityFields
-					name={name}
-					onNameChange={setName}
-					icon={icon}
-					onIconChange={setIcon}
-					image={image}
-					onImageChange={replaceImage}
-					disabled={isSubmitting}
-				/>
-
-				<section>
-					<SectionLabel>{m.vaults_create_dialog_field_type()}</SectionLabel>
-					<ListCard>
-						<ListRow
-							title={m.vaults_create_dialog_type_personal()}
-							subtitle={m.mob_vault_form_type_personal_hint()}
-							leading={
-								<span
-									className={cn(
-										"flex size-10 items-center justify-center rounded-xl",
-										type === "personal"
-											? "bg-primary-soft text-primary"
-											: "bg-surface-tertiary text-muted-foreground",
-									)}
-								>
-									<IconUser className={iconClass.row} />
-								</span>
-							}
-							isSelected={type === "personal"}
-							isDisabled={isSubmitting}
-							onPress={() => setType("personal")}
-						/>
-						<ListRow
-							title={m.vaults_create_dialog_type_team()}
-							subtitle={m.mob_vault_form_type_team_hint()}
-							leading={
-								<span
-									className={cn(
-										"flex size-10 items-center justify-center rounded-xl",
-										type === "team"
-											? "bg-primary-soft text-primary"
-											: "bg-surface-tertiary text-muted-foreground",
-									)}
-								>
-									<IconUsers className={iconClass.row} />
-								</span>
-							}
-							isSelected={type === "team"}
-							isDisabled={isSubmitting}
-							onPress={() => setType("team")}
-						/>
-					</ListCard>
-				</section>
-
-				{/* A picker only when there is something to pick, matching desktop. */}
-				{allAccounts.length > 1 ? (
-					<section>
-						<SectionLabel>
-							{m.vaults_create_dialog_field_account()}
-						</SectionLabel>
-						<ListCard>
-							{allAccounts.map((account) => (
-								<ListRow
-									key={account.accountId}
-									title={getAccountLabel(
-										account,
-										m.mob_settings_account_fallback(),
-									)}
-									subtitle={account.email}
-									leading={<AccountAvatar account={account} />}
-									isSelected={account.accountId === selectedAccountId}
-									isDisabled={isSubmitting}
-									onPress={() => setAccountId(account.accountId)}
-								/>
-							))}
-						</ListCard>
-					</section>
-				) : null}
-
-				<div className="flex flex-col gap-2">
-					<BrandButton
-						label={
-							isSubmitting
-								? m.vaults_create_dialog_action_creating()
-								: m.vaults_create_dialog_action_submit()
-						}
-						isLoading={isSubmitting}
-						disabled={!name.trim() || !selectedAccountId}
-						onClick={() => void handleSubmit()}
-					/>
-					<Pressable
-						onClick={() => onOpenChange(false)}
-						disabled={isSubmitting}
-						surface="sheet"
-						className="flex h-11 w-full items-center justify-center rounded-xl bg-surface-tertiary font-medium text-base text-foreground"
-					>
-						{m.vaults_create_dialog_action_cancel()}
-					</Pressable>
-				</div>
-			</form>
-		</MobileSheet>
 	);
 }
 

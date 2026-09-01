@@ -255,6 +255,8 @@ describe("Runtime worker service", () => {
 		let configuredDownloadSink: unknown;
 		let configuredUploadSource: unknown;
 		let configuredTakeUploadSourceBinary: unknown;
+		let configuredVaultImageArtifact: unknown;
+		let configuredVaultImageSource: unknown;
 		const configuredService = createRuntimeWorkerService({
 			executor: { invoke: async () => "{}" },
 			platformStorageExecutor: { invoke: async () => "{}" },
@@ -263,6 +265,12 @@ describe("Runtime worker service", () => {
 			binaryTransferExecutorFactory: () => binaryExecutor,
 			accountLeaseExecutor,
 			...authenticatedDownloadSinkPorts,
+			vaultImageSourceExecutorFactory: () =>
+				new (class {
+					async invoke() {
+						return { controlResponseJson: "{}" };
+					}
+				})(),
 			runtimeIncarnationIdentity: () => "runtime-fixed",
 			prepareAttachmentDownloadSinkRuntimeIncarnation: async (identity) => {
 				expect(identity).toBe("runtime-fixed");
@@ -301,6 +309,8 @@ describe("Runtime worker service", () => {
 							downloadSink: unknown,
 							uploadSource: unknown,
 							takeUploadSourceBinary: unknown,
+							vaultImageArtifact: unknown,
+							vaultImageSource: unknown,
 						) {
 							readiness.push("construct");
 							constructorThis = this;
@@ -316,6 +326,8 @@ describe("Runtime worker service", () => {
 							configuredDownloadSink = downloadSink;
 							configuredUploadSource = uploadSource;
 							configuredTakeUploadSourceBinary = takeUploadSourceBinary;
+							configuredVaultImageArtifact = vaultImageArtifact;
+							configuredVaultImageSource = vaultImageSource;
 							return runtime;
 						},
 					},
@@ -340,6 +352,12 @@ describe("Runtime worker service", () => {
 			"invoke",
 		]);
 		expect(configuredTakeUploadSourceBinary).toBeFunction();
+		expect(Reflect.ownKeys(configuredVaultImageArtifact as object)).toEqual([
+			"invoke",
+		]);
+		expect(Reflect.ownKeys(configuredVaultImageSource as object)).toEqual([
+			"invoke",
+		]);
 		let getterCalls = 0;
 		const hostile = new Uint8Array([9, 8]);
 		Object.defineProperty(hostile, "byteLength", {

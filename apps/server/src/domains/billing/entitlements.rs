@@ -1,4 +1,4 @@
-use sqlx::{query_as, PgPool};
+use sqlx::{query_as, PgPool, Postgres, Transaction};
 
 use crate::{
     config::{DeploymentMode, SELF_HOSTED_MODE},
@@ -12,6 +12,8 @@ use crate::{
 
 const TEAM_BILLING_ENTITLEMENT_QUERY: &str =
     "SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1";
+const LOCKED_TEAM_BILLING_ENTITLEMENT_QUERY: &str =
+    "SELECT u.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u INNER JOIN team t ON u.team_id = t.id WHERE u.id = $1 FOR UPDATE OF t";
 const MB: i64 = 1024 * 1024;
 const GB: i64 = 1024 * 1024 * 1024;
 
@@ -42,6 +44,18 @@ pub(crate) async fn load_team_billing_entitlement(
     query_as::<_, DbTeamBillingEntitlementRow>(TEAM_BILLING_ENTITLEMENT_QUERY)
         .bind(user_id)
         .fetch_optional(pool)
+        .await
+        .map_err(|error| database_error(error, error_message))
+}
+
+pub(crate) async fn load_team_billing_entitlement_locked(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    error_message: &'static str,
+) -> Result<Option<DbTeamBillingEntitlementRow>, AppError> {
+    query_as::<_, DbTeamBillingEntitlementRow>(LOCKED_TEAM_BILLING_ENTITLEMENT_QUERY)
+        .bind(user_id)
+        .fetch_optional(&mut **transaction)
         .await
         .map_err(|error| database_error(error, error_message))
 }

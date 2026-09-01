@@ -1,0 +1,5 @@
+export class VaultService { createVault() {} }
+const Writer = VaultService;
+const writer = new Writer();
+const { createVault: directWrite } = writer;
+directWrite();

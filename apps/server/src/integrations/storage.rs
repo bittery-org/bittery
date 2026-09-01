@@ -139,6 +139,15 @@ pub struct PresignedUploadResult {
     pub key: String,
     pub upload_url: String,
     pub public_url: Option<String>,
+    /// Headers whose exact values were included in the upload signature (excluding Host).
+    pub required_headers: Vec<PresignedUploadHeader>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresignedUploadHeader {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -190,6 +199,25 @@ async fn create_presigned_upload(
         key: key.to_string(),
         upload_url,
         public_url: storage.public_url(key),
+        required_headers: {
+            let mut headers = vec![PresignedUploadHeader {
+                name: "Content-Type".to_owned(),
+                value: content_type.to_owned(),
+            }];
+            if let Some(content_length) = content_length {
+                headers.push(PresignedUploadHeader {
+                    name: "Content-Length".to_owned(),
+                    value: content_length.to_string(),
+                });
+            }
+            if let Some(payload_sha256) = payload_sha256 {
+                headers.push(PresignedUploadHeader {
+                    name: "x-amz-content-sha256".to_owned(),
+                    value: payload_sha256.to_owned(),
+                });
+            }
+            headers
+        },
     })
 }
 
@@ -217,7 +245,41 @@ async fn create_exact_presigned_upload(
         key: key.to_owned(),
         upload_url,
         public_url: storage.public_url(key),
+        required_headers: exact_upload_headers(content_type, content_length, payload_sha256)?,
     })
+}
+
+fn exact_upload_headers(
+    content_type: &str,
+    content_length: i64,
+    payload_sha256: &str,
+) -> Result<Vec<PresignedUploadHeader>, StorageError> {
+    use base64::Engine as _;
+    let checksum = hex::decode(payload_sha256)
+        .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
+    if checksum.len() != 32 {
+        return Err(StorageError::InvalidConfig(
+            "exact upload SHA-256 must contain 32 bytes".to_owned(),
+        ));
+    }
+    Ok(vec![
+        PresignedUploadHeader {
+            name: "Content-Length".to_owned(),
+            value: content_length.to_string(),
+        },
+        PresignedUploadHeader {
+            name: "Content-Type".to_owned(),
+            value: content_type.to_owned(),
+        },
+        PresignedUploadHeader {
+            name: "x-amz-content-sha256".to_owned(),
+            value: payload_sha256.to_owned(),
+        },
+        PresignedUploadHeader {
+            name: "x-amz-checksum-sha256".to_owned(),
+            value: base64::engine::general_purpose::STANDARD.encode(checksum),
+        },
+    ])
 }
 
 async fn delete_object(storage: &S3CompatibleStorage, key: &str) -> Result<(), StorageError> {

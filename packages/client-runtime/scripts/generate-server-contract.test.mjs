@@ -197,3 +197,31 @@ test("the Operation outcome union is discriminated by its own tag", async () => 
 	// failure rather than another kind's answer read by accident.
 	assert.match(union, /deny_unknown_fields/);
 });
+
+test("Vault image staging generates closed MIME and correlated status enums", async () => {
+	const source = await readFile(
+		new URL("../../api-contract/openapi.v1.json", import.meta.url),
+	);
+	const generated = generateServerContract(JSON.parse(source), source);
+	assert.match(
+		generated,
+		/pub enum VaultImageContentType \{[\s\S]*ImageJpeg[\s\S]*ImagePng[\s\S]*ImageWebp[\s\S]*ImageGif[\s\S]*ImageAvif/,
+	);
+	const statusEnum = generated.indexOf(
+		"pub enum VaultImageStagingStatusResponse",
+	);
+	const status = generated.slice(
+		generated.lastIndexOf('#[serde(tag = "state"', statusEnum),
+		generated.indexOf("pub struct VaultImageStagingUploadHeader"),
+	);
+	assert.match(status, /#\[serde\(tag = "state"[\s\S]*deny_unknown_fields/);
+	assert.match(status, /Absent \{\}/);
+	for (const state of ["Unconfirmed", "Confirmed", "CleanupPending"]) {
+		assert.match(
+			status,
+			new RegExp(
+				`${state} \\{[\\s\\S]*generation: i64[\\s\\S]*lease_expires_at: String[\\s\\S]*object_key: String`,
+			),
+		);
+	}
+});

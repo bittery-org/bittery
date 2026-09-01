@@ -538,8 +538,16 @@ export function createRuntimeWorkerService(
 							invoke: uploadSourceExecutor.invoke.bind(uploadSourceExecutor),
 						},
 						takeFullOwnedUint8ArrayIntrinsic,
-						deps.vaultImageArtifactExecutor,
-						vaultImageSourceExecutor,
+						{
+							invoke: deps.vaultImageArtifactExecutor.invoke.bind(
+								deps.vaultImageArtifactExecutor,
+							),
+						},
+						{
+							invoke: vaultImageSourceExecutor.invoke.bind(
+								vaultImageSourceExecutor,
+							),
+						},
 						runtimeIncarnation,
 					);
 				} catch {

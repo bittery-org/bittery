@@ -402,6 +402,7 @@ mod tests {
             key: "attachments/user-1/item-1/file".to_string(),
             upload_url: "https://storage.invalid/upload".to_string(),
             public_url: None,
+            required_headers: Vec::new(),
         });
 
         assert_eq!(

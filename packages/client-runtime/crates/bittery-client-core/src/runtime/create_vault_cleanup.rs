@@ -1,13 +1,10 @@
-#![allow(
-    dead_code,
-    reason = "Ticket 53 proves cleanup behind a test-only gate before Ticket 54 composes production ports"
-)]
-
 use super::*;
 use crate::replica::{GuardedCommitPlan, PlanMutation, PlanResult};
 use async_trait::async_trait;
 
-use super::create_vault_staging::{CreateVaultStagingBinding, CreateVaultStagingError};
+use super::create_vault_staging::{
+    CreateVaultPortThreading, CreateVaultStagingBinding, CreateVaultStagingError,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CreateVaultCleanupPass {
@@ -17,8 +14,9 @@ pub(crate) enum CreateVaultCleanupPass {
     Completed,
 }
 
-#[async_trait]
-pub(crate) trait CreateVaultCleanupPort: Send + Sync {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub(crate) trait CreateVaultCleanupPort: CreateVaultPortThreading {
     async fn cleanup_remote(
         &self,
         binding: &CreateVaultStagingBinding,

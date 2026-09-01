@@ -4,14 +4,14 @@ use crate::{
     db::enums::{ItemCategory, OperationRejectionCode, VaultRole, VaultType},
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
-        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_vault_shape, item_shape, success_shape, update_vault_shape,
-        vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
-        vault_member_shape, vault_stats_shape, vault_summary_shape,
+        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape, item_shape,
+        success_shape, update_vault_shape, vault_available_member_shape, vault_details_shape,
+        vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
 };
 
 pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
+pub(crate) const VAULT_ICON_MAX_CHARS: usize = 128;
 
 mod access;
 mod attachments;
@@ -25,7 +25,6 @@ mod pagination;
 pub(crate) mod rotation;
 pub(crate) mod shapes;
 pub(crate) mod travel_mode;
-#[allow(dead_code)] // The production dispatcher opens this private foundation in Ticket 54.
 mod vault_image_staging;
 
 pub(crate) use attachments::{
@@ -35,8 +34,8 @@ pub(crate) use attachments::{
     AttachmentMoveStagingStatus,
 };
 pub(crate) use catalog::{
-    convert_vault_type, create_vault, create_vault_image_upload, delete_vault, get_vault,
-    get_vault_stats, list_vaults_page, update_vault,
+    convert_vault_type, create_vault_image_upload, delete_vault, execute_create_vault_operation,
+    get_vault, get_vault_stats, list_vaults_page, update_vault, CreateVaultOperationInput,
 };
 pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
@@ -49,11 +48,10 @@ pub(crate) use members::{
     add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
 };
 pub(crate) use pagination::ByteBoundedPage;
-#[allow(unused_imports)]
 pub(crate) use vault_image_staging::{
     confirm_vault_image_staging, grant_vault_image_staging, request_vault_image_staging_cleanup,
-    status_vault_image_staging, VaultImageStagingBinding, VaultImageStagingGrant,
-    VaultImageStagingState, VaultImageStagingStatus,
+    status_vault_image_staging, VaultImageStagingBinding, VaultImageStagingState,
+    VaultImageStagingStatus,
 };
 
 #[cfg(test)]
@@ -344,12 +342,6 @@ vault_details_shape!(service_struct {
     #[serde(rename_all = "camelCase")]
     pub struct VaultDetailsResponse
 }, count = i64);
-
-create_vault_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateVaultResponse
-});
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

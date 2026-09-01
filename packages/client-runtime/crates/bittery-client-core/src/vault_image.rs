@@ -553,10 +553,6 @@ impl VaultImageIngressFacade {
         .await
     }
 
-    #[allow(
-        dead_code,
-        reason = "Ticket 53 consumes accepted image bytes only through its test-gated staging executor"
-    )]
     pub(crate) async fn read_published_bound(
         &self,
         account_id: AccountId,
@@ -608,10 +604,6 @@ impl VaultImageIngressFacade {
         }
         Ok(bytes)
     }
-    #[allow(
-        dead_code,
-        reason = "Ticket 53 consumes this narrow cleanup seam behind its test-only executor"
-    )]
     pub(crate) async fn delete_bound(
         &self,
         account_id: AccountId,

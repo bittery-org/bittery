@@ -1,4 +1,7 @@
-use bittery_client_core::server_contract::{ErrorCode, ItemOperationResult, OperationOutcome};
+use bittery_client_core::server_contract::{
+    ErrorCode, ItemOperationResult, OperationOutcome, VaultImageContentType,
+    VaultImageStagingStatusResponse,
+};
 use serde_json::json;
 
 #[test]
@@ -41,4 +44,43 @@ fn all_caps_openapi_enums_keep_wire_spelling_without_invalid_rust_names() {
     let code: ErrorCode = serde_json::from_str("\"INTERNAL_ERROR\"").unwrap();
     assert!(matches!(code, ErrorCode::InternalError));
     assert_eq!(serde_json::to_string(&code).unwrap(), "\"INTERNAL_ERROR\"");
+}
+
+#[test]
+fn vault_image_staging_closed_values_round_trip_and_reject_impossible_wire_shapes() {
+    for mime in [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "image/avif",
+    ] {
+        let value: VaultImageContentType = serde_json::from_value(json!(mime)).unwrap();
+        assert_eq!(serde_json::to_value(value).unwrap(), json!(mime));
+    }
+    assert!(serde_json::from_value::<VaultImageContentType>(json!("image/svg+xml")).is_err());
+
+    let authority = json!({
+        "objectKey": "vaults/image",
+        "generation": 1,
+        "leaseExpiresAt": "2026-08-31T12:00:00Z",
+    });
+    for state in ["absent", "unconfirmed", "confirmed", "cleanup_pending"] {
+        let wire = if state == "absent" {
+            json!({"state": state})
+        } else {
+            let mut value = authority.clone();
+            value["state"] = json!(state);
+            value
+        };
+        let status: VaultImageStagingStatusResponse = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(status).unwrap(), wire);
+    }
+    for impossible in [
+        json!({"state": "unknown"}),
+        json!({"state": "absent", "objectKey": "vaults/image"}),
+        json!({"state": "confirmed"}),
+    ] {
+        assert!(serde_json::from_value::<VaultImageStagingStatusResponse>(impossible).is_err());
+    }
 }

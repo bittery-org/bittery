@@ -497,6 +497,21 @@ fn fingerprint_part(hasher: &mut Sha256, value: &[u8]) {
     hasher.update(value);
 }
 
+pub(crate) fn create_vault_operation_fingerprint(vault_id: &str, raw_body: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    for part in [
+        OPERATION_DISCRIMINATOR,
+        b"create_vault".as_slice(),
+        b"PUT /api/v1/vaults/{vaultId}".as_slice(),
+        vault_id.as_bytes(),
+        raw_body,
+        b"".as_slice(),
+    ] {
+        fingerprint_part(&mut hasher, part);
+    }
+    hasher.finalize().into()
+}
+
 /// Hashes the immutable request: protocol, kind, route, path values, exact body bytes, and the
 /// normalized precondition. Bearer token, Session, client ID and tracing headers are excluded,
 /// because the same work sent from a renewed Session is the same work.

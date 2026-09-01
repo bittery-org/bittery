@@ -7,13 +7,14 @@ import {
 	type AccountRemovalDeps,
 	removeAccountFromDevice,
 } from "./account-removal";
-import { normalizeAccountEmail, runtimeClient } from "./crypto";
+import { normalizeAccountEmail } from "./crypto";
 import {
 	clearActiveAccountData,
 	forgetWebAccountId,
 	readAccountDeletionMarker,
 	writeAccountDeletionMarker,
 } from "./storage";
+import { webRuntimeClient as runtimeClient } from "./web-runtime-client";
 
 let recovery: Promise<void> | null = null;
 

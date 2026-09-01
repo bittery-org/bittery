@@ -12,14 +12,12 @@
  */
 
 import { useAllVaultKeys, useItemCounts, useItems } from "@bittery/core/hooks";
-import { IconPlus, IconTag, IconVault } from "@bittery/ui/icons";
+import { IconTag, IconVault } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
-	BarButton,
 	EmptyState,
 	Fab,
-	iconClass,
 	ListCard,
 	ListRow,
 	SectionLabel,
@@ -29,7 +27,6 @@ import { CreateItemSheet } from "@/components/vault/create-item-sheet";
 import { ItemsSkeleton } from "@/components/vault/items-skeleton";
 import { TabScreen } from "@/components/vault/tab-screen";
 import { TagListCard, type TagRow } from "@/components/vault/tag-list";
-import { CreateVaultSheet } from "@/components/vault/vault-form-sheet";
 import { VaultTile } from "@/components/vault/vault-tile";
 import { useCreateItemFlow } from "@/hooks/use-create-item-flow";
 import { useI18n } from "@/providers/i18n-provider";
@@ -44,7 +41,6 @@ function BrowseScreen() {
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const [segment, setSegment] = useState<BrowseSegment>("vaults");
-	const [isCreateVaultOpen, setIsCreateVaultOpen] = useState(false);
 
 	const { vaultKeys, isLoading: isLoadingVaults } = useAllVaultKeys();
 	// One item subscription feeds every vault's count and the tag list — the same shape as
@@ -74,21 +70,6 @@ function BrowseScreen() {
 		<TabScreen
 			title={m.mob_browse_title()}
 			aurora
-			actions={
-				<>
-					{/* Vault creation lives in the bar, not the FAB: the FAB is "new item" on
-					    every tab, and a FAB that means two different things depending on a
-					    segmented control is the kind of thing you have to read twice. */}
-					{segment === "vaults" ? (
-						<BarButton
-							onClick={() => setIsCreateVaultOpen(true)}
-							aria-label={m.mob_vault_action_new()}
-						>
-							<IconPlus className={iconClass.bar} />
-						</BarButton>
-					) : null}
-				</>
-			}
 			toolbar={
 				<Segmented
 					ariaLabel={m.mob_browse_title()}
@@ -116,10 +97,6 @@ function BrowseScreen() {
 						icon={IconVault}
 						title={m.mob_vaults_empty_title()}
 						description={m.mob_vaults_empty_description()}
-						action={{
-							label: m.mob_vault_action_new(),
-							onPress: () => setIsCreateVaultOpen(true),
-						}}
 					/>
 				) : (
 					<div className="flex flex-col gap-6 px-4 pt-4">
@@ -205,14 +182,6 @@ function BrowseScreen() {
 				onOpenChange={createItemFlow.setIsOpen}
 				vaults={createItemFlow.vaultOptions}
 				onCreateItem={createItemFlow.handleCreateItem}
-			/>
-
-			<CreateVaultSheet
-				open={isCreateVaultOpen}
-				onOpenChange={setIsCreateVaultOpen}
-				onCreated={(vaultId) =>
-					navigate({ to: "/vault/$id", params: { id: vaultId } })
-				}
 			/>
 		</TabScreen>
 	);

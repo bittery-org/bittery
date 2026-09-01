@@ -5,6 +5,8 @@ use crate::{
         AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, DeleteAccountRequest,
         DeleteAccountResponse, ErrorCode, FinishLoginRequest, FinishLoginResponse,
         LoginAttemptResponse, ProblemDetails, StartLoginRequest, TravelModeResponse,
+        VaultDetailsResponseDto, VaultImageStagingBody, VaultImageStagingGrantResponse,
+        VaultImageStagingStatusResponse,
     },
     RequestCancellation, RuntimeError, RuntimeErrorCode,
 };
@@ -29,6 +31,25 @@ const MAX_ATTACHMENT_AUTHORITY_BYTES: usize = MAX_AUTH_VAULT_KEY_BYTES;
 /// One Operation outcome is a small closed document, never an entity page.
 const OPERATION_OUTCOME_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
+const VAULT_IMAGE_STAGING_RESPONSE_BYTES: u32 = 256 * 1024;
+
+pub(crate) fn decode_sha256_hex(value: &str) -> Option<[u8; 32]> {
+    if value.len() != 64 {
+        return None;
+    }
+    let mut decoded = [0_u8; 32];
+    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        let digit = |byte: u8| match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            _ => None,
+        };
+        decoded[index] = digit(pair[0])?
+            .checked_mul(16)?
+            .checked_add(digit(pair[1])?)?;
+    }
+    Some(decoded)
+}
 
 pub(crate) enum AuthenticatedOutcome<T> {
     Ok(T),
@@ -1240,6 +1261,292 @@ impl<'transport> AuthHttpClient<'transport> {
             (true, _) => Err(invariant(
                 "Attachment authority page omitted its continuation",
             )),
+        }
+    }
+
+    pub(crate) async fn vault_image_staging_status(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultImageStagingStatusResponse>, RuntimeError> {
+        self.vault_image_staging_json(
+            token,
+            operation_id,
+            "status",
+            HttpMethod::Post,
+            body,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn grant_vault_image_staging(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultImageStagingGrantResponse>, RuntimeError> {
+        self.vault_image_staging_json(
+            token,
+            operation_id,
+            "grants",
+            HttpMethod::Post,
+            body,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn confirm_vault_image_staging(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultImageStagingStatusResponse>, RuntimeError> {
+        self.vault_image_staging_json(
+            token,
+            operation_id,
+            "confirmations",
+            HttpMethod::Post,
+            body,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn cleanup_vault_image_staging(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<()>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Vault image cleanup request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let raw = self
+            .execute_raw(
+                HttpMethod::Delete,
+                self.endpoint(&[
+                    "api",
+                    "v1",
+                    "operations",
+                    operation_id,
+                    "vault-image-staging",
+                ])?,
+                headers,
+                body,
+                SMALL_AUTH_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        Ok(match raw.status {
+            200 | 204 => AuthenticatedOutcome::Ok(()),
+            401 => AuthenticatedOutcome::ReauthenticationRequired,
+            _ => AuthenticatedOutcome::Transient,
+        })
+    }
+
+    async fn vault_image_staging_json<T: DeserializeOwned>(
+        &self,
+        token: &str,
+        operation_id: &str,
+        suffix: &str,
+        method: HttpMethod,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<T>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Vault image staging request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let url = self.endpoint(&[
+            "api",
+            "v1",
+            "operations",
+            operation_id,
+            "vault-image-staging",
+            suffix,
+        ])?;
+        let raw = self
+            .execute_raw(
+                method,
+                url,
+                headers,
+                body,
+                VAULT_IMAGE_STAGING_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let response = serde_json::from_slice(&raw.body).map_err(|_| {
+                    authentication_failure("Vault image staging returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(response))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn upload_vault_image_staging(
+        &self,
+        upload_url: &str,
+        content_type: &str,
+        sha256: &str,
+        headers: &[HttpHeader],
+        bytes: &[u8],
+        cancellation: RequestCancellation,
+    ) -> Result<bool, RuntimeError> {
+        let url = Url::parse(upload_url)
+            .map_err(|_| invariant("Vault image staging upload URL is invalid"))?;
+        if !matches!(url.scheme(), "https" | "http")
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(invariant("Vault image staging upload URL is unsafe"));
+        }
+        use base64::Engine as _;
+        let digest = decode_sha256_hex(sha256)
+            .ok_or_else(|| invariant("Vault image staging SHA-256 is invalid"))?;
+        let expected = vec![
+            HttpHeader {
+                name: "Content-Length".into(),
+                value: bytes.len().to_string(),
+            },
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: content_type.to_owned(),
+            },
+            HttpHeader {
+                name: "x-amz-content-sha256".into(),
+                value: sha256.to_owned(),
+            },
+            HttpHeader {
+                name: "x-amz-checksum-sha256".into(),
+                value: base64::engine::general_purpose::STANDARD.encode(digest),
+            },
+        ];
+        if headers != expected {
+            return Err(invariant(
+                "Vault image staging upload headers do not match the exact binding",
+            ));
+        }
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Put,
+                    upload_url.to_owned(),
+                    headers.to_vec(),
+                    bytes.to_vec(),
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(matches!(
+            response,
+            HttpResponse::Completed {
+                status: 200..=299,
+                ..
+            }
+        ))
+    }
+
+    pub(crate) async fn fetch_vault_authority(
+        &self,
+        token: &str,
+        vault_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultDetailsResponseDto>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(vault_id, "Vault")?;
+        let url = self.endpoint(&["api", "v1", "vaults", vault_id])?;
+        self.authenticated_json_response(token, url, cancellation)
+            .await
+    }
+
+    pub(crate) async fn fetch_vault_key_page_raw(
+        &self,
+        token: &str,
+        cursor: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Vec<u8>>, RuntimeError> {
+        validate_bearer(token)?;
+        let mut url = self.endpoint(&["api", "v1", "users", "me", "vault-keys"])?;
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                VAULT_KEY_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                Ok(AuthenticatedOutcome::Ok(raw.body))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    async fn authenticated_json_response<T: DeserializeOwned>(
+        &self,
+        token: &str,
+        url: Url,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<T>, RuntimeError> {
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                VAULT_KEY_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let response = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Authority returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(response))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
         }
     }
 
@@ -3161,5 +3468,75 @@ mod tests {
         );
         assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
         assert!(executor.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn vault_image_upload_sends_every_exact_signed_header_and_rejects_drift() {
+        let completed = serde_json::to_string(&json!({
+            "type": "completed",
+            "status": 200,
+            "headers": [],
+            "body": []
+        }))
+        .unwrap();
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+        let sha256 = "a".repeat(64);
+        let exact = vec![
+            HttpHeader {
+                name: "Content-Length".into(),
+                value: "1".into(),
+            },
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "image/png".into(),
+            },
+            HttpHeader {
+                name: "x-amz-content-sha256".into(),
+                value: sha256.clone(),
+            },
+            HttpHeader {
+                name: "x-amz-checksum-sha256".into(),
+                value: "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo=".into(),
+            },
+        ];
+
+        assert!(client
+            .upload_vault_image_staging(
+                "https://objects.example.test/exact",
+                "image/png",
+                &sha256,
+                &exact,
+                b"x",
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap());
+        let request = executor.requests().pop().unwrap();
+        assert_eq!(request["body"], json!([120]));
+        assert_eq!(request["headers"], serde_json::to_value(&exact).unwrap());
+
+        for wrong in [exact[..3].to_vec(), {
+            let mut headers = exact.clone();
+            headers[0].value = "2".into();
+            headers
+        }] {
+            let error = client
+                .upload_vault_image_staging(
+                    "https://objects.example.test/exact",
+                    "image/png",
+                    &sha256,
+                    &wrong,
+                    b"x",
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        }
+        assert_eq!(executor.requests().len(), 1);
     }
 }

@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "Ticket 53 proves this executor through test-only staging ports before Ticket 54 opens production dispatch"
-)]
-
 use super::*;
 use crate::replica::{
     CreateVaultCheckpoint, CreateVaultImageRecord, OperationKind, OperationRecord, PlanMutation,
@@ -61,13 +56,46 @@ pub(crate) enum CreateVaultStagingPass {
     DispatchReady,
 }
 
+#[derive(Debug)]
+pub(crate) enum CreateVaultRecoveryError {
+    ParkedFenced,
+    Fatal(RuntimeError),
+}
+
+impl From<RuntimeError> for CreateVaultRecoveryError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Fatal(error)
+    }
+}
+
+impl CreateVaultRecoveryError {
+    #[cfg(test)]
+    pub(crate) fn into_runtime_error(self) -> RuntimeError {
+        match self {
+            Self::ParkedFenced => invalid("create-Vault recovery was fenced"),
+            Self::Fatal(error) => error,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct SessionRenewalBudget {
     pub(super) renewed: bool,
 }
 
-#[async_trait]
-pub(crate) trait CreateVaultStagingPort: Send + Sync {
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) trait CreateVaultPortThreading: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync + ?Sized> CreateVaultPortThreading for T {}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) trait CreateVaultPortThreading {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> CreateVaultPortThreading for T {}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub(crate) trait CreateVaultStagingPort: CreateVaultPortThreading {
     async fn status(
         &self,
         binding: &CreateVaultStagingBinding,
@@ -89,6 +117,7 @@ pub(crate) trait CreateVaultStagingPort: Send + Sync {
 }
 
 impl Runtime {
+    #[cfg(test)]
     pub(crate) async fn drive_create_vault_staging_cycle(
         &self,
         account_id: &AccountId,
@@ -102,6 +131,7 @@ impl Runtime {
             &mut SessionRenewalBudget::default(),
         )
         .await
+        .map_err(CreateVaultRecoveryError::into_runtime_error)
     }
 
     pub(super) async fn drive_create_vault_staging_cycle_with_budget(
@@ -110,7 +140,7 @@ impl Runtime {
         operation_id: &str,
         staging: &dyn CreateVaultStagingPort,
         renewal: &mut SessionRenewalBudget,
-    ) -> Result<CreateVaultStagingPass, RuntimeError> {
+    ) -> Result<CreateVaultStagingPass, CreateVaultRecoveryError> {
         let execution_lock = self.account_execution_lock(account_id)?;
         let _guard = execution_lock.lock().await;
         let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
@@ -123,7 +153,7 @@ impl Runtime {
             .cloned()
             .ok_or_else(|| invalid("create-Vault Operation is missing"))?;
         if operation.kind != OperationKind::CreateVault {
-            return Err(invalid("Operation is not create-Vault work"));
+            return Err(invalid("Operation is not create-Vault work").into());
         }
         let intent = operation
             .create_vault
@@ -167,7 +197,9 @@ impl Runtime {
                             }
                         };
                     if grant != CreateVaultUploadGrant::exact(&binding) {
-                        return Err(invalid("staging credential changed exact image authority"));
+                        return Err(
+                            invalid("staging credential changed exact image authority").into()
+                        );
                     }
                     let facade = self
                         .vault_image_ingress
@@ -229,9 +261,9 @@ impl Runtime {
                     next.create_vault.as_ref().unwrap(),
                 )?;
                 if fingerprint != next.request_fingerprint {
-                    return Err(invalid(
-                        "accepted create-Vault fingerprint changed before freeze",
-                    ));
+                    return Err(
+                        invalid("accepted create-Vault fingerprint changed before freeze").into(),
+                    );
                 }
                 next.request = request;
                 self.commit_create_vault_checkpoint(snapshot, next).await?;
@@ -246,7 +278,7 @@ impl Runtime {
         &self,
         snapshot: ReplicaSnapshot,
         mut operation: OperationRecord,
-    ) -> Result<CreateVaultStagingPass, RuntimeError> {
+    ) -> Result<CreateVaultStagingPass, CreateVaultRecoveryError> {
         operation.scheduling.attempt_count = operation.scheduling.attempt_count.saturating_add(1);
         operation.scheduling.not_before_ms = self
             .clock
@@ -263,7 +295,7 @@ impl Runtime {
             ))
             .await?;
         if !matches!(result, PlanResult::Applied { .. }) {
-            return Err(invalid("create-Vault retry scheduling was fenced"));
+            return Err(CreateVaultRecoveryError::ParkedFenced);
         }
         Ok(CreateVaultStagingPass::RetryScheduled)
     }
@@ -272,7 +304,7 @@ impl Runtime {
         &self,
         snapshot: ReplicaSnapshot,
         operation: OperationRecord,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), CreateVaultRecoveryError> {
         let result = self
             .replica
             .execute(GuardedCommitPlan::new(
@@ -284,7 +316,7 @@ impl Runtime {
             ))
             .await?;
         if !matches!(result, PlanResult::Applied { .. }) {
-            return Err(invalid("create-Vault checkpoint was fenced"));
+            return Err(CreateVaultRecoveryError::ParkedFenced);
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all();

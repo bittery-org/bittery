@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "Ticket 53 proves this executor behind a test-only gate before Ticket 54 opens production dispatch"
-)]
-
 use super::*;
 use crate::replica::{
     AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType, CreateVaultCheckpoint,
@@ -14,8 +9,8 @@ use async_trait::async_trait;
 
 use super::{
     create_vault_staging::{
-        CreateVaultStagingError, CreateVaultStagingPass, CreateVaultStagingPort,
-        SessionRenewalBudget,
+        CreateVaultPortThreading, CreateVaultRecoveryError, CreateVaultStagingError,
+        CreateVaultStagingPass, CreateVaultStagingPort, SessionRenewalBudget,
     },
     outcome::SemanticAnswer,
 };
@@ -55,8 +50,9 @@ pub(crate) enum CreateVaultExecutorPass {
     Completed,
 }
 
-#[async_trait]
-pub(crate) trait CreateVaultExecutorPort: Send + Sync {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub(crate) trait CreateVaultExecutorPort: CreateVaultPortThreading {
     async fn lookup(
         &self,
         operation: &OperationRecord,
@@ -79,6 +75,7 @@ pub(crate) trait CreateVaultExecutorPort: Send + Sync {
 }
 
 impl Runtime {
+    #[cfg(test)]
     pub(crate) async fn drive_create_vault_executor_cycle(
         &self,
         account_id: &AccountId,
@@ -92,6 +89,7 @@ impl Runtime {
             &mut SessionRenewalBudget::default(),
         )
         .await
+        .map_err(CreateVaultRecoveryError::into_runtime_error)
     }
 
     pub(crate) async fn drive_create_vault_recovery_cycle(
@@ -100,7 +98,7 @@ impl Runtime {
         operation_id: &str,
         staging: &dyn CreateVaultStagingPort,
         port: &dyn CreateVaultExecutorPort,
-    ) -> Result<CreateVaultExecutorPass, RuntimeError> {
+    ) -> Result<CreateVaultExecutorPass, CreateVaultRecoveryError> {
         let mut renewal = SessionRenewalBudget::default();
         loop {
             match self
@@ -137,7 +135,7 @@ impl Runtime {
         operation_id: &str,
         port: &dyn CreateVaultExecutorPort,
         renewal: &mut SessionRenewalBudget,
-    ) -> Result<CreateVaultExecutorPass, RuntimeError> {
+    ) -> Result<CreateVaultExecutorPass, CreateVaultRecoveryError> {
         let execution_lock = self.account_execution_lock(account_id)?;
         let _guard = execution_lock.lock().await;
         let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
@@ -155,24 +153,31 @@ impl Runtime {
                 .as_ref()
                 .is_none_or(|intent| intent.checkpoint != CreateVaultCheckpoint::FinalRequestFrozen)
         {
-            return Err(invalid("create-Vault Operation is not dispatch-ready"));
+            return Err(invalid("create-Vault Operation is not dispatch-ready").into());
         }
         if operation
             .create_vault
             .as_ref()
             .is_some_and(|intent| intent.image.is_some())
         {
-            // The accepted Operation is also the durable release obligation. Retry the
-            // idempotent source release before an authoritative outcome can remove that record.
-            self.finish_vault_image_acceptance_cleanup(account_id, operation_id)
-                .await;
+            // The release guard is process-local. Retry only a handshake this Runtime actually
+            // began; after a Worker restart there is no old host acceptance to release.
             let cleanup_pending = self
                 .pending_vault_image_acceptance_cleanup
                 .lock()
                 .expect("Vault image acceptance cleanup lock poisoned")
                 .contains(&(account_id.clone(), operation_id.to_owned()));
             if cleanup_pending {
-                return self.schedule_executor_retry(snapshot, operation).await;
+                self.finish_vault_image_acceptance_cleanup(account_id, operation_id)
+                    .await;
+                if self
+                    .pending_vault_image_acceptance_cleanup
+                    .lock()
+                    .expect("Vault image acceptance cleanup lock poisoned")
+                    .contains(&(account_id.clone(), operation_id.to_owned()))
+                {
+                    return self.schedule_executor_retry(snapshot, operation).await;
+                }
             }
         }
 
@@ -213,7 +218,8 @@ impl Runtime {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::AccountFailed,
                     "create-Vault replay reused an Operation identity",
-                ));
+                )
+                .into());
             }
         };
         if let Some(hint) = &hint {
@@ -226,7 +232,8 @@ impl Runtime {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::AccountFailed,
                         "create-Vault lookup contradicted the exact replay",
-                    ));
+                    )
+                    .into());
                 }
             }
         }
@@ -248,7 +255,7 @@ impl Runtime {
                     }
                 };
                 if authority.id != *vault_id {
-                    return Err(invalid("create-Vault authority changed the Vault ID"));
+                    return Err(invalid("create-Vault authority changed the Vault ID").into());
                 }
                 let intent = operation.create_vault.as_ref().unwrap();
                 let mut cursor = None;
@@ -275,12 +282,14 @@ impl Runtime {
                     let Some(raw_response_body) = page.raw_response_body.as_deref() else {
                         return Err(invalid(
                             "create-Vault authority key page omitted its raw byte evidence",
-                        ));
+                        )
+                        .into());
                     };
                     if raw_response_body.len() > MAX_AUTHORITY_PAGE_BYTES {
                         return Err(invalid(
                             "create-Vault authority key page exceeded its raw response bound",
-                        ));
+                        )
+                        .into());
                     }
                     let decoded: crate::server_contract::CursorPageAuthVaultKeyResponse =
                         serde_json::from_slice(raw_response_body).map_err(|_| {
@@ -290,7 +299,8 @@ impl Runtime {
                     if page.items.len() > 500 {
                         return Err(invalid(
                             "create-Vault authority key page exceeded its item bound",
-                        ));
+                        )
+                        .into());
                     }
                     let page_is_empty = page.items.is_empty();
                     let prior_item_count = item_count;
@@ -298,9 +308,9 @@ impl Runtime {
                         .checked_add(page.items.len())
                         .ok_or_else(|| invalid("create-Vault authority key count overflowed"))?;
                     if item_count > MAX_AUTHORITY_ITEMS {
-                        return Err(invalid(
-                            "create-Vault authority exceeded its key count bound",
-                        ));
+                        return Err(
+                            invalid("create-Vault authority exceeded its key count bound").into(),
+                        );
                     }
                     for (page_index, key) in page.items.into_iter().enumerate() {
                         let item_bytes = serde_json::to_vec(&key)
@@ -318,10 +328,13 @@ impl Runtime {
                         if byte_count > MAX_AUTHORITY_BYTES {
                             return Err(invalid(
                                 "create-Vault authority exceeded its key byte bound",
-                            ));
+                            )
+                            .into());
                         }
                         if !seen_vaults.insert(key.vault_id.clone()) {
-                            return Err(invalid("create-Vault authority duplicated a Vault key"));
+                            return Err(
+                                invalid("create-Vault authority duplicated a Vault key").into()
+                            );
                         }
                         if key.vault_id == *vault_id {
                             exact_key = Some(key);
@@ -329,7 +342,9 @@ impl Runtime {
                     }
                     if !page.has_more {
                         if page.next_cursor.is_some() {
-                            return Err(invalid("create-Vault authority ended with a cursor"));
+                            return Err(
+                                invalid("create-Vault authority ended with a cursor").into()
+                            );
                         }
                         cursor = None;
                         break;
@@ -337,30 +352,34 @@ impl Runtime {
                     if page_is_empty {
                         return Err(invalid(
                             "create-Vault authority continued after an empty page",
-                        ));
+                        )
+                        .into());
                     }
                     let Some(next) = page.next_cursor else {
-                        return Err(invalid("create-Vault authority omitted its next cursor"));
+                        return Err(
+                            invalid("create-Vault authority omitted its next cursor").into()
+                        );
                     };
                     if next.is_empty() {
-                        return Err(invalid(
-                            "create-Vault authority returned an empty key cursor",
-                        ));
+                        return Err(
+                            invalid("create-Vault authority returned an empty key cursor").into(),
+                        );
                     }
                     if !seen_cursors.insert(next.clone()) {
-                        return Err(invalid("create-Vault authority repeated a key cursor"));
+                        return Err(invalid("create-Vault authority repeated a key cursor").into());
                     }
                     if seen_cursors.iter().map(String::len).sum::<usize>() > MAX_AUTHORITY_BYTES {
                         return Err(invalid(
                             "create-Vault authority exceeded its cursor byte bound",
-                        ));
+                        )
+                        .into());
                     }
                     cursor = Some(next);
                 }
                 if cursor.is_some() && seen_cursors.len() == MAX_AUTHORITY_PAGES {
-                    return Err(invalid(
-                        "create-Vault authority exceeded the key page bound",
-                    ));
+                    return Err(
+                        invalid("create-Vault authority exceeded the key page bound").into(),
+                    );
                 }
                 let exact_key = exact_key.ok_or_else(|| {
                     invalid("create-Vault authority did not contain the accepted Vault key")
@@ -386,9 +405,7 @@ impl Runtime {
                 (OperationOutcomeResult::VaultRejected { code: *code }, None)
             }
             _ => {
-                return Err(invalid(
-                    "create-Vault replay produced another Operation result",
-                ))
+                return Err(invalid("create-Vault replay produced another Operation result").into())
             }
         };
         let observed = ObservedOutcome { result, ..observed };
@@ -407,7 +424,7 @@ impl Runtime {
             ))
             .await?;
         if !matches!(result, PlanResult::Applied { .. }) {
-            return Err(invalid("create-Vault reconciliation was fenced"));
+            return Err(CreateVaultRecoveryError::ParkedFenced);
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all();
@@ -418,7 +435,7 @@ impl Runtime {
         &self,
         snapshot: crate::replica::ReplicaSnapshot,
         operation: OperationRecord,
-    ) -> Result<CreateVaultExecutorPass, RuntimeError> {
+    ) -> Result<CreateVaultExecutorPass, CreateVaultRecoveryError> {
         self.schedule_create_vault_retry(snapshot, operation)
             .await?;
         Ok(CreateVaultExecutorPass::RetryScheduled)

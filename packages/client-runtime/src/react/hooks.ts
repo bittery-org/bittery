@@ -3,9 +3,11 @@ import type {
 	ItemsProjection,
 	PendingShareResultsProjection,
 	RuntimeStatusProjection,
+	WritableVaultCatalogProjection,
 } from "../../generated/runtime-protocol/contract";
 import {
 	type CreateItemInput,
+	type CreateVaultInput,
 	IDLE_SNAPSHOT,
 	LOADING_SESSION,
 	type QuickUnlockInput,
@@ -14,6 +16,7 @@ import {
 	type RuntimeSessionSnapshot,
 	type RuntimeSignedIn,
 	type RuntimeSnapshot,
+	type RuntimeVaultCreationAccepted,
 	type SignInInput,
 } from "../client";
 import { useRuntimeClient } from "./context";
@@ -41,6 +44,15 @@ export function useRuntimePendingShareResults(
 	return useRuntimeStore(
 		accountId == null ? null : client.pendingShareResults(accountId),
 		IDLE_SNAPSHOT as RuntimeSnapshot<PendingShareResultsProjection>,
+	);
+}
+
+/** Device-wide writable Vault authority shared by every React consumer. */
+export function useRuntimeWritableVaults(): RuntimeSnapshot<WritableVaultCatalogProjection> {
+	const client = useRuntimeClient();
+	return useRuntimeStore(
+		client.writableVaults(),
+		IDLE_SNAPSHOT as RuntimeSnapshot<WritableVaultCatalogProjection>,
 	);
 }
 
@@ -117,5 +129,17 @@ export function useCreateItem(): UseMutationResult<
 	const client = useRuntimeClient();
 	return useMutation({
 		mutationFn: (input: CreateItemInput) => client.createItem(input),
+	});
+}
+
+/** Accepts durable Vault creation; component lifetime does not own the accepted work. */
+export function useCreateVault(): UseMutationResult<
+	RuntimeVaultCreationAccepted,
+	Error,
+	CreateVaultInput
+> {
+	const client = useRuntimeClient();
+	return useMutation({
+		mutationFn: (input: CreateVaultInput) => client.createVault(input),
 	});
 }

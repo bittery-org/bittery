@@ -5,6 +5,7 @@ import { activateTeamPlan } from "../fixtures/billing";
 import { runE2eSql, sqlString } from "../fixtures/e2e-database";
 import {
 	createItem,
+	createVault,
 	VAULT_READY_TIMEOUT_MS,
 	vaultNavLink,
 } from "../fixtures/vault";
@@ -477,54 +478,8 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 				body: "event: ping\ndata: {}\n\n",
 			}),
 		);
-		let targetVaultId: string | undefined;
-		const user = await signUp(page, generateTestUser(), {
-			beforeRuntimeSignIn: async (legacyPage) => {
-				targetVaultId = await legacyPage.evaluate(async (name) => {
-					const storageModulePath = "/src/lib/storage.ts";
-					const cryptoModulePath = "/src/lib/crypto.ts";
-					const vaultRuntimeModulePath = "/src/lib/vault-runtime.ts";
-					const vaultServiceModulePath =
-						"/@id/@bittery/core/services/vault-service";
-					const accountResolverModulePath =
-						"/@id/@bittery/core/services/account-resolver";
-					const [
-						{ storage },
-						{ crypto },
-						{ vaultCrypto },
-						vaultServiceModule,
-						accountResolverModule,
-					] = await Promise.all([
-						import(storageModulePath),
-						import(cryptoModulePath),
-						import(vaultRuntimeModulePath),
-						import(vaultServiceModulePath),
-						import(accountResolverModulePath),
-					]);
-					const accountId = await storage.getActiveAccount();
-					if (!accountId)
-						throw new Error("Legacy signup did not install its Account.");
-					const service = new vaultServiceModule.VaultService({
-						storage,
-						crypto,
-						vaultCrypto,
-						accounts: new accountResolverModule.AccountResolver(storage),
-						vaultKeyProjection: { async syncVaultKeys() {} },
-					});
-					return (
-						await service.createVault({
-							name,
-							type: "personal",
-							icon: "lock",
-							accountId,
-						})
-					).vaultId;
-				}, `Move target ${suffix}`);
-			},
-		});
-		if (!targetVaultId)
-			throw new Error("Pre-Runtime fixture did not create the target Vault.");
-		const moveTargetVaultId = targetVaultId;
+		const user = await signUp(page, generateTestUser());
+		const moveTargetVaultId = await createVault(page, `Move target ${suffix}`);
 		activateTeamPlan(user.email);
 		const sourceVaultResult = runE2eSql(`
 			SELECT coalesce(json_agg(source.id ORDER BY source.id), '[]'::json)::text

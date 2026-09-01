@@ -1,8 +1,7 @@
+import { useCreateVault } from "@bittery/client-runtime/react";
 import {
-	type CreateVaultInput,
 	useAccountSwitcher,
 	useAvailableTags,
-	useCreateVault,
 	useDeleteVault,
 	useItemCounts,
 	useUpdateVault,
@@ -10,6 +9,7 @@ import {
 import {
 	Button,
 	CreateVaultDialog,
+	type CreateVaultFormValue,
 	DeleteVaultDialog,
 	EditVaultDialog,
 	Sheet,
@@ -29,6 +29,7 @@ import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
 
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { findRuntimeVault, vaultNavEntries } from "@/lib/runtime-items";
+import { grantRuntimeVaultImage } from "@/lib/runtime-vault-image";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -70,10 +71,23 @@ function VaultsLayout() {
 		name: string;
 	} | null>(null);
 
-	const handleCreateVault = async (data: CreateVaultInput) => {
-		const result = await createVault.mutateAsync({
-			...data,
-		});
+	const handleCreateVault = async (data: CreateVaultFormValue) => {
+		const image = data.imageFile
+			? grantRuntimeVaultImage(data.accountId, data.imageFile)
+			: undefined;
+		const result = await (async () => {
+			try {
+				return await createVault.mutateAsync({
+					accountId: data.accountId,
+					name: data.name,
+					vaultType: data.type === "team" ? "shared" : "personal",
+					icon: data.icon,
+					imageSource: image?.input,
+				});
+			} finally {
+				await image?.discard();
+			}
+		})();
 		navigate({ to: "/vaults/$vaultId", params: { vaultId: result.vaultId } });
 	};
 

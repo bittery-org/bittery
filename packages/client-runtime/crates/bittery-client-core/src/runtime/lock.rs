@@ -163,6 +163,13 @@ impl Runtime {
         drop(execution_guard);
         foreground_retirement.drain().await;
         let _execution_guard = execution_lock.lock().await;
+        if retirement == AccessRetirement::SignOut {
+            // The current Session is the last production authority for discarding provisional
+            // image bytes. Attempt cleanup behind the lifecycle and execution fences before
+            // Sign-out forgets that Session; durable receipts retain any unfinished cleanup.
+            self.best_effort_create_vault_remote_cleanup(std::slice::from_ref(account_id))
+                .await;
+        }
         self.retire_attachment_download_account(account_id).await;
         self.retire_attachment_upload_account(account_id).await;
         self.retire_vault_image_account(account_id).await;

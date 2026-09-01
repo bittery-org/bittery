@@ -26,8 +26,8 @@ export interface PickedFile {
 }
 
 /**
- * SAF hands back a URI and no MIME type, but `createVault` rejects anything whose content
- * type is not `image/*`, so a picked vault image has to be typed from its extension. Only the
+ * SAF hands back a URI and no MIME type, but Vault image updates reject anything whose content
+ * type is not `image/*`, so a picked Vault image has to be typed from its extension. Only the
  * formats the picker is filtered to are listed; everything else stays `application/octet-stream`
  * and is refused upstream rather than mislabelled here.
  */

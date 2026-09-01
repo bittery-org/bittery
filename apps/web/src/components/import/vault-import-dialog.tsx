@@ -326,6 +326,8 @@ function getImportErrorMessage(
 			return m.vaults_import_error_execution_failed();
 		case "create-vault-account-required":
 			return m.vaults_import_error_create_vault_account_required();
+		case "runtime-import-pending":
+			return m.vaults_import_error_runtime_pending();
 		case "unsupported-file-type":
 			return m.vaults_import_error_unsupported_file_type({
 				format: getStringParam(error.params, "format"),
@@ -469,9 +471,10 @@ export function VaultImportDialog({
 				: selectedProvider,
 		[preview?.providerId, selectedProvider],
 	);
+	const isParked = progress.stage === "awaiting-runtime-import";
 
 	const canStartImport = useMemo(() => {
-		if (!preview || isBusy) {
+		if (!preview || isBusy || isParked) {
 			return false;
 		}
 
@@ -485,7 +488,7 @@ export function VaultImportDialog({
 			}
 			return !!mapping.targetVaultId;
 		});
-	}, [preview, mappings, isBusy]);
+	}, [preview, mappings, isBusy, isParked]);
 
 	const displayError = useMemo(() => {
 		if (!error) {
@@ -569,6 +572,7 @@ export function VaultImportDialog({
 	const handleStartImport = useCallback(async () => {
 		try {
 			const result = await executeImport();
+			if (result === null) return;
 			onImportCompleted?.(result);
 
 			if (result.failedVaultCount > 0) {
@@ -818,7 +822,7 @@ export function VaultImportDialog({
 									variant="ghost"
 									size="sm"
 									onClick={() => setDialogStep("manager")}
-									disabled={isBusy}
+									disabled={isBusy || isParked}
 								>
 									{m.vaults_import_upload_change_provider()}
 								</Button>
@@ -920,7 +924,7 @@ export function VaultImportDialog({
 										variant="ghost"
 										size="sm"
 										onClick={handleChooseAnotherFile}
-										disabled={isBusy}
+										disabled={isBusy || isParked}
 									>
 										{m.vaults_import_preview_choose_another_file()}
 									</Button>
@@ -1053,7 +1057,7 @@ export function VaultImportDialog({
 														onValueChange={(value: "create" | "existing") =>
 															setMappingMode(sourceVault.id, value)
 														}
-														disabled={isBusy}
+														disabled={isBusy || isParked}
 													>
 														<SelectTrigger>
 															<SelectValue />
@@ -1078,7 +1082,7 @@ export function VaultImportDialog({
 																)
 															}
 															placeholder={m.vaults_import_mapping_placeholder_new_vault_name()}
-															disabled={isBusy}
+															disabled={isBusy || isParked}
 														/>
 													) : (
 														<Select
@@ -1086,7 +1090,7 @@ export function VaultImportDialog({
 															onValueChange={(value) =>
 																setMappingTargetVaultId(sourceVault.id, value)
 															}
-															disabled={isBusy}
+															disabled={isBusy || isParked}
 														>
 															<SelectTrigger>
 																<SelectValue

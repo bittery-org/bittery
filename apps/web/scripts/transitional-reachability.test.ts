@@ -99,7 +99,6 @@ describe("what the Web may still reach in the transitional stack", () => {
 		// Only the recorded holdouts survive, and each one exists to serve a write kind
 		// ticket 28 has not moved yet.
 		expect(reads.map((item) => `${item.symbol} ${item.file}`).sort()).toEqual([
-			"useAllVaultKeys src/hooks/use-vault-import.ts",
 			"useDeletedItems src/routes/_app/vaults/trash.tsx",
 			"useItemAttachments src/components/vault/item-detail-pane.tsx",
 			"useMoveTargetVaults src/components/vault/move-item-dialog.tsx",
@@ -133,14 +132,17 @@ describe("what this audit deliberately does not assert yet", () => {
 		expect(writes).toEqual([]);
 	});
 
-	test("Vault create, update, delete and conversion are still transitional", () => {
+	test("Vault creation is Runtime-owned while later Vault writes remain transitional", () => {
+		expect(FORBIDDEN_KINDS.has("vault-create")).toBe(true);
+		expect(
+			audit.reached.filter((item) => item.kind === "vault-create"),
+		).toEqual([]);
 		expect(FORBIDDEN_KINDS.has("vault-write")).toBe(false);
 		const writes = audit.reached
 			.filter((item) => item.kind === "vault-write")
 			.map((item) => item.symbol);
 		expect([...new Set(writes)].sort()).toEqual([
 			"useConvertVaultType",
-			"useCreateVault",
 			"useDeleteVault",
 			"useUpdateVault",
 		]);

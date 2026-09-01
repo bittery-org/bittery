@@ -449,9 +449,9 @@ impl Runtime {
             }
             OperationOutcomeResult::VaultApplied { .. }
             | OperationOutcomeResult::VaultRejected { .. } => {
-                // Ticket 53 keeps create-Vault production dispatch closed. Its test-only executor
-                // owns the bounded Vault/key fetch and guarded reconciliation until the atomic
-                // Server/Web cutover installs the production route.
+                // The production create-Vault executor owns bounded Vault/key fetch and guarded
+                // reconciliation. Generic Sync defers here to preserve its staging and cleanup
+                // ordering.
                 return CompletionResult::Retry;
             }
             OperationOutcomeResult::Rejected { .. } => {

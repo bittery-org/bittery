@@ -59,32 +59,53 @@ pub(super) async fn get_vault(
     ))
 }
 
-#[utoipa::path(put, path = "/vaults/{vaultId}", operation_id = "createVault", tag = "vaults", params(("vaultId" = String, Path)), request_body = CreateVaultBody, responses((status = 200, description = "Success", body = CreateVaultResponse), VaultErrorResponses))]
+#[utoipa::path(put, path = "/vaults/{vaultId}", operation_id = "createVault", tag = "vaults", params(("vaultId" = String, Path), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = CreateVaultBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), VaultErrorResponses))]
 pub(super) async fn create_vault(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
+    headers: HeaderMap,
     Path(vault_id): Path<String>,
-    ApiJson(body): ApiJson<CreateVaultBody>,
-) -> Result<Json<CreateVaultResponse>, ApiError> {
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<
+        CreateVaultBody,
+        ORDINARY_API_BODY_LIMIT_BYTES,
+    >,
+) -> Result<Json<crate::domains::operations::OperationOutcome>, ApiError> {
     let pool = &state.db_pool;
-    let result = vault::create_vault(
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    let result = vault::execute_create_vault_operation(
         pool,
         state.config.server.mode,
         &auth.session.user_id,
-        auth.effective_client_id().as_deref(),
-        vault::CreateVaultInput {
-            vault_id: Some(vault_id),
-            name: body.name,
-            vault_type: body.vault_type,
-            encrypted_vault_key: body.encrypted_vault_key,
-            icon: body.icon,
-            image_key: body.image_key,
-            client_id: auth.effective_client_id(),
+        vault::CreateVaultOperationInput {
+            operation_id,
+            raw_body: bytes,
+            vault: vault::CreateVaultInput {
+                vault_id: Some(vault_id),
+                name: body.name,
+                vault_type: body.vault_type,
+                encrypted_vault_key: body.encrypted_vault_key,
+                icon: Some(body.icon),
+                image_key: body.image_key,
+                client_id: auth.effective_client_id(),
+            },
         },
     )
-    .await
-    .notify_sync(&state)?;
-    Ok(Json(result.into()))
+    .await?;
+    match result {
+        crate::domains::operations::OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
+        }
+        crate::domains::operations::OperationResolution::IdReused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
 }
 
 #[utoipa::path(patch, path = "/vaults/{vaultId}", operation_id = "updateVault", tag = "vaults", params(("vaultId" = String, Path)), request_body(content = UpdateVaultBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = UpdateVaultResponse), VaultErrorResponses))]

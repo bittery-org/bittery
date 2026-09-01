@@ -537,6 +537,9 @@ pub struct Runtime {
     vault_image_ingress: Mutex<Option<VaultImageIngressFacade>>,
     pending_vault_image_acceptance_cleanup: Mutex<HashSet<(AccountId, String)>>,
     create_vault_cleanup_port: Mutex<Option<Arc<dyn create_vault_cleanup::CreateVaultCleanupPort>>>,
+    create_vault_cleanup_retry_deadlines: Mutex<HashMap<(AccountId, String), u64>>,
+    #[cfg(feature = "binding-test-harness")]
+    create_vault_binding_pause_checkpoint: Mutex<Option<crate::replica::CreateVaultCheckpoint>>,
     clock: Arc<dyn Clock>,
     device_timer: Arc<dyn DeviceTimer>,
     /// Wakes the dispatcher when something that can change eligibility happened: work was
@@ -934,6 +937,9 @@ impl Runtime {
             vault_image_ingress: Mutex::new(None),
             pending_vault_image_acceptance_cleanup: Mutex::new(HashSet::new()),
             create_vault_cleanup_port: Mutex::new(None),
+            create_vault_cleanup_retry_deadlines: Mutex::new(HashMap::new()),
+            #[cfg(feature = "binding-test-harness")]
+            create_vault_binding_pause_checkpoint: Mutex::new(None),
             clock,
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
@@ -1018,10 +1024,7 @@ impl Runtime {
             .expect("Vault image ingress lock poisoned") = Some(facade);
     }
 
-    #[allow(
-        dead_code,
-        reason = "Ticket 53 composes the cleanup port only in tests before Ticket 54 opens production staging"
-    )]
+    #[cfg(test)]
     pub(crate) fn install_create_vault_cleanup_port(
         &self,
         port: Arc<dyn create_vault_cleanup::CreateVaultCleanupPort>,
@@ -1117,10 +1120,7 @@ impl Runtime {
         }
     }
 
-    #[allow(
-        dead_code,
-        reason = "Ticket 53 proves retained cleanup retry before the production lifecycle scheduler is opened"
-    )]
+    #[cfg(test)]
     pub(crate) async fn retry_pending_vault_image_acceptance_cleanup(&self) {
         let pending: Vec<_> = self
             .pending_vault_image_acceptance_cleanup
@@ -2495,6 +2495,108 @@ impl Runtime {
                 "binding Upload seed could not serialize authority",
             )
         })
+    }
+
+    /// Restores the smallest authenticated authority needed by the joined create-Vault browser
+    /// matrix. Unlike the Upload seed, a restart keeps the persisted Replica byte-for-byte so the
+    /// generated Core must resume the accepted Operation and its staging checkpoint.
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    pub async fn seed_create_vault_binding_test_authority(
+        &self,
+        server_url: String,
+        pause_checkpoint: Option<String>,
+    ) -> Result<(), RuntimeError> {
+        use crate::{
+            platform_storage::{AccountMetadataDocument, CurrentSessionDocument},
+            test_fixtures::TEST_MASTER_UNLOCK_KEY,
+        };
+
+        let pause_checkpoint = match pause_checkpoint.as_deref() {
+            None => None,
+            Some("artifactReady") => Some(crate::replica::CreateVaultCheckpoint::ArtifactReady),
+            Some("remoteUploadConfirmed") => {
+                Some(crate::replica::CreateVaultCheckpoint::RemoteUploadConfirmed)
+            }
+            Some("finalRequestFrozen") => {
+                Some(crate::replica::CreateVaultCheckpoint::FinalRequestFrozen)
+            }
+            Some(_) => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "binding create-Vault pause checkpoint is invalid",
+                ));
+            }
+        };
+        *self
+            .create_vault_binding_pause_checkpoint
+            .lock()
+            .expect("binding create-Vault pause lock poisoned") = pause_checkpoint;
+        let account_id = AccountId::from("account-1");
+        let snapshot = match self.replica.load(&account_id).await? {
+            Some(snapshot) => snapshot,
+            None => {
+                self.seed_attachment_upload_binding_test_authority(
+                    server_url.clone(),
+                    "writable".into(),
+                )
+                .await?;
+                self.replica.snapshot(&account_id).ok_or_else(|| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "binding create-Vault seed lost its Account",
+                    )
+                })?
+            }
+        };
+        self.platform_storage
+            .store_account_metadata(&AccountMetadataDocument::new(
+                account_id.clone(),
+                snapshot.incarnation.clone(),
+                snapshot.user_id.clone(),
+                "joined@example.test".into(),
+                "Joined Create Vault".into(),
+                server_url,
+                None,
+                None,
+                "A3".into(),
+                1_777_500_000_000,
+                1_777_500_000_000,
+                false,
+                true,
+                bittery_crypto_core::current_kdf_profile(),
+                None,
+            )?)
+            .await?;
+        self.platform_storage
+            .store_current_session(&CurrentSessionDocument::new(
+                account_id.clone(),
+                snapshot.incarnation.clone(),
+                "joined-session-token".into(),
+                Some("joined-session".into()),
+                4_102_444_800_000,
+                Some(4_102_444_800_000),
+                Vec::new(),
+                "joined-encrypted-private-key".into(),
+            )?)
+            .await?;
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .insert(
+                (account_id.clone(), snapshot.incarnation.clone()),
+                LiveMasterUnlockKey::new(Zeroizing::new(TEST_MASTER_UNLOCK_KEY)),
+            );
+        self.account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .insert(account_id.clone(), AccountAccessState::Unlocked);
+        self.account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .insert(account_id, snapshot.lock_epoch);
+        self.note_session_available(&AccountId::from("account-1"));
+        Ok(())
     }
 
     fn clear_live_master_unlock_keys_for_account(&self, account_id: &AccountId) {

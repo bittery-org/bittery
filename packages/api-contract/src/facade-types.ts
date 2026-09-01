@@ -24,6 +24,10 @@ export interface CreateItemWriteOptions extends ApiWriteOptions {
 	idempotencyKey: string;
 }
 
+export interface CreateVaultWriteOptions extends ApiWriteOptions {
+	idempotencyKey: string;
+}
+
 /** An Item mutation additionally requires the strong version it is written against. */
 export interface ItemOperationWriteOptions extends CreateItemWriteOptions {
 	etag: string;
@@ -119,7 +123,10 @@ export type AuthVaultKey = Schema<"AuthVaultKeyResponse">;
 export type Vault = Schema<"VaultListEntryResponse">;
 export type VaultDetails = Schema<"VaultDetailsResponseDto">;
 export type CreateVaultInput = Schema<"CreateVaultBody">;
-export type CreateVaultResponse = Schema<"CreateVaultResponse">;
+export type CreateVaultResponse = Extract<
+	Schema<"OperationOutcome">,
+	{ kind: "create_vault" }
+>;
 export type UpdateVaultInput = Schema<"UpdateVaultBody">;
 export type UpdateVaultResponse = Schema<"UpdateVaultResponse">;
 export type VaultStats = Omit<

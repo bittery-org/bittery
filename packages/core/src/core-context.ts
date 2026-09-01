@@ -59,8 +59,6 @@ export function createCoreContext(
 	});
 	const vaults = new VaultService({
 		storage: options.storage,
-		crypto: options.crypto,
-		vaultCrypto: options.vaultCrypto,
 		accounts,
 		vaultKeyProjection: vaultRepository,
 	});

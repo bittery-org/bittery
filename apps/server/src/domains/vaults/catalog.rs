@@ -5,34 +5,52 @@ use time::OffsetDateTime;
 use super::pagination::{bounded_page_ids, ItemPageWeight, VAULT_PAGE_QUERY_BYTES};
 use super::{
     ByteBoundedPage, ConvertVaultTypeInput, ConvertVaultTypeResponse, CreateVaultImageUploadInput,
-    CreateVaultInput, CreateVaultResponse, SuccessResponse, UpdateVaultInput, UpdateVaultResponse,
-    VaultDetailsResponse, VaultIdInput, VaultListEntryResponse, VaultStatsResponse,
+    CreateVaultInput, SuccessResponse, UpdateVaultInput, UpdateVaultResponse, VaultDetailsResponse,
+    VaultIdInput, VaultListEntryResponse, VaultStatsResponse, VAULT_ICON_MAX_CHARS,
     VAULT_NAME_MAX_CHARS,
 };
 use crate::{
     config::{format_timestamp, DeploymentMode},
     db::events::{
         begin_sync_event_transaction, generate_resource_id, insert_audit_event, insert_sync_event,
+        insert_user_sync_event,
     },
     db::{
-        enums::{BillingPlan, BillingStatus, SyncEntityType, SyncEventType, VaultRole, VaultType},
+        enums::{
+            BillingPlan, BillingStatus, OperationRejectionCode, SyncEntityType, SyncEventType,
+            VaultRole, VaultType,
+        },
         models::DbVaultRoleRow,
     },
     domains::{
         billing::entitlements::{
-            load_team_billing_entitlement,
+            load_team_billing_entitlement, load_team_billing_entitlement_locked,
             resolve_vault_sharing_entitlement as shared_resolve_vault_sharing_entitlement,
             VaultSharingEntitlement,
+        },
+        operations::{
+            create_vault_operation_fingerprint, CreateVaultAppliedPayload,
+            CreateVaultOperationRejectionCode, CreateVaultOperationResult, OperationOutcome,
+            OperationResolution,
         },
         vaults::key::validate_encrypted_vault_key,
     },
     error::AppError,
     integrations::storage,
-    shared::transaction::{
-        acquire_advisory_lock, acquire_team_authority_lock, acquire_user_authority_lock,
-        database_error,
+    shared::{
+        transaction::{
+            acquire_advisory_lock, acquire_operation_lock, acquire_team_authority_lock,
+            acquire_user_authority_lock, database_error,
+        },
+        validate_resource_id,
     },
 };
+
+pub(crate) struct CreateVaultOperationInput {
+    pub(crate) operation_id: String,
+    pub(crate) raw_body: Vec<u8>,
+    pub(crate) vault: CreateVaultInput,
+}
 
 #[derive(Debug, sqlx::FromRow)]
 struct DbVaultListRow {
@@ -239,112 +257,287 @@ pub(crate) async fn create_vault_image_upload(
         })
 }
 
-pub(crate) async fn create_vault(
+pub(crate) async fn execute_create_vault_operation(
     pool: &PgPool,
     deployment_mode: DeploymentMode,
     user_id: &str,
-    request_client_id: Option<&str>,
-    input: CreateVaultInput,
-) -> Result<CreateVaultResponse, AppError> {
-    if input.name.trim().is_empty()
-        || input.name.chars().count() > VAULT_NAME_MAX_CHARS
-        || validate_encrypted_vault_key(&input.encrypted_vault_key).is_err()
-    {
-        return Err(AppError::bad_request("Invalid params"));
-    }
-
+    input: CreateVaultOperationInput,
+) -> Result<OperationResolution, AppError> {
     let vault_id = input
+        .vault
         .vault_id
-        .clone()
-        .unwrap_or_else(|| generate_resource_id("vault"));
-    let mut team_id: Option<String> = None;
-    let mut shared_vault_limit: Option<i64> = None;
-    if input.vault_type == VaultType::Team {
-        let actor =
-            load_team_billing_entitlement(pool, user_id, "Failed to load team membership").await?;
-        let Some(actor) = actor else {
-            return Err(AppError::bad_request(
-                "You must belong to a team to create a team vault",
-            ));
-        };
-        let Some(actor_team_id) = actor.team_id else {
-            return Err(AppError::bad_request(
-                "You must belong to a team to create a team vault",
-            ));
-        };
-        let Some(plan) = actor.billing_plan else {
-            return Err(AppError::bad_request(
-                "You must belong to a team to create a team vault",
-            ));
-        };
-        let Some(status) = actor.billing_status else {
-            return Err(AppError::bad_request(
-                "You must belong to a team to create a team vault",
-            ));
-        };
-
-        let entitlement = resolve_vault_sharing_entitlement(deployment_mode, plan, status);
-        if !entitlement.allowed {
-            return Err(AppError::forbidden(
-                "Shared vaults are only available on Family or Team plans with active billing.",
-            ));
-        }
-        team_id = Some(actor_team_id);
-        shared_vault_limit = entitlement.shared_vault_limit;
-    }
-
+        .as_deref()
+        .ok_or_else(|| AppError::bad_request("Vault ID is required"))?;
+    validate_create_vault_intent(vault_id, &input.vault)?;
+    let fingerprint = create_vault_operation_fingerprint(vault_id, &input.raw_body);
     let mut transaction = begin_sync_event_transaction(pool)
         .await
-        .map_err(|error| database_error(error, "Failed to start vault transaction"))?;
-    if let Some(team_id) = team_id.as_deref() {
+        .map_err(|error| database_error(error, "Failed to start create-Vault Operation"))?;
+    acquire_operation_lock(
+        &mut *transaction,
+        user_id,
+        &input.operation_id,
+        "Failed to serialize create-Vault Operation",
+    )
+    .await?;
+    if let Some(existing) = query_as::<_, (Vec<u8>,)>(
+		"SELECT request_fingerprint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+	)
+	.bind(user_id)
+	.bind(&input.operation_id)
+	.fetch_optional(&mut *transaction)
+	.await
+	.map_err(|error| database_error(error, "Failed to load create-Vault outcome"))?
+	{
+		if existing.0 != fingerprint {
+			transaction.rollback().await.ok();
+			return Ok(OperationResolution::IdReused);
+		}
+		transaction
+			.commit()
+			.await
+			.map_err(|error| database_error(error, "Failed to replay create-Vault outcome"))?;
+		let outcome = crate::domains::operations::get_operation_outcome(
+			pool,
+			user_id,
+			&input.operation_id,
+		)
+		.await?
+		.ok_or_else(|| AppError::internal("Retained create-Vault outcome disappeared"))?;
+		return Ok(OperationResolution::Outcome {
+			outcome,
+			newly_committed: false,
+		});
+	}
+
+    if let Some(image_key) = input.vault.image_key.as_deref() {
+        let confirmed = query_scalar::<_, bool>(
+			"SELECT EXISTS(SELECT 1 FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND vault_id = $3 AND object_key = $4 AND state = 'confirmed' AND lease_expires_at > NOW())",
+		)
+		.bind(user_id)
+		.bind(&input.operation_id)
+		.bind(vault_id)
+		.bind(image_key)
+		.fetch_one(&mut *transaction)
+		.await
+		.map_err(|error| database_error(error, "Failed to verify Vault image staging"))?;
+        if !confirmed {
+            transaction.rollback().await.ok();
+            return Err(AppError::conflict("Vault image staging is incomplete"));
+        }
+    }
+
+    // Operation identity is User-scoped, while the Vault primary key is global. Distinct
+    // Operations (including cross-User requests) must serialize the first authority check for
+    // one candidate Vault ID before either may insert it.
+    acquire_advisory_lock(
+        &mut *transaction,
+        &format!("create-vault-id:{vault_id}"),
+        "Failed to serialize create-Vault identity",
+    )
+    .await?;
+    let mut rejection =
+        if query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM vault WHERE id = $1)")
+            .bind(vault_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to check Vault identity"))?
+        {
+            Some((
+                OperationRejectionCode::VaultIdConflict,
+                CreateVaultOperationRejectionCode::VaultIdConflict,
+            ))
+        } else {
+            None
+        };
+    let mut team_id = None;
+    let mut shared_limit = None;
+    if rejection.is_none() && input.vault.vault_type == VaultType::Team {
         acquire_user_authority_lock(
             &mut transaction,
             user_id,
             "Failed to lock Team Vault creator authority",
         )
         .await?;
-        acquire_team_authority_lock(
-            &mut *transaction,
-            team_id,
-            "Failed to lock Team Vault creation authority",
-        )
-        .await?;
+        let actor_team_id =
+            query_scalar::<_, Option<String>>("SELECT team_id FROM \"user\" WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(|error| {
+                    database_error(error, "Failed to load Team Vault creator membership")
+                })?;
+        if let Some(actor_team_id) = actor_team_id {
+            acquire_team_authority_lock(
+                &mut *transaction,
+                &actor_team_id,
+                "Failed to lock Team Vault creation authority",
+            )
+            .await?;
+            let locked = load_team_billing_entitlement_locked(
+                &mut transaction,
+                user_id,
+                "Failed to re-read locked Team Vault creator authority",
+            )
+            .await?
+            .ok_or_else(|| AppError::internal("Team Vault creator authority disappeared"))?;
+            if locked.team_id.as_deref() != Some(actor_team_id.as_str()) {
+                return Err(AppError::internal(
+                    "Team Vault creator authority changed while locked",
+                ));
+            }
+            let (Some(plan), Some(status)) = (locked.billing_plan, locked.billing_status) else {
+                return Err(AppError::internal(
+                    "Team Vault creator billing authority is incomplete",
+                ));
+            };
+            let entitlement = resolve_vault_sharing_entitlement(deployment_mode, plan, status);
+            if entitlement.allowed {
+                team_id = Some(actor_team_id);
+                shared_limit = entitlement.shared_vault_limit;
+            } else {
+                rejection = Some((
+                    OperationRejectionCode::VaultSharingEntitlementDenied,
+                    CreateVaultOperationRejectionCode::VaultSharingEntitlementDenied,
+                ));
+            }
+        } else {
+            rejection = Some((
+                OperationRejectionCode::TeamMembershipRequired,
+                CreateVaultOperationRejectionCode::TeamMembershipRequired,
+            ));
+            // No Team exists to lock. The User row lock makes this absence authoritative.
+            team_id = None;
+            shared_limit = None;
+        }
     }
-    if input.vault_type == VaultType::Team {
-        if let (Some(team_id), Some(limit)) = (team_id.as_deref(), shared_vault_limit) {
-            assert_shared_vault_quota(&mut transaction, team_id, limit).await?;
+    if rejection.is_none() {
+        if let Some(team_id) = team_id.as_deref() {
+            if let Some(limit) = shared_limit {
+                acquire_advisory_lock(
+                    &mut *transaction,
+                    &format!("shared-vaults:{team_id}"),
+                    "Failed to acquire shared vault limit lock",
+                )
+                .await?;
+                let count = query_scalar::<_, i64>(
+                    "SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
+                )
+                .bind(team_id)
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(|error| database_error(error, "Failed to count shared vaults"))?;
+                if count >= limit {
+                    rejection = Some((
+                        OperationRejectionCode::SharedVaultLimitReached,
+                        CreateVaultOperationRejectionCode::SharedVaultLimitReached,
+                    ));
+                }
+            }
         }
     }
 
-    insert_vault(
+    let result = if let Some((stored_code, wire_code)) = rejection {
+        insert_audit_event(
+            &mut *transaction,
+            &generate_resource_id("audit"),
+            user_id,
+            "vault_create_rejected",
+            "operation",
+            &input.operation_id,
+            Some(json!({ "code": stored_code.as_str() })),
+        )
+        .await?;
+        query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, 'create_vault', $3, 'rejected', $4::operation_rejection_code)")
+			.bind(user_id).bind(&input.operation_id).bind(fingerprint.as_slice()).bind(stored_code)
+			.execute(&mut *transaction).await
+			.map_err(|error| database_error(error, "Failed to retain rejected create-Vault outcome"))?;
+        if input.vault.image_key.is_some() {
+            query("UPDATE vault_image_staging SET state = 'cleanup_pending', updated_at = NOW() WHERE user_id = $1 AND operation_id = $2")
+				.bind(user_id).bind(&input.operation_id).execute(&mut *transaction).await
+				.map_err(|error| database_error(error, "Failed to mark rejected Vault image cleanup"))?;
+        }
+        CreateVaultOperationResult::Rejected { code: wire_code }
+    } else {
+        insert_vault(
+            &mut transaction,
+            vault_id,
+            user_id,
+            team_id.as_deref(),
+            &input.vault,
+        )
+        .await?;
+        insert_vault_key(
+            &mut transaction,
+            vault_id,
+            user_id,
+            &input.vault.encrypted_vault_key,
+        )
+        .await?;
+        insert_vault_created_sync_event(
+            &mut transaction,
+            vault_id,
+            user_id,
+            input.vault.client_id.as_deref(),
+        )
+        .await?;
+        insert_vault_created_audit_log(&mut *transaction, vault_id, user_id).await?;
+        let payload = serde_json::to_value(CreateVaultAppliedPayload {
+            vault_id: vault_id.to_owned(),
+        })
+        .map_err(|_| AppError::internal("Failed to encode create-Vault outcome"))?;
+        query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, $2, 'create_vault', $3, 'applied', $4)")
+			.bind(user_id).bind(&input.operation_id).bind(fingerprint.as_slice()).bind(payload)
+			.execute(&mut *transaction).await
+			.map_err(|error| database_error(error, "Failed to retain applied create-Vault outcome"))?;
+        if input.vault.image_key.is_some() {
+            query("DELETE FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND state = 'confirmed'")
+				.bind(user_id).bind(&input.operation_id).execute(&mut *transaction).await
+				.map_err(|error| database_error(error, "Failed to promote Vault image staging"))?;
+        }
+        CreateVaultOperationResult::Applied {
+            vault_id: vault_id.to_owned(),
+        }
+    };
+    insert_user_sync_event(
         &mut transaction,
-        &vault_id,
+        SyncEventType::OperationResolved,
+        &input.operation_id,
+        SyncEntityType::Operation,
         user_id,
-        team_id.as_deref(),
-        &input,
+        1,
+        input.vault.client_id.as_deref(),
+        None,
     )
     .await?;
-    insert_vault_key(
-        &mut transaction,
-        &vault_id,
-        user_id,
-        &input.encrypted_vault_key,
-    )
-    .await?;
-    insert_vault_created_sync_event(
-        &mut transaction,
-        &vault_id,
-        user_id,
-        input.client_id.as_deref().or(request_client_id),
-    )
-    .await?;
-    insert_vault_created_audit_log(&mut *transaction, &vault_id, user_id).await?;
     transaction
         .commit()
         .await
-        .map_err(|error| database_error(error, "Failed to commit vault transaction"))?;
+        .map_err(|error| database_error(error, "Failed to commit create-Vault Operation"))?;
+    Ok(OperationResolution::Outcome {
+        outcome: OperationOutcome::new_create_vault(input.operation_id, result),
+        newly_committed: true,
+    })
+}
 
-    Ok(CreateVaultResponse { vault_id })
+fn validate_create_vault_intent(vault_id: &str, input: &CreateVaultInput) -> Result<(), AppError> {
+    if validate_resource_id(vault_id).is_err() {
+        return Err(AppError::bad_request("Invalid params"));
+    }
+    let name_chars = input.name.chars().count();
+    let valid_name =
+        input.name == input.name.trim() && (2..=VAULT_NAME_MAX_CHARS).contains(&name_chars);
+    let valid_icon = input.icon.as_deref().is_some_and(|icon| {
+        let chars = icon.chars().count();
+        icon == icon.trim() && (1..=VAULT_ICON_MAX_CHARS).contains(&chars)
+    });
+    if !valid_name
+        || !valid_icon
+        || validate_encrypted_vault_key(&input.encrypted_vault_key).is_err()
+    {
+        return Err(AppError::bad_request("Invalid params"));
+    }
+    Ok(())
 }
 
 pub(crate) async fn update_vault(

@@ -13,10 +13,12 @@ import { createFakeRuntimeTransport } from "../testing";
 import {
 	RuntimeProvider,
 	useCreateItem,
+	useCreateVault,
 	useRuntimeItems,
 	useRuntimeQuickUnlock,
 	useRuntimeSession,
 	useRuntimeStatus,
+	useRuntimeWritableVaults,
 } from "./index";
 
 function itemsProjection(accountId: string, title: string) {
@@ -137,6 +139,145 @@ describe("sibling consumers of one Account", () => {
 		await flush(transport);
 		expect(screen.getByTestId("layout").textContent).toBe("first");
 		second.unmount();
+	});
+});
+
+describe("creating a Vault from React", () => {
+	test("hands the exact draft to the Runtime and answers with its accepted Vault", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		let accepting: ReturnType<RuntimeClient["createVault"]> | undefined;
+
+		function CreateButton() {
+			const create = useCreateVault();
+			return (
+				<button
+					type="button"
+					data-testid="create-vault"
+					onClick={() => {
+						accepting = create.mutateAsync({
+							accountId: "account-1",
+							name: "Shared finances",
+							vaultType: "shared",
+							icon: "wallet",
+							imageSource: {
+								capabilityId: "browser-image-1",
+								contentType: "image/png",
+								byteLength: "12",
+							},
+						});
+					}}
+				>
+					create
+				</button>
+			);
+		}
+
+		const view = render(host(client, <CreateButton />));
+		await flush(transport);
+		await act(async () => {
+			screen.getByTestId("create-vault").click();
+			await transport.settled();
+		});
+
+		const requests = transport.calls.filter((call) => call.type === "request");
+		expect(requests).toHaveLength(1);
+		expect(JSON.parse(requests[0]?.requestJson ?? "{}")).toEqual({
+			type: "createVault",
+			accountId: "account-1",
+			name: "Shared finances",
+			vaultType: "shared",
+			icon: "wallet",
+			imageSource: {
+				capabilityId: "browser-image-1",
+				contentType: "image/png",
+				byteLength: "12",
+			},
+		});
+
+		await act(async () => {
+			transport.answer({
+				type: "succeeded",
+				value: {
+					type: "vaultCreationAccepted",
+					operationId: "operation-1",
+					vaultId: "vault-1",
+					replicaRevision: "7",
+				},
+			});
+			await transport.settled();
+		});
+		expect(await accepting).toEqual({
+			operationId: "operation-1",
+			vaultId: "vault-1",
+			replicaRevision: "7",
+		});
+		view.unmount();
+	});
+});
+
+describe("writable Vault authority from React", () => {
+	test("shares the Device catalog and preserves Account identity", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+
+		function Catalog({ label }: { label: string }) {
+			const snapshot = useRuntimeWritableVaults();
+			const value =
+				snapshot.state === "ready"
+					? snapshot.value.vaults
+							.map((vault) => `${vault.accountId}:${vault.vaultId}`)
+							.join(",")
+					: snapshot.state;
+			return <p data-testid={label}>{value}</p>;
+		}
+
+		const view = render(
+			host(
+				client,
+				<>
+					<Catalog label="first" />
+					<Catalog label="second" />
+				</>,
+			),
+		);
+		await flush(transport);
+		expect(transport.openObservations()).toHaveLength(1);
+		expect(transport.openObservations()[0]?.request).toEqual({
+			type: "writableVaultCatalog",
+		});
+
+		await act(async () => {
+			transport.publish({
+				type: "writableVaultCatalog",
+				value: {
+					revision: "8",
+					vaults: [
+						{
+							accountId: "account-1",
+							vaultId: "vault-a",
+							name: "Alpha",
+							vaultType: "personal",
+							role: "owner",
+						},
+						{
+							accountId: "account-2",
+							vaultId: "vault-b",
+							name: "Beta",
+							vaultType: "team",
+							role: "admin",
+						},
+					],
+				},
+			});
+		});
+		expect(screen.getByTestId("first").textContent).toBe(
+			"account-1:vault-a,account-2:vault-b",
+		);
+		expect(screen.getByTestId("second").textContent).toBe(
+			"account-1:vault-a,account-2:vault-b",
+		);
+		view.unmount();
 	});
 });
 

@@ -11,6 +11,7 @@ export {
 } from "./context";
 export {
 	useCreateItem,
+	useCreateVault,
 	useRuntimeItems,
 	useRuntimeLock,
 	useRuntimePendingShareResults,
@@ -19,5 +20,6 @@ export {
 	useRuntimeSignIn,
 	useRuntimeSignOut,
 	useRuntimeStatus,
+	useRuntimeWritableVaults,
 } from "./hooks";
 export { useRuntimeStore } from "./use-runtime-store";

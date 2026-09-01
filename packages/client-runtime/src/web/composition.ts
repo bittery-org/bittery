@@ -81,6 +81,7 @@ export interface WebClientRuntime {
 
 export interface VaultImageSourceGrants {
 	grant(source: VaultImageSourceGrant): string;
+	discard(capabilityId: string): Promise<void>;
 }
 
 export function createWebClientRuntime(

@@ -37,10 +37,9 @@ use crate::{
     },
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
-        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_vault_shape, item_shape, update_vault_shape, vault_available_member_shape,
-        vault_details_shape, vault_list_entry_shape, vault_member_shape, vault_stats_shape,
-        vault_summary_shape,
+        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape, item_shape,
+        update_vault_shape, vault_available_member_shape, vault_details_shape,
+        vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
     AppState,
 };
@@ -51,19 +50,100 @@ mod items;
 mod members;
 pub(crate) mod rotation;
 pub(crate) mod travel_mode;
+mod vault_image_staging;
 
 pub(crate) const ITEM_BODY_LIMIT_BYTES: usize = ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024;
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateVaultBody {
-    #[schema(max_length = 200)]
+    #[schema(min_length = 2, max_length = 200)]
     name: String,
     vault_type: VaultType,
     #[schema(max_length = 65536)]
     encrypted_vault_key: String,
-    icon: Option<String>,
+    #[schema(min_length = 1, max_length = 128)]
+    icon: String,
     image_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VaultImageStagingBody {
+    vault_id: String,
+    byte_length: i64,
+    content_type: VaultImageContentType,
+    sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+enum VaultImageContentType {
+    #[serde(rename = "image/jpeg")]
+    Jpeg,
+    #[serde(rename = "image/png")]
+    Png,
+    #[serde(rename = "image/webp")]
+    Webp,
+    #[serde(rename = "image/gif")]
+    Gif,
+    #[serde(rename = "image/avif")]
+    Avif,
+}
+
+impl VaultImageContentType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+            Self::Webp => "image/webp",
+            Self::Gif => "image/gif",
+            Self::Avif => "image/avif",
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultImageStagingGrantResponse {
+    object_key: String,
+    upload_url: String,
+    generation: i64,
+    lease_expires_at: String,
+    upload_headers: Vec<VaultImageStagingUploadHeader>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultImageStagingUploadHeader {
+    name: String,
+    value: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+enum VaultImageStagingStatusResponse {
+    Absent {},
+    Unconfirmed {
+        #[serde(rename = "objectKey")]
+        object_key: String,
+        generation: i64,
+        #[serde(rename = "leaseExpiresAt")]
+        lease_expires_at: String,
+    },
+    Confirmed {
+        #[serde(rename = "objectKey")]
+        object_key: String,
+        generation: i64,
+        #[serde(rename = "leaseExpiresAt")]
+        lease_expires_at: String,
+    },
+    CleanupPending {
+        #[serde(rename = "objectKey")]
+        object_key: String,
+        generation: i64,
+        #[serde(rename = "leaseExpiresAt")]
+        lease_expires_at: String,
+    },
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -356,13 +436,6 @@ struct AddVaultMemberBody {
 struct UpdateVaultMemberRoleBody {
     role: VaultRole,
 }
-
-create_vault_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct CreateVaultResponse
-});
-create_vault_shape!(shape_from { vault::CreateVaultResponse => CreateVaultResponse });
 
 update_vault_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
@@ -804,6 +877,10 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(catalog::convert_vault))
         .routes(routes!(catalog::delete_vault))
         .routes(routes!(catalog::create_image_upload))
+        .routes(routes!(vault_image_staging::grant))
+        .routes(routes!(vault_image_staging::status))
+        .routes(routes!(vault_image_staging::confirm))
+        .routes(routes!(vault_image_staging::cleanup))
         .routes(routes!(items::set_favorite))
         .routes(routes!(items::delete_item))
         .routes(routes!(items::restore_item))
@@ -842,6 +919,7 @@ mod tests {
     use super::{
         check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
         BulkImportBody, BulkImportItemInput, FavoriteBody, ItemCategory, UpdateVaultBody,
+        VaultImageContentType, VaultImageStagingBody, VaultImageStagingStatusResponse,
         VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
     };
     use crate::{
@@ -863,6 +941,83 @@ mod tests {
             encryption_iv: "iv".to_string(),
             encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
         }
+    }
+
+    #[test]
+    fn vault_image_staging_wire_values_are_closed_and_correlated() {
+        for content_type in [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif",
+            "image/avif",
+        ] {
+            let body: VaultImageStagingBody = serde_json::from_value(json!({
+                "vaultId": "vault_test",
+                "byteLength": 12,
+                "contentType": content_type,
+                "sha256": "0".repeat(64),
+            }))
+            .expect("allowed Vault image MIME must decode");
+            assert_eq!(body.content_type.as_str(), content_type);
+            assert_eq!(
+                serde_json::to_value(body.content_type).unwrap(),
+                json!(content_type)
+            );
+        }
+        assert!(serde_json::from_value::<VaultImageStagingBody>(json!({
+            "vaultId": "vault_test",
+            "byteLength": 12,
+            "contentType": "image/svg+xml",
+            "sha256": "0".repeat(64),
+        }))
+        .is_err());
+
+        let authority = || {
+            (
+                "vaults/key".to_string(),
+                7_i64,
+                "2026-08-31T12:00:00Z".to_string(),
+            )
+        };
+        let values = [
+            VaultImageStagingStatusResponse::Absent {},
+            VaultImageStagingStatusResponse::Unconfirmed {
+                object_key: authority().0,
+                generation: authority().1,
+                lease_expires_at: authority().2,
+            },
+            VaultImageStagingStatusResponse::Confirmed {
+                object_key: authority().0,
+                generation: authority().1,
+                lease_expires_at: authority().2,
+            },
+            VaultImageStagingStatusResponse::CleanupPending {
+                object_key: authority().0,
+                generation: authority().1,
+                lease_expires_at: authority().2,
+            },
+        ];
+        for value in values {
+            let encoded = serde_json::to_value(&value).unwrap();
+            let decoded: VaultImageStagingStatusResponse =
+                serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+        }
+        assert!(
+            serde_json::from_value::<VaultImageStagingStatusResponse>(json!({
+                "state": "absent",
+                "objectKey": "impossible"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<VaultImageStagingStatusResponse>(json!({
+                "state": "confirmed"
+            }))
+            .is_err()
+        );
+        assert!(serde_json::from_value::<VaultImageContentType>(json!("text/plain")).is_err());
     }
 
     #[test]

@@ -12,8 +12,9 @@ export interface AtomicVaultImageSource {
 }
 export interface VaultImageSourceGrant {
 	accountId: string;
-	operationId: string;
-	vaultId: string;
+	/** Omitted for a browser draft; Rust binds both identities on the first exact claim. */
+	operationId?: string;
+	vaultId?: string;
 	contentType: string;
 	byteLength: bigint;
 	source: AtomicVaultImageSource;
@@ -45,7 +46,7 @@ type Entry = VaultImageSourceGrant & {
 type Tombstone = {
 	incarnation: string;
 	accountId: string;
-	operationId: string;
+	operationId?: string;
 };
 type Account = {
 	phase: "active" | "pendingRetirement" | "retired";
@@ -100,6 +101,7 @@ export class WebVaultImageSourceRegistry {
 	readonly #identity: () => string;
 	readonly #lifetime: number;
 	#incarnation?: string;
+	#retiredIncarnation?: string;
 	#phase: "uninitialized" | "fenced" | "open" | "closing" | "closed" =
 		"uninitialized";
 	constructor(options: WebVaultImageSourceRegistryOptions = {}) {
@@ -126,6 +128,7 @@ export class WebVaultImageSourceRegistry {
 			if (this.#entries.size !== 0)
 				throw new Error("Vault-image source cleanup did not drain");
 			this.#incarnation = incarnation;
+			this.#retiredIncarnation = undefined;
 			this.#accounts.clear();
 			this.#tombstones.clear();
 			this.#phase = "open";
@@ -136,8 +139,9 @@ export class WebVaultImageSourceRegistry {
 			this.#phase !== "open" ||
 			this.#incarnation === undefined ||
 			!ID.test(grant.accountId) ||
-			!ID.test(grant.operationId) ||
-			!ID.test(grant.vaultId) ||
+			(grant.operationId === undefined) !== (grant.vaultId === undefined) ||
+			(grant.operationId !== undefined && !ID.test(grant.operationId)) ||
+			(grant.vaultId !== undefined && !ID.test(grant.vaultId)) ||
 			!MIME.has(grant.contentType) ||
 			grant.byteLength < 1n ||
 			grant.byteLength > 2_097_152n ||
@@ -176,6 +180,12 @@ export class WebVaultImageSourceRegistry {
 		});
 		return capabilityId;
 	}
+	async discard(capabilityId: string): Promise<void> {
+		if (!ID.test(capabilityId))
+			throw new Error("Vault-image capability is invalid");
+		const entry = this.#entries.get(capabilityId);
+		if (entry !== undefined) await this.#cleanup(entry);
+	}
 	async invoke(
 		controlJson: string,
 		incarnation: string,
@@ -189,13 +199,18 @@ export class WebVaultImageSourceRegistry {
 		} catch {
 			return { type: "invariantViolation" };
 		}
-		const canReleaseAcceptance =
-			request.type === "endAcceptance" &&
+		if (
+			request.type === "retireRuntime" &&
+			this.#retiredIncarnation === incarnation
+		)
+			return { type: "retired" };
+		const canCompleteClosingHandshake =
+			(request.type === "endAcceptance" || request.type === "retireRuntime") &&
 			(this.#phase === "fenced" || this.#phase === "closing");
 		if (
 			!ID.test(incarnation) ||
 			this.#incarnation !== incarnation ||
-			(this.#phase !== "open" && !canReleaseAcceptance)
+			(this.#phase !== "open" && !canCompleteClosingHandshake)
 		)
 			return { type: "sourceFailure" };
 		if (request.type === "retireAccount") {
@@ -279,10 +294,17 @@ export class WebVaultImageSourceRegistry {
 				if (
 					entry.state !== "granted" ||
 					request.accountId !== entry.accountId ||
-					request.operationId !== entry.operationId ||
-					request.vaultId !== entry.vaultId ||
 					request.contentType !== entry.contentType ||
 					request.byteLength !== entry.byteLength.toString()
+				)
+					return { type: "sourceFailure" };
+				if (entry.operationId === undefined && entry.vaultId === undefined) {
+					entry.operationId = request.operationId;
+					entry.vaultId = request.vaultId;
+				}
+				if (
+					request.operationId !== entry.operationId ||
+					request.vaultId !== entry.vaultId
 				)
 					return { type: "sourceFailure" };
 				entry.state = "claimed";
@@ -395,6 +417,7 @@ export class WebVaultImageSourceRegistry {
 		this.#accounts.set(accountId, accountState(previous.generation + 1));
 	}
 	async retireRuntime(incarnation: string): Promise<void> {
+		if (this.#retiredIncarnation === incarnation) return;
 		if (this.#incarnation !== incarnation)
 			throw new Error("Vault-image Runtime retirement is invalid");
 		this.#phase = "fenced";
@@ -407,6 +430,7 @@ export class WebVaultImageSourceRegistry {
 				.map((account) => account.drained),
 		);
 		this.#incarnation = undefined;
+		this.#retiredIncarnation = incarnation;
 		for (const account of this.#accounts.values()) account.phase = "retired";
 	}
 	beginClose() {

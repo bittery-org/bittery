@@ -437,6 +437,20 @@ impl WebClientRuntime {
             .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = seedCreateVaultTestAuthority)]
+    pub async fn seed_create_vault_test_authority(
+        &self,
+        server_url: String,
+        pause_checkpoint: Option<String>,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .seed_create_vault_binding_test_authority(server_url, pause_checkpoint)
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
     pub async fn request_json(
         &self,
         request_id: String,

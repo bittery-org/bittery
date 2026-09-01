@@ -24,7 +24,7 @@ import {
 /**
  * What a transitional symbol owns.
  *
- * The four forbidden kinds are the ones the Runtime replaced on Web. The rest are named,
+ * The forbidden kinds are the ones the Runtime replaced on Web. The rest are named,
  * not forgiven: they say which transitional stack a symbol belongs to and which ticket owes
  * its removal.
  */
@@ -41,7 +41,9 @@ export type TransitionalKind =
 	| "item-write"
 	/** Creates a Share through the retired TypeScript writer. Runtime owns this on Web. */
 	| "share-write"
-	/** Vault create, update, delete, type conversion. Still transitional; no ticket yet. */
+	/** Creates a Vault through the retired TypeScript writer. Runtime owns this on Web. */
+	| "vault-create"
+	/** Updates, deletes or converts a Vault through the transitional TypeScript writers. */
 	| "vault-write"
 	/** Transitional Account, Session and lifecycle machinery. Sign-in itself is the Runtime's. */
 	| "account"
@@ -61,6 +63,7 @@ export const FORBIDDEN_KINDS: ReadonlySet<TransitionalKind> = new Set([
 	"item-create",
 	"sync-loop",
 	"share-write",
+	"vault-create",
 ]);
 
 /** A Web file that may still reach a forbidden symbol, and the reason it may. */
@@ -113,18 +116,7 @@ export const TRANSITIONAL_SURFACE: readonly TransitionalEntry[] = [
 	{ module: HOOKS, symbol: "useVaultInfo", kind: "vault-read" },
 	{ module: HOOKS, symbol: "useCrossVaultTags", kind: "vault-read" },
 	{ module: HOOKS, symbol: "useVaultRepositoryState", kind: "vault-read" },
-	{
-		module: HOOKS,
-		symbol: "useAllVaultKeys",
-		kind: "vault-read",
-		holdouts: [
-			{
-				file: "src/hooks/use-vault-import.ts",
-				ticket: 28,
-				why: "bulk import writes Items through the transitional repository, and reads this only to pick the Vault it writes into",
-			},
-		],
-	},
+	{ module: HOOKS, symbol: "useAllVaultKeys", kind: "vault-read" },
 	{
 		module: HOOKS,
 		symbol: "useMoveTargetVaults",
@@ -171,8 +163,8 @@ export const TRANSITIONAL_SURFACE: readonly TransitionalEntry[] = [
 	{ module: HOOKS, symbol: "useMoveItem", kind: "item-write" },
 	{ module: HOOKS, symbol: "useCreateShare", kind: "share-write" },
 
-	// --- Vault writes: still transitional, no ticket yet -----------------------------
-	{ module: HOOKS, symbol: "useCreateVault", kind: "vault-write" },
+	// --- Vault creation is Runtime-owned; the other writes remain transitional --------
+	{ module: HOOKS, symbol: "useCreateVault", kind: "vault-create" },
 	{ module: HOOKS, symbol: "useUpdateVault", kind: "vault-write" },
 	{ module: HOOKS, symbol: "useDeleteVault", kind: "vault-write" },
 	{ module: HOOKS, symbol: "useConvertVaultType", kind: "vault-write" },

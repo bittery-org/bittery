@@ -750,6 +750,7 @@
 	"vaults_import_error_file_incompatible": "Diese Datei ist nicht mit {providerTitle} kompatibel. Bitte lade eine gültige Exportdatei hoch.",
 	"vaults_import_error_no_importable_items": "Keine importierbaren Einträge gefunden. Dieser Export enthält nur leere Tresore.",
 	"vaults_import_error_import_not_ready": "Lade zuerst eine Exportdatei hoch und analysiere sie, bevor du den Import startest.",
+	"vaults_import_error_runtime_pending": "Der neue Tresor wurde angenommen. Dein Importentwurf bleibt hier gespeichert und wird fortgesetzt, sobald der Runtime-Import verfügbar ist.",
 	"vaults_import_error_mapping_missing": "Fehlende Zuordnung für Quell-Tresor \"{sourceVaultName}\".",
 	"vaults_import_error_target_vault_required": "Wähle einen Ziel-Tresor für \"{sourceVaultName}\" oder erstelle einen neuen.",
 	"vaults_import_error_target_vault_name_required": "Gib einen Ziel-Tresornamen für \"{sourceVaultName}\" ein.",

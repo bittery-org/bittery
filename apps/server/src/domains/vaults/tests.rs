@@ -16,7 +16,7 @@ use axum::http::{
     HeaderMap, HeaderValue, Method, StatusCode,
 };
 use serde_json::{json, Value};
-use sqlx::{query, query_as, query_scalar, PgPool};
+use sqlx::{postgres::PgPoolOptions, query, query_as, query_scalar, PgPool};
 use time::{Duration, OffsetDateTime};
 
 use std::sync::Arc;
@@ -1806,6 +1806,124 @@ fn assert_rejected(body: &Value, kind: &str, code: &str) {
         json!({ "status": "rejected", "code": code }),
         "unexpected rejected outcome: {body}"
     );
+}
+
+async fn assert_create_vault_rejection_history(
+    pool: &PgPool,
+    user_id: &str,
+    operation_id: &str,
+    vault_id: &str,
+    code: &str,
+    vault_must_be_absent: bool,
+) {
+    let outcome = query_as::<_, (String, String, Option<String>, Option<Value>)>(
+		"SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+	)
+	.bind(user_id)
+	.bind(operation_id)
+	.fetch_all(pool)
+	.await
+	.unwrap();
+    assert_eq!(
+        outcome,
+        vec![(
+            "create_vault".into(),
+            "rejected".into(),
+            Some(code.into()),
+            None,
+        )]
+    );
+    let audits = query_as::<_, (String, Option<String>, String, Option<Value>)>(
+		"SELECT action, entity_type, entity_id, metadata::jsonb FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+	)
+	.bind(user_id)
+	.bind(operation_id)
+	.fetch_all(pool)
+	.await
+	.unwrap();
+    assert_eq!(
+        audits,
+        vec![(
+            "vault_create_rejected".into(),
+            Some("operation".into()),
+            operation_id.into(),
+            Some(json!({ "code": code })),
+        )]
+    );
+    let events = query_as::<_, (String, Option<String>, String, String, Option<String>, i32, Option<String>)>(
+		"SELECT event_type::text, vault_id, entity_id, entity_type::text, client_id, version, metadata FROM sync_event WHERE user_id = $1 AND entity_id = $2",
+	)
+	.bind(user_id)
+	.bind(operation_id)
+	.fetch_all(pool)
+	.await
+	.unwrap();
+    assert_eq!(
+        events,
+        vec![(
+            "operation_resolved".into(),
+            None,
+            operation_id.into(),
+            "operation".into(),
+            Some("integration-test".into()),
+            1,
+            None,
+        )]
+    );
+    assert_eq!(
+		query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = $2 AND action = 'vault_created'",
+		)
+		.bind(user_id)
+		.bind(vault_id)
+		.fetch_one(pool)
+		.await
+		.unwrap(),
+		0
+	);
+    assert_eq!(
+		query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND entity_id = $2 AND event_type = 'vault_created'",
+		)
+		.bind(user_id)
+		.bind(vault_id)
+		.fetch_one(pool)
+		.await
+		.unwrap(),
+		0
+	);
+    assert_eq!(
+        query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+        )
+        .bind(vault_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+		query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2",
+		)
+		.bind(user_id)
+		.bind(operation_id)
+		.fetch_one(pool)
+		.await
+		.unwrap(),
+		0
+	);
+    if vault_must_be_absent {
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE id = $1")
+                .bind(vault_id)
+                .fetch_one(pool)
+                .await
+                .unwrap(),
+            0
+        );
+    }
 }
 
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
@@ -5317,6 +5435,7 @@ async fn vault_create_audit_failure_rolls_back_mutation() {
         install_required_audit_failure_trigger(&app.pool, "vault_created").await;
         let session = app.issue_session(&fixture.solo_user_id).await;
         let vault_id = "vault_rejected_audit";
+		let operation_id = "vault-create-audit-rollback";
 
         let response = app
             .api_json(
@@ -5325,9 +5444,11 @@ async fn vault_create_audit_failure_rolls_back_mutation() {
                 Some(json!({
                     "name": "Atomic Audit Vault",
                     "vaultType": "personal",
-                    "encryptedVaultKey": "atomic-audit-key"
+					"encryptedVaultKey": "atomic-audit-key",
+					"icon": "lock",
+					"imageKey": null
                 })),
-                authenticated_json_headers(&session.token),
+				idempotency_headers(&session.token, operation_id),
             )
             .await;
 
@@ -5353,6 +5474,16 @@ async fn vault_create_audit_failure_rolls_back_mutation() {
             sync_event_count, 0,
             "vault sync event must roll back with its audit"
         );
+		assert_eq!(
+			retained_outcome_count(&app.pool, &fixture.solo_user_id, operation_id).await,
+			0,
+			"failed audit must roll back the retained outcome"
+		);
+		assert_eq!(
+			entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+			0,
+			"failed audit must roll back operation resolution"
+		);
     })
     .await;
 }
@@ -7069,6 +7200,1611 @@ async fn every_item_operation_replays_one_retained_outcome() {
     .await;
 }
 
+#[tokio::test]
+async fn create_vault_put_replays_one_retained_operation_outcome() {
+    with_api_test_app("create_vault_operation_replay", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "create-vault-operation-replay";
+        let path = "/api/v1/vaults/runtime-created-vault";
+        let body = Some(json!({
+            "name": "Runtime created",
+            "vaultType": "personal",
+            "encryptedVaultKey": "runtime-owner-key",
+            "icon": "lock",
+            "imageKey": null
+        }));
+        let headers = || {
+            let mut headers = authenticated_json_headers(&session.token);
+            headers.insert("idempotency-key", operation_id.parse().unwrap());
+            headers
+        };
+        let first = app
+            .api_json(Method::PUT, path, body.clone(), headers())
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(first.body["kind"], json!("create_vault"));
+        assert_eq!(first.body["operationId"], json!(operation_id));
+        assert_eq!(first.body["result"]["status"], json!("applied"));
+        assert_eq!(
+            first.body["result"]["vaultId"],
+            json!("runtime-created-vault")
+        );
+        let replay = app.api_json(Method::PUT, path, body, headers()).await;
+        assert_eq!(replay.body, first.body);
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+            1
+        );
+        assert_eq!(
+            entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+            1
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_rejects_every_malformed_intent_before_domain_history() {
+    with_api_test_app("create_vault_intent_validation", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let valid = json!({
+            "name": "Valid Vault",
+            "vaultType": "personal",
+            "encryptedVaultKey": "wrapped",
+            "icon": "lock",
+            "imageKey": null
+        });
+        let mut cases = Vec::new();
+        for (label, vault_id, field, value) in [
+            (
+                "short-id",
+                "short-id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            (
+                "dot-id",
+                "invalid.vault.id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            (
+                "tilde-id",
+                "invalid~vault~id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            (
+                "unsafe-id",
+                "unsafe%20id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            ("long-id", "a".repeat(65), "name", json!("Valid Vault")),
+            (
+                "short-name",
+                "invalid-short-name".into(),
+                "name",
+                json!("x"),
+            ),
+            (
+                "trim-name",
+                "invalid-trim-name".into(),
+                "name",
+                json!(" Valid"),
+            ),
+            (
+                "long-name",
+                "invalid-long-name".into(),
+                "name",
+                json!("n".repeat(201)),
+            ),
+            ("blank-icon", "invalid-blank-icon".into(), "icon", json!("")),
+            (
+                "trim-icon",
+                "invalid-trim-icon".into(),
+                "icon",
+                json!(" lock"),
+            ),
+            (
+                "long-icon",
+                "invalid-long-icon".into(),
+                "icon",
+                json!("i".repeat(129)),
+            ),
+            (
+                "blank-key",
+                "invalid-blank-key".into(),
+                "encryptedVaultKey",
+                json!("   "),
+            ),
+            (
+                "long-key",
+                "invalid-long-key".into(),
+                "encryptedVaultKey",
+                json!("k".repeat(super::key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1)),
+            ),
+        ] {
+            let mut body = valid.clone();
+            body[field] = value;
+            cases.push((label, vault_id, body));
+        }
+        let mut missing_icon = valid.clone();
+        missing_icon.as_object_mut().unwrap().remove("icon");
+        cases.push(("missing-icon", "invalid-missing-icon".into(), missing_icon));
+
+		for (label, vault_id, body) in cases {
+            let operation_id = format!("invalid-create-vault-{label}");
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/vaults/{vault_id}"),
+                    Some(body),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert!(
+                response.status.is_client_error(),
+                "{label}: {}",
+                response.body
+            );
+            if matches!(
+                label,
+                "short-id" | "dot-id" | "tilde-id" | "unsafe-id" | "long-id"
+            ) {
+                assert_transport_error(&response.body, "BAD_REQUEST", "Invalid params");
+            }
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                0,
+                "{label} retained an outcome"
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                0
+            );
+			assert_eq!(
+				query_scalar::<_, i64>(
+					"SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1"
+                )
+                .bind(&operation_id)
+                .fetch_one(&app.pool)
+                .await
+				.unwrap(),
+				0
+			);
+			assert_eq!(
+				query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE id = $1")
+					.bind(&vault_id)
+					.fetch_one(&app.pool)
+					.await
+					.unwrap(),
+				0,
+				"{label} created a Vault"
+			);
+			assert_eq!(
+				query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1")
+					.bind(&vault_id)
+					.fetch_one(&app.pool)
+					.await
+					.unwrap(),
+				0,
+				"{label} created a Vault key"
+			);
+			assert_eq!(
+				query_scalar::<_, i64>(
+					"SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'vault_created'",
+				)
+				.bind(&vault_id)
+				.fetch_one(&app.pool)
+				.await
+				.unwrap(),
+				0,
+				"{label} emitted a success event"
+			);
+			assert_eq!(
+				query_scalar::<_, i64>(
+					"SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2",
+				)
+				.bind(&fixture.owner_user_id)
+				.bind(&operation_id)
+				.fetch_one(&app.pool)
+				.await
+				.unwrap(),
+				0,
+				"{label} contaminated image staging"
+			);
+		}
+
+		let pre_domain_operation = "invalid-create-vault-enum";
+		let pre_domain_vault = "invalid-create-vault-enum-target";
+		let pre_domain = app
+			.api_json(
+				Method::PUT,
+				&format!("/api/v1/vaults/{pre_domain_vault}"),
+				Some(json!({
+					"name": "Invalid enum",
+					"vaultType": "organization",
+					"encryptedVaultKey": "wrapped",
+					"icon": "lock",
+					"imageKey": null
+				})),
+				idempotency_headers(&session.token, pre_domain_operation),
+			)
+			.await;
+		assert!(pre_domain.status.is_client_error(), "{}", pre_domain.body);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+			)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+			)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND (entity_id = $2 OR entity_id = $3)",
+			)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.bind(pre_domain_vault)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT (SELECT COUNT(*) FROM vault WHERE id = $1) + (SELECT COUNT(*) FROM vault_key WHERE vault_id = $1) + (SELECT COUNT(*) FROM vault_image_staging WHERE user_id = $2 AND operation_id = $3)",
+			)
+			.bind(pre_domain_vault)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+
+			let boundary_id = "A0_-".repeat(16);
+        let boundary = app
+            .api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{boundary_id}"),
+                Some(json!({
+                    "name": "nn",
+                    "vaultType": "personal",
+                    "encryptedVaultKey": "k".repeat(super::key::ENCRYPTED_VAULT_KEY_MAX_BYTES),
+                    "icon": "i".repeat(super::VAULT_ICON_MAX_CHARS),
+                    "imageKey": null
+                })),
+                idempotency_headers(&session.token, "valid-create-vault-boundaries"),
+            )
+            .await;
+        assert_eq!(boundary.status, StatusCode::OK, "{}", boundary.body);
+        assert_eq!(boundary.body["result"]["status"], json!("applied"));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_accepts_canonical_uuid_and_boundary_slug_ids() {
+    with_api_test_app("create_vault_canonical_ids", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        for (label, vault_id) in [
+            ("uuid", "550e8400-e29b-41d4-a716-446655440000".to_owned()),
+            ("slug-min", "aB0_-z9_Xy".to_owned()),
+            ("slug-max", "A0_-".repeat(16)),
+        ] {
+            let operation_id = format!("canonical-create-vault-{label}");
+            let path = format!("/api/v1/vaults/{vault_id}");
+            let body = json!({
+                "name": "Canonical Vault",
+                "vaultType": "personal",
+                "encryptedVaultKey": "wrapped",
+                "icon": "lock",
+                "imageKey": null
+            });
+            let expected_fingerprint = crate::domains::operations::create_vault_operation_fingerprint(
+                &vault_id,
+                body.to_string().as_bytes(),
+            );
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(body.clone()),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{label}: {}", first.body);
+            assert_eq!(first.body["kind"], json!("create_vault"));
+            assert_eq!(
+                first.body["result"],
+                json!({ "status": "applied", "vaultId": vault_id })
+            );
+
+            let replay = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(body),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(replay.body, first.body, "{label} must replay exactly");
+            assert_eq!(
+                query_as::<_, (String, String, Vec<u8>, Option<Value>)>(
+                    "SELECT operation_kind::text, result_status::text, request_fingerprint, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+                )
+                .bind(&fixture.owner_user_id)
+                .bind(&operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                (
+                    "create_vault".into(),
+                    "applied".into(),
+                    expected_fingerprint.to_vec(),
+                    Some(json!({ "vaultId": vault_id })),
+                )
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                1
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &vault_id, "vault_created").await,
+                1
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_operation_commits_every_history_once_and_rejects_identity_reuse() {
+    with_api_test_app("create_vault_complete_history", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "create-vault-complete-history";
+        let path = "/api/v1/vaults/runtime-history-vault";
+        let body = json!({
+            "name": "History Vault",
+            "vaultType": "team",
+            "encryptedVaultKey": "runtime-owner-key",
+            "icon": "users",
+            "imageKey": null
+        });
+        let headers = || {
+            let mut headers = authenticated_json_headers(&session.token);
+            headers.insert("idempotency-key", operation_id.parse().unwrap());
+            headers
+        };
+
+        let first = app
+            .api_json(Method::PUT, path, Some(body.clone()), headers())
+            .await;
+        assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+        assert_eq!(first.body["result"]["status"], json!("applied"));
+        let replay = app
+            .api_json(Method::PUT, path, Some(body.clone()), headers())
+            .await;
+        assert_eq!(replay.body, first.body);
+        let mut changed_body = body;
+        changed_body["name"] = json!("Other");
+        let reused = app
+            .api_json(
+                Method::PUT,
+                path,
+                Some(changed_body),
+                headers(),
+            )
+            .await;
+        assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+
+		let vault = query_as::<_, (String, String, String, Option<String>, Option<String>, String)>(
+			"SELECT id, name, type::text, icon, team_id, created_by_id FROM vault WHERE id = $1",
+		)
+		.bind("runtime-history-vault")
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			vault,
+			(
+				"runtime-history-vault".into(),
+				"History Vault".into(),
+				"team".into(),
+				Some("users".into()),
+				Some(fixture.paid_team_id.clone()),
+				fixture.owner_user_id.clone(),
+			)
+		);
+		let owner_key = query_as::<_, (String, String)>(
+			"SELECT role::text, encrypted_vault_key FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+		)
+		.bind("runtime-history-vault")
+		.bind(&fixture.owner_user_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(owner_key, ("owner".into(), "runtime-owner-key".into()));
+		let audit = query_as::<_, (String, Option<String>, String, Option<String>)>(
+			"SELECT action, entity_type, entity_id, metadata FROM audit_log WHERE entity_id = $1",
+		)
+		.bind("runtime-history-vault")
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			audit,
+			(
+				"vault_created".into(),
+				Some("vault".into()),
+				"runtime-history-vault".into(),
+				None,
+			)
+		);
+		let events = query_as::<_, (String, Option<String>, String, String, Option<String>, i32, Option<String>)>(
+			"SELECT event_type::text, vault_id, entity_id, entity_type::text, client_id, version, metadata FROM sync_event WHERE user_id = $1 AND (entity_id = $2 OR entity_id = $3) ORDER BY event_type::text",
+		)
+		.bind(&fixture.owner_user_id)
+		.bind("runtime-history-vault")
+		.bind(operation_id)
+		.fetch_all(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			events,
+			vec![
+				(
+					"operation_resolved".into(),
+					None,
+					operation_id.into(),
+					"operation".into(),
+					Some("integration-test".into()),
+					1,
+					None,
+				),
+				(
+					"vault_created".into(),
+					Some("runtime-history-vault".into()),
+					"runtime-history-vault".into(),
+					"vault".into(),
+					Some("integration-test".into()),
+					1,
+					None,
+				),
+			],
+		);
+		let outcome = query_as::<_, (String, String, Option<String>, Option<Value>)>(
+			"SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+		)
+		.bind(&fixture.owner_user_id)
+		.bind(operation_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			outcome,
+			(
+				"create_vault".into(),
+				"applied".into(),
+				None,
+				Some(json!({ "vaultId": "runtime-history-vault" })),
+			)
+		);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_operation_rolls_back_effect_outcome_audit_and_events_together() {
+    with_api_test_app("create_vault_atomic_rollback", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        install_operation_step_failure_trigger(
+            &app.pool,
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        )
+        .await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "create-vault-atomic-rollback";
+        let mut headers = authenticated_json_headers(&session.token);
+        headers.insert("idempotency-key", operation_id.parse().unwrap());
+        let response = app
+            .api_json(
+                Method::PUT,
+                "/api/v1/vaults/runtime-rollback-vault",
+                Some(json!({
+                    "name": "Rollback Vault",
+                    "vaultType": "personal",
+                    "encryptedVaultKey": "runtime-owner-key",
+                    "icon": "lock",
+                    "imageKey": null
+                })),
+                headers,
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM vault WHERE id = 'runtime-rollback-vault'"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+            0
+        );
+        assert_eq!(
+            entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = 'runtime-rollback-vault'"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_team_authority_is_read_after_the_user_lock() {
+    with_api_test_app("create_vault_locked_team_authority", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+		let mut blocker = app.pool.begin().await.unwrap();
+        query("SELECT id FROM \"user\" WHERE id = $1 FOR UPDATE")
+            .bind(&fixture.owner_user_id)
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+
+		let request_pool = app.pool.clone();
+		let request_user_id = fixture.owner_user_id.clone();
+		let request = tokio::spawn(async move {
+			super::execute_create_vault_operation(
+				&request_pool,
+				crate::config::DeploymentMode::Cloud,
+				&request_user_id,
+				super::CreateVaultOperationInput {
+					operation_id: "locked-team-authority".into(),
+					raw_body: br#"{"name":"Locked authority","vaultType":"team","encryptedVaultKey":"runtime-owner-key","icon":"users","imageKey":null}"#.to_vec(),
+					vault: super::CreateVaultInput {
+						vault_id: Some("locked-team-vault".into()),
+						name: "Locked authority".into(),
+						vault_type: crate::db::enums::VaultType::Team,
+						encrypted_vault_key: "runtime-owner-key".into(),
+						icon: Some("users".into()),
+						image_key: None,
+						client_id: Some("integration-test".into()),
+					},
+				},
+			)
+			.await
+		});
+		let mut observed_lock_wait = false;
+		for _ in 0..200 {
+			let waiting = query_scalar::<_, bool>(
+				"SELECT EXISTS(SELECT 1 FROM pg_stat_activity activity WHERE activity.datname = current_database() AND pg_backend_pid() = ANY(pg_blocking_pids(activity.pid)))",
+            )
+			.fetch_one(&mut *blocker)
+			.await
+			.unwrap();
+			if waiting {
+				observed_lock_wait = true;
+				break;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		}
+		assert!(observed_lock_wait, "create-Vault request never waited on locked User authority");
+        query("UPDATE \"user\" SET team_id = NULL WHERE id = $1")
+            .bind(&fixture.owner_user_id)
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        blocker.commit().await.unwrap();
+		let resolution = request.await.unwrap().unwrap();
+		let response = match resolution {
+			crate::domains::operations::OperationResolution::Outcome { outcome, .. } =>
+				serde_json::to_value(outcome).unwrap(),
+			crate::domains::operations::OperationResolution::IdReused =>
+				panic!("fresh Operation ID was reused"),
+		};
+		assert_eq!(response["result"]["status"], json!("rejected"));
+		assert_eq!(response["result"]["code"], json!("team_membership_required"));
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE id = 'locked-team-vault'")
+                .fetch_one(&app.pool).await.unwrap(),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_holds_team_billing_authority_through_its_authorized_commit() {
+    with_api_test_app("create_vault_team_billing_contention", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        set_team_billing(&app.pool, &fixture.paid_team_id, "family", "active").await;
+        query(
+            r#"CREATE FUNCTION test_hold_team_billing_create() RETURNS trigger AS $$
+               BEGIN
+                 PERFORM pg_advisory_xact_lock(hashtext('test-team-billing-create'));
+                 RETURN NEW;
+               END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        query(
+            "CREATE TRIGGER test_hold_team_billing_create BEFORE INSERT ON vault FOR EACH ROW WHEN (NEW.id = 'team-billing-authorized-vault') EXECUTE FUNCTION test_hold_team_billing_create()",
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+
+        let mut barrier = app.pool.begin().await.unwrap();
+        query("SELECT pg_advisory_xact_lock(hashtext('test-team-billing-create'))")
+            .execute(&mut *barrier)
+            .await
+            .unwrap();
+        let create_pool = app.pool.clone();
+        let create_user_id = fixture.owner_user_id.clone();
+        let create = tokio::spawn(async move {
+            super::execute_create_vault_operation(
+                &create_pool,
+                crate::config::DeploymentMode::Cloud,
+                &create_user_id,
+                super::CreateVaultOperationInput {
+                    operation_id: "team-billing-authorized-operation".into(),
+                    raw_body: br#"{"name":"Authorized before downgrade","vaultType":"team","encryptedVaultKey":"team-billing-owner-key","icon":"users","imageKey":null}"#.to_vec(),
+                    vault: super::CreateVaultInput {
+                        vault_id: Some("team-billing-authorized-vault".into()),
+                        name: "Authorized before downgrade".into(),
+                        vault_type: crate::db::enums::VaultType::Team,
+                        encrypted_vault_key: "team-billing-owner-key".into(),
+                        icon: Some("users".into()),
+                        image_key: None,
+                        client_id: Some("integration-test".into()),
+                    },
+                },
+            )
+            .await
+        });
+        wait_for_advisory_waiters(&app.pool, 1).await;
+
+        let billing_pool = app.pool.clone();
+        let billing_team_id = fixture.paid_team_id.clone();
+        let billing = tokio::spawn(async move {
+            query("UPDATE team SET billing_plan = 'free', billing_status = 'active' WHERE id = $1")
+                .bind(billing_team_id)
+                .execute(&billing_pool)
+                .await
+        });
+        let mut billing_waited = false;
+        for _ in 0..200 {
+            query("SELECT pg_stat_clear_snapshot()")
+                .execute(&mut *barrier)
+                .await
+                .unwrap();
+            let blocked = query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM pg_stat_activity activity WHERE activity.datname = current_database() AND cardinality(pg_blocking_pids(activity.pid)) > 0",
+            )
+            .fetch_one(&mut *barrier)
+            .await
+            .unwrap();
+            if blocked >= 2 {
+                billing_waited = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            billing_waited,
+            "the billing writer did not wait for create-Vault Team authority"
+        );
+        assert_eq!(
+            retained_outcome_count(
+                &app.pool,
+                &fixture.owner_user_id,
+                "team-billing-authorized-operation",
+            )
+            .await,
+            0,
+            "no semantic history may publish before the authorized transaction commits",
+        );
+
+        barrier.commit().await.unwrap();
+        let resolution = create.await.unwrap().unwrap();
+        billing.await.unwrap().unwrap();
+        let outcome = match resolution {
+            crate::domains::operations::OperationResolution::Outcome {
+                outcome,
+                newly_committed,
+            } => {
+                assert!(newly_committed);
+                serde_json::to_value(outcome).unwrap()
+            }
+            crate::domains::operations::OperationResolution::IdReused => {
+                panic!("fresh Operation identity was reused")
+            }
+        };
+        assert_eq!(outcome["result"]["status"], json!("applied"));
+        assert_eq!(
+            outcome["result"]["vaultId"],
+            json!("team-billing-authorized-vault")
+        );
+        assert_eq!(
+            query_as::<_, (String, String, Option<String>, String)>(
+                "SELECT v.type::text, v.created_by_id, v.team_id, vk.encrypted_vault_key FROM vault v JOIN vault_key vk ON vk.vault_id = v.id AND vk.user_id = $1 WHERE v.id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-vault")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![(
+                "team".into(),
+                fixture.owner_user_id.clone(),
+                Some(fixture.paid_team_id.clone()),
+                "team-billing-owner-key".into(),
+            )]
+        );
+        assert_eq!(
+            query_as::<_, (String, String, Option<String>, Option<Value>)>(
+                "SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-operation")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![(
+                "create_vault".into(),
+                "applied".into(),
+                None,
+                Some(json!({ "vaultId": "team-billing-authorized-vault" })),
+            )]
+        );
+        assert_eq!(
+            query_as::<_, (String, Option<String>, String, Option<Value>)>(
+                "SELECT action, entity_type, entity_id, metadata::jsonb FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-vault")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![(
+                "vault_created".into(),
+                Some("vault".into()),
+                "team-billing-authorized-vault".into(),
+                None,
+            )]
+        );
+        assert_eq!(
+            query_as::<_, (String, Option<String>, String, String, Option<String>, i32, Option<String>)>(
+                "SELECT event_type::text, vault_id, entity_id, entity_type::text, client_id, version, metadata FROM sync_event WHERE user_id = $1 AND (entity_id = $2 OR entity_id = $3) ORDER BY event_type::text",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-vault")
+            .bind("team-billing-authorized-operation")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![
+                (
+                    "operation_resolved".into(),
+                    None,
+                    "team-billing-authorized-operation".into(),
+                    "operation".into(),
+                    Some("integration-test".into()),
+                    1,
+                    None,
+                ),
+                (
+                    "vault_created".into(),
+                    Some("team-billing-authorized-vault".into()),
+                    "team-billing-authorized-vault".into(),
+                    "vault".into(),
+                    Some("integration-test".into()),
+                    1,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            query_as::<_, (String, String)>(
+                "SELECT billing_plan::text, billing_status::text FROM team WHERE id = $1",
+            )
+            .bind(&fixture.paid_team_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            ("free".into(), "active".into()),
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_route_retains_shared_vault_limit_reached() {
+    with_api_test_app("create_vault_shared_limit", |app| async move {
+		let fixture = build_vault_router_fixture(&app.pool).await;
+		set_team_billing(&app.pool, &fixture.paid_team_id, "family", "active").await;
+		let existing = query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
+		)
+		.bind(&fixture.paid_team_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		for index in existing..5 {
+			query("INSERT INTO vault (id, name, type, created_by_id, team_id) VALUES ($1, $2, 'team'::vault_type, $3, $4)")
+				.bind(format!("shared-limit-existing-{index}"))
+				.bind(format!("Existing {index}"))
+				.bind(&fixture.owner_user_id)
+				.bind(&fixture.paid_team_id)
+				.execute(&app.pool)
+				.await
+				.unwrap();
+		}
+		let session = app.issue_session(&fixture.owner_user_id).await;
+		let operation_id = "create-vault-shared-limit";
+		let response = app
+			.api_json(
+				Method::PUT,
+				"/api/v1/vaults/shared-limit-new",
+				Some(json!({
+					"name": "At limit",
+					"vaultType": "team",
+					"encryptedVaultKey": "wrapped",
+					"icon": "users",
+					"imageKey": null
+				})),
+				idempotency_headers(&session.token, operation_id),
+			)
+			.await;
+		assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+		assert_rejected(&response.body, "create_vault", "shared_vault_limit_reached");
+		assert_eq!(
+			retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+			1
+		);
+		assert_eq!(
+			entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+			1
+		);
+		assert_create_vault_rejection_history(
+			&app.pool,
+			&fixture.owner_user_id,
+			operation_id,
+			"shared-limit-new",
+			"shared_vault_limit_reached",
+			true,
+		)
+		.await;
+	})
+	.await;
+}
+
+#[tokio::test]
+async fn create_vault_semantic_rejections_have_exact_uncontaminated_history() {
+    with_api_test_app("create_vault_rejection_matrix", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        seed_vault(
+            &app.pool,
+            "conflicting-vault-id",
+            "Existing identity",
+            "personal",
+            &fixture.outsider_user_id,
+            None,
+        )
+        .await;
+
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let solo_session = app.issue_session(&fixture.solo_user_id).await;
+        let cases = [
+            (
+                &owner_session.token,
+                fixture.owner_user_id.as_str(),
+                "reject-vault-id-conflict",
+                "conflicting-vault-id",
+                "personal",
+                "vault_id_conflict",
+                false,
+            ),
+            (
+                &solo_session.token,
+                fixture.solo_user_id.as_str(),
+                "reject-team-membership",
+                "missing-team-vault",
+                "team",
+                "team_membership_required",
+                true,
+            ),
+        ];
+        for (token, user_id, operation_id, vault_id, vault_type, code, absent) in cases {
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/vaults/{vault_id}"),
+                    Some(json!({
+                        "name": "Rejected Vault",
+                        "vaultType": vault_type,
+                        "encryptedVaultKey": "rejected-wrapped-key",
+                        "icon": "lock",
+                        "imageKey": null
+                    })),
+                    idempotency_headers(token, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_rejected(&response.body, "create_vault", code);
+            assert_create_vault_rejection_history(
+                &app.pool,
+                user_id,
+                operation_id,
+                vault_id,
+                code,
+                absent,
+            )
+            .await;
+        }
+
+        set_team_billing(&app.pool, &fixture.paid_team_id, "free", "active").await;
+        let operation_id = "reject-sharing-entitlement";
+        let vault_id = "entitlement-rejected-vault";
+        let denied = app
+            .api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{vault_id}"),
+                Some(json!({
+                    "name": "Denied Vault",
+                    "vaultType": "team",
+                    "encryptedVaultKey": "denied-wrapped-key",
+                    "icon": "users",
+                    "imageKey": null
+                })),
+                idempotency_headers(&owner_session.token, operation_id),
+            )
+            .await;
+        assert_rejected(
+            &denied.body,
+            "create_vault",
+            "vault_sharing_entitlement_denied",
+        );
+        assert_create_vault_rejection_history(
+            &app.pool,
+            &fixture.owner_user_id,
+            operation_id,
+            vault_id,
+            "vault_sharing_entitlement_denied",
+            true,
+        )
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_cross_user_shared_vault_admission_serializes_at_the_inclusive_limit() {
+    with_api_test_app("create_vault_concurrent_shared_limit", |app| async move {
+		let fixture = build_vault_router_fixture(&app.pool).await;
+		set_team_billing(&app.pool, &fixture.paid_team_id, "family", "active").await;
+		let existing = query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
+		)
+		.bind(&fixture.paid_team_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		for index in existing..4 {
+			query("INSERT INTO vault (id, name, type, created_by_id, team_id) VALUES ($1, $2, 'team'::vault_type, $3, $4)")
+				.bind(format!("concurrent-existing-{index}"))
+				.bind(format!("Existing {index}"))
+				.bind(&fixture.owner_user_id)
+				.bind(&fixture.paid_team_id)
+				.execute(&app.pool)
+				.await
+				.unwrap();
+		}
+
+		let mut barrier = app.pool.begin().await.unwrap();
+		crate::shared::transaction::acquire_team_authority_lock(
+			&mut *barrier,
+			&fixture.paid_team_id,
+			"test barrier",
+		)
+		.await
+		.unwrap();
+		let concurrency_pool = PgPoolOptions::new()
+			.max_connections(3)
+			.connect_with(app.pool.connect_options().as_ref().clone())
+			.await
+			.unwrap();
+		let spawn = |user_id: String, operation_id: &'static str, vault_id: &'static str| {
+			let pool = concurrency_pool.clone();
+			tokio::spawn(async move {
+				super::execute_create_vault_operation(
+					&pool,
+					crate::config::DeploymentMode::Cloud,
+					&user_id,
+					super::CreateVaultOperationInput {
+						operation_id: operation_id.into(),
+						raw_body: format!(r#"{{"name":"Concurrent","vaultType":"team","encryptedVaultKey":"{operation_id}-key","icon":"users","imageKey":null}}"#).into_bytes(),
+						vault: super::CreateVaultInput {
+							vault_id: Some(vault_id.into()),
+							name: "Concurrent".into(),
+							vault_type: crate::db::enums::VaultType::Team,
+							encrypted_vault_key: format!("{operation_id}-key"),
+							icon: Some("users".into()),
+							image_key: None,
+							client_id: Some("integration-test".into()),
+						},
+					},
+				)
+				.await
+			})
+		};
+		let first = spawn(
+			fixture.owner_user_id.clone(),
+			"concurrent-owner-operation",
+			"concurrent-owner-vault",
+		);
+		let mut first_reached_team_barrier = false;
+		for _ in 0..200 {
+			query("SELECT pg_stat_clear_snapshot()")
+				.execute(&mut *barrier)
+				.await
+				.unwrap();
+			let waiting = query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM pg_stat_activity activity WHERE activity.datname = current_database() AND cardinality(pg_blocking_pids(activity.pid)) > 0",
+			)
+			.fetch_one(&mut *barrier)
+			.await
+			.unwrap();
+			if waiting >= 1 {
+				first_reached_team_barrier = true;
+				break;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		}
+		assert!(
+			first_reached_team_barrier,
+			"first admission did not reach the held Team authority lock"
+		);
+		let second = spawn(
+			fixture.admin_user_id.clone(),
+			"concurrent-admin-operation",
+			"concurrent-admin-vault",
+		);
+		let mut both_admissions_blocked = false;
+		for _ in 0..200 {
+			query("SELECT pg_stat_clear_snapshot()")
+				.execute(&mut *barrier)
+				.await
+				.unwrap();
+			let waiting = query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM pg_stat_activity activity WHERE activity.datname = current_database() AND cardinality(pg_blocking_pids(activity.pid)) > 0",
+			)
+			.fetch_one(&mut *barrier)
+			.await
+			.unwrap();
+			if waiting >= 2 {
+				both_admissions_blocked = true;
+				break;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		}
+		assert!(
+			both_admissions_blocked,
+			"second admission did not contend behind the blocked first admission"
+		);
+		barrier.commit().await.unwrap();
+
+		let outcomes = [first.await.unwrap().unwrap(), second.await.unwrap().unwrap()]
+			.into_iter()
+			.map(|resolution| match resolution {
+				crate::domains::operations::OperationResolution::Outcome { outcome, .. } =>
+					serde_json::to_value(outcome).unwrap(),
+				crate::domains::operations::OperationResolution::IdReused =>
+					panic!("fresh concurrent Operation ID was reused"),
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(
+			outcomes
+				.iter()
+				.filter(|outcome| outcome["result"]["status"] == "applied")
+				.count(),
+			1
+		);
+		let rejected = outcomes
+			.iter()
+			.find(|outcome| outcome["result"]["status"] == "rejected")
+			.expect("one admission must be rejected");
+		assert_eq!(rejected["result"]["code"], json!("shared_vault_limit_reached"));
+		let applied = outcomes
+			.iter()
+			.find(|outcome| outcome["result"]["status"] == "applied")
+			.expect("one admission must apply");
+		let (applied_user, applied_operation, applied_vault) =
+			if applied["operationId"] == "concurrent-owner-operation" {
+				(&fixture.owner_user_id, "concurrent-owner-operation", "concurrent-owner-vault")
+			} else {
+				(&fixture.admin_user_id, "concurrent-admin-operation", "concurrent-admin-vault")
+			};
+		assert_eq!(applied["result"]["vaultId"], json!(applied_vault));
+		assert_eq!(
+			query_as::<_, (String, String, String, Option<String>, String)>(
+				"SELECT v.name, v.type::text, v.created_by_id, v.team_id, vk.encrypted_vault_key FROM vault v JOIN vault_key vk ON vk.vault_id = v.id AND vk.user_id = $1 WHERE v.id = $2",
+			)
+			.bind(applied_user)
+			.bind(applied_vault)
+			.fetch_all(&app.pool)
+			.await
+			.unwrap(),
+			vec![(
+				"Concurrent".into(),
+				"team".into(),
+				applied_user.to_string(),
+				Some(fixture.paid_team_id.clone()),
+				format!("{applied_operation}-key"),
+			)]
+		);
+		assert_eq!(
+			query_as::<_, (String, String, Option<String>, Option<Value>)>(
+				"SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+			)
+			.bind(applied_user)
+			.bind(applied_operation)
+			.fetch_all(&app.pool)
+			.await
+			.unwrap(),
+			vec![(
+				"create_vault".into(),
+				"applied".into(),
+				None,
+				Some(json!({ "vaultId": applied_vault })),
+			)]
+		);
+		assert_eq!(
+			query_as::<_, (String, Option<String>, String, Option<Value>)>(
+				"SELECT action, entity_type, entity_id, metadata::jsonb FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+			)
+			.bind(applied_user)
+			.bind(applied_vault)
+			.fetch_all(&app.pool)
+			.await
+			.unwrap(),
+			vec![(
+				"vault_created".into(),
+				Some("vault".into()),
+				applied_vault.into(),
+				None,
+			)]
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND ((entity_id = $2 AND event_type = 'vault_created') OR (entity_id = $3 AND event_type = 'operation_resolved'))",
+			)
+			.bind(applied_user)
+			.bind(applied_vault)
+			.bind(applied_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			2
+		);
+		let (rejected_user, rejected_operation, rejected_vault) =
+			if rejected["operationId"] == "concurrent-owner-operation" {
+				(&fixture.owner_user_id, "concurrent-owner-operation", "concurrent-owner-vault")
+			} else {
+				(&fixture.admin_user_id, "concurrent-admin-operation", "concurrent-admin-vault")
+			};
+		assert_create_vault_rejection_history(
+			&app.pool,
+			rejected_user,
+			rejected_operation,
+			rejected_vault,
+			"shared_vault_limit_reached",
+			true,
+		)
+		.await;
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
+			)
+			.bind(&fixture.paid_team_id)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			5
+		);
+		concurrency_pool.close().await;
+	})
+	.await;
+}
+
+#[tokio::test]
+async fn concurrent_distinct_operations_for_one_fresh_vault_id_resolve_apply_then_conflict() {
+    with_api_test_app("create_vault_concurrent_same_id", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        query(
+            r#"CREATE FUNCTION test_hold_same_vault_insert() RETURNS trigger AS $$
+               BEGIN
+                 PERFORM pg_advisory_xact_lock(hashtext('test-create-same-vault-insert'));
+                 RETURN NEW;
+               END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        query(
+            "CREATE TRIGGER test_hold_same_vault_insert BEFORE INSERT ON vault FOR EACH ROW WHEN (NEW.id = 'concurrent-same-vault') EXECUTE FUNCTION test_hold_same_vault_insert()",
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        let mut barrier = app.pool.begin().await.unwrap();
+        query("SELECT pg_advisory_xact_lock(hashtext('test-create-same-vault-insert'))")
+            .execute(&mut *barrier)
+            .await
+            .unwrap();
+        let concurrency_pool = PgPoolOptions::new()
+            .max_connections(3)
+            .connect_with(app.pool.connect_options().as_ref().clone())
+            .await
+            .unwrap();
+        let spawn = |user_id: String, operation_id: &'static str| {
+            let pool = concurrency_pool.clone();
+            tokio::spawn(async move {
+                super::execute_create_vault_operation(
+                    &pool,
+                    crate::config::DeploymentMode::Cloud,
+                    &user_id,
+                    super::CreateVaultOperationInput {
+                        operation_id: operation_id.into(),
+                        raw_body: format!(r#"{{"name":"Same Vault","vaultType":"personal","encryptedVaultKey":"{operation_id}-key","icon":"lock","imageKey":null}}"#).into_bytes(),
+                        vault: super::CreateVaultInput {
+                            vault_id: Some("concurrent-same-vault".into()),
+                            name: "Same Vault".into(),
+                            vault_type: crate::db::enums::VaultType::Personal,
+                            encrypted_vault_key: format!("{operation_id}-key"),
+                            icon: Some("lock".into()),
+                            image_key: None,
+                            client_id: Some("integration-test".into()),
+                        },
+                    },
+                )
+                .await
+            })
+        };
+        let first = spawn(fixture.owner_user_id.clone(), "concurrent-same-first");
+        wait_for_advisory_waiters(&app.pool, 1).await;
+        let second = spawn(fixture.admin_user_id.clone(), "concurrent-same-second");
+        wait_for_advisory_waiters(&app.pool, 2).await;
+        assert!(
+            !query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock(hashtext($1))")
+            .bind("create-vault-id:concurrent-same-vault")
+            .fetch_one(&mut *barrier)
+            .await
+            .unwrap(),
+            "the loser must wait on the global candidate Vault-ID authority",
+        );
+        barrier.commit().await.unwrap();
+
+        let resolutions = [first.await.unwrap(), second.await.unwrap()];
+        assert!(resolutions.iter().all(Result::is_ok));
+        let outcomes = resolutions
+            .into_iter()
+            .map(|resolution| match resolution.unwrap() {
+                crate::domains::operations::OperationResolution::Outcome { outcome, .. } => {
+                    serde_json::to_value(outcome).unwrap()
+                }
+                crate::domains::operations::OperationResolution::IdReused => {
+                    panic!("fresh Operation identity was reused")
+                }
+            })
+            .collect::<Vec<_>>();
+        let applied = outcomes
+            .iter()
+            .find(|outcome| outcome["result"]["status"] == "applied")
+            .expect("one Operation must apply");
+        let rejected = outcomes
+            .iter()
+            .find(|outcome| outcome["result"]["status"] == "rejected")
+            .expect("one Operation must reject");
+        assert_eq!(applied["result"]["vaultId"], json!("concurrent-same-vault"));
+        assert_eq!(rejected["result"]["code"], json!("vault_id_conflict"));
+        let applied_operation = applied["operationId"].as_str().unwrap();
+        let rejected_operation = rejected["operationId"].as_str().unwrap();
+        let applied_user = if applied_operation == "concurrent-same-first" {
+            &fixture.owner_user_id
+        } else {
+            &fixture.admin_user_id
+        };
+        let rejected_user = if rejected_operation == "concurrent-same-first" {
+            &fixture.owner_user_id
+        } else {
+            &fixture.admin_user_id
+        };
+        assert_eq!(
+            query_as::<_, (String, String, Option<String>, Option<Value>)>(
+                "SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(applied_user)
+            .bind(applied_operation)
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![("create_vault".into(), "applied".into(), None, Some(json!({ "vaultId": "concurrent-same-vault" })))],
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = 'concurrent-same-vault' AND action = 'vault_created'")
+                .bind(applied_user)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+            1,
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND ((entity_id = 'concurrent-same-vault' AND event_type = 'vault_created') OR (entity_id = $2 AND event_type = 'operation_resolved'))")
+                .bind(applied_user)
+                .bind(applied_operation)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+            2,
+        );
+        assert_create_vault_rejection_history(
+            &app.pool,
+            rejected_user,
+            rejected_operation,
+            "concurrent-same-vault",
+            "vault_id_conflict",
+            false,
+        )
+        .await;
+
+        for outcome in outcomes {
+            let operation_id = outcome["operationId"].as_str().unwrap();
+            let user_id = if operation_id == "concurrent-same-first" {
+                &fixture.owner_user_id
+            } else {
+                &fixture.admin_user_id
+            };
+            let replay = super::execute_create_vault_operation(
+                &app.pool,
+                crate::config::DeploymentMode::Cloud,
+                user_id,
+                super::CreateVaultOperationInput {
+                    operation_id: operation_id.into(),
+                    raw_body: format!(r#"{{"name":"Same Vault","vaultType":"personal","encryptedVaultKey":"{operation_id}-key","icon":"lock","imageKey":null}}"#).into_bytes(),
+                    vault: super::CreateVaultInput {
+                        vault_id: Some("concurrent-same-vault".into()),
+                        name: "Same Vault".into(),
+                        vault_type: crate::db::enums::VaultType::Personal,
+                        encrypted_vault_key: format!("{operation_id}-key"),
+                        icon: Some("lock".into()),
+                        image_key: None,
+                        client_id: Some("integration-test".into()),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+            let replay = match replay {
+                crate::domains::operations::OperationResolution::Outcome { outcome, newly_committed } => {
+                    assert!(!newly_committed);
+                    serde_json::to_value(outcome).unwrap()
+                }
+                crate::domains::operations::OperationResolution::IdReused => panic!("replay changed identity"),
+            };
+            assert_eq!(replay, outcome);
+        }
+        concurrency_pool.close().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_corrupt_billing_is_internal_and_retains_no_semantic_rejection() {
+    with_api_test_app("create_vault_corrupt_billing", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        query("ALTER TABLE team ALTER COLUMN billing_plan DROP NOT NULL")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("UPDATE team SET billing_plan = NULL WHERE id = $1")
+            .bind(&fixture.paid_team_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "corrupt-team-billing";
+        let mut headers = authenticated_json_headers(&session.token);
+        headers.insert("idempotency-key", operation_id.parse().unwrap());
+        let response = app
+            .api_json(
+                Method::PUT,
+                "/api/v1/vaults/corrupt-team-vault",
+                Some(json!({
+                    "name": "Corrupt billing",
+                    "vaultType": "team",
+                    "encryptedVaultKey": "runtime-owner-key",
+                    "icon": "users",
+                    "imageKey": null
+                })),
+                headers,
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+            0
+        );
+        assert_eq!(
+            entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_image_staging_promotes_on_apply_and_marks_cleanup_on_rejection() {
+    with_api_test_app("create_vault_image_decisions", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        for (operation_id, vault_id, expected_status) in [
+            ("image-create-applied", "image-created-vault", "applied"),
+            (
+                "image-create-rejected",
+                fixture.main_vault_id.as_str(),
+                "rejected",
+            ),
+        ] {
+            let sha256 = "a".repeat(64);
+            let object_key = format!(
+                "vaults/{}/{vault_id}/create/{operation_id}-{sha256}",
+                fixture.owner_user_id
+            );
+            let fingerprint = super::vault_image_staging::binding_fingerprint_for_test(
+                &super::VaultImageStagingBinding {
+                    operation_id: operation_id.to_owned(),
+                    vault_id: vault_id.to_owned(),
+                    raw_sha256: sha256.clone(),
+                    raw_length: 1,
+                    content_type: "image/png".to_owned(),
+                },
+            );
+            query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) VALUES ($1, $2, $3, 1)")
+                .bind(&fixture.owner_user_id).bind(operation_id).bind(fingerprint)
+                .execute(&app.pool).await.unwrap();
+            query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) VALUES ($1, $2, $3, $4, $5, 1, 'image/png', 'confirmed', 1, NOW() + INTERVAL '24 hours')")
+                .bind(&fixture.owner_user_id).bind(operation_id).bind(vault_id).bind(&object_key).bind(&sha256)
+                .execute(&app.pool).await.unwrap();
+            let mut headers = authenticated_json_headers(&session.token);
+            headers.insert("idempotency-key", operation_id.parse().unwrap());
+            let response = app.api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{vault_id}"),
+                Some(json!({
+                    "name": "Image decision",
+                    "vaultType": "personal",
+                    "encryptedVaultKey": "runtime-owner-key",
+                    "icon": "image",
+                    "imageKey": object_key
+                })),
+                headers,
+            ).await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_eq!(response.body["result"]["status"], json!(expected_status));
+            let staging_state: Option<String> = query_scalar(
+                "SELECT state::text FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind(operation_id)
+            .fetch_optional(&app.pool)
+            .await
+            .unwrap();
+            if expected_status == "applied" {
+                assert!(staging_state.is_none());
+                assert_eq!(
+                    query_scalar::<_, Option<String>>("SELECT image_key FROM vault WHERE id = $1")
+                        .bind(vault_id).fetch_one(&app.pool).await.unwrap().as_deref(),
+                    Some(object_key.as_str())
+                );
+            } else {
+                assert_eq!(staging_state.as_deref(), Some("cleanup_pending"));
+            }
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_staging_grant_is_public_and_exactly_bound() {
+    with_api_test_app_state(
+        "vault_image_staging_public_grant",
+        |state| {
+            state.with_object_storage(Arc::new(RecordingObjectStorage::succeeding(None)))
+        },
+        |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "public-vault-image-operation";
+        let sha256 = "a".repeat(64);
+        let object_key = format!(
+            "vaults/{}/public-vault/create/{operation_id}-{sha256}",
+            fixture.owner_user_id
+        );
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/operations/{operation_id}/vault-image-staging/grants"),
+                Some(json!({
+                    "vaultId": "public-vault",
+                    "byteLength": 1,
+                    "contentType": "image/png",
+                    "sha256": sha256
+                })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(
+            response.status,
+            StatusCode::OK,
+            "unexpected grant response: {}",
+            response.body
+        );
+        assert_eq!(response.body["objectKey"], json!(object_key));
+        assert_eq!(response.body["generation"], json!(1));
+        assert!(response.body["uploadUrl"].is_string());
+        assert_eq!(
+            response.body["uploadHeaders"],
+            json!([
+                { "name": "Content-Length", "value": "1" },
+                { "name": "Content-Type", "value": "image/png" },
+                { "name": "x-amz-content-sha256", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+                { "name": "x-amz-checksum-sha256", "value": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo=" }
+            ])
+        );
+        },
+    )
+    .await;
+}
+
 /// The same Operation ID with other immutable bytes is identity reuse, never a second answer.
 #[tokio::test]
 async fn every_item_operation_refuses_a_reused_id_with_other_bytes() {
@@ -7600,7 +9336,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 let created_team_vault_id = "vault_created_team";
 
                 let create_personal_response = app
-                    .api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_personal_vault_id), Some(json!({ "name": "Created Personal Vault", "vaultType": "personal", "encryptedVaultKey": "created-personal-key" })), solo_headers.clone())
+					.api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_personal_vault_id), Some(json!({ "name": "Created Personal Vault", "vaultType": "personal", "encryptedVaultKey": "created-personal-key", "icon": "lock" })), idempotency_headers(&solo_session.token, "legacy-create-personal-vault"))
                     .await;
                 create_personal_response.assert_contract_status();
                 let created_personal_type: String =
@@ -7619,7 +9355,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 assert!(created_personal_team_id.is_none());
 
                 let create_team_response = app
-                    .api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_team_vault_id), Some(json!({ "name": "Created Team Vault", "vaultType": "team", "encryptedVaultKey": "created-team-key" })), owner_headers.clone())
+					.api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_team_vault_id), Some(json!({ "name": "Created Team Vault", "vaultType": "team", "encryptedVaultKey": "created-team-key", "icon": "users" })), idempotency_headers(&owner_session.token, "legacy-create-team-vault"))
                     .await;
                 create_team_response.assert_contract_status();
                 let created_team_type: String =
@@ -7747,16 +9483,15 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			let owner_headers = authenticated_json_headers(&owner_session.token);
 			let admin_headers = authenticated_json_headers(&admin_session.token);
 			let member_headers = authenticated_json_headers(&member_session.token);
-			let solo_headers = authenticated_json_headers(&solo_session.token);
 
 			let solo_team_create_response = app
-				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "No Team Vault", "vaultType": "team", "encryptedVaultKey": "wrapped" })), solo_headers)
+				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "No Team Vault", "vaultType": "team", "encryptedVaultKey": "wrapped", "icon": "users" })), idempotency_headers(&solo_session.token, "legacy-no-team-create-vault"))
 				.await;
 			solo_team_create_response.assert_contract_status();
-			assert_handler_error(
+			assert_rejected(
 				&solo_team_create_response.body,
-				"BAD_REQUEST",
-				"You must belong to a team to create a team vault",
+				"create_vault",
+				"team_membership_required",
 			);
 
 			let blank_update_response = app
@@ -7803,13 +9538,13 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 
 			set_team_billing(&app.pool, &fixture.paid_team_id, "free", "active").await;
 			let plan_forbidden_create_response = app
-				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key" })), owner_headers)
+				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key", "icon": "users" })), idempotency_headers(&owner_session.token, "legacy-blocked-team-create-vault"))
 				.await;
 			plan_forbidden_create_response.assert_contract_status();
-			assert_handler_error(
+			assert_rejected(
 				&plan_forbidden_create_response.body,
-				"FORBIDDEN",
-				"Shared vaults are only available on Family or Team plans with active billing.",
+				"create_vault",
+				"vault_sharing_entitlement_denied",
 			);
 		})
 		.await;

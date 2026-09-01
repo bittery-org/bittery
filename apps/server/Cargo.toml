@@ -4,6 +4,9 @@ version = "0.5.2"
 edition = "2021"
 default-run = "bittery-server"
 
+[features]
+acceptance-adapter = []
+
 [[bin]]
 name = "bittery-server"
 path = "src/main.rs"
@@ -11,6 +14,11 @@ path = "src/main.rs"
 [[bin]]
 name = "write-openapi"
 path = "src/bin/write-openapi.rs"
+
+[[bin]]
+name = "presign-exact-upload-acceptance"
+path = "src/bin/presign-exact-upload-acceptance.rs"
+required-features = ["acceptance-adapter"]
 
 [dependencies]
 async-stream = "0.3"

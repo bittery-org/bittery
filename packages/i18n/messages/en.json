@@ -750,6 +750,7 @@
 	"vaults_import_error_file_incompatible": "This file is not compatible with {providerTitle}. Please upload a valid export file.",
 	"vaults_import_error_no_importable_items": "No importable items were found. This export only contains empty vaults.",
 	"vaults_import_error_import_not_ready": "Upload and parse an export file before starting import.",
+	"vaults_import_error_runtime_pending": "The new vault was accepted. Your import draft is saved here and will resume when Runtime import is available.",
 	"vaults_import_error_mapping_missing": "Missing mapping for source vault \"{sourceVaultName}\".",
 	"vaults_import_error_target_vault_required": "Select a target vault for \"{sourceVaultName}\" or choose create new.",
 	"vaults_import_error_target_vault_name_required": "Enter a target vault name for \"{sourceVaultName}\".",

@@ -7,10 +7,950 @@ use super::operation_fixtures::*;
 use super::*;
 use crate::{
     auth_http::AuthenticatedOutcome,
-    http_transport::{HttpHeader, HttpMethod},
+    http_transport::{HttpHeader, HttpMethod, SerializedHttpExecutor},
     replica::{GuardedCommitPlan, PlanMutation},
     test_fixtures::TEST_VAULT_ID,
+    CreateVaultType, VaultImageSourceInput,
 };
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::sync::atomic::AtomicUsize;
+
+#[test]
+fn create_vault_recovery_classification_is_closed_and_independent_of_message_wording() {
+    use super::create_vault_staging::CreateVaultRecoveryError;
+
+    assert_eq!(
+        dispatch::create_vault_recovery_policy(&CreateVaultRecoveryError::ParkedFenced),
+        dispatch::CreateVaultRecoveryPolicy::ParkedFenced,
+    );
+    for message in [
+        "contradictory authority",
+        "fatal authority was fenced by a hostile message",
+    ] {
+        let classified = CreateVaultRecoveryError::from(RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            message,
+        ));
+        match classified {
+            CreateVaultRecoveryError::Fatal(error) => {
+                assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+                assert_eq!(error.message, message);
+                assert_eq!(
+                    dispatch::create_vault_recovery_policy(
+                        &CreateVaultRecoveryError::Fatal(error,)
+                    ),
+                    dispatch::CreateVaultRecoveryPolicy::FailAccount,
+                );
+            }
+            CreateVaultRecoveryError::ParkedFenced => {
+                panic!("fatal recovery was reclassified from its message")
+            }
+        }
+    }
+}
+
+#[test]
+fn production_create_vault_staging_exhaustively_maps_closed_wire_values() {
+    use crate::server_contract::VaultImageStagingStatusResponse;
+
+    let binding = super::create_vault_staging::CreateVaultStagingBinding {
+        account_id: AccountId::from("account-1"),
+        operation_id: "operation_image".into(),
+        vault_id: TEST_VAULT_ID.into(),
+        object_key: "vaults/image".into(),
+        byte_length: 11,
+        content_type: "image/avif".into(),
+        sha256: "0".repeat(64),
+    };
+    let body =
+        dispatch::ProductionCreateVaultPort::staging_body(&binding).expect("closed MIME must bind");
+    assert_eq!(
+        serde_json::to_value(body.content_type).unwrap(),
+        json!("image/avif")
+    );
+
+    let status = |response| dispatch::ProductionCreateVaultPort::status(response, &binding);
+    assert_eq!(
+        status(VaultImageStagingStatusResponse::Absent {}).unwrap(),
+        super::create_vault_staging::CreateVaultStagingStatus::Missing
+    );
+    assert_eq!(
+        status(VaultImageStagingStatusResponse::Unconfirmed {
+            object_key: binding.object_key.clone(),
+            generation: 1,
+            lease_expires_at: "2026-08-31T12:00:00Z".into(),
+        })
+        .unwrap(),
+        super::create_vault_staging::CreateVaultStagingStatus::AwaitingUpload
+    );
+    assert_eq!(
+        status(VaultImageStagingStatusResponse::Confirmed {
+            object_key: binding.object_key.clone(),
+            generation: 1,
+            lease_expires_at: "2026-08-31T12:00:00Z".into(),
+        })
+        .unwrap(),
+        super::create_vault_staging::CreateVaultStagingStatus::Confirmed
+    );
+    assert!(status(VaultImageStagingStatusResponse::CleanupPending {
+        object_key: binding.object_key.clone(),
+        generation: 1,
+        lease_expires_at: "2026-08-31T12:00:00Z".into(),
+    })
+    .is_err());
+
+    let mut invalid = binding;
+    invalid.content_type = "image/svg+xml".into();
+    assert!(dispatch::ProductionCreateVaultPort::staging_body(&invalid).is_err());
+}
+
+struct DispatchImageSource(Option<Vec<u8>>);
+
+#[async_trait]
+impl crate::VaultImageSource for DispatchImageSource {
+    async fn next_chunk(
+        &mut self,
+        _: usize,
+    ) -> Result<Option<Vec<u8>>, crate::VaultImageSourceError> {
+        Ok(self.0.take())
+    }
+    async fn close(&mut self) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+}
+
+struct DispatchImageSourcePort;
+
+#[async_trait]
+impl crate::VaultImageSourcePort for DispatchImageSourcePort {
+    async fn claim(
+        &self,
+        _: &crate::VaultImageSourceGrant,
+    ) -> Result<Box<dyn crate::VaultImageSource>, crate::VaultImageSourceError> {
+        Ok(Box::new(DispatchImageSource(Some(b"image-bytes".to_vec()))))
+    }
+    async fn retire_account(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_account_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn begin_acceptance(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &str,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn end_acceptance(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &str,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn retire_runtime(&self, _: &str) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct ProductionVaultImageHttp {
+    requests: Mutex<Vec<(String, String)>>,
+    reject_create: AtomicBool,
+    return_malformed_create_outcome: AtomicBool,
+    return_retained_create_outcome: AtomicBool,
+    lookup_unauthorized: AtomicUsize,
+    put_unauthorized: AtomicUsize,
+    apply_create_with_malformed_authority: AtomicBool,
+    cleanup_failures: AtomicUsize,
+    cleanup_unauthorized: AtomicUsize,
+    cleanup_bodies: Mutex<Vec<Vec<u8>>>,
+}
+
+#[async_trait]
+impl SerializedHttpExecutor for ProductionVaultImageHttp {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: Value = serde_json::from_str(&request_json).unwrap();
+        let method = request["method"].as_str().unwrap().to_owned();
+        let url = request["url"].as_str().unwrap().to_owned();
+        self.requests
+            .lock()
+            .unwrap()
+            .push((method.clone(), url.clone()));
+        let body: Vec<u8> = request["body"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|byte| byte.as_u64().unwrap() as u8)
+            .collect();
+        let response = if url.ends_with("/api/v1/sessions/current/refresh") {
+            completed(
+                200,
+                serde_json::to_vec(&json!({
+                    "token": SECOND_TOKEN,
+                    "sessionId": "session-2",
+                    "expiresAt": "2099-01-01T00:00:00Z"
+                }))
+                .unwrap(),
+            )
+        } else if url.ends_with("/vault-image-staging/status") {
+            completed(
+                200,
+                serde_json::to_vec(&json!({ "state": "absent" })).unwrap(),
+            )
+        } else if url.ends_with("/vault-image-staging/grants") {
+            let body: Value = serde_json::from_slice(&body).unwrap();
+            let operation_id = url.split('/').nth_back(2).unwrap();
+            let sha256 = body["sha256"].as_str().unwrap();
+            let checksum = {
+                use base64::Engine as _;
+                base64::engine::general_purpose::STANDARD
+                    .encode(crate::auth_http::decode_sha256_hex(sha256).unwrap())
+            };
+            let object_key = format!(
+                "vaults/{USER}/{}/create/{operation_id}-{}",
+                body["vaultId"].as_str().unwrap(),
+                sha256
+            );
+            completed(
+                200,
+                serde_json::to_vec(&json!({
+                    "objectKey": object_key,
+                    "uploadUrl": "https://objects.example.test/staged-image",
+                    "uploadHeaders": [
+                        { "name": "Content-Length", "value": body["byteLength"].as_i64().unwrap().to_string() },
+                        { "name": "Content-Type", "value": body["contentType"].as_str().unwrap() },
+                        { "name": "x-amz-content-sha256", "value": sha256 },
+                        { "name": "x-amz-checksum-sha256", "value": checksum }
+                    ],
+                    "generation": 1,
+                    "leaseExpiresAt": "2099-01-01T00:00:00Z"
+                }))
+                .unwrap(),
+            )
+        } else if url == "https://objects.example.test/staged-image" {
+            completed(200, Vec::new())
+        } else if url.ends_with("/vault-image-staging/confirmations") {
+            let body: Value = serde_json::from_slice(&body).unwrap();
+            let operation_id = url.split('/').nth_back(2).unwrap();
+            completed(200, serde_json::to_vec(&json!({
+                "state": "confirmed",
+                "objectKey": format!("vaults/{USER}/{}/create/{operation_id}-{}", body["vaultId"].as_str().unwrap(), body["sha256"].as_str().unwrap()),
+                "generation": 1,
+                "leaseExpiresAt": "2099-01-01T00:00:00Z"
+            })).unwrap())
+        } else if method == "GET" && url.contains("/api/v1/operations/") {
+            if self
+                .lookup_unauthorized
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                    value.checked_sub(1)
+                })
+                .is_ok()
+            {
+                completed(401, Vec::new())
+            } else if !self.return_retained_create_outcome.load(Ordering::SeqCst) {
+                completed(404, Vec::new())
+            } else {
+                let operation_id = url.rsplit('/').next().unwrap();
+                completed(
+                    200,
+                    serde_json::to_vec(&json!({
+                        "operationId": operation_id,
+                        "kind": "create_vault",
+                        "result": { "status": "rejected", "code": "vault_id_conflict" }
+                    }))
+                    .unwrap(),
+                )
+            }
+        } else if method == "PUT" && url.contains("/api/v1/vaults/") {
+            if self
+                .put_unauthorized
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                    value.checked_sub(1)
+                })
+                .is_ok()
+            {
+                completed(401, Vec::new())
+            } else if self.return_malformed_create_outcome.load(Ordering::SeqCst) {
+                completed(
+                    200,
+                    serde_json::to_vec(&json!({
+                        "operationId": "another-operation",
+                        "kind": "create_vault",
+                        "result": { "status": "rejected", "code": "vault_id_conflict" }
+                    }))
+                    .unwrap(),
+                )
+            } else if self.reject_create.load(Ordering::SeqCst) {
+                let operation_id = request["headers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|header| {
+                        header["name"]
+                            .as_str()
+                            .unwrap()
+                            .eq_ignore_ascii_case("idempotency-key")
+                    })
+                    .unwrap()["value"]
+                    .as_str()
+                    .unwrap();
+                completed(
+                    200,
+                    serde_json::to_vec(&json!({
+                        "operationId": operation_id,
+                        "kind": "create_vault",
+                        "result": { "status": "rejected", "code": "vault_id_conflict" }
+                    }))
+                    .unwrap(),
+                )
+            } else if self
+                .apply_create_with_malformed_authority
+                .load(Ordering::SeqCst)
+            {
+                let operation_id = request["headers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|header| {
+                        header["name"]
+                            .as_str()
+                            .unwrap()
+                            .eq_ignore_ascii_case("idempotency-key")
+                    })
+                    .unwrap()["value"]
+                    .as_str()
+                    .unwrap();
+                completed(
+                    200,
+                    serde_json::to_vec(&json!({
+                        "operationId": operation_id,
+                        "kind": "create_vault",
+                        "result": {
+                            "status": "applied",
+                            "vaultId": url.rsplit('/').next().unwrap()
+                        }
+                    }))
+                    .unwrap(),
+                )
+            } else {
+                completed(503, b"{}".to_vec())
+            }
+        } else if method == "GET" && url.contains("/api/v1/vaults/") {
+            completed(
+                200,
+                serde_json::to_vec(&json!({
+                    "id": "contradictory-vault-id",
+                    "name": "Runtime Vault",
+                    "vaultType": "personal",
+                    "icon": "lock",
+                    "imageUrl": null,
+                    "userRole": "owner",
+                    "itemCount": "0",
+                    "memberCount": "1",
+                    "createdAt": "2026-08-31T00:00:00Z"
+                }))
+                .unwrap(),
+            )
+        } else if method == "DELETE" && url.ends_with("/vault-image-staging") {
+            self.cleanup_bodies.lock().unwrap().push(body.clone());
+            if self
+                .cleanup_unauthorized
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                    value.checked_sub(1)
+                })
+                .is_ok()
+            {
+                completed(401, b"{}".to_vec())
+            } else if self
+                .cleanup_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                    value.checked_sub(1)
+                })
+                .is_ok()
+            {
+                completed(503, b"{}".to_vec())
+            } else {
+                completed(
+                    200,
+                    serde_json::to_vec(&json!({ "success": true })).unwrap(),
+                )
+            }
+        } else {
+            panic!("unexpected production Vault image route {method} {url}")
+        };
+        Ok(response.to_string())
+    }
+
+    fn cancel(&self, _: &str) {}
+}
+
+#[tokio::test]
+async fn malformed_create_vault_outcome_fails_durably_without_mutation_or_dispatch_spin() {
+    let harness = seeded(false).await;
+    let authority_before = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap()
+        .bootstrap
+        .vaults;
+    let operation_id = match harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Runtime Vault".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: None,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        RuntimeResponse::VaultCreationAccepted { operation_id, .. } => operation_id,
+        other => panic!("expected create-Vault acceptance, got {other:?}"),
+    };
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    server
+        .return_malformed_create_outcome
+        .store(true, Ordering::SeqCst);
+    let runtime = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    runtime
+        .replica()
+        .load(&harness.account_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(
+        runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::Parked
+    ));
+    let after = runtime.replica().snapshot(&harness.account_id).unwrap();
+    assert_eq!(after.failure, Some(RuntimeErrorCode::InvariantViolation));
+    assert_eq!(after.bootstrap.vaults, authority_before);
+    assert!(after
+        .operations
+        .iter()
+        .any(|operation| operation.operation_id == operation_id));
+    let requests = server.requests.lock().unwrap().len();
+    assert!(matches!(
+        runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::Parked
+    ));
+    assert_eq!(server.requests.lock().unwrap().len(), requests);
+    assert!(harness.timer.requested().is_empty());
+}
+
+#[tokio::test]
+async fn contradictory_create_vault_authority_fails_durably_without_a_dispatch_spin() {
+    let harness = seeded(false).await;
+    let operation_id = match harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Runtime Vault".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: None,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        RuntimeResponse::VaultCreationAccepted { operation_id, .. } => operation_id,
+        other => panic!("expected create-Vault acceptance, got {other:?}"),
+    };
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    server
+        .apply_create_with_malformed_authority
+        .store(true, Ordering::SeqCst);
+    let runtime = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    runtime
+        .replica()
+        .load(&harness.account_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(
+        runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::Parked
+    ));
+    let after = runtime.replica().snapshot(&harness.account_id).unwrap();
+    assert_eq!(after.failure, Some(RuntimeErrorCode::InvariantViolation));
+    assert!(after
+        .operations
+        .iter()
+        .any(|operation| operation.operation_id == operation_id));
+    let requests = server.requests.lock().unwrap().len();
+    assert!(matches!(
+        runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::Parked
+    ));
+    assert_eq!(server.requests.lock().unwrap().len(), requests);
+    assert!(harness.timer.requested().is_empty());
+}
+
+#[tokio::test]
+async fn accepted_create_vault_reaches_the_production_dispatch_gate() {
+    let harness = seeded(false).await;
+    harness.server.script([Fault::Status(503)]);
+    let operation_id = match harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Runtime Vault".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: None,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        RuntimeResponse::VaultCreationAccepted { operation_id, .. } => operation_id,
+        other => panic!("expected create-Vault acceptance, got {other:?}"),
+    };
+
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let operation = harness
+        .operation()
+        .expect("transient create remains durable");
+    assert_eq!(operation.scheduling.attempt_count, 1);
+    let request = harness.server.create_requests().pop().unwrap();
+    assert_eq!(
+        request.url,
+        format!("{SERVER_URL}/api/v1/vaults/{}", operation.vault_id())
+    );
+    assert_eq!(
+        request.header("idempotency-key"),
+        Some(operation_id.as_str())
+    );
+}
+
+#[tokio::test]
+async fn retried_production_create_vault_looks_up_then_proves_with_identical_put() {
+    let harness = seeded(false).await;
+    let operation_id = match harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Lookup Vault".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: None,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        RuntimeResponse::VaultCreationAccepted { operation_id, .. } => operation_id,
+        other => panic!("expected create-Vault acceptance, got {other:?}"),
+    };
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    let runtime = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    runtime
+        .replica()
+        .load(&harness.account_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    server.requests.lock().unwrap().clear();
+    server
+        .return_retained_create_outcome
+        .store(true, Ordering::SeqCst);
+    server.reject_create.store(true, Ordering::SeqCst);
+    runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let requests = server.requests.lock().unwrap();
+    let operation_route = format!("{SERVER_URL}/api/v1/operations/{operation_id}");
+    let retry = requests.as_slice();
+    assert_eq!(retry[0], ("GET".into(), operation_route));
+    assert_eq!(retry[1].0, "PUT");
+    assert!(retry[1].1.contains("/api/v1/vaults/"));
+    assert!(runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap()
+        .operations
+        .is_empty());
+}
+
+#[tokio::test]
+async fn production_create_lookup_and_put_share_one_session_renewal_budget() {
+    let harness = seeded(false).await;
+    let operation_id = match harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Renewal Vault".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: None,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        RuntimeResponse::VaultCreationAccepted { operation_id, .. } => operation_id,
+        other => panic!("expected create-Vault acceptance, got {other:?}"),
+    };
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    server.lookup_unauthorized.store(1, Ordering::SeqCst);
+    server.put_unauthorized.store(1, Ordering::SeqCst);
+    let runtime = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    runtime.replica().load(&harness.account_id).await.unwrap();
+
+    runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let routes = server.requests.lock().unwrap().clone();
+    assert_eq!(
+        routes
+            .iter()
+            .filter(|(_, url)| url.ends_with("/refresh"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        routes.iter().filter(|(method, _)| method == "GET").count(),
+        2
+    );
+    assert_eq!(
+        routes.iter().filter(|(method, _)| method == "PUT").count(),
+        1
+    );
+    assert!(runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap()
+        .operations
+        .iter()
+        .any(|operation| operation.operation_id == operation_id));
+    assert_eq!(
+        runtime
+            .waiting_reasons
+            .lock()
+            .unwrap()
+            .get(&harness.account_id),
+        Some(&AccountWaitingReason::ReauthenticationRequired)
+    );
+}
+
+#[tokio::test]
+async fn production_create_vault_dispatch_stages_one_exact_image_before_put() {
+    let harness = seeded(false).await;
+    let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
+    harness.runtime.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "runtime-image-dispatch",
+            Arc::new(DispatchImageSourcePort),
+            artifacts.clone(),
+        )
+        .unwrap(),
+    );
+    let (operation_id, vault_id) = match harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Image Vault".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "image".into(),
+                image_source: Some(VaultImageSourceInput {
+                    capability_id: "browser-image".into(),
+                    byte_length: 11,
+                    content_type: "image/png".into(),
+                }),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        RuntimeResponse::VaultCreationAccepted {
+            operation_id,
+            vault_id,
+            ..
+        } => (operation_id, vault_id),
+        other => panic!("expected image Vault acceptance, got {other:?}"),
+    };
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    server.reject_create.store(true, Ordering::SeqCst);
+    server.cleanup_unauthorized.store(2, Ordering::SeqCst);
+    let restarted = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    restarted
+        .replica()
+        .load(&harness.account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    restarted.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "runtime-image-dispatch",
+            Arc::new(DispatchImageSourcePort),
+            artifacts.clone(),
+        )
+        .unwrap(),
+    );
+
+    restarted
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let pending = restarted.replica().snapshot(&harness.account_id).unwrap();
+    assert!(pending.operations.is_empty());
+    let pending_receipt = pending
+        .receipts
+        .iter()
+        .find(|receipt| receipt.operation_id == operation_id)
+        .unwrap();
+    assert!(matches!(
+        pending_receipt.result,
+        crate::replica::OperationOutcomeResult::VaultRejected { .. }
+    ));
+    assert!(pending_receipt
+        .create_vault_cleanup
+        .as_ref()
+        .is_some_and(|cleanup| cleanup.remote_staging_pending));
+    assert_eq!(
+        restarted
+            .waiting_reasons
+            .lock()
+            .unwrap()
+            .get(&harness.account_id),
+        Some(&AccountWaitingReason::ReauthenticationRequired)
+    );
+
+    let recovered = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    recovered
+        .replica()
+        .load(&harness.account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    recovered.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "runtime-image-dispatch",
+            Arc::new(DispatchImageSourcePort),
+            artifacts,
+        )
+        .unwrap(),
+    );
+    assert!(matches!(
+        recovered.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::Progressed
+    ));
+    let completed = recovered.replica().snapshot(&harness.account_id).unwrap();
+    let completed_receipt = completed
+        .receipts
+        .iter()
+        .find(|receipt| receipt.operation_id == operation_id)
+        .unwrap();
+    assert!(completed_receipt.create_vault_cleanup.is_none());
+    let cleanup_bodies = server.cleanup_bodies.lock().unwrap();
+    assert_eq!(cleanup_bodies.len(), 3);
+    assert!(cleanup_bodies.windows(2).all(|pair| pair[0] == pair[1]));
+    let routes: Vec<_> = server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(method, url)| (method.clone(), url.rsplit('/').next().unwrap().to_owned()))
+        .collect();
+    assert_eq!(
+        routes,
+        vec![
+            ("POST".into(), "status".into()),
+            ("POST".into(), "grants".into()),
+            ("PUT".into(), "staged-image".into()),
+            ("POST".into(), "confirmations".into()),
+            ("GET".into(), operation_id),
+            ("PUT".into(), vault_id),
+            ("DELETE".into(), "vault-image-staging".into()),
+            ("POST".into(), "refresh".into()),
+            ("DELETE".into(), "vault-image-staging".into()),
+            ("DELETE".into(), "vault-image-staging".into()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn production_sign_out_best_effort_replays_pending_image_cleanup_without_a_test_port() {
+    let harness = seeded(false).await;
+    let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
+    harness.runtime.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "runtime-signout-cleanup",
+            Arc::new(DispatchImageSourcePort),
+            artifacts.clone(),
+        )
+        .unwrap(),
+    );
+    let operation_id = match harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Sign-out image".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "image".into(),
+                image_source: Some(VaultImageSourceInput {
+                    capability_id: "signout-image".into(),
+                    byte_length: 11,
+                    content_type: "image/png".into(),
+                }),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    {
+        RuntimeResponse::VaultCreationAccepted { operation_id, .. } => operation_id,
+        other => panic!("expected image Vault acceptance, got {other:?}"),
+    };
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    let production = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    production
+        .replica()
+        .load(&harness.account_id)
+        .await
+        .unwrap()
+        .unwrap();
+    production
+        .unlock_account(&harness.account_id)
+        .await
+        .unwrap();
+    production.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "runtime-signout-cleanup",
+            Arc::new(DispatchImageSourcePort),
+            artifacts,
+        )
+        .unwrap(),
+    );
+
+    let result = production
+        .request(
+            RuntimeRequest::SignOut {
+                account_id: harness.account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await;
+
+    let cleanup_bodies = server.cleanup_bodies.lock().unwrap();
+    assert_eq!(
+        cleanup_bodies.len(),
+        1,
+        "sign-out result: {result:?}; requests: {:?}",
+        server.requests.lock().unwrap()
+    );
+    let binding: Value = serde_json::from_slice(&cleanup_bodies[0]).unwrap();
+    assert!(binding["vaultId"].as_str().is_some());
+    assert_eq!(binding["byteLength"], json!(11));
+    assert_eq!(binding["contentType"], json!("image/png"));
+    assert_eq!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(method, url)| method == "DELETE" && url.ends_with("/vault-image-staging"))
+            .count(),
+        1
+    );
+    assert!(server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(_, url)| url.contains(&operation_id)));
+}
 
 #[derive(Clone, Copy)]
 enum ExistingDispatchCase {

@@ -1,33 +1,13 @@
-import type { CryptoPort } from "@bittery/crypto-port";
 import {
 	decodeVaultType,
 	type ServerVaultListEntry,
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore } from "@bittery/storage";
-import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type { AccountResolver } from "./account-resolver";
-import type { VaultCrypto } from "./vault-crypto";
 
-/**
- * Image file input - supports File (browser) or Blob
- */
-export type ImageFileInput = File | (Blob & { name?: string });
-
-export interface CreateVaultInput {
-	name: string;
-	type: "personal" | "team";
-	icon: string;
-	imageFile?: ImageFileInput;
-	imageKey?: string;
-	accountId: string;
-}
-
-export interface CreateVaultResult {
-	vaultId: string;
-}
-
+/** Vault image updates accept a File because the upload needs its name, MIME type, and body. */
 export interface UpdateVaultInput {
 	vaultId: string;
 	name?: string;
@@ -88,103 +68,19 @@ interface VaultKeyProjection {
 
 interface VaultServiceDeps {
 	storage: AccountStore;
-	crypto: CryptoPort;
-	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
 	vaultKeyProjection: VaultKeyProjection;
 }
 
 export class VaultService {
 	private readonly storage: AccountStore;
-	private readonly crypto: CryptoPort;
-	private readonly vaultCrypto: VaultCrypto;
 	private readonly accounts: AccountResolver;
 	private readonly vaultKeyProjection: VaultKeyProjection;
 
 	constructor(deps: VaultServiceDeps) {
 		this.storage = deps.storage;
-		this.crypto = deps.crypto;
-		this.vaultCrypto = deps.vaultCrypto;
 		this.accounts = deps.accounts;
 		this.vaultKeyProjection = deps.vaultKeyProjection;
-	}
-
-	async createVault(input: CreateVaultInput): Promise<CreateVaultResult> {
-		const trimmedName = input.name.trim();
-		if (!trimmedName) {
-			throw new Error("Vault name is required");
-		}
-		if (trimmedName.length < 2) {
-			throw new Error("Vault name must be at least 2 characters");
-		}
-
-		const accountId = input.accountId;
-		const client = await this.accounts.getClientForAccount(accountId);
-		const vaultId = await this.crypto.generateUuid();
-
-		let imageKey = input.imageKey;
-		if (input.imageFile && !imageKey) {
-			const file = input.imageFile;
-			const contentType = file.type;
-			const fileName = "name" in file && file.name ? file.name : "image";
-
-			if (!contentType.startsWith("image/")) {
-				throw new Error("Vault image must be an image file");
-			}
-
-			const { data: upload } = await client.vaults.createImageUpload(vaultId, {
-				fileName,
-				contentType,
-			});
-
-			const uploadResponse = await fetch(upload.uploadUrl, {
-				method: "PUT",
-				headers: {
-					"Content-Type": contentType,
-				},
-				body: file,
-			});
-
-			if (!uploadResponse.ok) {
-				throw new Error("Failed to upload vault image");
-			}
-
-			imageKey = upload.key;
-		}
-
-		const masterUnlockKey = await this.storage.getMasterUnlockKey(accountId);
-		if (!masterUnlockKey) {
-			throw new Error("Master Unlock Key not found. Please sign in again.");
-		}
-		// Session and account metadata are written together at login, so the
-		// canonical resolver keeps this context bound to the requested account.
-		const currentUserId = await resolveUserIdForAccount(
-			this.storage,
-			accountId,
-			{ errorMessage: "Session data missing. Please sign in again." },
-		);
-		const vaultKey = await this.crypto.generateEncryptionKey();
-		try {
-			const encryptedVaultKey = await this.vaultCrypto.wrapVaultKeyForOwner({
-				vaultKey,
-				masterUnlockKey,
-				vaultId,
-				userId: currentUserId,
-				keyVersion: 1,
-			});
-
-			const { data: result } = await client.vaults.create(vaultId, {
-				name: trimmedName,
-				vaultType: input.type,
-				encryptedVaultKey,
-				icon: input.icon,
-				imageKey: imageKey ?? null,
-			});
-
-			return { vaultId: result.vaultId };
-		} finally {
-			await this.crypto.destroyKey(vaultKey);
-		}
 	}
 
 	async updateVault(input: UpdateVaultInput): Promise<void> {

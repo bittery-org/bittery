@@ -55,7 +55,10 @@ export class IndexedDbVaultImageArtifactExecutor {
 		this.#digest =
 			options.digest ??
 			((bytes) =>
-				crypto.subtle.digest("SHA-256", bytes) as Promise<ArrayBuffer>);
+				crypto.subtle.digest(
+					"SHA-256",
+					Uint8Array.from(bytes).buffer,
+				) as Promise<ArrayBuffer>);
 	}
 	async invoke(
 		request: VaultImageControlRequest,

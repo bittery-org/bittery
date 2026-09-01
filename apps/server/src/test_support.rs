@@ -449,6 +449,55 @@ impl ObjectStorage for RecordingObjectStorage {
                 .unwrap_or_else(|| key.to_owned()),
             upload_url: format!("https://upload.invalid/{key}"),
             public_url: self.public_url(key),
+            required_headers: Vec::new(),
+        })
+    }
+    async fn presign_exact_upload(
+        &self,
+        key: &str,
+        content_type: &str,
+        content_length: i64,
+        payload_sha256: &str,
+        _expires: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        use base64::Engine as _;
+        self.upload_requests
+            .lock()
+            .expect("storage upload requests lock")
+            .push((
+                key.into(),
+                content_type.into(),
+                Some(content_length),
+                Some(payload_sha256.to_owned()),
+            ));
+        self.record(format!("presign_upload:{key}"))?;
+        let checksum = hex::decode(payload_sha256)
+            .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
+        Ok(PresignedUploadResult {
+            key: self
+                .upload_key_override
+                .clone()
+                .unwrap_or_else(|| key.to_owned()),
+            upload_url: format!("https://upload.invalid/{key}"),
+            public_url: self.public_url(key),
+            required_headers: vec![
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "Content-Length".to_owned(),
+                    value: content_length.to_string(),
+                },
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "Content-Type".to_owned(),
+                    value: content_type.to_owned(),
+                },
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "x-amz-content-sha256".to_owned(),
+                    value: payload_sha256.to_owned(),
+                },
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "x-amz-checksum-sha256".to_owned(),
+                    value: base64::engine::general_purpose::STANDARD.encode(checksum),
+                },
+            ],
         })
     }
     async fn presign_download(

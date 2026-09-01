@@ -63,6 +63,7 @@ export type {
 	CreateTeamInput,
 	CreateVaultInput,
 	CreateVaultResponse,
+	CreateVaultWriteOptions,
 	DeleteAccountInput,
 	DeleteAccountResponse,
 	DeletedVaultItem,

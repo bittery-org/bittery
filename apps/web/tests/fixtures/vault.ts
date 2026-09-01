@@ -100,8 +100,19 @@ export async function createVault(
 	options: { iconLabel?: string } = {},
 ): Promise<string> {
 	// The sidebar that owns this button only exists under /vaults.
-	await gotoRoute(page, "/vaults", page.getByTestId("new-vault-button"));
-	await page.getByTestId("new-vault-button").click();
+	const createButton = page.getByTestId("new-vault-button");
+	if (!(await createButton.isVisible())) {
+		const inAppVaultLink = page.locator('a[href="/vaults"]').first();
+		if (await inAppVaultLink.isVisible()) {
+			await inAppVaultLink.click();
+			await expect(createButton).toBeVisible({
+				timeout: VAULT_READY_TIMEOUT_MS,
+			});
+		} else {
+			await gotoRoute(page, "/vaults", createButton);
+		}
+	}
+	await createButton.click();
 	const dialog = page.getByTestId("create-vault-dialog");
 	await expect(dialog).toBeVisible();
 	await dialog.locator("#name").fill(name);

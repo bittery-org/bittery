@@ -10,10 +10,19 @@ use super::outcome::{CompletionResult, OutcomeResolutionAuthBudget, SemanticAnsw
 use super::*;
 use crate::{
     auth_http::AuthenticatedOutcome,
+    http_transport::HttpHeader,
     platform_storage::CurrentSessionDocument,
-    replica::{OperationKind, OperationSchedulingState, ReplicaSnapshot},
+    replica::{
+        AuthorityVaultRole, AuthorityVaultType, OperationKind, OperationSchedulingState,
+        ReplicaSnapshot,
+    },
+    server_contract::{
+        VaultImageContentType, VaultImageStagingBody, VaultImageStagingStatusResponse, VaultRole,
+        VaultType,
+    },
     AccountId,
 };
+use async_trait::async_trait;
 use std::collections::HashMap;
 
 /// How long one local send may hold an Operation before another pass may try it again.
@@ -101,6 +110,57 @@ enum AttemptOutcome {
     Parked,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CreateVaultRecoveryPolicy {
+    ParkedFenced,
+    FailAccount,
+    ReauthenticationRequired,
+    Parked,
+    Retry,
+}
+
+pub(super) fn create_vault_recovery_policy(
+    error: &super::create_vault_staging::CreateVaultRecoveryError,
+) -> CreateVaultRecoveryPolicy {
+    use super::create_vault_staging::CreateVaultRecoveryError;
+
+    match error {
+        CreateVaultRecoveryError::ParkedFenced => CreateVaultRecoveryPolicy::ParkedFenced,
+        CreateVaultRecoveryError::Fatal(error)
+            if error.code == RuntimeErrorCode::InvariantViolation =>
+        {
+            CreateVaultRecoveryPolicy::FailAccount
+        }
+        CreateVaultRecoveryError::Fatal(error)
+            if matches!(
+                error.code,
+                RuntimeErrorCode::AuthenticationRequired
+                    | RuntimeErrorCode::AuthenticationUnavailable
+            ) =>
+        {
+            CreateVaultRecoveryPolicy::ReauthenticationRequired
+        }
+        CreateVaultRecoveryError::Fatal(error)
+            if matches!(
+                error.code,
+                RuntimeErrorCode::RuntimeClosed
+                    | RuntimeErrorCode::Cancelled
+                    | RuntimeErrorCode::AccountMissing
+                    | RuntimeErrorCode::AccountFailed
+            ) =>
+        {
+            CreateVaultRecoveryPolicy::Parked
+        }
+        CreateVaultRecoveryError::Fatal(_) => CreateVaultRecoveryPolicy::Retry,
+    }
+}
+
+pub(super) enum CleanupAttemptOutcome {
+    Completed,
+    RetryScheduled,
+    Parked,
+}
+
 /// The fence-safe authenticated send shared by Sync catch-up and the background dispatcher.
 /// Semantic completion belongs to the caller; Bootstrap owns terminal Sync page progress.
 enum ExactSendOutcome {
@@ -109,6 +169,407 @@ enum ExactSendOutcome {
     Deferred,
     RetryScheduled,
     Reauthenticate,
+}
+
+pub(super) struct ProductionCreateVaultPort<'a> {
+    runtime: &'a Runtime,
+    account_id: AccountId,
+    http: AuthHttpClient<'a>,
+    session: tokio::sync::Mutex<CurrentSessionDocument>,
+    upload: Mutex<Option<(String, String, Vec<HttpHeader>)>>,
+}
+
+impl ProductionCreateVaultPort<'_> {
+    pub(super) fn staging_body(
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+    ) -> Result<VaultImageStagingBody, super::create_vault_staging::CreateVaultStagingError> {
+        Ok(VaultImageStagingBody {
+            vault_id: binding.vault_id.clone(),
+            byte_length: i64::try_from(binding.byte_length)
+                .map_err(|_| super::create_vault_staging::CreateVaultStagingError::Retryable)?,
+            content_type: match binding.content_type.as_str() {
+                "image/jpeg" => VaultImageContentType::ImageJpeg,
+                "image/png" => VaultImageContentType::ImagePng,
+                "image/webp" => VaultImageContentType::ImageWebp,
+                "image/gif" => VaultImageContentType::ImageGif,
+                "image/avif" => VaultImageContentType::ImageAvif,
+                _ => return Err(super::create_vault_staging::CreateVaultStagingError::Retryable),
+            },
+            sha256: binding.sha256.clone(),
+        })
+    }
+
+    pub(super) fn status(
+        response: VaultImageStagingStatusResponse,
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+    ) -> Result<
+        super::create_vault_staging::CreateVaultStagingStatus,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        match response {
+            VaultImageStagingStatusResponse::Absent {} => {
+                Ok(super::create_vault_staging::CreateVaultStagingStatus::Missing)
+            }
+            VaultImageStagingStatusResponse::Unconfirmed {
+                object_key,
+                generation,
+                lease_expires_at,
+            } => Self::bound_status(
+                binding,
+                object_key,
+                generation,
+                lease_expires_at,
+                super::create_vault_staging::CreateVaultStagingStatus::AwaitingUpload,
+            ),
+            VaultImageStagingStatusResponse::Confirmed {
+                object_key,
+                generation,
+                lease_expires_at,
+            } => Self::bound_status(
+                binding,
+                object_key,
+                generation,
+                lease_expires_at,
+                super::create_vault_staging::CreateVaultStagingStatus::Confirmed,
+            ),
+            VaultImageStagingStatusResponse::CleanupPending { .. } => {
+                Err(super::create_vault_staging::CreateVaultStagingError::Retryable)
+            }
+        }
+    }
+
+    fn bound_status(
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+        object_key: String,
+        generation: i64,
+        lease_expires_at: String,
+        status: super::create_vault_staging::CreateVaultStagingStatus,
+    ) -> Result<
+        super::create_vault_staging::CreateVaultStagingStatus,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        if object_key == binding.object_key && generation > 0 && !lease_expires_at.is_empty() {
+            Ok(status)
+        } else {
+            Err(super::create_vault_staging::CreateVaultStagingError::Retryable)
+        }
+    }
+
+    async fn renewed_session(
+        &self,
+    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+        let mut session = self.session.lock().await;
+        match self
+            .runtime
+            .renew_session(
+                &self.account_id,
+                &session,
+                &self.http,
+                RequestCancellation::new(),
+            )
+            .await
+        {
+            Ok(renewed) => {
+                *session = renewed;
+                Ok(())
+            }
+            Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
+                Err(super::create_vault_staging::CreateVaultStagingError::Unauthorized)
+            }
+            Err(_) => Err(super::create_vault_staging::CreateVaultStagingError::Retryable),
+        }
+    }
+}
+
+fn production_exchange<T>(
+    result: Result<AuthenticatedOutcome<T>, RuntimeError>,
+) -> Result<T, super::create_vault_staging::CreateVaultStagingError> {
+    match result {
+        Ok(AuthenticatedOutcome::Ok(value)) => Ok(value),
+        Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
+            Err(super::create_vault_staging::CreateVaultStagingError::Unauthorized)
+        }
+        Ok(AuthenticatedOutcome::Transient) | Err(_) => {
+            Err(super::create_vault_staging::CreateVaultStagingError::Retryable)
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl super::create_vault_staging::CreateVaultStagingPort for ProductionCreateVaultPort<'_> {
+    async fn status(
+        &self,
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+    ) -> Result<
+        super::create_vault_staging::CreateVaultStagingStatus,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        let body = Self::staging_body(binding)?;
+        let session = self.session.lock().await;
+        let response = production_exchange(
+            self.http
+                .vault_image_staging_status(
+                    session.token.as_ref(),
+                    &binding.operation_id,
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        Self::status(response, binding)
+    }
+
+    async fn grant(
+        &self,
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+    ) -> Result<
+        super::create_vault_staging::CreateVaultUploadGrant,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        let body = Self::staging_body(binding)?;
+        let session = self.session.lock().await;
+        let response = production_exchange(
+            self.http
+                .grant_vault_image_staging(
+                    session.token.as_ref(),
+                    &binding.operation_id,
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        let upload_headers = response
+            .upload_headers
+            .into_iter()
+            .map(|header| HttpHeader {
+                name: header.name,
+                value: header.value,
+            })
+            .collect();
+        *self
+            .upload
+            .lock()
+            .expect("Vault image upload lock poisoned") = Some((
+            response.object_key.clone(),
+            response.upload_url,
+            upload_headers,
+        ));
+        Ok(super::create_vault_staging::CreateVaultUploadGrant {
+            object_key: response.object_key,
+            byte_length: binding.byte_length,
+            content_type: binding.content_type.clone(),
+            sha256: binding.sha256.clone(),
+        })
+    }
+
+    async fn upload(
+        &self,
+        grant: &super::create_vault_staging::CreateVaultUploadGrant,
+        bytes: &[u8],
+    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+        let upload_url = self
+            .upload
+            .lock()
+            .expect("Vault image upload lock poisoned")
+            .clone()
+            .filter(|(object_key, _, _)| object_key == &grant.object_key)
+            .map(|(_, upload_url, headers)| (upload_url, headers))
+            .ok_or(super::create_vault_staging::CreateVaultStagingError::Retryable)?;
+        let (upload_url, headers) = upload_url;
+        match self
+            .http
+            .upload_vault_image_staging(
+                &upload_url,
+                &grant.content_type,
+                &grant.sha256,
+                &headers,
+                bytes,
+                RequestCancellation::new(),
+            )
+            .await
+        {
+            Ok(true) => Ok(()),
+            Ok(false) | Err(_) => {
+                Err(super::create_vault_staging::CreateVaultStagingError::Retryable)
+            }
+        }
+    }
+
+    async fn confirm(
+        &self,
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+    ) -> Result<
+        super::create_vault_staging::CreateVaultStagingStatus,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        let body = Self::staging_body(binding)?;
+        let session = self.session.lock().await;
+        let response = production_exchange(
+            self.http
+                .confirm_vault_image_staging(
+                    session.token.as_ref(),
+                    &binding.operation_id,
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        Self::status(response, binding)
+    }
+
+    async fn renew_session(
+        &self,
+    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+        self.renewed_session().await
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl super::create_vault_executor::CreateVaultExecutorPort for ProductionCreateVaultPort<'_> {
+    async fn lookup(
+        &self,
+        operation: &OperationRecord,
+    ) -> Result<
+        Option<super::create_vault_executor::CreateVaultOperationResponse>,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        let session = self.session.lock().await;
+        let outcome = production_exchange(
+            self.http
+                .fetch_operation_outcome(
+                    session.token.as_ref(),
+                    &operation.operation_id,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        outcome
+            .map(|outcome| {
+                serde_json::to_vec(&outcome)
+                    .map(
+                        |body| super::create_vault_executor::CreateVaultOperationResponse {
+                            status: 200,
+                            body,
+                        },
+                    )
+                    .map_err(|_| super::create_vault_staging::CreateVaultStagingError::Retryable)
+            })
+            .transpose()
+    }
+
+    async fn put_exact(
+        &self,
+        operation: &OperationRecord,
+    ) -> Result<
+        super::create_vault_executor::CreateVaultOperationResponse,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        let session = self.session.lock().await;
+        let response = production_exchange(
+            self.http
+                .dispatch_operation(
+                    session.token.as_ref(),
+                    &operation.operation_id,
+                    &operation.request,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        Ok(super::create_vault_executor::CreateVaultOperationResponse {
+            status: response.status,
+            body: response.body,
+        })
+    }
+
+    async fn fetch_vault(
+        &self,
+        vault_id: &str,
+    ) -> Result<
+        super::create_vault_executor::CreateVaultAuthorityRecord,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        let session = self.session.lock().await;
+        let response = production_exchange(
+            self.http
+                .fetch_vault_authority(session.token.as_ref(), vault_id, RequestCancellation::new())
+                .await,
+        )?;
+        Ok(super::create_vault_executor::CreateVaultAuthorityRecord {
+            id: response.id,
+            name: response.name,
+            vault_type: match response.vault_type {
+                VaultType::Personal => AuthorityVaultType::Personal,
+                VaultType::Team => AuthorityVaultType::Team,
+            },
+            icon: response.icon,
+            image_url: response.image_url,
+            role: match response.user_role {
+                VaultRole::Owner => AuthorityVaultRole::Owner,
+                VaultRole::Admin => AuthorityVaultRole::Admin,
+                VaultRole::Member => AuthorityVaultRole::Member,
+                VaultRole::ReadOnly => AuthorityVaultRole::ReadOnly,
+            },
+        })
+    }
+
+    async fn fetch_vault_keys(
+        &self,
+        _vault_id: &str,
+        cursor: Option<&str>,
+    ) -> Result<
+        super::create_vault_executor::CreateVaultAuthorityPage,
+        super::create_vault_staging::CreateVaultStagingError,
+    > {
+        let session = self.session.lock().await;
+        let raw_response_body = production_exchange(
+            self.http
+                .fetch_vault_key_page_raw(
+                    session.token.as_ref(),
+                    cursor,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        Ok(super::create_vault_executor::CreateVaultAuthorityPage {
+            raw_response_body: Some(raw_response_body),
+        })
+    }
+
+    async fn renew_session(
+        &self,
+    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+        self.renewed_session().await
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl super::create_vault_cleanup::CreateVaultCleanupPort for ProductionCreateVaultPort<'_> {
+    async fn cleanup_remote(
+        &self,
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+        let body = Self::staging_body(binding)?;
+        let session = self.session.lock().await;
+        production_exchange(
+            self.http
+                .cleanup_vault_image_staging(
+                    session.token.as_ref(),
+                    &binding.operation_id,
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )
+    }
+
+    async fn renew_session(
+        &self,
+    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+        self.renewed_session().await
+    }
 }
 
 impl Runtime {
@@ -299,7 +760,15 @@ impl Runtime {
         let mut earliest: Option<u64> = None;
         let mut leased_elsewhere = false;
         for snapshot in self.replica.snapshots() {
-            if snapshot.operations.is_empty()
+            if (snapshot.operations.is_empty()
+                && !snapshot.receipts.iter().any(|receipt| {
+                    receipt
+                        .create_vault_cleanup
+                        .as_ref()
+                        .is_some_and(|cleanup| {
+                            cleanup.local_artifact_pending || cleanup.remote_staging_pending
+                        })
+                }))
                 || snapshot.failure.is_some()
                 || self.account_teardown_is_pending(&snapshot.account_id)
             {
@@ -315,12 +784,43 @@ impl Runtime {
                 // Parked on a Session, not on a clock. Only `note_session_available` frees it.
                 continue;
             }
-            for operation in &snapshot.operations {
-                // Ticket 53 installs create-Vault persistence and test adapters only. Ticket 54
-                // opens this production eligibility gate atomically with the real staging ports.
-                if operation.kind == OperationKind::CreateVault {
+            for receipt in snapshot.receipts.iter().filter(|receipt| {
+                receipt
+                    .create_vault_cleanup
+                    .as_ref()
+                    .is_some_and(|cleanup| {
+                        cleanup.local_artifact_pending || cleanup.remote_staging_pending
+                    })
+            }) {
+                let key = (snapshot.account_id.clone(), receipt.operation_id.clone());
+                if let Some(deadline) = self
+                    .create_vault_cleanup_retry_deadlines
+                    .lock()
+                    .expect("create-Vault cleanup deadline lock poisoned")
+                    .get(&key)
+                    .copied()
+                    .filter(|deadline| *deadline > now_ms)
+                {
+                    earliest = Some(earliest.map_or(deadline, |current| current.min(deadline)));
                     continue;
                 }
+                let Some(lease) = self.dispatch_leases.acquire(&receipt.operation_id, now_ms)
+                else {
+                    leased_elsewhere = true;
+                    continue;
+                };
+                let outcome = self
+                    .attempt_create_vault_receipt_cleanup(&snapshot, &receipt.operation_id)
+                    .await;
+                drop(lease);
+                return match outcome {
+                    CleanupAttemptOutcome::Completed | CleanupAttemptOutcome::RetryScheduled => {
+                        DispatchPass::Progressed
+                    }
+                    CleanupAttemptOutcome::Parked => DispatchPass::Parked,
+                };
+            }
+            for operation in &snapshot.operations {
                 if operation.scheduling.not_before_ms > now_ms {
                     earliest = Some(
                         earliest.map_or(operation.scheduling.not_before_ms, |current| {
@@ -339,7 +839,8 @@ impl Runtime {
                 let outcome = self.attempt_dispatch(&snapshot, operation).await;
                 drop(lease);
                 return match outcome {
-                    AttemptOutcome::Progressed | AttemptOutcome::Parked => DispatchPass::Progressed,
+                    AttemptOutcome::Progressed => DispatchPass::Progressed,
+                    AttemptOutcome::Parked => DispatchPass::Parked,
                 };
             }
         }
@@ -354,6 +855,139 @@ impl Runtime {
         }
     }
 
+    pub(super) async fn attempt_create_vault_receipt_cleanup(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation_id: &str,
+    ) -> CleanupAttemptOutcome {
+        let account_id = snapshot.account_id.clone();
+        let key = (account_id.clone(), operation_id.to_owned());
+        let Some(auth_config) = self.auth_client_config.clone() else {
+            return CleanupAttemptOutcome::Parked;
+        };
+        let metadata = match self
+            .platform_storage
+            .load_account_metadata(&account_id, &snapshot.incarnation)
+            .await
+        {
+            Ok(Some(metadata)) => metadata,
+            Ok(None) => return CleanupAttemptOutcome::Parked,
+            Err(_) => return self.schedule_production_cleanup_retry(key),
+        };
+        let session = match self
+            .platform_storage
+            .load_current_session(&account_id, &snapshot.incarnation)
+            .await
+        {
+            Ok(Some(session)) => session,
+            Ok(None) => return CleanupAttemptOutcome::Parked,
+            Err(_) => return self.schedule_production_cleanup_retry(key),
+        };
+        let http = match AuthHttpClient::new(
+            &self.http_transport,
+            &metadata.normalized_server_url,
+            metadata.insecure_transport_confirmed,
+            auth_config,
+        ) {
+            Ok(http) => http,
+            Err(_) => return self.schedule_production_cleanup_retry(key),
+        };
+        let port = ProductionCreateVaultPort {
+            runtime: self,
+            account_id: account_id.clone(),
+            http,
+            session: tokio::sync::Mutex::new(session),
+            upload: Mutex::new(None),
+        };
+        loop {
+            match self
+                .drive_create_vault_cleanup_cycle(&account_id, operation_id, &port)
+                .await
+            {
+                Ok(super::create_vault_cleanup::CreateVaultCleanupPass::Progressed) => continue,
+                Ok(super::create_vault_cleanup::CreateVaultCleanupPass::Completed) => {
+                    self.create_vault_cleanup_retry_deadlines
+                        .lock()
+                        .expect("create-Vault cleanup deadline lock poisoned")
+                        .remove(&key);
+                    return CleanupAttemptOutcome::Completed;
+                }
+                Ok(super::create_vault_cleanup::CreateVaultCleanupPass::RetryScheduled)
+                | Err(_) => return self.schedule_production_cleanup_retry(key),
+                Ok(
+                    super::create_vault_cleanup::CreateVaultCleanupPass::ReauthenticationRequired,
+                ) => {
+                    return CleanupAttemptOutcome::Parked;
+                }
+            }
+        }
+    }
+
+    fn schedule_production_cleanup_retry(&self, key: (AccountId, String)) -> CleanupAttemptOutcome {
+        if let Ok(now_ms) = self.clock.now_ms() {
+            self.create_vault_cleanup_retry_deadlines
+                .lock()
+                .expect("create-Vault cleanup deadline lock poisoned")
+                .insert(key, now_ms.saturating_add(BASE_BACKOFF_MS));
+        }
+        CleanupAttemptOutcome::RetryScheduled
+    }
+
+    pub(super) async fn best_effort_production_create_vault_remote_cleanup(
+        &self,
+        binding: &super::create_vault_staging::CreateVaultStagingBinding,
+    ) {
+        let Some(snapshot) = self.replica.snapshot(&binding.account_id) else {
+            return;
+        };
+        let Some(auth_config) = self.auth_client_config.clone() else {
+            return;
+        };
+        let Ok(Some(metadata)) = self
+            .platform_storage
+            .load_account_metadata(&binding.account_id, &snapshot.incarnation)
+            .await
+        else {
+            return;
+        };
+        let Ok(Some(session)) = self
+            .platform_storage
+            .load_current_session(&binding.account_id, &snapshot.incarnation)
+            .await
+        else {
+            return;
+        };
+        let Ok(http) = AuthHttpClient::new(
+            &self.http_transport,
+            &metadata.normalized_server_url,
+            metadata.insecure_transport_confirmed,
+            auth_config,
+        ) else {
+            return;
+        };
+        let port = ProductionCreateVaultPort {
+            runtime: self,
+            account_id: binding.account_id.clone(),
+            http,
+            session: tokio::sync::Mutex::new(session),
+            upload: Mutex::new(None),
+        };
+        let first =
+            super::create_vault_cleanup::CreateVaultCleanupPort::cleanup_remote(&port, binding)
+                .await;
+        if matches!(
+            first,
+            Err(super::create_vault_staging::CreateVaultStagingError::Unauthorized)
+        ) && super::create_vault_cleanup::CreateVaultCleanupPort::renew_session(&port)
+            .await
+            .is_ok()
+        {
+            let _ =
+                super::create_vault_cleanup::CreateVaultCleanupPort::cleanup_remote(&port, binding)
+                    .await;
+        }
+    }
+
     /// Replays one Operation's immutable bytes against the Session that is current right now.
     ///
     /// Every exit either moves durable backoff, parks the Account on a Session, or records that
@@ -363,6 +997,21 @@ impl Runtime {
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
     ) -> AttemptOutcome {
+        if operation.kind == OperationKind::CreateVault {
+            #[cfg(feature = "binding-test-harness")]
+            if operation.create_vault.as_ref().is_some_and(|intent| {
+                self.create_vault_binding_pause_checkpoint
+                    .lock()
+                    .expect("binding create-Vault pause lock poisoned")
+                    .as_ref()
+                    == Some(&intent.checkpoint)
+            }) {
+                return AttemptOutcome::Parked;
+            }
+            return self
+                .attempt_create_vault_dispatch(snapshot, operation)
+                .await;
+        }
         let account_id = snapshot.account_id.clone();
         let expected_incarnation = snapshot.incarnation.clone();
         let execution_lock = match self.account_execution_lock(&account_id) {
@@ -443,6 +1092,113 @@ impl Runtime {
         };
         self.send_with_session(&snapshot, &operation, &http, session)
             .await
+    }
+
+    async fn attempt_create_vault_dispatch(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+    ) -> AttemptOutcome {
+        let account_id = snapshot.account_id.clone();
+        let Some(auth_config) = self.auth_client_config.clone() else {
+            return AttemptOutcome::Parked;
+        };
+        let metadata = match self
+            .platform_storage
+            .load_account_metadata(&account_id, &snapshot.incarnation)
+            .await
+        {
+            Ok(Some(metadata)) => metadata,
+            Ok(None) => {
+                self.mark_reauthentication_required(&account_id);
+                return AttemptOutcome::Parked;
+            }
+            Err(_) => {
+                self.persist_backoff(snapshot, operation).await;
+                return AttemptOutcome::Progressed;
+            }
+        };
+        let session = match self
+            .platform_storage
+            .load_current_session(&account_id, &snapshot.incarnation)
+            .await
+        {
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                self.mark_reauthentication_required(&account_id);
+                return AttemptOutcome::Parked;
+            }
+            Err(_) => {
+                self.persist_backoff(snapshot, operation).await;
+                return AttemptOutcome::Progressed;
+            }
+        };
+        let http = match AuthHttpClient::new(
+            &self.http_transport,
+            &metadata.normalized_server_url,
+            metadata.insecure_transport_confirmed,
+            auth_config,
+        ) {
+            Ok(http) => http,
+            Err(_) => {
+                self.persist_backoff(snapshot, operation).await;
+                return AttemptOutcome::Progressed;
+            }
+        };
+        let port = ProductionCreateVaultPort {
+            runtime: self,
+            account_id: account_id.clone(),
+            http,
+            session: tokio::sync::Mutex::new(session),
+            upload: Mutex::new(None),
+        };
+        match self
+            .drive_create_vault_recovery_cycle(&account_id, &operation.operation_id, &port, &port)
+            .await
+        {
+            Ok(super::create_vault_executor::CreateVaultExecutorPass::Completed) => {
+                while matches!(
+                    self.drive_create_vault_cleanup_cycle(
+                        &account_id,
+                        &operation.operation_id,
+                        &port,
+                    )
+                    .await,
+                    Ok(super::create_vault_cleanup::CreateVaultCleanupPass::Progressed)
+                ) {}
+                AttemptOutcome::Progressed
+            }
+            Ok(super::create_vault_executor::CreateVaultExecutorPass::RetryScheduled) => {
+                AttemptOutcome::Progressed
+            }
+            Ok(super::create_vault_executor::CreateVaultExecutorPass::ReauthenticationRequired) => {
+                AttemptOutcome::Parked
+            }
+            Err(error) => match create_vault_recovery_policy(&error) {
+                CreateVaultRecoveryPolicy::ParkedFenced => {
+                    // A guard can only fence after another durable write moved truth. That write
+                    // publishes the legitimate wake; reporting progress here would immediately
+                    // select the still-eligible Operation and turn contention into a hot loop.
+                    AttemptOutcome::Parked
+                }
+                CreateVaultRecoveryPolicy::FailAccount => {
+                    // Contradictory Server authority or an impossible local image/outcome state
+                    // must stop the Account durably. Parking without a durable reason would make
+                    // the outer dispatcher select the same Operation forever.
+                    self.fail_account_module(&account_id).await;
+                    AttemptOutcome::Parked
+                }
+                CreateVaultRecoveryPolicy::ReauthenticationRequired => {
+                    self.mark_reauthentication_required(&account_id);
+                    AttemptOutcome::Parked
+                }
+                CreateVaultRecoveryPolicy::Parked => AttemptOutcome::Parked,
+                CreateVaultRecoveryPolicy::Retry => {
+                    self.persist_backoff(snapshot, operation).await;
+                    AttemptOutcome::Progressed
+                }
+            },
+        }
     }
 
     async fn send_with_session(

@@ -178,12 +178,9 @@ export {
 export {
 	type ConvertVaultTypeInput,
 	type ConvertVaultTypeResult,
-	type CreateVaultInput,
-	type CreateVaultResult,
 	type DeleteVaultInput,
 	type UpdateVaultInput,
 	useConvertVaultType,
-	useCreateVault,
 	useDeleteVault,
 	useUpdateVault,
 } from "./vault";

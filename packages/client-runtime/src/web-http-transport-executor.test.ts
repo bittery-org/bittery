@@ -52,6 +52,80 @@ function deferredFetch() {
 }
 
 describe("WebHttpTransportExecutor", () => {
+	test("validates signed binary PUT authority and leaves Content-Length to the user agent", async () => {
+		let captured: Request | undefined;
+		const executor = new WebHttpTransportExecutor(async (input) => {
+			captured = input as Request;
+			return new Response(null, { status: 200 });
+		});
+		const signedHeaders = [
+			{ name: "Content-Length", value: "3" },
+			{ name: "Content-Type", value: "image/png" },
+			{
+				name: "x-amz-content-sha256",
+				value:
+					"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+			},
+			{
+				name: "x-amz-checksum-sha256",
+				value: "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=",
+			},
+		];
+
+		await executor.invoke(
+			request({ method: "PUT", body: [1, 2, 3], headers: signedHeaders }),
+		);
+
+		expect(captured?.headers.has("content-length")).toBe(false);
+		expect([...(captured as Request).headers.entries()]).toEqual([
+			["content-type", "image/png"],
+			["x-amz-checksum-sha256", "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E="],
+			[
+				"x-amz-content-sha256",
+				"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+			],
+		]);
+	});
+
+	test("rejects missing or mismatched signed binary PUT bindings before fetch", async () => {
+		let calls = 0;
+		const executor = new WebHttpTransportExecutor(async () => {
+			calls += 1;
+			return new Response(null);
+		});
+		const exact = [
+			{ name: "Content-Length", value: "3" },
+			{ name: "Content-Type", value: "image/png" },
+			{
+				name: "x-amz-content-sha256",
+				value:
+					"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+			},
+			{
+				name: "x-amz-checksum-sha256",
+				value: "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=",
+			},
+		];
+		for (const headers of [
+			exact.filter(({ name }) => name !== "Content-Length"),
+			exact.map((header) =>
+				header.name === "Content-Length" ? { ...header, value: "2" } : header,
+			),
+			exact.filter(({ name }) => name !== "x-amz-content-sha256"),
+			exact.filter(({ name }) => name !== "x-amz-checksum-sha256"),
+			exact.map((header) =>
+				header.name === "x-amz-content-sha256"
+					? { ...header, value: "0".repeat(64) }
+					: header,
+			),
+		]) {
+			await expect(
+				executor.invoke(request({ method: "PUT", body: [1, 2, 3], headers })),
+			).rejects.toThrow("HTTP transport invocation failed");
+		}
+		expect(calls).toBe(0);
+	});
+
 	test("executes Rust request bytes with a locked-down browser Request", async () => {
 		let captured: Request | undefined;
 		const executor = new WebHttpTransportExecutor(async (input) => {

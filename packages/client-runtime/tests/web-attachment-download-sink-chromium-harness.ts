@@ -88,6 +88,24 @@ Object.assign(globalThis, {
 						uploadRegistry.invoke(controlRequestJson, scope),
 				},
 				takeFullOwnedUint8ArrayIntrinsic,
+				{
+					invoke: async (controlRequestJson: string) => {
+						const request = JSON.parse(controlRequestJson) as { type: string };
+						const type =
+							request.type === "startupSweep"
+								? "swept"
+								: request.type === "deleteAccount"
+									? "accountDeleted"
+									: "wiped";
+						return { controlResponseJson: JSON.stringify({ type }) };
+					},
+				},
+				{
+					invoke: async () => ({
+						controlResponseJson: '{"type":"retired"}',
+					}),
+				},
+				scope,
 			);
 		};
 		const wedged = await construct("real-core-one");

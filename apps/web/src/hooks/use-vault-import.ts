@@ -1,10 +1,14 @@
 import {
-	useAllVaultKeys,
+	useRuntimeClient,
+	useRuntimeWritableVaults,
+} from "@bittery/client-runtime/react";
+import {
+	useAccountSwitcher,
 	useCoreContext,
 	usePlatformCrypto,
 } from "@bittery/core/hooks";
 import { getClientForAccount } from "@bittery/core/services/account-resolver";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	getImportProvider,
 	type ImportErrorCode,
@@ -19,6 +23,10 @@ import {
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "@/providers/transitional-sync-provider";
+import {
+	runtimeImportParking,
+	useParkedRuntimeImportDraft,
+} from "./runtime-import-parking";
 
 const IMPORT_BATCH_SIZE = 200;
 const DEFAULT_CREATED_VAULT_ICON = "lock";
@@ -40,6 +48,7 @@ export type ImportExecutionStage =
 	| "uploading"
 	| "finalizing"
 	| "completed"
+	| "awaiting-runtime-import"
 	| "error";
 
 export interface ImportExecutionProgress {
@@ -62,6 +71,7 @@ type HookImportErrorCode =
 	| "target-vault-missing"
 	| "target-vault-read-only"
 	| "create-vault-account-required"
+	| "runtime-import-pending"
 	| "missing-target-mapping"
 	| "target-vault-key-decrypt-failed"
 	| "vault-import-failed"
@@ -98,6 +108,9 @@ interface ResolvedTargetVault {
 	accountId: string;
 }
 
+// Ticket 54 owns only a document-session presentation seam. Keeping the decrypted draft in
+// memory survives dialog/route unmounts without writing Item plaintext to Web Storage. Ticket 55
+// replaces this with the durable Runtime Import authority.
 class VaultImportError extends Error {
 	readonly code: VaultImportErrorCode;
 	readonly params?: ImportMessageParams;
@@ -107,6 +120,13 @@ class VaultImportError extends Error {
 		this.name = "VaultImportError";
 		this.code = code;
 		this.params = params;
+	}
+}
+
+class StaleImportOperation extends Error {
+	constructor() {
+		super("stale-import-operation");
+		this.name = "StaleImportOperation";
 	}
 }
 
@@ -227,22 +247,90 @@ function normalizeImportError(
 export function useVaultImport() {
 	const { m } = useI18n();
 	const core = useCoreContext();
+	const runtimeClient = useRuntimeClient();
 	const crypto = usePlatformCrypto();
 	const invalidator = useQueryInvalidator();
-	const { vaultKeys } = useAllVaultKeys();
-
-	const [providerId, setProviderId] = useState<ImportProviderId | null>(null);
-	const [preview, setPreview] = useState<ImportPreview | null>(null);
-	const [mappings, setMappings] = useState<Record<string, ImportVaultMapping>>(
-		{},
+	const writableVaults = useRuntimeWritableVaults();
+	const { activeAccount } = useAccountSwitcher({ enabled: false });
+	const parkedDraft = useParkedRuntimeImportDraft(activeAccount);
+	const asyncFence = useRef({ accountId: activeAccount, epoch: 0 });
+	if (asyncFence.current.accountId !== activeAccount) {
+		asyncFence.current = {
+			accountId: activeAccount,
+			epoch: asyncFence.current.epoch + 1,
+		};
+	}
+	const beginAsyncOperation = useCallback(() => {
+		const fence = asyncFence.current;
+		fence.epoch += 1;
+		return { accountId: fence.accountId, epoch: fence.epoch };
+	}, []);
+	const operationIsCurrent = useCallback(
+		(operation: { accountId: string | null; epoch: number }) =>
+			asyncFence.current.accountId === operation.accountId &&
+			asyncFence.current.epoch === operation.epoch,
+		[],
 	);
-	const [progress, setProgress] = useState<ImportExecutionProgress>(
+	const cancelAsyncOperations = useCallback(() => {
+		asyncFence.current.epoch += 1;
+	}, []);
+
+	const [presentationAccountId, setPresentationAccountId] =
+		useState(activeAccount);
+	const [localProviderId, setProviderId] = useState<ImportProviderId | null>(
+		null,
+	);
+	const [localPreview, setPreview] = useState<ImportPreview | null>(null);
+	const [localMappings, setMappings] = useState<
+		Record<string, ImportVaultMapping>
+	>({});
+	const [localProgress, setProgress] = useState<ImportExecutionProgress>(
 		createEmptyProgress(),
 	);
-	const [summary, setSummary] = useState<ImportExecutionSummary | null>(null);
-	const [error, setError] = useState<ImportMessageDescriptor | null>(null);
-	const [isBusy, setIsBusy] = useState(false);
-	const [skippedEmptyVaultCount, setSkippedEmptyVaultCount] = useState(0);
+	const [localSummary, setSummary] = useState<ImportExecutionSummary | null>(
+		null,
+	);
+	const [localError, setError] = useState<ImportMessageDescriptor | null>(null);
+	const [localIsBusy, setIsBusy] = useState(false);
+	const [localSkippedEmptyVaultCount, setSkippedEmptyVaultCount] = useState(0);
+	const localPresentationIsActive =
+		activeAccount !== null && presentationAccountId === activeAccount;
+	// This guard is the UI privacy invariant: an Account switch hides the previous
+	// Account's decrypted preview and mappings in the switching render itself, before
+	// the cleanup effect can run or the destination Account's parked draft is restored.
+	const providerId =
+		parkedDraft?.providerId ??
+		(localPresentationIsActive ? localProviderId : null);
+	const preview =
+		parkedDraft?.preview ?? (localPresentationIsActive ? localPreview : null);
+	const mappings =
+		parkedDraft?.mappings ?? (localPresentationIsActive ? localMappings : {});
+	const progress =
+		parkedDraft?.progress ??
+		(localPresentationIsActive ? localProgress : createEmptyProgress());
+	const summary = localPresentationIsActive ? localSummary : null;
+	const error = parkedDraft
+		? ({ code: "runtime-import-pending" } satisfies ImportMessageDescriptor)
+		: localPresentationIsActive
+			? localError
+			: null;
+	const isBusy = localPresentationIsActive ? localIsBusy : false;
+	const skippedEmptyVaultCount =
+		parkedDraft?.skippedEmptyVaultCount ??
+		(localPresentationIsActive ? localSkippedEmptyVaultCount : 0);
+	const parkedRuntimeTargets = parkedDraft?.parkedRuntimeTargets ?? {};
+
+	useEffect(() => {
+		setPresentationAccountId(activeAccount);
+		setProviderId(null);
+		setPreview(null);
+		setMappings({});
+		setProgress(createEmptyProgress());
+		setSummary(null);
+		setError(null);
+		setIsBusy(false);
+		setSkippedEmptyVaultCount(0);
+	}, [activeAccount]);
 
 	const resolveSourceVaultName = useCallback(
 		(nameCode: ImportSourceVaultNameCode) => {
@@ -262,12 +350,14 @@ export function useVaultImport() {
 
 	const existingVaults = useMemo(
 		() =>
-			[...vaultKeys].sort((a, b) =>
-				a.vaultName.localeCompare(b.vaultName, undefined, {
-					sensitivity: "base",
-				}),
-			),
-		[vaultKeys],
+			(writableVaults.state === "ready" ? writableVaults.value.vaults : [])
+				.map((vault) => ({ ...vault, vaultName: vault.name }))
+				.sort((a, b) =>
+					a.vaultName.localeCompare(b.vaultName, undefined, {
+						sensitivity: "base",
+					}),
+				),
+		[writableVaults],
 	);
 
 	const existingVaultById = useMemo(() => {
@@ -275,6 +365,10 @@ export function useVaultImport() {
 	}, [existingVaults]);
 
 	const reset = useCallback(() => {
+		if (Object.keys(parkedRuntimeTargets).length > 0) {
+			return;
+		}
+		cancelAsyncOperations();
 		setProviderId(null);
 		setPreview(null);
 		setMappings({});
@@ -283,10 +377,12 @@ export function useVaultImport() {
 		setError(null);
 		setIsBusy(false);
 		setSkippedEmptyVaultCount(0);
-	}, []);
+	}, [cancelAsyncOperations, parkedRuntimeTargets]);
 
 	const parseFile = useCallback(
 		async (file: File, selectedProviderId: ImportProviderId) => {
+			const operation = beginAsyncOperation();
+			setPresentationAccountId(activeAccount);
 			setIsBusy(true);
 			setError(null);
 			setSummary(null);
@@ -314,6 +410,7 @@ export function useVaultImport() {
 					await provider.parse(file),
 					resolveSourceVaultName,
 				);
+				if (!operationIsCurrent(operation)) return;
 				const emptyVaultCount = parsedPreview.sourceVaults.filter(
 					(sourceVault) => sourceVault.itemCount === 0,
 				).length;
@@ -334,6 +431,7 @@ export function useVaultImport() {
 					processedVaults: 0,
 				});
 			} catch (parseError) {
+				if (!operationIsCurrent(operation)) return;
 				const normalizedError = normalizeImportError(
 					parseError,
 					"parse-failed",
@@ -352,10 +450,15 @@ export function useVaultImport() {
 				});
 				throw normalizedError;
 			} finally {
-				setIsBusy(false);
+				if (operationIsCurrent(operation)) setIsBusy(false);
 			}
 		},
-		[resolveSourceVaultName],
+		[
+			activeAccount,
+			beginAsyncOperation,
+			operationIsCurrent,
+			resolveSourceVaultName,
+		],
 	);
 
 	const updateVaultMapping = useCallback(
@@ -411,7 +514,11 @@ export function useVaultImport() {
 	);
 
 	const executeImport =
-		useCallback(async (): Promise<ImportExecutionSummary> => {
+		useCallback(async (): Promise<ImportExecutionSummary | null> => {
+			const operation = beginAsyncOperation();
+			const assertOperationIsCurrent = () => {
+				if (!operationIsCurrent(operation)) throw new StaleImportOperation();
+			};
 			if (!preview || !providerId) {
 				throw new VaultImportError("import-not-ready");
 			}
@@ -420,12 +527,18 @@ export function useVaultImport() {
 			if (!provider) {
 				throw new VaultImportError("provider-unavailable");
 			}
+			const parkingLease =
+				operation.accountId === null
+					? null
+					: runtimeImportParking.capture(operation.accountId);
 
 			const sourceVaults = preview.sourceVaults;
 			const sourceItemsByVault = groupItemsBySourceVault(preview.sourceItems);
 			const resolvedTargets = new Map<string, ResolvedTargetVault>();
 			const failedVaults: ImportFailedVault[] = [];
 			const createdVaults: ResolvedTargetVault[] = [];
+			let acceptedMappings = mappings;
+			let acceptedTargets: Record<string, ResolvedTargetVault> = {};
 			const userIdByAccount = new Map<string, string>();
 
 			const resolveUserIdForContext = async (
@@ -440,6 +553,7 @@ export function useVaultImport() {
 					storage.getStoredSessionData(accountId),
 					storage.getAccountMetadata(accountId),
 				]);
+				assertOperationIsCurrent();
 				const userId = sessionData?.userId ?? account?.userId;
 				if (!userId) {
 					throw new Error("User ID not available for encryption context");
@@ -467,6 +581,13 @@ export function useVaultImport() {
 			});
 
 			try {
+				if (Object.keys(parkedRuntimeTargets).length > 0) {
+					setProgress((current) => ({
+						...current,
+						stage: "awaiting-runtime-import",
+					}));
+					throw new VaultImportError("runtime-import-pending");
+				}
 				for (const sourceVault of sourceVaults) {
 					const mapping = mappings[sourceVault.id];
 					if (!mapping) {
@@ -510,11 +631,10 @@ export function useVaultImport() {
 					});
 				}
 
-				const activeAccount = await storage.getActiveAccount();
-				const defaultAccountId = activeAccount ?? undefined;
+				const defaultAccountId = operation.accountId ?? undefined;
 
 				// A default account is only required to create new vaults. Existing
-				// mappings already carry the exact accountId from their vault key.
+				// mappings carry the accountId from the Runtime's writable-Vault catalog.
 				const requiresVaultCreation = sourceVaults.some(
 					(sourceVault) => mappings[sourceVault.id]?.mode === "create",
 				);
@@ -539,9 +659,9 @@ export function useVaultImport() {
 						currentVaultName: targetVaultName,
 					}));
 
-					const createdVault = await core.vaults.createVault({
+					const createdVault = await runtimeClient.createVault({
 						name: targetVaultName,
-						type: "personal",
+						vaultType: "personal",
 						icon: DEFAULT_CREATED_VAULT_ICON,
 						accountId: defaultAccountId,
 					});
@@ -554,13 +674,56 @@ export function useVaultImport() {
 
 					createdVaults.push(resolvedTarget);
 					resolvedTargets.set(sourceVault.id, resolvedTarget);
+					acceptedMappings = {
+						...acceptedMappings,
+						[sourceVault.id]: {
+							...mapping,
+							targetVaultId: resolvedTarget.vaultId,
+						},
+					};
+					acceptedTargets = {
+						...acceptedTargets,
+						[sourceVault.id]: resolvedTarget,
+					};
+					if (parkingLease === null) {
+						throw new VaultImportError("create-vault-account-required");
+					}
+					const parking = runtimeImportParking.park(parkingLease, {
+						accountId: defaultAccountId,
+						providerId,
+						preview,
+						mappings: acceptedMappings,
+						progress: {
+							stage: "awaiting-runtime-import",
+							totalItems: preview.sourceItems.length,
+							processedItems: 0,
+							totalVaults: sourceVaults.length,
+							processedVaults: 0,
+						},
+						skippedEmptyVaultCount,
+						parkedRuntimeTargets: acceptedTargets,
+					});
+					if (createdVaults.length === 1) {
+						// Parking is a one-way authority handoff. From the first accepted
+						// Vault onward, lifecycle cleanup must have no hook-local plaintext
+						// or mappings available to fall back to.
+						setPresentationAccountId(null);
+						setProviderId(null);
+						setPreview(null);
+						setMappings({});
+						setProgress(createEmptyProgress());
+						setSkippedEmptyVaultCount(0);
+					}
+					if (parking.state === "retired") {
+						throw new StaleImportOperation();
+					}
+					if (!operationIsCurrent(operation)) {
+						throw new StaleImportOperation();
+					}
 				}
 
-				const refreshAccountId =
-					createdVaults[0]?.accountId ?? defaultAccountId;
-				if (createdVaults.length > 0 && refreshAccountId) {
-					await core.vaults.refreshVaultKeys(refreshAccountId);
-					await invalidator.invalidateVaultKeys();
+				if (createdVaults.length > 0) {
+					throw new VaultImportError("runtime-import-pending");
 				}
 
 				for (const sourceVault of sourceVaults) {
@@ -597,11 +760,13 @@ export function useVaultImport() {
 							storage,
 							accountId,
 						);
+						assertOperationIsCurrent();
 						const userId = await resolveUserIdForContext(accountId);
 						const vaultKey = await core.vaultCrypto.getVaultKey({
 							vaultId: resolvedTarget.vaultId,
 							accountId,
 						});
+						assertOperationIsCurrent();
 
 						if (!vaultKey) {
 							throw new VaultImportError("target-vault-key-decrypt-failed", {
@@ -614,6 +779,7 @@ export function useVaultImport() {
 							for (const sourceItem of sourceItems) {
 								const decryptedItem = provider.toDecryptedItemData(sourceItem);
 								const itemId = await crypto.generateUuid();
+								assertOperationIsCurrent();
 								const encryptedData = await core.vaultCrypto.encryptItem(
 									JSON.stringify(decryptedItem.data),
 									vaultKey,
@@ -624,6 +790,7 @@ export function useVaultImport() {
 										userId,
 									},
 								);
+								assertOperationIsCurrent();
 
 								encryptedItems.push({
 									itemId,
@@ -647,6 +814,7 @@ export function useVaultImport() {
 						} finally {
 							// `getVaultKey` mints a fresh ref for this vault on every call.
 							await crypto.destroyKey(vaultKey);
+							assertOperationIsCurrent();
 						}
 
 						setProgress((current) => ({
@@ -668,12 +836,15 @@ export function useVaultImport() {
 								resolvedTarget.vaultId,
 								{ items: batch },
 							);
+							assertOperationIsCurrent();
 							importedItemsInVault += result.importedCount;
 							importedCount += result.importedCount;
 						}
 
 						await invalidator.invalidateVaultList(resolvedTarget.vaultId);
+						assertOperationIsCurrent();
 					} catch (vaultError) {
+						if (vaultError instanceof StaleImportOperation) throw vaultError;
 						const remainingItems = Math.max(
 							0,
 							sourceItems.length - encryptedItemsInVault,
@@ -712,17 +883,23 @@ export function useVaultImport() {
 
 				// An import can target several accounts, and `ItemCache` is namespaced
 				// per account, so each one must be cleared explicitly.
-				for (const account of await storage.getAccountsList()) {
+				const accounts = await storage.getAccountsList();
+				assertOperationIsCurrent();
+				for (const account of accounts) {
 					await itemCache.clearItemCache(account.accountId);
+					assertOperationIsCurrent();
 				}
 
 				const { accountsInfo } = await core.accounts.resolveAccounts();
+				assertOperationIsCurrent();
 				if (accountsInfo.length > 0) {
 					await core.vaultRepository.refreshFromServer(accountsInfo);
+					assertOperationIsCurrent();
 				}
 
 				if (createdVaults.length > 0) {
 					await invalidator.invalidateVaultKeys();
+					assertOperationIsCurrent();
 				}
 
 				const resultSummary: ImportExecutionSummary = {
@@ -745,28 +922,43 @@ export function useVaultImport() {
 				});
 				return resultSummary;
 			} catch (executionError) {
-				const normalizedError = normalizeImportError(
-					executionError,
-					"execution-failed",
-				);
-				setError(toImportMessageDescriptor(normalizedError));
-				setProgress((current) => ({
-					...current,
-					stage: "error",
-				}));
+				if (executionError instanceof StaleImportOperation) {
+					return null;
+				}
+				const normalizedError =
+					createdVaults.length > 0
+						? new VaultImportError("runtime-import-pending")
+						: normalizeImportError(executionError, "execution-failed");
+				if (operationIsCurrent(operation)) {
+					setError(toImportMessageDescriptor(normalizedError));
+				}
+				if (
+					operationIsCurrent(operation) &&
+					normalizedError.code !== "runtime-import-pending"
+				) {
+					setProgress((current) => ({
+						...current,
+						stage: "error",
+					}));
+				}
 				throw normalizedError;
 			} finally {
-				setIsBusy(false);
+				if (parkingLease !== null) runtimeImportParking.release(parkingLease);
+				if (operationIsCurrent(operation)) setIsBusy(false);
 			}
 		}, [
 			preview,
 			providerId,
 			mappings,
+			parkedRuntimeTargets,
+			beginAsyncOperation,
 			existingVaultById,
-			core.vaults,
+			operationIsCurrent,
+			skippedEmptyVaultCount,
 			core.accounts,
 			core.vaultRepository,
 			core.vaultCrypto,
+			runtimeClient,
 			crypto,
 			invalidator,
 		]);

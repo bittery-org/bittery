@@ -7,7 +7,10 @@ import {
 } from "../web-vault-image-source";
 
 export interface VaultImageSourceRegistryOwner {
-	readonly grants: { grant(source: VaultImageSourceGrant): string };
+	readonly grants: {
+		grant(source: VaultImageSourceGrant): string;
+		discard(capabilityId: string): Promise<void>;
+	};
 	prepare(runtimeIncarnation: string): Promise<void>;
 	invoke(
 		controlRequestJson: string,
@@ -48,6 +51,7 @@ export function createVaultImageSourceRegistryOwner(
 	};
 	const grants = {
 		grant: (source: VaultImageSourceGrant) => registry.grant(source),
+		discard: (capabilityId: string) => registry.discard(capabilityId),
 	};
 	return {
 		grants,

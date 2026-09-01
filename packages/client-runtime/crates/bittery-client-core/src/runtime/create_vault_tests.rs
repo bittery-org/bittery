@@ -3046,14 +3046,17 @@ async fn foreign_vault_with_matching_wrapped_ciphertext_cannot_reconcile_created
     let (runtime, account_id, operation_id, mut port) = matrix_recovery("none", 0, false).await;
     port.foreign_only = true;
     let before = runtime.replica().snapshot(&account_id).unwrap().operations[0].clone();
-    assert_eq!(
-        runtime
-            .drive_create_vault_recovery_cycle(&account_id, &operation_id, &port, &port)
-            .await
-            .unwrap_err()
-            .code,
-        RuntimeErrorCode::InvariantViolation
-    );
+    let error = runtime
+        .drive_create_vault_recovery_cycle(&account_id, &operation_id, &port, &port)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        super::create_vault_staging::CreateVaultRecoveryError::Fatal(RuntimeError {
+            code: RuntimeErrorCode::InvariantViolation,
+            ..
+        })
+    ));
     let after = runtime.replica().snapshot(&account_id).unwrap();
     assert_eq!(after.operations.len(), 1);
     assert_eq!(after.operations[0].operation_id, before.operation_id);
@@ -3076,10 +3079,12 @@ async fn real_guard_races_at_checkpoint_authority_fetch_and_final_commit_preserv
         port.race_at = Some(race_at);
         *port.race_context.lock().unwrap() = Some((runtime.clone(), account_id.clone()));
         assert!(
-            runtime
-                .drive_create_vault_recovery_cycle(&account_id, &operation_id, &port, &port)
-                .await
-                .is_err(),
+            matches!(
+                runtime
+                    .drive_create_vault_recovery_cycle(&account_id, &operation_id, &port, &port,)
+                    .await,
+                Err(super::create_vault_staging::CreateVaultRecoveryError::ParkedFenced)
+            ),
             "{race_at}"
         );
         let snapshot = runtime.replica().snapshot(&account_id).unwrap();

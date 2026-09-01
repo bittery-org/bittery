@@ -89,7 +89,7 @@ export async function performDeltaSync(
 
 	if (event.type === "operation_resolved") {
 		const { data: outcome } = await apiClient.operations.get(event.entityId);
-		if (outcome.kind === "create_share") {
+		if (outcome.kind === "create_share" || outcome.kind === "create_vault") {
 			return;
 		}
 		if (outcome.result.status === "applied") {

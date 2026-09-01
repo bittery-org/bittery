@@ -30,6 +30,7 @@ import type {
 	CreateTeamInput,
 	CreateVaultInput,
 	CreateVaultResponse,
+	CreateVaultWriteOptions,
 	DeleteAccountInput,
 	DeleteAccountResponse,
 	DeletedVaultItem,
@@ -219,7 +220,7 @@ export interface ApiClient {
 		create(
 			vaultId: string,
 			input: CreateVaultInput,
-			options?: ApiWriteOptions,
+			options: CreateVaultWriteOptions,
 		): Promise<ApiResult<CreateVaultResponse>>;
 		update(
 			vaultId: string,
@@ -1063,12 +1064,20 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				call("GET", "/api/v1/vaults/{vaultId}", {
 					params: { path: { vaultId } },
 				}),
-			create: (vaultId, input, write) =>
-				call("PUT", "/api/v1/vaults/{vaultId}", {
-					params: { path: { vaultId } },
+			async create(vaultId, input, write) {
+				const result = await call("PUT", "/api/v1/vaults/{vaultId}", {
+					params: {
+						path: { vaultId },
+						header: { "Idempotency-Key": write.idempotencyKey },
+					},
 					body: input,
 					headers: writeHeaders(write),
-				}),
+				});
+				if (result.data.kind !== "create_vault") {
+					throw new TypeError("Create Vault returned another Operation kind.");
+				}
+				return { ...result, data: result.data };
+			},
 			update: (vaultId, input, write) =>
 				call("PATCH", "/api/v1/vaults/{vaultId}", {
 					params: { path: { vaultId } },

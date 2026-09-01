@@ -41,6 +41,10 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"TravelModeResponse",
 	"UpdateItemBody",
 	"UpdateAttachmentBody",
+	"VaultDetailsResponseDto",
+	"VaultImageStagingBody",
+	"VaultImageStagingGrantResponse",
+	"VaultImageStagingStatusResponse",
 	"VaultAttachmentResponse",
 ]);
 
@@ -356,6 +360,9 @@ function renderTaggedOneOf(name, schema) {
 						: `        #[serde(rename = ${JSON.stringify(field)})]\n`;
 				return `${rename}        ${rustField}: ${type},`;
 			});
+		if (fields.length === 0) {
+			return `    #[serde(rename = ${JSON.stringify(label)})]\n    ${pascalCase(label)} {},`;
+		}
 		return `    #[serde(rename = ${JSON.stringify(label)})]\n    ${pascalCase(label)} {\n${fields.join("\n")}\n    },`;
 	});
 	return [

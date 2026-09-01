@@ -11,7 +11,7 @@ type Equal<Left, Right> =
 type Assert<Value extends true> = Value;
 
 type _GrantFacadeStaysShallow = Assert<
-	Equal<keyof VaultImageSourceGrants, "grant">
+	Equal<keyof VaultImageSourceGrants, "discard" | "grant">
 >;
 type _CompositionDoesNotExposeRegistryAuthority = Assert<
 	Equal<"vaultImages" extends keyof WebClientRuntime ? true : false, false>
@@ -87,7 +87,7 @@ describe("Vault-image Web composition public surface", () => {
 				)
 			).type,
 		).toBe("sourceFailure");
-		expect(Object.keys(owner.grants)).toEqual(["grant"]);
+		expect(Object.keys(owner.grants)).toEqual(["grant", "discard"]);
 		expect("registry" in owner).toBe(false);
 	});
 });

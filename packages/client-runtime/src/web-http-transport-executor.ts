@@ -27,13 +27,14 @@ export class WebHttpTransportExecutor {
 		}
 		assertBodySupported(request);
 		assertUniqueHeaderNames(request.headers);
+		const browserHeaders = await browserOwnedHeaders(request);
 
 		const controller = new AbortController();
 		let browserRequest: Request;
 		try {
 			browserRequest = new Request(request.url, {
 				method: request.method,
-				headers: request.headers.map(({ name, value }): [string, string] => [
+				headers: browserHeaders.map(({ name, value }): [string, string] => [
 					name,
 					value,
 				]),
@@ -46,7 +47,7 @@ export class WebHttpTransportExecutor {
 				referrerPolicy: "no-referrer",
 				mode: "cors",
 			});
-			assertHeadersPreserved(request.headers, browserRequest.headers);
+			assertHeadersPreserved(browserHeaders, browserRequest.headers);
 		} catch {
 			throw new HttpTransportInvocationError();
 		}
@@ -78,6 +79,56 @@ export class WebHttpTransportExecutor {
 		this.#active.delete(dispatchId);
 		controller.abort();
 	}
+}
+
+/**
+ * A presigned object-store PUT binds Content-Length, but Fetch forbids script from setting it.
+ * Validate the complete byte authority here, then omit only that header so the browser emits the
+ * same value from its known-size body. Every other signed header remains byte-for-byte explicit.
+ */
+async function browserOwnedHeaders(
+	request: HttpRequest,
+): Promise<HttpRequest["headers"]> {
+	if (request.method !== "PUT") return request.headers;
+	const byName = new Map(
+		request.headers.map((header) => [header.name.toLowerCase(), header]),
+	);
+	const isSignedBinaryPut = [
+		"content-length",
+		"x-amz-content-sha256",
+		"x-amz-checksum-sha256",
+	].some((name) => byName.has(name));
+	if (!isSignedBinaryPut) return request.headers;
+	const contentLength = byName.get("content-length")?.value;
+	const contentType = byName.get("content-type")?.value;
+	const hexadecimalDigest = byName.get("x-amz-content-sha256")?.value;
+	const base64Digest = byName.get("x-amz-checksum-sha256")?.value;
+	if (
+		contentLength !== String(request.body.length) ||
+		contentType === undefined ||
+		contentType.length === 0 ||
+		hexadecimalDigest === undefined ||
+		base64Digest === undefined
+	) {
+		throw new HttpTransportInvocationError();
+	}
+	const digest = new Uint8Array(
+		await globalThis.crypto.subtle.digest(
+			"SHA-256",
+			Uint8Array.from(request.body),
+		),
+	);
+	const actualHex = [...digest]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+	let binary = "";
+	for (const byte of digest) binary += String.fromCharCode(byte);
+	if (hexadecimalDigest !== actualHex || base64Digest !== btoa(binary)) {
+		throw new HttpTransportInvocationError();
+	}
+	return request.headers.filter(
+		({ name }) => name.toLowerCase() !== "content-length",
+	);
 }
 
 function assertBodySupported(request: HttpRequest): void {

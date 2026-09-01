@@ -47,6 +47,7 @@ pub(crate) struct VaultImageStagingGrant {
     pub(crate) upload_url: String,
     pub(crate) generation: i64,
     pub(crate) lease_expires_at: OffsetDateTime,
+    pub(crate) upload_headers: Vec<crate::integrations::storage::PresignedUploadHeader>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +104,11 @@ fn binding_fingerprint(binding: &VaultImageStagingBinding) -> String {
         )
         .as_bytes(),
     ))
+}
+
+#[cfg(test)]
+pub(crate) fn binding_fingerprint_for_test(binding: &VaultImageStagingBinding) -> String {
+    binding_fingerprint(binding)
 }
 
 fn object_key(user_id: &str, binding: &VaultImageStagingBinding) -> String {
@@ -289,6 +295,7 @@ pub(crate) async fn grant_vault_image_staging(
         upload_url: upload.upload_url,
         generation,
         lease_expires_at,
+        upload_headers: upload.required_headers,
     })
 }
 

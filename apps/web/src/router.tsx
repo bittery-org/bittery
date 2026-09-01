@@ -24,7 +24,7 @@ import {
 	QueryClient,
 	QueryClientProvider,
 } from "@tanstack/react-query";
-import { runtimeClient } from "./lib/crypto";
+import { webRuntimeClient as runtimeClient } from "./lib/web-runtime-client";
 import { AccountRuntimeProvider } from "./providers/account-runtime-provider";
 import { I18nProvider } from "./providers/i18n-provider";
 import { WebPlatformProvider } from "./providers/platform-provider";

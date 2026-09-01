@@ -10,6 +10,9 @@ const allSuites = [
 	"tests/web-attachment-upload.chromium.test.ts",
 	"tests/opfs-upload-spool.chromium.test.ts",
 	"tests/web-vault-image-artifact.chromium.test.ts",
+	"tests/web-vault-image-http.chromium.test.ts",
+	"tests/web-create-vault.chromium.test.ts",
+	"../../apps/web/tests/browser/runtime-import-parking.chromium.test.ts",
 ];
 const selectors = new Map([
 	["binary-transfer", ["tests/web-binary-transfer.chromium.test.ts"]],
@@ -19,6 +22,8 @@ const selectors = new Map([
 	],
 	["attachment-upload", ["tests/web-attachment-upload.chromium.test.ts"]],
 	["vault-image-artifact", ["tests/web-vault-image-artifact.chromium.test.ts"]],
+	["vault-image-http", ["tests/web-vault-image-http.chromium.test.ts"]],
+	["create-vault", ["tests/web-create-vault.chromium.test.ts"]],
 ]);
 const requestedSelector = process.argv.slice(2);
 const suites =
@@ -30,7 +35,7 @@ const suites =
 
 if (suites === undefined) {
 	console.error(
-		"Usage: node ./scripts/test-chromium.mjs [binary-transfer|attachment-download-sink|attachment-upload|vault-image-artifact]",
+		"Usage: node ./scripts/test-chromium.mjs [binary-transfer|attachment-download-sink|attachment-upload|vault-image-artifact|vault-image-http|create-vault]",
 	);
 	process.exit(2);
 }
@@ -54,7 +59,14 @@ if (!xvfbAvailable) {
 }
 
 let joinedUploadBindingsRoot;
-if (suites.includes("tests/web-attachment-upload.chromium.test.ts")) {
+if (
+	suites.some((suite) =>
+		[
+			"tests/web-attachment-upload.chromium.test.ts",
+			"tests/web-create-vault.chromium.test.ts",
+		].includes(suite),
+	)
+) {
 	joinedUploadBindingsRoot = mkdtempSync(
 		join(process.env.TMPDIR ?? tmpdir(), "bittery-joined-upload-bindings."),
 	);

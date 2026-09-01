@@ -410,13 +410,12 @@ impl Runtime {
         }
     }
 
-    async fn best_effort_create_vault_remote_cleanup(&self, account_ids: &[AccountId]) {
+    pub(super) async fn best_effort_create_vault_remote_cleanup(&self, account_ids: &[AccountId]) {
         let port = self
             .create_vault_cleanup_port
             .lock()
             .expect("create-Vault cleanup port lock poisoned")
             .clone();
-        let Some(port) = port else { return };
         let mut bindings = Vec::new();
         let mut seen = BTreeSet::new();
         for account_id in account_ids {
@@ -461,12 +460,17 @@ impl Runtime {
             }
         }
         for binding in bindings {
-            if matches!(
-                port.cleanup_remote(&binding).await,
-                Err(super::create_vault_staging::CreateVaultStagingError::Unauthorized)
-            ) && port.renew_session().await.is_ok()
-            {
-                let _ = port.cleanup_remote(&binding).await;
+            if let Some(port) = &port {
+                if matches!(
+                    port.cleanup_remote(&binding).await,
+                    Err(super::create_vault_staging::CreateVaultStagingError::Unauthorized)
+                ) && port.renew_session().await.is_ok()
+                {
+                    let _ = port.cleanup_remote(&binding).await;
+                }
+            } else {
+                self.best_effort_production_create_vault_remote_cleanup(&binding)
+                    .await;
             }
         }
     }
