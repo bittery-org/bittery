@@ -1,7 +1,7 @@
 # Add the Import outcome foundation
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 54
 Parent: [28 — finalized E1–E10 frontier](28-remaining-item-write-kinds.md#2026-08-30--final-web-item-and-import-frontier-resolved)
 
@@ -48,3 +48,24 @@ standards and specification approval. It was this ticket's sole declared depende
 Ticket 28 E6-E10 frontier is already decision-complete. The existing `ready-for-agent` status is
 therefore now fully unblocked: this slice can add the closed `import_items` outcome foundation while
 preserving the legacy Import route and keeping production Runtime Import dispatch closed.
+
+### 2026-09-01 — resolved
+
+Commit `c14aa81eeea87b9bad8e7cf86ee345cf08fb41c2` adds the closed `import_items` retained-outcome
+foundation across the immutable Server migration, tagged lookup and constraints, OpenAPI and API
+contract, generated Rust consumer, and Sync consumer. Applied outcomes carry the exact
+`{ vaultId, importedCount }` payload, including zero, and rejected outcomes are limited to
+`invalid_ciphertext`, `vault_access_denied`, `vault_read_only`, and `item_id_conflict`; malformed,
+cross-kind, and unknown payloads remain closed failures.
+
+This foundation does not accept or dispatch a Runtime Import Operation, change the legacy
+`POST /api/v1/vaults/{vaultId}/item-imports` route, or cut over the Web Import workflow. Independent
+final standards and specification reviews both approved the implementation with no remaining
+findings.
+
+Green verification covered the Server Operation suite (14 tests), Runtime outcome suite (50 tests)
+and focused Import outcome test (1), Sync suite (17), generator suite (35), `server_contract` (5),
+migrations (27), contracts generation/check, `pnpm check:server`, Clippy, `pnpm check:ci:rust`,
+affected type checks, targeted Biome, and `git diff --check`. Root `pnpm check:ci` is not claimed
+green: its remaining host-cutover failures belong to Ticket 58. The unrelated pre-existing API
+fixture check also remains at 35 passing and 1 failing and is not attributed to this slice.
