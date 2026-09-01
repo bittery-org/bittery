@@ -48,3 +48,37 @@ Runtime integration.
   accepted batch.
 - Run the whole-repository entry gate, focused Server/Web/browser tests, OpenAPI/generator and
   affected type checks, `pnpm check:ci`, `pnpm check:ci:rust`, and `git diff --check`.
+
+## Comments
+
+### 2026-09-01 — ready for agent
+
+Ticket 56 is resolved in commit `5dbbeec8cb806a56c83b053f34445966486ccbb4` with independent final
+standards and specification approval. It was this ticket's sole declared dependency, and the parent
+Ticket 28 E7–E10 frontier is decision-complete. The existing `ready-for-agent` status is therefore
+fully unblocked: this slice may open production Import dispatch, replace the Server Import handler in
+place, and cut the Web Import workflow over to the shared Runtime client.
+
+One working condition carries over. The worktree still holds the preserved uncommitted Ticket 58 Web
+aggregate described in the [2026-09-01 handoff](../handoff-2026-09-01.md), so root `pnpm check:ci` is
+expected to stop at that Biome and type-check overlap until Ticket 58 reconciles it. Keep those bytes
+unchanged and report the gate honestly instead of claiming a clean root CI pass.
+
+### 2026-09-01 — handovers from Ticket 56
+
+Ticket 56 left three decisions to whoever wires `runtime/import_executor.rs` into production
+dispatch:
+
+- **Repeated authority contradiction has no scheduling answer yet.** A failed `validate_authority`
+  or a changed `importedCount` currently returns `Err(InvariantViolation)` without advancing the
+  durable backoff. Once the executor runs inside the production scheduling loop, an authority that
+  keeps contradicting the retained outcome can spin. Decide how that case is scheduled — parked,
+  backed off, or surfaced as a terminal local failure — before opening the gate.
+- **`ImportExecutorPass::RetryScheduled` is misnamed at one edge.** The executor also returns it for
+  fenced or missing guarded commits, where nothing was scheduled at all. Revisit the name, or split
+  the variant, while wiring; do not build host behavior on the current spelling.
+- **The host-observable progress surface does not exist.** `RuntimeProjection` has no Operation
+  variant, so a host cannot observe an in-flight Import batch today. Ticket 56's progress effect is
+  the Operation itself, as recorded in
+  [its interpretation comment](56-runtime-import-batch.md#2026-09-01--interpretation-the-local-progress-effect).
+  This ticket must therefore deliver that projection, not merely style an existing one.

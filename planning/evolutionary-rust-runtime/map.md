@@ -136,7 +136,9 @@ or rollout order.
   after which ticket 28 ends the Web cutover. Its C4 review
   split the committed shared-Attachment uploader-AAD correction into
   [ticket 43](issues/43-attachment-move-uploader-aad.md); its first clean-tree gate recorded earlier
-  integration drift in [ticket 44](issues/44-ticket-43-ci-gate-drift.md).
+  integration drift in [ticket 44](issues/44-ticket-43-ci-gate-drift.md), and the Import batch slice
+  recorded pre-existing conformance generator nondeterminism in
+  [ticket 59](issues/59-bootstrap-write-order-nondeterminism.md).
 - The eleven remaining response-cache call sites are inventoried in
   [ticket 24](issues/24-remaining-server-operation-outcomes.md), now resolved and narrowed to the six
   Item routes, and [ticket 29](issues/29-rotation-operation-outcomes.md) for the five Rotation
@@ -157,6 +159,8 @@ or rollout order.
   optional browser-SQLite path then proceeds through the Web deployment decision, conditional
   implementation, Extension placement decision, and recovery work in
   [tickets 39 through 42](issues/39-web-sqlite-deployment-decision.md).
+  [Ticket 59](issues/59-bootstrap-write-order-nondeterminism.md) asks whether ticket 38 also owns the
+  prepared-write ordering promise its fix would add to the shared persistence contract.
 - Extension and Desktop host integration after the specified Web cutover.
 - Android extraction and native host responsibilities, followed by iOS host responsibilities.
 - Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.
