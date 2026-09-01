@@ -36,6 +36,7 @@ export type {
 	CreateVaultType,
 	CreditCardItemData,
 	IdentityItemData,
+	ImportItemDraft,
 	ItemDraft,
 	ItemProjection,
 	LoginItemData,
@@ -120,6 +121,22 @@ export type CreateVaultInput = Omit<
 >;
 export type RuntimeVaultCreationAccepted = Omit<
 	Extract<RuntimeResponse, { type: "vaultCreationAccepted" }>,
+	"type"
+>;
+/**
+ * One ordered, all-or-nothing Import batch of at most 200 plaintext drafts. The host supplies
+ * category data and Favorite only; Rust mints every Item ID and owns the ciphertext.
+ */
+export type ImportItemsInput = Omit<
+	Extract<RuntimeRequest, { type: "importItems" }>,
+	"type"
+>;
+/**
+ * The durable acceptance of one batch, including the Item IDs Rust minted in accepted order. It
+ * is not the applied outcome: the batch is durable, and its authority arrives by reconciliation.
+ */
+export type RuntimeImportBatchAccepted = Omit<
+	Extract<RuntimeResponse, { type: "importBatchAccepted" }>,
 	"type"
 >;
 export interface CreateShareInput {
@@ -208,6 +225,14 @@ export interface RuntimeClient {
 		input: UpdateItemInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeAccepted>;
+	/**
+	 * Durably accepts one ordered Import batch. Resolving means the batch survives a restart, not
+	 * that the Server applied it.
+	 */
+	importItems(
+		input: ImportItemsInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeImportBatchAccepted>;
 	createShare(
 		input: CreateShareInput,
 		options?: RuntimeCallOptions,
@@ -370,6 +395,14 @@ export function createRuntimeClient(
 				callOptions,
 			);
 			return { operationId, itemId, replicaRevision };
+		},
+		async importItems(input, callOptions) {
+			const { operationId, vaultId, itemIds, replicaRevision } = await call(
+				{ type: "importItems", ...input },
+				"importBatchAccepted",
+				callOptions,
+			);
+			return { operationId, vaultId, itemIds, replicaRevision };
 		},
 		async createShare(input, callOptions) {
 			const { operationId, itemId, replicaRevision } = await call(

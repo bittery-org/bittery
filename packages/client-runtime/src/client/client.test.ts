@@ -364,4 +364,84 @@ describe("Runtime client requests", () => {
 		await client.close();
 		expect(transport.calls.map((call) => call.type)).toEqual(["close"]);
 	});
+
+	test("routes one ordered Import batch through the neutral client facade", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const importing = client.importItems({
+			accountId: "account-1",
+			vaultId: "vault-1",
+			items: [
+				{
+					draft: { category: "login", data: { title: "Imported Login" } },
+					favorite: true,
+				},
+				{
+					draft: {
+						category: "secure-note",
+						data: { title: "Imported Note", note: "Body" },
+					},
+					favorite: false,
+				},
+			],
+		});
+		await transport.settled();
+		// The host hands over plaintext drafts and Favorite only. Rust owns every Item identity.
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "importItems",
+			accountId: "account-1",
+			vaultId: "vault-1",
+			items: [
+				{
+					draft: { category: "login", data: { title: "Imported Login" } },
+					favorite: true,
+				},
+				{
+					draft: {
+						category: "secure-note",
+						data: { title: "Imported Note", note: "Body" },
+					},
+					favorite: false,
+				},
+			],
+		});
+
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "importBatchAccepted",
+				operationId: "operation-import-1",
+				vaultId: "vault-1",
+				itemIds: ["item-1", "item-2"],
+				replicaRevision: "7",
+			},
+		});
+		expect(await importing).toEqual({
+			operationId: "operation-import-1",
+			vaultId: "vault-1",
+			itemIds: ["item-1", "item-2"],
+			replicaRevision: "7",
+		});
+	});
+
+	test("refuses an Import answer that is not the accepted batch", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const importing = client.importItems({
+			accountId: "account-1",
+			vaultId: "vault-1",
+			items: [],
+		});
+		await transport.settled();
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "accepted",
+				operationId: "operation-import-1",
+				itemId: "item-1",
+				replicaRevision: "7",
+			},
+		});
+		await expect(importing).rejects.toBeInstanceOf(RuntimeRequestError);
+	});
 });

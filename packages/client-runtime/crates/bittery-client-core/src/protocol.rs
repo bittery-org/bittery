@@ -130,6 +130,21 @@ pub enum RuntimeRequest {
         vault_id: String,
         draft: ItemDraft,
     },
+    ImportItems {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        vault_id: String,
+        // `replica::MAX_IMPORT_ITEMS` owns the bound every accepting, fetching, and validating
+        // path enforces, including the one this schema publishes to hosts.
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(length(max = crate::replica::MAX_IMPORT_ITEMS))
+        )]
+        items: Vec<ImportItemDraft>,
+    },
     UpdateItem {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -312,6 +327,17 @@ impl fmt::Debug for RuntimeRequest {
                 .field("vault_id", vault_id)
                 .field("draft", draft)
                 .finish(),
+            Self::ImportItems {
+                account_id,
+                vault_id,
+                items,
+            } => formatter
+                .debug_struct("ImportItems")
+                .field("account_id", account_id)
+                .field("vault_id", vault_id)
+                .field("item_count", &items.len())
+                .field("plaintext", &"[redacted]")
+                .finish(),
             Self::UpdateItem {
                 account_id,
                 item_id,
@@ -439,6 +465,7 @@ impl RuntimeRequest {
             Self::Wipe => None,
             Self::CreateVault { account_id, .. }
             | Self::CreateItem { account_id, .. }
+            | Self::ImportItems { account_id, .. }
             | Self::UpdateItem { account_id, .. }
             | Self::SetItemFavorite { account_id, .. }
             | Self::TrashItem { account_id, .. }
@@ -616,6 +643,31 @@ pub enum ItemDraft {
     Identity(IdentityItemData),
     #[serde(rename = "authenticator")]
     Authenticator(AuthenticatorItemData),
+}
+
+/// One plaintext Import draft. The host supplies only category data and Favorite; Rust owns the
+/// final Item identity, ciphertext, and immutable batch request.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImportItemDraft {
+    pub draft: ItemDraft,
+    #[serde(default)]
+    pub favorite: bool,
+}
+
+impl fmt::Debug for ImportItemDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImportItemDraft")
+            .field("category", &self.draft.category())
+            .field("favorite", &self.favorite)
+            .field("plaintext", &"[redacted]")
+            .finish()
+    }
 }
 
 impl fmt::Debug for ItemDraft {
@@ -1055,6 +1107,17 @@ pub enum RuntimeResponse {
     Accepted {
         operation_id: String,
         item_id: String,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        replica_revision: u64,
+    },
+    ImportBatchAccepted {
+        operation_id: String,
+        vault_id: String,
+        item_ids: Vec<String>,
         #[serde(with = "decimal_u64")]
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",

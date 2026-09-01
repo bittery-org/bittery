@@ -52,6 +52,12 @@ operationId: string
 replicaRevision: string
 type: "accepted"
 } | {
+itemIds: string[]
+operationId: string
+replicaRevision: string
+type: "importBatchAccepted"
+vaultId: string
+} | {
 accountId: string
 operationId: string
 type: "shareResultAcknowledged"
@@ -177,6 +183,14 @@ vaultType: CreateVaultType
 accountId: string
 draft: ItemDraft
 type: "createItem"
+vaultId: string
+} | {
+accountId: string
+/**
+ * @maxItems 200
+ */
+items: ImportItemDraft[]
+type: "importItems"
 vaultId: string
 } | {
 accountId: string
@@ -474,6 +488,14 @@ export interface VaultImageSourceInput {
 byteLength: string
 capabilityId: string
 contentType: string
+}
+/**
+ * One plaintext Import draft. The host supplies only category data and Favorite; Rust owns the
+ * final Item identity, ciphertext, and immutable batch request.
+ */
+export interface ImportItemDraft {
+draft: ItemDraft
+favorite: boolean
 }
 export interface CreateShareDraft {
 accessMode: ShareAccessMode

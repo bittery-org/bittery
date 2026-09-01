@@ -868,6 +868,308 @@ fn vault_target_operation_history() -> Result<History, RuntimeError> {
     Ok(history.finish())
 }
 
+fn import_batch_history() -> Result<History, RuntimeError> {
+    let account_id = "account-import-operation";
+    let mut history = HistoryBuilder::new(
+        "import-batch-acceptance-and-zero-reconciliation-are-atomic",
+        &[
+            "closed Import batch resource target",
+            "immutable ordered request and fingerprint",
+            "empty applied receipt without optimistic or authoritative Item",
+            "Operation removal and receipt survive adapter reload",
+        ],
+        &[account_id],
+    );
+    history.install("install Import Account", account_id, "first")?;
+    history.begin_bootstrap(
+        "begin Import Bootstrap authority",
+        BeginBootstrapPlan {
+            guard: guard(account_id, 0, 0),
+            generation_id: BootstrapGenerationId("generation-1".into()),
+        },
+    )?;
+    history.stage_bootstrap(
+        "stage Import Vault page",
+        stage_page(
+            account_id,
+            1,
+            0,
+            BootstrapPageCursor::VaultsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "import-authority",
+        ),
+    )?;
+    history.stage_bootstrap(
+        "stage empty Import Item page",
+        stage_page(
+            account_id,
+            1,
+            0,
+            BootstrapPageCursor::ItemsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "import-authority",
+        ),
+    )?;
+    history.promote_bootstrap(
+        "promote Import Bootstrap authority",
+        PromoteBootstrapPlan {
+            guard: guard(account_id, 1, 0),
+            generation_id: BootstrapGenerationId("generation-1".into()),
+        },
+    )?;
+    let body = br#"{"items":[]}"#.to_vec();
+    let path = super::import_items_path("vault-1");
+    let request_fingerprint = super::import_items_fingerprint("vault-1", &body);
+    let operation = OperationRecord {
+        operation_id: "operation-import-empty".into(),
+        kind: OperationKind::ImportItems,
+        target: ResourceRef::ImportBatch {
+            vault_id: "vault-1".into(),
+        },
+        request: ImmutableHttpRequest {
+            method: HttpMethod::Post,
+            path,
+            headers: vec![HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }],
+            body,
+        },
+        request_fingerprint,
+        attachment_move_recovery: None,
+        create_vault: None,
+        scheduling: OperationSchedulingState::default(),
+    };
+    history.commit_plan(
+        "atomically accept empty Import request and local progress ownership",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            2,
+            0,
+            vec![PlanMutation::AcceptOperation(operation.clone())],
+        ),
+    )?;
+    history.commit_plan(
+        "atomically receipt applied zero and remove Import progress ownership",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            3,
+            0,
+            vec![PlanMutation::ReconcileImportItems {
+                outcome: ObservedOutcome {
+                    operation_id: operation.operation_id,
+                    request_fingerprint: operation.request_fingerprint,
+                    result: OperationOutcomeResult::ImportApplied {
+                        vault_id: "vault-1".into(),
+                        imported_count: 0,
+                    },
+                },
+                items: Vec::new(),
+            }],
+        ),
+    )?;
+    Ok(history.finish())
+}
+
+/// The five closed categories in the spelling the frozen Import request carries, paired with the
+/// Favorite each draft asked for.
+const IMPORT_BATCH: [(&str, AuthorityItemCategory, bool); 5] = [
+    ("login", AuthorityItemCategory::Login, true),
+    ("secure-note", AuthorityItemCategory::SecureNote, false),
+    ("credit-card", AuthorityItemCategory::CreditCard, true),
+    ("identity", AuthorityItemCategory::Identity, false),
+    ("totp", AuthorityItemCategory::Totp, true),
+];
+
+fn import_item_id(operation_id: &str, index: usize) -> String {
+    format!("{operation_id}-item-{index}")
+}
+
+fn import_ciphertext(operation_id: &str, index: usize) -> String {
+    format!("opaque-import-ciphertext-{operation_id}-{index}")
+}
+
+/// One frozen single-Item Import request, fingerprinted from its own bytes.
+///
+/// Each shared history batch carries one Item on purpose. `bootstrap_rows` walks the Bootstrap
+/// Item `HashMap`, so a plan installing several Items at once emits its rows in hash order and the
+/// generated corpus would differ between runs. One Item per batch keeps the corpus reproducible
+/// without hiding that ordering behind a sort this slice does not own.
+fn import_operation(operation_id: &str, index: usize) -> Result<OperationRecord, RuntimeError> {
+    let path = super::import_items_path("vault-1");
+    let (category, _, favorite) = &IMPORT_BATCH[index];
+    let body = serde_json::to_vec(&serde_json::json!({
+        "items": [{
+            "itemId": import_item_id(operation_id, index),
+            "category": category,
+            "favorite": favorite,
+            "encryptedData": import_ciphertext(operation_id, index),
+            "encryptionIv": "BBBBBBBBBBBBBBBB",
+            "encryptionAlgorithm": "AES-GCM-AAD-V1",
+        }]
+    }))
+    .map_err(|_| oracle_error("Import conformance body could not be serialized"))?;
+    let request_fingerprint = super::import_items_fingerprint("vault-1", &body);
+    Ok(OperationRecord {
+        operation_id: operation_id.to_owned(),
+        kind: OperationKind::ImportItems,
+        target: ResourceRef::ImportBatch {
+            vault_id: "vault-1".into(),
+        },
+        request: ImmutableHttpRequest {
+            method: HttpMethod::Post,
+            path,
+            headers: vec![HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }],
+            body,
+        },
+        request_fingerprint,
+        attachment_move_recovery: None,
+        create_vault: None,
+        scheduling: OperationSchedulingState::default(),
+    })
+}
+
+fn import_authority(account_id: &str, operation_id: &str, index: usize) -> AuthorityItemRecord {
+    let (_, category, favorite) = &IMPORT_BATCH[index];
+    let mut record = authority_item(account_id, &import_item_id(operation_id, index), 1);
+    record.category = category.clone();
+    record.favorite = *favorite;
+    record.encrypted_data = import_ciphertext(operation_id, index);
+    record
+}
+
+/// The nonempty half of the Import contract: every closed category and its Favorite reach durable
+/// authority under one applied receipt, a rejected batch installs nothing, and neither disturbs the
+/// receipts or authority an earlier batch already retained.
+fn import_reconciliation_history() -> Result<History, RuntimeError> {
+    let account_id = "account-import-batch";
+    let mut history = HistoryBuilder::new(
+        "import-batch-authority-and-rejection-are-atomic",
+        &[
+            "five-category batch authority under one applied receipt each",
+            "preserved Favorite and frozen Item identity",
+            "rejected batch without Item authority",
+            "earlier batch receipts and authority survive later batches",
+        ],
+        &[account_id],
+    );
+    history.install("install Import batch Account", account_id, "first")?;
+    history.begin_bootstrap(
+        "begin Import batch Bootstrap authority",
+        BeginBootstrapPlan {
+            guard: guard(account_id, 0, 0),
+            generation_id: BootstrapGenerationId("generation-1".into()),
+        },
+    )?;
+    history.stage_bootstrap(
+        "stage Import batch Vault page",
+        stage_page(
+            account_id,
+            1,
+            0,
+            BootstrapPageCursor::VaultsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "import-batch-authority",
+        ),
+    )?;
+    history.stage_bootstrap(
+        "stage empty Import batch Item page",
+        stage_page(
+            account_id,
+            1,
+            0,
+            BootstrapPageCursor::ItemsInitial,
+            SyncCursor::CapturedEmpty,
+            BootstrapContinuation::Final,
+            "import-batch-authority",
+        ),
+    )?;
+    history.promote_bootstrap(
+        "promote Import batch Bootstrap authority",
+        PromoteBootstrapPlan {
+            guard: guard(account_id, 1, 0),
+            generation_id: BootstrapGenerationId("generation-1".into()),
+        },
+    )?;
+
+    let mut revision = 2;
+    for (index, (category, _, _)) in IMPORT_BATCH.iter().enumerate() {
+        let applied = import_operation(&format!("operation-import-{category}"), index)?;
+        history.commit_plan(
+            &format!("atomically accept the {category} Import request"),
+            GuardedCommitPlan::new(
+                AccountId::from(account_id),
+                incarnation(account_id, "first"),
+                revision,
+                0,
+                vec![PlanMutation::AcceptOperation(applied.clone())],
+            ),
+        )?;
+        revision += 1;
+        history.commit_plan(
+            &format!("atomically install {category} batch authority, its receipt, and remove the Operation"),
+            GuardedCommitPlan::new(
+                AccountId::from(account_id),
+                incarnation(account_id, "first"),
+                revision,
+                0,
+                vec![PlanMutation::ReconcileImportItems {
+                    outcome: ObservedOutcome {
+                        operation_id: applied.operation_id.clone(),
+                        request_fingerprint: applied.request_fingerprint,
+                        result: OperationOutcomeResult::ImportApplied {
+                            vault_id: "vault-1".into(),
+                            imported_count: 1,
+                        },
+                    },
+                    items: vec![import_authority(account_id, &applied.operation_id, index)],
+                }],
+            ),
+        )?;
+        revision += 1;
+    }
+
+    let rejected = import_operation("operation-import-rejected", 0)?;
+    history.commit_plan(
+        "accept one more independent Import request",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            revision,
+            0,
+            vec![PlanMutation::AcceptOperation(rejected.clone())],
+        ),
+    )?;
+    history.commit_plan(
+        "atomically retain a read-only rejection without touching the earlier batches",
+        GuardedCommitPlan::new(
+            AccountId::from(account_id),
+            incarnation(account_id, "first"),
+            revision + 1,
+            0,
+            vec![PlanMutation::ReconcileImportItems {
+                outcome: ObservedOutcome {
+                    operation_id: rejected.operation_id,
+                    request_fingerprint: rejected.request_fingerprint,
+                    result: OperationOutcomeResult::ImportRejected {
+                        code: super::ImportItemsOperationRejectionCode::VaultReadOnly,
+                    },
+                },
+                items: Vec::new(),
+            }],
+        ),
+    )?;
+    Ok(history.finish())
+}
+
 fn deletion_history() -> Result<History, RuntimeError> {
     let mut history = HistoryBuilder::new(
         "explicit-account-deletion-and-device-wipe",
@@ -1522,6 +1824,8 @@ fn build_corpus() -> Result<Corpus, RuntimeError> {
         histories: vec![
             installation_history()?,
             vault_target_operation_history()?,
+            import_batch_history()?,
+            import_reconciliation_history()?,
             deletion_history()?,
             bootstrap_history()?,
             five_category_authority_history()?,

@@ -455,6 +455,12 @@ impl Runtime {
                 // ordering.
                 return CompletionResult::Retry;
             }
+            OperationOutcomeResult::ImportApplied { .. }
+            | OperationOutcomeResult::ImportRejected { .. } => {
+                // Ticket 56's bounded Import executor owns exact replay, complete batch fetch,
+                // and guarded reconciliation. Generic production dispatch remains closed.
+                return CompletionResult::Retry;
+            }
             OperationOutcomeResult::Rejected { .. } => {
                 if operation.kind == OperationKind::CreateShare {
                     PlanMutation::ReconcileShareOutcome { outcome, cursor }
@@ -979,6 +985,13 @@ fn outcome_matches_operation_shape(
         | OperationOutcomeResult::VaultRejected { .. } => {
             !item_target && operation.kind == OperationKind::CreateVault
         }
+        OperationOutcomeResult::ImportApplied { .. }
+        | OperationOutcomeResult::ImportRejected { .. } => {
+            matches!(
+                operation.target,
+                crate::replica::ResourceRef::ImportBatch { .. }
+            ) && operation.kind == OperationKind::ImportItems
+        }
     }
 }
 
@@ -1099,20 +1112,55 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
             };
             (operation_id, OperationKind::CreateVault, result)
         }
-        // Ticket 55 makes the generated consumer aware of this closed Server outcome before the
-        // Runtime can durably accept an Import Operation. A parsable Import answer under an ID
-        // owned by any currently accepted kind is therefore identity reuse, never eligibility.
-        WireOperationOutcome::ImportItems { result, .. } => {
-            if matches!(
-                result,
+        // An Import answer is eligible only for an Operation this Device accepted as an Import
+        // batch against the same Vault. Under any other accepted kind or target the Server is
+        // describing other bytes under this ID, which is identity reuse, never a decision.
+        WireOperationOutcome::ImportItems {
+            operation_id,
+            result,
+        } => {
+            let accepted_import = operation.kind == OperationKind::ImportItems
+                && matches!(
+                    operation.target,
+                    crate::replica::ResourceRef::ImportBatch { .. }
+                );
+            let result = match result {
                 WireImportItemsOperationResult::Applied {
                     imported_count,
-                    ref vault_id,
-                } if !(0..=200).contains(&imported_count) || vault_id.is_empty()
-            ) {
-                return SemanticAnswer::Transient;
-            }
-            return SemanticAnswer::IdentityReused;
+                    vault_id,
+                } => {
+                    // The Server's closed schema, and the frozen migration behind it, constrain an
+                    // applied count to the accepted batch bound. A count outside that range, or
+                    // one too wide for the durable field, is a payload this Runtime cannot read at
+                    // all: malformed exactly like a negative count, so it retries and never
+                    // fences. Widening the batch bound needs a new Server migration first.
+                    let Some(imported_count) = u16::try_from(imported_count)
+                        .ok()
+                        .filter(|count| usize::from(*count) <= crate::replica::MAX_IMPORT_ITEMS)
+                    else {
+                        return SemanticAnswer::Transient;
+                    };
+                    if vault_id.is_empty() {
+                        return SemanticAnswer::Transient;
+                    }
+                    if !accepted_import || vault_id != operation.vault_id() {
+                        return SemanticAnswer::IdentityReused;
+                    }
+                    OperationOutcomeResult::ImportApplied {
+                        vault_id,
+                        imported_count,
+                    }
+                }
+                WireImportItemsOperationResult::Rejected { code } => {
+                    if !accepted_import {
+                        return SemanticAnswer::IdentityReused;
+                    }
+                    OperationOutcomeResult::ImportRejected {
+                        code: import_rejection_code(code),
+                    }
+                }
+            };
+            (operation_id, OperationKind::ImportItems, result)
         }
     };
     if operation_id != operation.operation_id || operation.kind != expected_kind {
@@ -1224,8 +1272,29 @@ fn rejection_allowed(kind: OperationKind, code: OperationRejectionCode) -> bool 
                 | ItemVersionConflict
                 | AttachmentStateConflict
         ),
-        OperationKind::CreateVault | OperationKind::CreateItem | OperationKind::CreateShare => {
-            false
+        OperationKind::CreateVault
+        | OperationKind::CreateItem
+        | OperationKind::CreateShare
+        | OperationKind::ImportItems => false,
+    }
+}
+
+fn import_rejection_code(
+    code: crate::server_contract::ImportItemsOperationRejectionCode,
+) -> crate::replica::ImportItemsOperationRejectionCode {
+    use crate::replica::ImportItemsOperationRejectionCode as Local;
+    match code {
+        crate::server_contract::ImportItemsOperationRejectionCode::InvalidCiphertext => {
+            Local::InvalidCiphertext
+        }
+        crate::server_contract::ImportItemsOperationRejectionCode::VaultAccessDenied => {
+            Local::VaultAccessDenied
+        }
+        crate::server_contract::ImportItemsOperationRejectionCode::VaultReadOnly => {
+            Local::VaultReadOnly
+        }
+        crate::server_contract::ImportItemsOperationRejectionCode::ItemIdConflict => {
+            Local::ItemIdConflict
         }
     }
 }

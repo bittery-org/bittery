@@ -40,6 +40,14 @@ mod dispatch;
 #[cfg(test)]
 mod dispatch_tests;
 mod foreground_attachment_lifecycle;
+mod import;
+#[allow(
+    dead_code,
+    reason = "Ticket 56 lands the complete Import executor behind Ticket 57's production gate"
+)]
+mod import_executor;
+#[cfg(test)]
+mod import_tests;
 mod install;
 mod lock;
 mod open;
@@ -1802,6 +1810,14 @@ impl Runtime {
                 draft,
             } => {
                 self.accept_create_login_item(account_id, vault_id, draft, cancellation, accepted)
+                    .await
+            }
+            RuntimeRequest::ImportItems {
+                account_id,
+                vault_id,
+                items,
+            } => {
+                self.accept_import_items(account_id, vault_id, items, cancellation, accepted)
                     .await
             }
             RuntimeRequest::UpdateItem {

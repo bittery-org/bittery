@@ -1492,7 +1492,7 @@ fn authority_item_category(category: crate::ItemCategory) -> AuthorityItemCatego
     }
 }
 
-fn server_item_category(category: crate::ItemCategory) -> ItemCategory {
+pub(super) fn server_item_category(category: crate::ItemCategory) -> ItemCategory {
     match category {
         crate::ItemCategory::Login => ItemCategory::Login,
         crate::ItemCategory::SecureNote => ItemCategory::SecureNote,
@@ -1655,7 +1655,7 @@ fn rfc3339(now_ms: u64) -> Result<String, RuntimeError> {
 
 /// Opens the Vault key exactly the way the Bootstrap read path opens it, including the wrap-context
 /// equality that stops another Vault's or another User's key from being accepted.
-fn unwrap_vault_key(
+pub(super) fn unwrap_vault_key(
     vault: &AuthorityVaultRecord,
     user_id: &str,
     master_unlock_key: &[u8; 32],

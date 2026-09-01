@@ -5027,6 +5027,60 @@ public func FfiConverterTypeCreateShareDraft_lower(_ value: CreateShareDraft) ->
 }
 
 
+public struct ImportItemDraft {
+    public var draft: ItemDraft
+    public var favorite: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(draft: ItemDraft, favorite: Bool) {
+        self.draft = draft
+        self.favorite = favorite
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ImportItemDraft: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeImportItemDraft: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ImportItemDraft {
+        return
+            try ImportItemDraft(
+                draft: FfiConverterTypeItemDraft.read(from: &buf),
+                favorite: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ImportItemDraft, into buf: inout [UInt8]) {
+        FfiConverterTypeItemDraft.write(value.draft, into: &buf)
+        FfiConverterBool.write(value.favorite, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeImportItemDraft_lift(_ buf: RustBuffer) throws -> ImportItemDraft {
+    return try FfiConverterTypeImportItemDraft.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeImportItemDraft_lower(_ value: ImportItemDraft) -> RustBuffer {
+    return FfiConverterTypeImportItemDraft.lower(value)
+}
+
+
 public struct ItemsProjection {
     public var accountId: String
     public var replicaRevision: UInt64
@@ -6670,6 +6724,8 @@ public enum RuntimeRequest {
     )
     case createItem(accountId: String, vaultId: String, draft: ItemDraft
     )
+    case importItems(accountId: String, vaultId: String, items: [ImportItemDraft]
+    )
     case updateItem(accountId: String, itemId: String, draft: ItemDraft
     )
     case setItemFavorite(accountId: String, itemId: String, favorite: Bool
@@ -6741,40 +6797,43 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         case 9: return .createItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
         )
 
-        case 10: return .updateItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
+        case 10: return .importItems(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), items: try FfiConverterSequenceTypeImportItemDraft.read(from: &buf)
         )
 
-        case 11: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
+        case 11: return .updateItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
         )
 
-        case 12: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 12: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
         )
 
-        case 13: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 13: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 14: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
+        case 14: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 15: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 15: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
         )
 
-        case 16: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
+        case 16: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 17: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        case 17: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
         )
 
-        case 18: return .renameAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), name: try FfiConverterTypeAttachmentName.read(from: &buf)
+        case 18: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
-        case 19: return .deleteAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 19: return .renameAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), name: try FfiConverterTypeAttachmentName.read(from: &buf)
         )
 
-        case 20: return .downloadAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), sinkCapabilityId: try FfiConverterString.read(from: &buf)
+        case 20: return .deleteAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
         )
 
-        case 21: return .uploadAttachment(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), metadata: try FfiConverterTypeAttachmentUploadMetadata.read(from: &buf), fileSize: try FfiConverterUInt64.read(from: &buf), sourceCapabilityId: try FfiConverterString.read(from: &buf)
+        case 21: return .downloadAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), sinkCapabilityId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 22: return .uploadAttachment(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), metadata: try FfiConverterTypeAttachmentUploadMetadata.read(from: &buf), fileSize: try FfiConverterUInt64.read(from: &buf), sourceCapabilityId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -6842,80 +6901,87 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
             FfiConverterTypeItemDraft.write(draft, into: &buf)
 
 
-        case let .updateItem(accountId,itemId,draft):
+        case let .importItems(accountId,vaultId,items):
             writeInt(&buf, Int32(10))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(vaultId, into: &buf)
+            FfiConverterSequenceTypeImportItemDraft.write(items, into: &buf)
+
+
+        case let .updateItem(accountId,itemId,draft):
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeItemDraft.write(draft, into: &buf)
 
 
         case let .setItemFavorite(accountId,itemId,favorite):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterBool.write(favorite, into: &buf)
 
 
         case let .trashItem(accountId,itemId):
-            writeInt(&buf, Int32(12))
-            FfiConverterString.write(accountId, into: &buf)
-            FfiConverterString.write(itemId, into: &buf)
-
-
-        case let .restoreItem(accountId,itemId):
             writeInt(&buf, Int32(13))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
-        case let .moveItem(accountId,itemId,targetVaultId):
+        case let .restoreItem(accountId,itemId):
             writeInt(&buf, Int32(14))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+
+
+        case let .moveItem(accountId,itemId,targetVaultId):
+            writeInt(&buf, Int32(15))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterString.write(targetVaultId, into: &buf)
 
 
         case let .permanentlyDeleteItem(accountId,itemId):
-            writeInt(&buf, Int32(15))
+            writeInt(&buf, Int32(16))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .createShare(accountId,itemId,draft):
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(17))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeCreateShareDraft.write(draft, into: &buf)
 
 
         case let .acknowledgeShareResult(accountId,operationId):
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(18))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
 
         case let .renameAttachment(accountId,attachmentId,name):
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(19))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
             FfiConverterTypeAttachmentName.write(name, into: &buf)
 
 
         case let .deleteAttachment(accountId,attachmentId):
-            writeInt(&buf, Int32(19))
+            writeInt(&buf, Int32(20))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
 
         case let .downloadAttachment(accountId,attachmentId,sinkCapabilityId):
-            writeInt(&buf, Int32(20))
+            writeInt(&buf, Int32(21))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
             FfiConverterString.write(sinkCapabilityId, into: &buf)
 
 
         case let .uploadAttachment(accountId,itemId,metadata,fileSize,sourceCapabilityId):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(22))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeAttachmentUploadMetadata.write(metadata, into: &buf)
@@ -6956,6 +7022,8 @@ public enum RuntimeResponse: Equatable, Hashable {
     case accepted(operationId: String, itemId: String, replicaRevision: UInt64
     )
     case vaultCreationAccepted(operationId: String, vaultId: String, replicaRevision: UInt64
+    )
+    case importBatchAccepted(operationId: String, vaultId: String, itemIds: [String], replicaRevision: UInt64
     )
     case shareResultAcknowledged(accountId: String, operationId: String
     )
@@ -7005,22 +7073,25 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         case 5: return .vaultCreationAccepted(operationId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 6: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        case 6: return .importBatchAccepted(operationId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), itemIds: try FfiConverterSequenceString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 7: return .attachmentRenamed(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 7: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
-        case 8: return .attachmentDeleted(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 8: return .attachmentRenamed(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
         )
 
-        case 9: return .attachmentDownloaded(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 9: return .attachmentDeleted(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
         )
 
-        case 10: return .attachmentUploaded(attachmentId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        case 10: return .attachmentDownloaded(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
         )
 
-        case 11: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
+        case 11: return .attachmentUploaded(attachmentId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        )
+
+        case 12: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -7064,38 +7135,46 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
             FfiConverterUInt64.write(replicaRevision, into: &buf)
 
 
-        case let .shareResultAcknowledged(accountId,operationId):
+        case let .importBatchAccepted(operationId,vaultId,itemIds,replicaRevision):
             writeInt(&buf, Int32(6))
+            FfiConverterString.write(operationId, into: &buf)
+            FfiConverterString.write(vaultId, into: &buf)
+            FfiConverterSequenceString.write(itemIds, into: &buf)
+            FfiConverterUInt64.write(replicaRevision, into: &buf)
+
+
+        case let .shareResultAcknowledged(accountId,operationId):
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
 
         case let .attachmentRenamed(accountId,attachmentId):
-            writeInt(&buf, Int32(7))
-            FfiConverterString.write(accountId, into: &buf)
-            FfiConverterString.write(attachmentId, into: &buf)
-
-
-        case let .attachmentDeleted(accountId,attachmentId):
             writeInt(&buf, Int32(8))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
 
-        case let .attachmentDownloaded(accountId,attachmentId):
+        case let .attachmentDeleted(accountId,attachmentId):
             writeInt(&buf, Int32(9))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
 
-        case let .attachmentUploaded(attachmentId,replicaRevision):
+        case let .attachmentDownloaded(accountId,attachmentId):
             writeInt(&buf, Int32(10))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(attachmentId, into: &buf)
+
+
+        case let .attachmentUploaded(attachmentId,replicaRevision):
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(attachmentId, into: &buf)
             FfiConverterUInt64.write(replicaRevision, into: &buf)
 
 
         case let .teardown(scope,status,failures):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
             FfiConverterTypeTeardownScope.write(scope, into: &buf)
             FfiConverterTypeTeardownStatus.write(status, into: &buf)
             FfiConverterSequenceTypeTeardownPhase.write(failures, into: &buf)
@@ -8351,6 +8430,31 @@ fileprivate struct FfiConverterSequenceTypeAccountStatus: FfiConverterRustBuffer
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeAccountStatus.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeImportItemDraft: FfiConverterRustBuffer {
+    typealias SwiftType = [ImportItemDraft]
+
+    public static func write(_ value: [ImportItemDraft], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeImportItemDraft.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ImportItemDraft] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ImportItemDraft]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeImportItemDraft.read(from: &buf))
         }
         return seq
     }

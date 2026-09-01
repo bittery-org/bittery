@@ -821,6 +821,12 @@ impl Runtime {
                 };
             }
             for operation in &snapshot.operations {
+                // Ticket 56 accepts and persists Import batches but Ticket 57 owns the atomic
+                // legacy-route cutover. Keeping this before scheduling/lease inspection makes
+                // production Import transport literally unreachable rather than merely failing.
+                if operation.kind == OperationKind::ImportItems {
+                    continue;
+                }
                 if operation.scheduling.not_before_ms > now_ms {
                     earliest = Some(
                         earliest.map_or(operation.scheduling.not_before_ms, |current| {
@@ -1323,7 +1329,11 @@ impl Runtime {
     ///
     /// The whole record travels so the Replica can refuse any commit that would change the
     /// immutable half, and a rejected or fenced commit simply leaves the durable schedule alone.
-    async fn persist_backoff(&self, snapshot: &ReplicaSnapshot, operation: &OperationRecord) {
+    pub(super) async fn persist_backoff(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+    ) {
         let Ok(now_ms) = self.clock.now_ms() else {
             return;
         };

@@ -387,7 +387,8 @@ pub(super) fn prepare_commit(
         | PlanMutation::ReconcileItemMutation { outcome, .. }
         | PlanMutation::RetainRejection { outcome, .. }
         | PlanMutation::ReconcileShareOutcome { outcome, .. }
-        | PlanMutation::ReconcileCreateVault { outcome, .. } = mutation
+        | PlanMutation::ReconcileCreateVault { outcome, .. }
+        | PlanMutation::ReconcileImportItems { outcome, .. } = mutation
         {
             writes.extend(completion_writes(
                 &plan.account_id,
@@ -576,6 +577,7 @@ pub(super) fn prepare_commit(
             | PlanMutation::RetainRejection { .. }
             | PlanMutation::ReconcileShareOutcome { .. }
             | PlanMutation::ReconcileCreateVault { .. }
+            | PlanMutation::ReconcileImportItems { .. }
             | PlanMutation::AdvanceSyncPageCursor { .. }
             | PlanMutation::FailAccount { .. }
             | PlanMutation::FreezeAttachmentMoveRejection { .. }

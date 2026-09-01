@@ -160,6 +160,12 @@ pub(crate) enum PlanMutation {
         outcome: ObservedOutcome,
         vault: Option<AuthorityVaultRecord>,
     },
+    /// Installs one complete authoritative Import batch, its compact receipt, and removes the
+    /// accepted request/progress effect in one guarded Replica commit.
+    ReconcileImportItems {
+        outcome: ObservedOutcome,
+        items: Vec<AuthorityItemRecord>,
+    },
     CompleteCreateVaultCleanup {
         operation_id: String,
         local_artifact_done: bool,
@@ -245,6 +251,13 @@ pub(crate) enum OperationOutcomeResult {
     VaultRejected {
         code: CreateVaultOperationRejectionCode,
     },
+    ImportApplied {
+        vault_id: String,
+        imported_count: u16,
+    },
+    ImportRejected {
+        code: ImportItemsOperationRejectionCode,
+    },
     Rejected {
         code: OperationRejectionCode,
     },
@@ -257,6 +270,15 @@ pub(crate) enum CreateVaultOperationRejectionCode {
     TeamMembershipRequired,
     VaultSharingEntitlementDenied,
     SharedVaultLimitReached,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ImportItemsOperationRejectionCode {
+    InvalidCiphertext,
+    VaultAccessDenied,
+    VaultReadOnly,
+    ItemIdConflict,
 }
 
 /// One observed semantic outcome, carrying the fingerprint it was answered for.
@@ -305,19 +327,22 @@ pub(crate) struct OperationReceiptRecord {
 pub(crate) enum ResourceRef {
     Item { item_id: String, vault_id: String },
     Vault { vault_id: String },
+    ImportBatch { vault_id: String },
 }
 
 impl ResourceRef {
     pub(crate) fn item_id(&self) -> Option<&str> {
         match self {
             Self::Item { item_id, .. } => Some(item_id),
-            Self::Vault { .. } => None,
+            Self::Vault { .. } | Self::ImportBatch { .. } => None,
         }
     }
 
     pub(crate) fn vault_id(&self) -> &str {
         match self {
-            Self::Item { vault_id, .. } | Self::Vault { vault_id } => vault_id,
+            Self::Item { vault_id, .. }
+            | Self::Vault { vault_id }
+            | Self::ImportBatch { vault_id } => vault_id,
         }
     }
 }
@@ -343,6 +368,7 @@ pub(crate) enum OperationKind {
     MoveItem,
     PermanentlyDeleteItem,
     CreateShare,
+    ImportItems,
 }
 
 /// The exact bytes an accepted Operation will send, forever.
@@ -465,6 +491,40 @@ fn create_vault_fingerprint(path: &str, body: &[u8]) -> Sha256Fingerprint {
     for value in [
         b"bittery.operation.v1".as_slice(),
         b"create_vault",
+        path.as_bytes(),
+        body,
+    ] {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value);
+    }
+    Sha256Fingerprint(digest.finalize().into())
+}
+
+/// The most Items one Import batch may ever carry.
+///
+/// The Replica cannot depend on the Runtime, so the bound the trust boundary enforces is the one
+/// the Runtime accepts against, the executor fetches against, and the outcome reader validates
+/// against. One owner is what keeps "at most 200" from drifting into four different numbers.
+pub(crate) const MAX_IMPORT_ITEMS: usize = 200;
+
+/// The one canonical Import route.
+///
+/// The Runtime freezes its bytes against it, the Replica re-derives them from the persisted
+/// record, and the shared conformance histories build them the same way. One owner is what makes
+/// "the same accepted batch" mean the same thing on every side of the trust boundary.
+pub(crate) fn import_items_path(vault_id: &str) -> String {
+    format!("/api/v1/vaults/{vault_id}/item-imports")
+}
+
+/// Binds one Import batch's identity to its route and its exact bytes.
+pub(crate) fn import_items_fingerprint(vault_id: &str, body: &[u8]) -> Sha256Fingerprint {
+    use sha2::{Digest, Sha256};
+
+    let path = import_items_path(vault_id);
+    let mut digest = Sha256::new();
+    for value in [
+        b"bittery.operation.v1".as_slice(),
+        b"import_items",
         path.as_bytes(),
         body,
     ] {
@@ -2331,6 +2391,48 @@ impl AccountReplica {
                 }
                 self.operations.remove(&operation.operation_id);
             }
+            PlanMutation::ReconcileImportItems { outcome, items } => {
+                let operation = self.operation_for(&outcome)?;
+                if operation.kind != OperationKind::ImportItems
+                    || !matches!(operation.target, ResourceRef::ImportBatch { .. })
+                {
+                    return Err(replica_invariant(
+                        "an Import reconciliation needs an import-Items Operation",
+                    ));
+                }
+                match &outcome.result {
+                    OperationOutcomeResult::ImportApplied {
+                        vault_id,
+                        imported_count,
+                    } if vault_id == operation.vault_id()
+                        && usize::from(*imported_count) == items.len() =>
+                    {
+                        let mut seen = std::collections::HashSet::new();
+                        for item in &items {
+                            if item.vault_id != *vault_id
+                                || item.version != 1
+                                || item.encryption_version != 1
+                                || !seen.insert(item.id.clone())
+                            {
+                                return Err(replica_invariant(
+                                    "authoritative Import Item does not match the batch outcome",
+                                ));
+                            }
+                        }
+                        for item in items {
+                            self.write_authoritative_item(item)?;
+                        }
+                    }
+                    OperationOutcomeResult::ImportRejected { .. } if items.is_empty() => {}
+                    _ => {
+                        return Err(replica_invariant(
+                            "authoritative Import batch does not match its outcome",
+                        ))
+                    }
+                }
+                self.retain_receipt(&operation, &outcome)?;
+                self.operations.remove(&operation.operation_id);
+            }
             PlanMutation::CompleteCreateVaultCleanup {
                 operation_id,
                 local_artifact_done,
@@ -3039,6 +3141,7 @@ pub(crate) fn item_operation_fingerprint(
         OperationKind::MoveItem => "move_item",
         OperationKind::PermanentlyDeleteItem => "permanently_delete_item",
         OperationKind::CreateShare => "create_share",
+        OperationKind::ImportItems => "import_items",
     };
     let expected_version = expected_version.to_string();
     let mut hasher = Sha256::new();
@@ -3092,6 +3195,16 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
         (OperationKind::CreateVault, _) => {
             return Err(replica_invariant("create-Vault durable intent is invalid"));
         }
+        (OperationKind::ImportItems, None)
+            if matches!(operation.target, ResourceRef::ImportBatch { .. }) =>
+        {
+            validate_import_operation(operation)?;
+        }
+        // Closes the kind. Without this arm an Import record naming an Item target would reach
+        // the permissive Item arm below and skip every Import validation.
+        (OperationKind::ImportItems, _) => {
+            return Err(replica_invariant("Import durable intent is invalid"));
+        }
         (_, Some(_)) => {
             return Err(replica_invariant(
                 "non-Vault Operation carries Vault intent",
@@ -3116,6 +3229,72 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
     Ok(())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PersistedImportBody {
+    items: Vec<PersistedImportItem>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PersistedImportItem {
+    item_id: String,
+    /// The generated wire enum, never a hand-written list of its spellings. Deserializing the
+    /// closed set is the drift guard: a new category reaches this boundary by regenerating the
+    /// contract under ADR 0012, and an unknown one fails to deserialize.
+    #[allow(
+        dead_code,
+        reason = "the closed category is enforced by its type, never re-read here"
+    )]
+    category: crate::server_contract::ItemCategory,
+    /// Declared so `deny_unknown_fields` accepts the persisted Favorite and rejects a body that
+    /// drops it. Nothing here re-derives the value.
+    #[allow(
+        dead_code,
+        reason = "the persisted Favorite is bound by being declared, never read again"
+    )]
+    favorite: bool,
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: String,
+}
+
+fn validate_import_operation(operation: &OperationRecord) -> Result<(), RuntimeError> {
+    let path = import_items_path(operation.vault_id());
+    if operation.request.method != HttpMethod::Post
+        || operation.request.path != path
+        || operation.request.headers
+            != [HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }]
+    {
+        return Err(replica_invariant("Import request route or headers changed"));
+    }
+    let body: PersistedImportBody = serde_json::from_slice(&operation.request.body)
+        .map_err(|_| replica_invariant("Import request body is malformed"))?;
+    if body.items.len() > MAX_IMPORT_ITEMS {
+        return Err(replica_invariant("Import request exceeds its Item bound"));
+    }
+    let mut ids = std::collections::HashSet::new();
+    for item in body.items {
+        if item.item_id.is_empty()
+            || !ids.insert(item.item_id)
+            || item.encrypted_data.is_empty()
+            || item.encryption_iv.is_empty()
+            || item.encryption_algorithm.is_empty()
+        {
+            return Err(replica_invariant("Import request Item is invalid"));
+        }
+    }
+    if import_items_fingerprint(operation.vault_id(), &operation.request.body)
+        != operation.request_fingerprint
+    {
+        return Err(replica_invariant("Import request fingerprint changed"));
+    }
+    Ok(())
+}
+
 fn validate_operation_receipt(
     receipt: &OperationReceiptRecord,
     user_id: &str,
@@ -3124,7 +3303,11 @@ fn validate_operation_receipt(
         ResourceRef::Item { item_id, vault_id } if !item_id.is_empty() && !vault_id.is_empty() => {
             Some(item_id.as_str())
         }
-        ResourceRef::Vault { vault_id } if !vault_id.is_empty() => None,
+        ResourceRef::Vault { vault_id } | ResourceRef::ImportBatch { vault_id }
+            if !vault_id.is_empty() =>
+        {
+            None
+        }
         _ => return Err(replica_invariant("Operation receipt target is empty")),
     };
     if receipt.operation_id.is_empty() {
@@ -3136,6 +3319,15 @@ fn validate_operation_receipt(
             vault_id == receipt.vault_id()
         }
         (OperationKind::CreateVault, None, OperationOutcomeResult::VaultRejected { .. }) => true,
+        (
+            OperationKind::ImportItems,
+            None,
+            OperationOutcomeResult::ImportApplied {
+                vault_id,
+                imported_count,
+            },
+        ) => vault_id == receipt.vault_id() && usize::from(*imported_count) <= MAX_IMPORT_ITEMS,
+        (OperationKind::ImportItems, None, OperationOutcomeResult::ImportRejected { .. }) => true,
         (
             OperationKind::CreateShare,
             Some(_),

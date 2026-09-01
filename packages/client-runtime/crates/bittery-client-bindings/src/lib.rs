@@ -954,6 +954,12 @@ impl ItemDraft {
     }
 }
 
+#[derive(Clone, uniffi::Record)]
+pub struct ImportItemDraft {
+    pub draft: ItemDraft,
+    pub favorite: bool,
+}
+
 #[derive(Clone, uniffi::Enum)]
 pub enum RuntimeRequest {
     SignIn {
@@ -993,6 +999,11 @@ pub enum RuntimeRequest {
         account_id: String,
         vault_id: String,
         draft: ItemDraft,
+    },
+    ImportItems {
+        account_id: String,
+        vault_id: String,
+        items: Vec<ImportItemDraft>,
     },
     UpdateItem {
         account_id: String,
@@ -1118,6 +1129,17 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("vault_id", vault_id)
                 .field("draft", draft)
+                .finish(),
+            Self::ImportItems {
+                account_id,
+                vault_id,
+                items,
+            } => formatter
+                .debug_struct("ImportItems")
+                .field("account_id", account_id)
+                .field("vault_id", vault_id)
+                .field("item_count", &items.len())
+                .field("plaintext", &"[redacted]")
                 .finish(),
             Self::UpdateItem {
                 account_id,
@@ -1258,6 +1280,12 @@ pub enum RuntimeResponse {
     VaultCreationAccepted {
         operation_id: String,
         vault_id: String,
+        replica_revision: u64,
+    },
+    ImportBatchAccepted {
+        operation_id: String,
+        vault_id: String,
+        item_ids: Vec<String>,
         replica_revision: u64,
     },
     ShareResultAcknowledged {
@@ -1908,6 +1936,21 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 vault_id,
                 draft: draft.to_core(),
             },
+            RuntimeRequest::ImportItems {
+                account_id,
+                vault_id,
+                items,
+            } => Self::ImportItems {
+                account_id: account_id.into(),
+                vault_id,
+                items: items
+                    .into_iter()
+                    .map(|item| core::ImportItemDraft {
+                        draft: item.draft.to_core(),
+                        favorite: item.favorite,
+                    })
+                    .collect(),
+            },
             RuntimeRequest::UpdateItem {
                 account_id,
                 item_id,
@@ -2108,6 +2151,17 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
             } => Self::VaultCreationAccepted {
                 operation_id,
                 vault_id,
+                replica_revision,
+            },
+            core::RuntimeResponse::ImportBatchAccepted {
+                operation_id,
+                vault_id,
+                item_ids,
+                replica_revision,
+            } => Self::ImportBatchAccepted {
+                operation_id,
+                vault_id,
+                item_ids,
                 replica_revision,
             },
             core::RuntimeResponse::ShareResultAcknowledged {
