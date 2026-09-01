@@ -38,3 +38,13 @@ reachability.
   dispatch `import_items`.
 - Run focused Server tests, `pnpm check:server`, OpenAPI/API/client-runtime generation checks,
   affected type checks, `pnpm check:ci`, `pnpm check:ci:rust`, and `git diff --check`.
+
+## Comments
+
+### 2026-09-01 — ready for agent
+
+Ticket 54 is resolved in commit `08684f43d72e801398f85e8a8560b11f5e735541` with independent final
+standards and specification approval. It was this ticket's sole declared dependency, and the parent
+Ticket 28 E6-E10 frontier is already decision-complete. The existing `ready-for-agent` status is
+therefore now fully unblocked: this slice can add the closed `import_items` outcome foundation while
+preserving the legacy Import route and keeping production Runtime Import dispatch closed.
