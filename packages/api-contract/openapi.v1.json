@@ -16816,6 +16816,63 @@
         },
         "additionalProperties": false
       },
+      "ImportItemsOperationRejectionCode": {
+        "type": "string",
+        "enum": [
+          "invalid_ciphertext",
+          "vault_access_denied",
+          "vault_read_only",
+          "item_id_conflict"
+        ]
+      },
+      "ImportItemsOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "vaultId",
+              "importedCount",
+              "status"
+            ],
+            "properties": {
+              "importedCount": {
+                "type": "integer",
+                "format": "int32",
+                "maximum": 200,
+                "minimum": 0
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              },
+              "vaultId": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ImportItemsOperationRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The closed retained answer for one Import batch. Runtime dispatch remains gated until Ticket 57."
+      },
       "InvitationDetailsResponse": {
         "type": "object",
         "required": [
@@ -17736,6 +17793,28 @@
               },
               "result": {
                 "$ref": "#/components/schemas/CreateVaultOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "import_items"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ImportItemsOperationResult"
               }
             }
           }

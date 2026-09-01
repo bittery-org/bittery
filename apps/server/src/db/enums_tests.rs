@@ -141,7 +141,8 @@ fn closed_sets_keep_their_wire_strings() {
             "move_item",
             "permanently_delete_item",
             "create_share",
-            "create_vault"
+            "create_vault",
+            "import_items"
         ]
     );
     assert_wire_labels!(OperationOutcomeStatus, ["applied", "rejected"]);

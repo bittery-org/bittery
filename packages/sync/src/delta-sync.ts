@@ -89,15 +89,23 @@ export async function performDeltaSync(
 
 	if (event.type === "operation_resolved") {
 		const { data: outcome } = await apiClient.operations.get(event.entityId);
-		if (outcome.kind === "create_share" || outcome.kind === "create_vault") {
-			return;
+		switch (outcome.kind) {
+			case "create_item":
+			case "update_item":
+			case "set_item_favorite":
+			case "trash_item":
+			case "restore_item":
+			case "move_item":
+			case "permanently_delete_item":
+				break;
+			default:
+				return;
 		}
 		if (outcome.result.status === "applied") {
 			await reconcileCurrentItem(outcome.result.itemId);
 		}
-		// The lookup answers one union tagged on `kind`. Only a create outcome reconciles a
-		// pending create; any other kind belongs to work this caller does not own, and the Item
-		// it names has already been refreshed above.
+		// Only a create outcome reconciles a pending create; the other Item kinds have already
+		// refreshed their authoritative Item above.
 		return outcome.kind === "create_item" ? outcome : undefined;
 	}
 

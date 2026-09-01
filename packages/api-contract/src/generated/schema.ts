@@ -2231,6 +2231,20 @@ export interface components {
             readonly contentType: string;
             readonly fileName: string;
         };
+        /** @enum {string} */
+        readonly ImportItemsOperationRejectionCode: "invalid_ciphertext" | "vault_access_denied" | "vault_read_only" | "item_id_conflict";
+        /** @description The closed retained answer for one Import batch. Runtime dispatch remains gated until Ticket 57. */
+        readonly ImportItemsOperationResult: {
+            /** Format: int32 */
+            readonly importedCount: number;
+            /** @enum {string} */
+            readonly status: "applied";
+            readonly vaultId: string;
+        } | {
+            readonly code: components["schemas"]["ImportItemsOperationRejectionCode"];
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
         readonly InvitationDetailsResponse: {
             readonly createdAt: string;
             readonly email: string;
@@ -2466,6 +2480,11 @@ export interface components {
             readonly kind: "create_vault";
             readonly operationId: string;
             readonly result: components["schemas"]["CreateVaultOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "import_items";
+            readonly operationId: string;
+            readonly result: components["schemas"]["ImportItemsOperationResult"];
         };
         /**
          * @description The Item-only rejection vocabulary. Its OpenAPI name stays stable because Client Runtime has

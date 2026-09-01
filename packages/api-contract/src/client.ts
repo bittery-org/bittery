@@ -797,6 +797,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				return { ...result, data: result.data };
 			case "create_share":
 			case "create_vault":
+			case "import_items":
 				throw new TypeError(
 					"An Item mutation returned a non-Item Operation outcome.",
 				);

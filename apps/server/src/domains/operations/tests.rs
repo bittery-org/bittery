@@ -115,6 +115,71 @@ fn create_vault_outcomes_serialize_the_exact_closed_wire_shape() {
     }
 }
 
+#[test]
+fn import_items_outcomes_serialize_the_exact_closed_wire_shape() {
+    use super::{ImportItemsOperationRejectionCode, ImportItemsOperationResult, OperationOutcome};
+    use serde_json::json;
+
+    for imported_count in [0, 200] {
+        let outcome = OperationOutcome::new_import_items(
+            "import-operation".into(),
+            ImportItemsOperationResult::Applied {
+                vault_id: "vault_1".into(),
+                imported_count,
+            },
+        );
+        let wire = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(
+            wire,
+            json!({
+                "kind": "import_items",
+                "operationId": "import-operation",
+                "result": {
+                    "status": "applied",
+                    "vaultId": "vault_1",
+                    "importedCount": imported_count
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<OperationOutcome>(wire).unwrap(),
+            outcome
+        );
+    }
+
+    for (code, wire) in [
+        (
+            ImportItemsOperationRejectionCode::InvalidCiphertext,
+            "invalid_ciphertext",
+        ),
+        (
+            ImportItemsOperationRejectionCode::VaultAccessDenied,
+            "vault_access_denied",
+        ),
+        (
+            ImportItemsOperationRejectionCode::VaultReadOnly,
+            "vault_read_only",
+        ),
+        (
+            ImportItemsOperationRejectionCode::ItemIdConflict,
+            "item_id_conflict",
+        ),
+    ] {
+        assert_eq!(
+            serde_json::to_value(OperationOutcome::new_import_items(
+                "import-operation".into(),
+                ImportItemsOperationResult::Rejected { code },
+            ))
+            .unwrap(),
+            json!({
+                "kind": "import_items",
+                "operationId": "import-operation",
+                "result": { "status": "rejected", "code": wire }
+            })
+        );
+    }
+}
+
 fn create(item_id: &str) -> ItemOperationEffect {
     ItemOperationEffect::Create(CreateItemEffectInput {
         item_id: item_id.into(),
@@ -281,7 +346,6 @@ async fn create_vault_applied_outcome_requires_the_exact_vault_id_payload() {
             "create-vault-outcome-shape@example.com",
         )
         .await;
-
         query(
             "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'valid-create-vault', 'create_vault', $2, 'applied', $3)",
         )
@@ -507,6 +571,181 @@ async fn create_vault_schema_rejects_malformed_cross_kind_and_unknown_rows_atomi
         .fetch_one(&app.pool)
         .await
         .expect("rollback probe should load");
+        assert_eq!(retained, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn import_items_persistence_lookup_and_rollback_are_closed() {
+    use crate::test_support::{authenticated_json_headers, seed_user, with_api_test_app};
+    use axum::http::Method;
+    use serde_json::{json, Value};
+    use sqlx::{query, query_scalar};
+
+    with_api_test_app("import_items_outcome_foundation", |app| async move {
+        let user_id = "import_items_outcome_user";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Import Items Outcome User",
+            "import-items-outcome@example.com",
+        )
+        .await;
+        let other_user_id = "import_items_outcome_other_user";
+        seed_user(
+            &app.pool,
+            other_user_id,
+            "Import Items Outcome Other User",
+            "import-items-outcome-other@example.com",
+        )
+        .await;
+
+        for (index, imported_count) in [0, 200].into_iter().enumerate() {
+            query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, $2, 'import_items', $3, 'applied', $4)")
+                .bind(user_id)
+                .bind(format!("applied-import-{index}"))
+                .bind(vec![index as u8; 32])
+                .bind(json!({ "vaultId": "vault_1", "importedCount": imported_count }))
+                .execute(&app.pool)
+                .await
+                .expect("the exact Import payload should be retained");
+        }
+        query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'applied-import-0', 'import_items', $2, 'applied', $3)")
+            .bind(other_user_id)
+            .bind(vec![8_u8; 32])
+            .bind(json!({ "vaultId": "vault_other", "importedCount": 17 }))
+            .execute(&app.pool)
+            .await
+            .expect("the same Operation ID remains scoped to the other User");
+        for (index, code) in [
+            "invalid_ciphertext",
+            "vault_access_denied",
+            "vault_read_only",
+            "item_id_conflict",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, 'import_items', $3, 'rejected', $4::operation_rejection_code)")
+                .bind(user_id)
+                .bind(format!("rejected-import-{index}"))
+                .bind(vec![(index + 2) as u8; 32])
+                .bind(code)
+                .execute(&app.pool)
+                .await
+                .expect("each closed Import rejection should be retained");
+        }
+
+        let session = app.issue_session(user_id).await;
+        for (operation_id, expected) in [
+            (
+                "applied-import-0",
+                json!({
+                    "kind": "import_items",
+                    "operationId": "applied-import-0",
+                    "result": { "status": "applied", "vaultId": "vault_1", "importedCount": 0 }
+                }),
+            ),
+            (
+                "rejected-import-2",
+                json!({
+                    "kind": "import_items",
+                    "operationId": "rejected-import-2",
+                    "result": { "status": "rejected", "code": "vault_read_only" }
+                }),
+            ),
+        ] {
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.body, expected);
+        }
+        let other_session = app.issue_session(other_user_id).await;
+        let other_response = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/applied-import-0",
+                None,
+                authenticated_json_headers(&other_session.token),
+            )
+            .await;
+        other_response.assert_contract_status();
+        assert_eq!(
+            other_response.body,
+            json!({
+                "kind": "import_items",
+                "operationId": "applied-import-0",
+                "result": { "status": "applied", "vaultId": "vault_other", "importedCount": 17 }
+            })
+        );
+
+        for (index, payload) in [
+            Value::Null,
+            json!({}),
+            json!({ "vaultId": "vault_1" }),
+            json!({ "vaultId": "vault_1", "importedCount": -1 }),
+            json!({ "vaultId": "vault_1", "importedCount": 1.5 }),
+            json!({ "vaultId": "vault_1", "importedCount": 201 }),
+            json!({ "vaultId": 1, "importedCount": 1 }),
+            json!({ "vaultId": "vault_1", "importedCount": 1, "extra": true }),
+            json!({ "itemId": "item_1", "version": 1 }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let result = query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, $2, 'import_items', $3, 'applied', $4)")
+                .bind(user_id)
+                .bind(format!("malformed-import-{index}"))
+                .bind(vec![(index + 9) as u8; 32])
+                .bind(payload)
+                .execute(&app.pool)
+                .await;
+            assert!(result.is_err(), "malformed Import payload {index} was retained");
+        }
+        for (operation_id, kind, code) in [
+            ("foreign-import-code", "import_items", "item_not_found"),
+            ("import-code-on-vault", "create_vault", "vault_access_denied"),
+            ("import-code-on-share", "create_share", "vault_access_denied"),
+        ] {
+            let result = query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, $3::operation_kind, $4, 'rejected', $5::operation_rejection_code)")
+                .bind(user_id)
+                .bind(operation_id)
+                .bind(kind)
+                .bind(vec![20_u8; 32])
+                .bind(code)
+                .execute(&app.pool)
+                .await;
+            assert!(result.is_err(), "cross-kind rejection {operation_id} was retained");
+        }
+
+        let mut transaction = app.pool.begin().await.expect("transaction should begin");
+        query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'rolled-back-import', 'import_items', $2, 'applied', $3)")
+            .bind(user_id)
+            .bind(vec![21_u8; 32])
+            .bind(json!({ "vaultId": "vault_1", "importedCount": 1 }))
+            .execute(&mut *transaction)
+            .await
+            .expect("valid row should enter the uncommitted transaction");
+        let invalid = query("INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'forces-import-rollback', 'import_items', $2, 'applied', $3)")
+            .bind(user_id)
+            .bind(vec![22_u8; 32])
+            .bind(json!({ "vaultId": "vault_1", "importedCount": 1, "foreign": true }))
+            .execute(&mut *transaction)
+            .await;
+        assert!(invalid.is_err());
+        transaction.rollback().await.expect("rollback should succeed");
+        let retained: i64 = query_scalar("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = 'rolled-back-import'")
+            .bind(user_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("rollback probe should load");
         assert_eq!(retained, 0);
     })
     .await;

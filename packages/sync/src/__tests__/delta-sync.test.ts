@@ -282,6 +282,45 @@ describe("performDeltaSync Item encryption context", () => {
 		expect(outcome).toBeUndefined();
 	});
 
+	it("does not project an applied Import outcome into Item sync", async () => {
+		const api = client();
+		const fetchedItems: unknown[] = [];
+		api.operations.get = async (operationId) =>
+			({
+				data: {
+					operationId,
+					kind: "import_items",
+					result: {
+						status: "applied",
+						vaultId: "vault_1",
+						importedCount: 2,
+					},
+				},
+			}) as never;
+		api.items.get = async (itemId) => {
+			fetchedItems.push(itemId);
+			return { data: serverItem() } as never;
+		};
+		const { cache, items, removedItems } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "import_operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(fetchedItems).toEqual([]);
+		expect(items).toEqual([]);
+		expect(removedItems).toEqual([]);
+		expect(outcome).toBeUndefined();
+	});
+
 	it.each([
 		"item_created",
 		"item_updated",

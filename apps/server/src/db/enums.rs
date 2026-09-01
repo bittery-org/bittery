@@ -517,6 +517,7 @@ pub enum OperationKind {
     PermanentlyDeleteItem,
     CreateShare,
     CreateVault,
+    ImportItems,
 }
 
 closed_enum!(OperationKind, "operation_kind", {
@@ -529,6 +530,7 @@ closed_enum!(OperationKind, "operation_kind", {
     PermanentlyDeleteItem => "permanently_delete_item",
     CreateShare => "create_share",
     CreateVault => "create_vault",
+    ImportItems => "import_items",
 });
 
 /// Whether a retained Operation applied its effect or proved a terminal rejection.

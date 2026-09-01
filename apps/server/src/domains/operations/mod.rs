@@ -54,6 +54,13 @@ pub(crate) struct CreateVaultAppliedPayload {
     pub(crate) vault_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ImportItemsAppliedPayload {
+    pub(crate) vault_id: String,
+    pub(crate) imported_count: i32,
+}
+
 /// Pins every fingerprint to this protocol, so bytes hashed under a later one can never collide.
 const OPERATION_DISCRIMINATOR: &[u8] = b"bittery.operation.v1";
 
@@ -309,6 +316,51 @@ pub(crate) enum CreateVaultOperationRejectionCode {
     SharedVaultLimitReached,
 }
 
+/// The closed retained answer for one Import batch. Runtime dispatch remains gated until Ticket 57.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(crate) enum ImportItemsOperationResult {
+    Applied {
+        #[serde(rename = "vaultId")]
+        vault_id: String,
+        #[serde(rename = "importedCount")]
+        #[schema(minimum = 0, maximum = 200)]
+        imported_count: i32,
+    },
+    Rejected {
+        code: ImportItemsOperationRejectionCode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ImportItemsOperationRejectionCode {
+    InvalidCiphertext,
+    VaultAccessDenied,
+    VaultReadOnly,
+    ItemIdConflict,
+}
+
+fn import_items_rejection_code(
+    code: OperationRejectionCode,
+) -> Result<ImportItemsOperationRejectionCode, AppError> {
+    Ok(match code {
+        OperationRejectionCode::InvalidCiphertext => {
+            ImportItemsOperationRejectionCode::InvalidCiphertext
+        }
+        OperationRejectionCode::VaultAccessDenied => {
+            ImportItemsOperationRejectionCode::VaultAccessDenied
+        }
+        OperationRejectionCode::VaultReadOnly => ImportItemsOperationRejectionCode::VaultReadOnly,
+        OperationRejectionCode::ItemIdConflict => ImportItemsOperationRejectionCode::ItemIdConflict,
+        _ => {
+            return Err(AppError::internal(
+                "Stored Import Operation has a foreign rejection",
+            ))
+        }
+    })
+}
+
 /// The one retained outcome shape, discriminated by Operation kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 // The field rename is spelled out per variant because the OpenAPI generator reads `rename`, not
@@ -360,6 +412,11 @@ pub(crate) enum OperationOutcome {
         operation_id: String,
         result: CreateVaultOperationResult,
     },
+    ImportItems {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: ImportItemsOperationResult,
+    },
 }
 
 impl OperationOutcome {
@@ -399,6 +456,9 @@ impl OperationOutcome {
             OperationKind::CreateVault => {
                 unreachable!("create-Vault outcomes use their Vault applied payload")
             }
+            OperationKind::ImportItems => {
+                unreachable!("Import outcomes use their batch applied payload")
+            }
         }
     }
 
@@ -417,6 +477,16 @@ impl OperationOutcome {
         result: CreateVaultOperationResult,
     ) -> Self {
         Self::CreateVault {
+            operation_id,
+            result,
+        }
+    }
+
+    pub(crate) fn new_import_items(
+        operation_id: String,
+        result: ImportItemsOperationResult,
+    ) -> Self {
+        Self::ImportItems {
             operation_id,
             result,
         }
@@ -538,6 +608,33 @@ fn outcome_from_row(
     operation_id: &str,
     row: StoredOutcomeRow,
 ) -> Result<OperationOutcome, AppError> {
+    if row.operation_kind == OperationKind::ImportItems {
+        let result =
+            match row.result_status {
+                OperationOutcomeStatus::Applied => {
+                    let payload = row.applied_payload.ok_or_else(|| {
+                        AppError::internal("Stored applied Import Operation has no payload")
+                    })?;
+                    let payload: ImportItemsAppliedPayload = serde_json::from_str(&payload)
+                        .map_err(|_| {
+                            AppError::internal("Stored Import Operation payload is invalid")
+                        })?;
+                    ImportItemsOperationResult::Applied {
+                        vault_id: payload.vault_id,
+                        imported_count: payload.imported_count,
+                    }
+                }
+                OperationOutcomeStatus::Rejected => ImportItemsOperationResult::Rejected {
+                    code: import_items_rejection_code(row.rejection_code.ok_or_else(|| {
+                        AppError::internal("Stored rejected Operation has no code")
+                    })?)?,
+                },
+            };
+        return Ok(OperationOutcome::new_import_items(
+            operation_id.to_owned(),
+            result,
+        ));
+    }
     if row.operation_kind == OperationKind::CreateVault {
         let result =
             match row.result_status {

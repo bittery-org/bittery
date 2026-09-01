@@ -40,6 +40,52 @@ fn the_operation_outcome_union_is_discriminated_by_kind() {
 }
 
 #[test]
+fn import_items_outcomes_parse_only_the_closed_generated_wire_shape() {
+    use bittery_client_core::server_contract::{
+        ImportItemsOperationRejectionCode, ImportItemsOperationResult,
+    };
+
+    let applied = json!({
+        "kind": "import_items",
+        "operationId": "operation-1",
+        "result": {"status": "applied", "vaultId": "vault-1", "importedCount": 0},
+    });
+    let outcome: OperationOutcome = serde_json::from_value(applied.clone()).unwrap();
+    assert!(matches!(
+        &outcome,
+        OperationOutcome::ImportItems {
+            result: ImportItemsOperationResult::Applied {
+                imported_count: 0,
+                ..
+            },
+            ..
+        }
+    ));
+    assert_eq!(serde_json::to_value(outcome).unwrap(), applied);
+
+    let rejected: ImportItemsOperationResult = serde_json::from_value(json!({
+        "status": "rejected",
+        "code": "item_id_conflict"
+    }))
+    .unwrap();
+    assert!(matches!(
+        rejected,
+        ImportItemsOperationResult::Rejected {
+            code: ImportItemsOperationRejectionCode::ItemIdConflict
+        }
+    ));
+
+    for malformed in [
+        json!({"kind": "import_items", "operationId": "operation-1", "result": {"status": "applied", "vaultId": "vault-1"}}),
+        json!({"kind": "import_items", "operationId": "operation-1", "result": {"status": "applied", "vaultId": "vault-1", "importedCount": 0, "extra": true}}),
+        json!({"kind": "import_items", "operationId": "operation-1", "result": {"status": "rejected", "code": "item_not_found"}}),
+        json!({"kind": "create_vault", "operationId": "operation-1", "result": {"status": "applied", "vaultId": "vault-1", "importedCount": 0}}),
+    ] {
+        assert!(serde_json::from_value::<OperationOutcome>(malformed).is_err());
+    }
+}
+
+#[test]
 fn all_caps_openapi_enums_keep_wire_spelling_without_invalid_rust_names() {
     let code: ErrorCode = serde_json::from_str("\"INTERNAL_ERROR\"").unwrap();
     assert!(matches!(code, ErrorCode::InternalError));

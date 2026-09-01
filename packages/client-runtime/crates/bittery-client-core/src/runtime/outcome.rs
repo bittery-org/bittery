@@ -20,6 +20,7 @@ use crate::{
         CreateShareOperationResult as WireCreateShareOperationResult,
         CreateVaultOperationRejectionCode as WireVaultRejectionCode,
         CreateVaultOperationResult as WireCreateVaultOperationResult,
+        ImportItemsOperationResult as WireImportItemsOperationResult,
         ItemOperationResult as WireItemOperationResult, OperationOutcome as WireOperationOutcome,
         OperationRejectionCode as WireOperationRejectionCode,
     },
@@ -1097,6 +1098,21 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
                 }
             };
             (operation_id, OperationKind::CreateVault, result)
+        }
+        // Ticket 55 makes the generated consumer aware of this closed Server outcome before the
+        // Runtime can durably accept an Import Operation. A parsable Import answer under an ID
+        // owned by any currently accepted kind is therefore identity reuse, never eligibility.
+        WireOperationOutcome::ImportItems { result, .. } => {
+            if matches!(
+                result,
+                WireImportItemsOperationResult::Applied {
+                    imported_count,
+                    ref vault_id,
+                } if !(0..=200).contains(&imported_count) || vault_id.is_empty()
+            ) {
+                return SemanticAnswer::Transient;
+            }
+            return SemanticAnswer::IdentityReused;
         }
     };
     if operation_id != operation.operation_id || operation.kind != expected_kind {
