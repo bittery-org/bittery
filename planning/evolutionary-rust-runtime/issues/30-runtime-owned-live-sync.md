@@ -3,51 +3,39 @@
 Type: task
 Status: ready-for-agent
 Blocked by: 28
-Spec: ../spec.md#first-slice-sync-feed
+Spec: ../spec.md#outcome-and-reconciliation
 
 ## Outcome
 
-The Runtime keeps an Account current on its own: it holds the Sync connection, wakes on a hint,
-fetches changes, applies authoritative entities, and advances the Cursor, for as long as the Account
-is unlocked. A second Device's change reaches the first without a user action.
+While an Account is unlocked, Runtime maintains Sync, reconnects after transport failure, fetches
+authority on hints, and advances the Cursor. Another Device's change arrives without user action.
 
-## Problem
+## Current gap
 
-Rust already owns every *part* of Sync. `runtime/bootstrap.rs` has `catch_up_changes`,
-`observe_sse_hint`, the pinned tagged watermark, the exact-Cursor advance, and `renew_session`.
-
-What it does not have is a loop. Both are called only from `run_bootstrap`, which runs once inside a
-Sign-in or Quick Unlock request and then returns. So the Runtime catches up exactly once per unlock
-and never again, and nothing is listening when the Server emits a hint afterwards.
-
-Ticket 22 deleted the transitional Web Sync loop, correctly: the specification forbids two active
-writers for one Account, and the Runtime is the writer now. The consequence is that the Web host
-currently has no live Sync at all. `apps/web/tests/e2e/sync.spec.ts` asserts live cross-device
-propagation and cannot pass until this ticket lands.
+`runtime/bootstrap.rs::run_bootstrap` hydrates and catches up once during Sign-in/Quick Unlock.
+It no longer opens SSE inside that request. There is no persistent live-Sync runner.
+The transitional Web Sync loop was removed by ticket 22; `tests/e2e/sync.spec.ts` remains the
+cross-device acceptance gate.
 
 ## Work
 
-- Add a long-lived Sync loop per unlocked Account, modelled on `Runtime::run_operation_dispatch`:
-  a plain future the host drives, waking on a `Notify` plus a delay, returning when the Runtime
-  closes. Do not spawn a runtime or import a scheduler; use the existing `device_timer` seam, which
-  exists because Tokio's timer panics on `wasm32-unknown-unknown`.
-- Hold the SSE connection for the Account's lifetime rather than for one request, and treat it as a
-  hint only, per ticket 07. A hint wakes a changes fetch; it never carries authority.
-- Reconnect with bounded backoff. A dropped connection is transient and must not fail the Account or
-  end any accepted Operation.
-- Keep the Cursor rules unchanged: fetch the authoritative entity outside storage, then atomically
-  apply the encrypted entity or tombstone and advance from the exact expected Cursor. Fetch or commit
-  failure leaves the Cursor unchanged. Stale Server versions cannot overwrite newer ciphertext.
-- Stop cleanly on Lock, Sign-out, and Runtime close, releasing the connection and destroying nothing
-  durable. A parked Account holds no connection and no timer.
-- Interact correctly with dispatch: an `operation_resolved` event that arrives over Sync must reach
-  the same reconciliation path `runtime/outcome.rs` already owns, not a second one.
-- Spawn the loop from the Web binding beside the existing dispatch and observation drains.
+- Add one driven, long-lived Sync future per unlocked Account using the existing timer/wakeup seam
+  and lifecycle ownership. Browser WASM cannot use Tokio's timer; do not introduce host retry policy.
+- Hold SSE only while the Account is eligible. Treat events as wakeups, fetch changes independently,
+  and reconnect with bounded backoff. Disconnects preserve accepted Operations and do not fail the
+  Account.
+- Reuse the Account execution fence and central Session renewal/reconciliation. A long-held SSE read
+  must not hold the fence or block Sign-in, mutations, or teardown.
+- Apply all events in a page before the exact guarded `AdvanceSyncPageCursor` commit. Fetch/commit
+  failure leaves the Cursor unchanged; replay cannot overwrite newer authority.
+- Route `operation_resolved` through existing exact replay/outcome reconciliation.
+- Lock, Sign-out, Remove, Wipe, Account failure, and Runtime close release connections/timers and
+  fence late callbacks. The Sync runner itself deletes no durable work.
+- Wire the Web binding's runner beside dispatch/observation drains; other hosts reuse that behavior.
 
 ## Verification
 
-A change committed by a second Device reaches the first with no user action and no request in flight.
-A dropped SSE connection reconnects with backoff and loses no change. A hint that arrives during a
-commit does not reorder or skip a Cursor. Lock, Sign-out, and close release the connection and leave
-durable state intact. `apps/web/tests/e2e/sync.spec.ts` passes. `pnpm check:ci` and
-`pnpm check:ci:rust` pass.
+Real second-Device changes arrive while no request is in flight. Held SSE does not block Sign-in or
+mutations; dropped connections reconnect without skipped events. Hints during commits, expired
+Cursors, Session renewal, repeated failures, Account isolation, and teardown races preserve page
+atomicity and durable work. Run focused Runtime tests, the Web Sync E2E, and both full CI gates.

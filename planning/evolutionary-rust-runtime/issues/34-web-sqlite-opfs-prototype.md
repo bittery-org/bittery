@@ -33,4 +33,4 @@ the first-slice acceptance path?
 
 The verdict names the supported browser/deployment matrix, VFS, concurrency/owner model, durability
 and corruption behavior, measured costs, and every failed gate. Production replacement remains
-blocked on a later German maintainer decision. Success here does not authorize Extension adoption.
+blocked on the deployment decision in ticket 39. Success here does not authorize Extension adoption.

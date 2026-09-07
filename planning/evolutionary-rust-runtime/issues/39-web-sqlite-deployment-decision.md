@@ -7,13 +7,12 @@ Research: ../sqlite-everywhere-research-2026-08-24.md
 
 ## Question
 
-After the prototype, should supported Web deployments replace IndexedDB with SQLite WASM over the
-proved OPFS VFS, accepting its measured browser floor, multi-tab behavior, artifact cost, and any
-COOP/COEP effects?
+After [ticket 34](34-web-sqlite-opfs-prototype.md), should supported Web deployments replace IndexedDB
+with SQLite/OPFS, accepting its measured browser floor, concurrency, artifact cost, and header effects?
 
-## Recommendation
+## Decision criteria
 
-Retain IndexedDB unless the prototype passes the exact shared corpus and browser acceptance path,
-supports two tabs without a second authority, and proves the real Safari/iOS deployment matrix.
-Conduct the decision in German and record the supported browsers, VFS, headers, and rollback boundary
-in English before any implementation ticket becomes ready.
+Retain IndexedDB unless the candidate passes the exact shared corpus and browser acceptance,
+proves two-tab ownership, and supports the real Safari/iOS deployment matrix.
+Record the selected VFS, browsers, headers, migration/reset choice, and rollback boundary.
+Only an explicit SQLite decision makes ticket 40 eligible; a successful prototype alone does not.

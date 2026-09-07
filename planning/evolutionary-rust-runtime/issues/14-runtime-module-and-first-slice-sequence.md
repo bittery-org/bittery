@@ -6,18 +6,7 @@ Blocked by: 01, 03, 06, 11, 12, 13
 
 ## Question
 
-Derive the module boundary and smallest dependency-ordered implementation sequence that proves the
-first Web slice without putting new Runtime behavior into the crypto core or the transitional
-TypeScript core.
-
-## Evidence
-
-- `bittery-crypto-core` already holds the compatible cryptographic implementation and has WASM and
-  native binding pipelines.
-- Current Client behavior is split among TypeScript core, storage, Sync, and application providers.
-- ADR 0012 requires generated cross-language definitions instead of hand-restated types.
-- Web can cut over one composition root while Desktop and Extension still temporarily compile against
-  transitional TypeScript packages.
+Where does Client Runtime live, and what is the first verified implementation sequence?
 
 ## Answer
 

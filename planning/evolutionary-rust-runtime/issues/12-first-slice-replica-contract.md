@@ -6,17 +6,7 @@ Blocked by: 04, 07, 08, 09, 10, 11
 
 ## Question
 
-Derive the smallest logical Account Replica schema and guarded commits that can prove the first Web
-slice on IndexedDB and later execute unchanged inside native Rust SQLite.
-
-## Evidence
-
-- The current Item cache, queue document, Account store, optimistic projection, and Sync cursor have
-  separate persistence authorities.
-- Current full Bootstrap already stages invisible generations and atomically promotes a complete one.
-- Current Item creation chooses the final Item ID before encryption and sends it through
-  `PUT /vaults/{vaultId}/items/{itemId}`. Ciphertext AAD binds that ID and revision.
-- Existing cached Item records contain ciphertext, while decrypted Item data lives in memory.
+Which Account-scoped records and guarded commits prove the first slice across both storage engines?
 
 ## Answer
 
@@ -35,12 +25,13 @@ An offline create uses its client-created Item ID as the canonical Server ID. `A
 atomically inserts immutable request bytes plus fingerprint, the pending Operation, and its encrypted
 optimistic overlay, then returns `Accepted`. Retry leases suppress duplicate work but do not provide
 correctness. Applied reconciliation atomically writes authoritative ciphertext, removes the overlay
-and active Operation, inserts the compact receipt, and advances a matching Cursor when applicable.
+and active Operation, inserts the compact receipt, and leaves Sync page advancement to the guarded
+page commit after all events reconcile (see [ticket 28](28-remaining-item-write-kinds.md#item-operations)).
 
 Bootstrap pages remain invisible until one promotion plan swaps the active generation and tagged
 watermark. A change Cursor advances only with every authoritative effect it covers. Account
 incarnation rejects late work after remove-and-readd; lock epoch rejects decrypted projections built
 across a lock. Account removal deletes the local Replica but does not claim to cancel a Server effect.
 
-The specification must include one adapter-conformance suite with failure injection, restart,
-replay, stale-guard, lock race, Account-removal race, and IndexedDB/SQLite state-equivalence cases.
+[Ticket 31](31-shared-replica-adapter-conformance.md) delivered the shared conformance suite for
+failure, restart, replay, stale guards, lock/removal races, and IndexedDB/SQLite equivalence.

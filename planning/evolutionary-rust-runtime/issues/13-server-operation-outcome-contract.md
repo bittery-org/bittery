@@ -6,17 +6,7 @@ Blocked by: 05, 06, 07, 09, 10
 
 ## Question
 
-Derive the in-place Server contract that gives a retried create-Item Operation one durable semantic
-outcome committed atomically with its Domain effect or proved non-effect.
-
-## Evidence
-
-- Current HTTP idempotency commits a claim before the Domain call and stores response bytes after it.
-  A committed Item can therefore exist without a durable result.
-- Current completed records expire after 24 hours and stale claims become indeterminate.
-- Current create-Item Domain code already commits Item, audit, and Item Sync event together, but its
-  access checks occur before that transaction.
-- The existing Item route already accepts `Idempotency-Key` and a client-chosen final Item ID.
+How does the Server commit and retain one semantic result atomically with the Domain decision?
 
 ## Answer
 

@@ -6,21 +6,7 @@ Blocked by: 05, 09
 
 ## Question
 
-Choose whether a user may discard an accepted Operation whose Server outcome is still unknown.
-Acceptance means the immutable request and optimistic effect are durable, and the Server may already
-have committed the effect even when the response was lost.
-
-Decide whether the first Runtime offers no per-Operation discard, offers a local-only discard with an
-explicit ambiguity warning, or adds a Server cancellation protocol that races with execution.
-
-## Evidence
-
-- Removing the local Operation cannot undo an effect the Server may already have committed.
-- A cancellation request needs its own atomic ordering against the original Operation and still
-  cannot promise cancellation after the original outcome exists.
-- Account removal is a broader intentional local-data action and does not need to masquerade as
-  cancellation of an individual Server mutation.
-- The first slice has no product requirement for abandoning one accepted Login-Item creation.
+May the first Runtime discard one accepted Operation whose Server outcome is unknown?
 
 ## Answer
 

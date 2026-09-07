@@ -30,7 +30,6 @@ or rollout order.
 - Delivery order is existing Server/Web/Desktop/Extension, Android Compose, then iOS SwiftUI.
 - The external Rust runtime seam is designed once for all hosts. Platform adapters may differ; Domain
   and Sync behavior may not be reimplemented per host.
-- Decisions are asked in German. Resulting repository artifacts are written in English.
 
 ### Greenfield disposition
 
@@ -103,67 +102,57 @@ or rollout order.
 - [Empty Vault Bootstrap authority](issues/35-empty-vault-bootstrap.md): keep one bounded Bootstrap
   feed, but make it explicitly two-phase: cursor-paginated standalone Vault summaries and wrapped
   keys first, then cursor-paginated Items under the same pinned watermark and promotion boundary.
-- [Final Web Item and Import frontier](issues/28-remaining-item-write-kinds.md#2026-08-30--final-web-item-and-import-frontier-resolved):
-  pause the host-only cutover until the shared Runtime models every Item category, owns Vault
-  creation as a durable `create_vault` Operation, and owns each existing 200-Item import batch
-  as one durable `import_items` Operation. Both Server routes gain closed retained outcomes only at
-  atomic Runtime/Web cutovers; an empty import remains an applied zero-item no-op. The Web import
-  hook remains presentation and provider orchestration only. Before an image-bearing Vault Operation
-  is accepted, Runtime copies the bounded opaque host source into a distinct Account/Operation-bound
-  durable plaintext artifact; accepted work never depends on a host capability. The shared source
-  facade preserves the Attachment registry's exact Runtime-incarnation/Account/Operation/request
-  binding, inclusive bounded state and tombstones, replay/expiry behavior, reconstructable cleanup,
-  and retirement fencing. Allowed image types are exactly JPEG, PNG, WebP, GIF, and AVIF. Runtime
-  promises zeroization only for buffers it owns or receives, not an original host source or physical
-  media overwrite. After acceptance, Runtime alone resumes deterministic remote staging under a
-  rolling 24-hour lease renewed by exact status/grant/confirmation. Each User is limited to 64
-  outstanding bindings and 128 MiB total; exact replay consumes no additional quota. Runtime then
-  freezes the final Vault request, reconciles its retained outcome, and drives idempotent local/remote
-  orphan cleanup. The Attachment ciphertext artifact store is not this plaintext-image port.
-  Incompatible Desktop and Mobile create affordances stay explicitly absent until their later Runtime
-  host slices; no `apps/web` hook or transitional writer becomes the reusable interface. Delivery is
-  dependency-ordered as [tickets 49 through 58](issues/49-five-category-runtime-item-interface.md),
-  with executable whole-repository caller-reachability gates in both atomic cutovers.
+- [Final Web Item and Import frontier](issues/28-remaining-item-write-kinds.md#final-web-item-and-import-frontier):
+  the shared Runtime owns all five Item categories, durable Vault creation, bounded durable image
+  ingress/staging, and one durable Operation per Import batch. Tickets 49–56 delivered the
+  foundations and create-Vault cutover. Tickets 57–58 finish Import and Web consumers; both cutovers
+  require executable whole-repository caller graphs.
+- [Account removal, Wipe, and Server deletion](issues/48-runtime-account-removal-and-wipe.md):
+  Runtime owns explicit local teardown and authenticated deletion transport. Web retains the
+  confirmed Server-first deletion gesture and its durable exact-retry marker. Local incomplete
+  teardown cannot report success or infer another Account.
 
-## Not yet specified
+## Current delivery state
 
-- First Web slice implementation is specified in [the accepted specification](spec.md) and queued in
-  [tickets 15 through 23](issues/15-binding-compile-spike.md), with the host binding
-  architecture split out into [tickets 25 through 27](issues/25-runtime-protocol-contract.md).
-  The remaining Item write kinds follow under the claimed
-  [ticket 28](issues/28-remaining-item-write-kinds.md) umbrella; its final frontier is split into
-  dependency-ordered [tickets 49 through 58](issues/49-five-category-runtime-item-interface.md),
-  after which ticket 28 ends the Web cutover. Its C4 review
-  split the committed shared-Attachment uploader-AAD correction into
-  [ticket 43](issues/43-attachment-move-uploader-aad.md); its first clean-tree gate recorded earlier
-  integration drift in [ticket 44](issues/44-ticket-43-ci-gate-drift.md), and the Import batch slice
-  recorded pre-existing conformance generator nondeterminism in
-  [ticket 59](issues/59-bootstrap-write-order-nondeterminism.md).
-- The eleven remaining response-cache call sites are inventoried in
-  [ticket 24](issues/24-remaining-server-operation-outcomes.md), now resolved and narrowed to the six
-  Item routes, and [ticket 29](issues/29-rotation-operation-outcomes.md) for the five Rotation
-  routes. Lookup answers one outcome union tagged on `kind`; rejections share a common core and add
-  only genuinely new per-kind failures. Old idempotency cleanup is gated on an executable
-  zero-call-site inventory in ticket 29.
-- Live Sync ownership is [ticket 30](issues/30-runtime-owned-live-sync.md). Rust owns every part of
-  Sync, but catch-up and the SSE hint run only inside a Sign-in or Quick Unlock, so the Web host has
-  no live Sync between unlocks.
-- Browser SQLite remains optional future work. [Ticket 34](issues/34-web-sqlite-opfs-prototype.md)
-  compares the official SQLite WASM and Rust-compiled SQLite shapes in the existing Web Runtime
-  Worker after the current Web acceptance work. Extension placement remains a separate frontier:
-  Chrome MV3 needs an offscreen document plus a dedicated Worker, while Firefox/Safari use different
-  background ownership models; a successful Web prototype does not decide it.
-- Physical Replica evolution is tracked separately in
-  [ticket 38](issues/38-replica-persistence-evolution.md): logical histories stay shared, while
-  additive IndexedDB upgrades and versioned native SQLite migrations remain engine-specific. The
-  optional browser-SQLite path then proceeds through the Web deployment decision, conditional
-  implementation, Extension placement decision, and recovery work in
-  [tickets 39 through 42](issues/39-web-sqlite-deployment-decision.md).
-  [Ticket 59](issues/59-bootstrap-write-order-nondeterminism.md) asks whether ticket 38 also owns the
-  prepared-write ordering promise its fix would add to the shared persistence contract.
-- Extension and Desktop host integration after the specified Web cutover.
-- Android extraction and native host responsibilities, followed by iOS host responsibilities.
-- Slice gates, deletion of replaced TypeScript paths, and final cross-host conformance criteria.
+Reviewed against committed source at `87386201` on 2026-09-07. Historical handoffs describe earlier
+sessions; current tickets govern remaining work. This documentation review did not rerun product CI.
+
+- First Web acceptance and its blockers (15–27, 31–32, 35–37) are resolved under the
+  [first-slice specification](spec.md). Attachment/lifecycle corrections (43–48) and the final
+  category/Vault/Import foundations (49–56) are resolved.
+- [57 — Import cutover](issues/57-import-atomic-cutover.md) is ready and unblocked. The Server half
+  is committed, but Runtime dispatch is gated, the Operations projection is absent, the Web hook
+  still calls the legacy importer, and the Import caller graph/acceptance are unfinished.
+- [58 — final Web host cutover](issues/58-final-web-host-cutover.md) follows 57. Its partial host
+  work is already committed; it still owes consumer review and complete ownership/browser/CI gates.
+  [28](issues/28-remaining-item-write-kinds.md) stays open until those gates pass.
+- [29 — Rotation outcomes](issues/29-rotation-operation-outcomes.md) is `needs-info`: retained
+  applied payloads and per-kind rejection sets still need a decision. Five response-cache call
+  sites remain. Cleanup must preserve ticket 48's separate Account-deletion replay protocol.
+- [30 — live Sync](issues/30-runtime-owned-live-sync.md) follows 28. Bootstrap catches up once;
+  long-lived SSE, reconnect, and automatic cross-device propagation remain undelivered.
+- [38 — persistence evolution](issues/38-replica-persistence-evolution.md) remains `needs-info`.
+  The additive IndexedDB v6-to-v7 upgrade is already delivered; blocked/versionchange behavior and
+  versioned native SQLite migrations remain.
+- [59 — conformance reproducibility](issues/59-bootstrap-write-order-nondeterminism.md) remains
+  `needs-info` for the contract-versus-generator ordering decision. Shared Import histories still
+  avoid multi-Item prepared writes.
+
+## Remaining frontiers
+
+- Optional browser SQLite: [34 — prototype](issues/34-web-sqlite-opfs-prototype.md) follows 30/32,
+  then [39 — deployment decision](issues/39-web-sqlite-deployment-decision.md) and
+  [40 — conditional implementation](issues/40-conditional-web-sqlite-implementation.md).
+  [41 — Extension placement](issues/41-extension-runtime-placement-decision.md) remains a separate
+  decision, and [42 — recovery/export](issues/42-browser-replica-recovery.md) applies to the selected
+  engines. Successful Web OPFS evidence does not authorize Extension adoption.
+- Desktop, then Extension production host integration after Web; Android Compose follows, then
+  iOS SwiftUI. Native application linking and capability adapters remain host acceptance work.
+- Vault update/delete/type conversion still use transitional ownership and need a separate frontier;
+  Vault creation is already delivered. Other product paths outside the first-slice specification
+  must be inventoried before claiming complete application migration.
+- Final cross-host conformance and deletion of shared transitional modules after their last caller
+  migrates.
 
 ## Out of scope
 

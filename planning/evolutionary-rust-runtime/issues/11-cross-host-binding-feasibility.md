@@ -6,23 +6,7 @@ Blocked by: 02, 03, 04, 06
 
 ## Question
 
-Determine whether the closed typed `request`/`observe`/`close` Runtime seam can project through the
-existing Web Worker/WASM toolchain and later generated Kotlin and Swift bindings without moving
-Domain, authentication, Sync, or Replica policy into a host.
-
-## Evidence
-
-- Web `KeyRef` values belong to the one Worker/port instance that created them; a second Runtime
-  Worker cannot consume them. The existing process-wide crypto Worker is therefore the Runtime host.
-- The existing version-pinned UniFFI pipeline already generates async Kotlin calls, object lifetime
-  handling, callbacks, and native libraries for the crypto API.
-- The existing Tauri Android and Apple projects are WebView scaffolding rather than suitable native
-  Compose or SwiftUI application foundations.
-- Android already contains useful Keystore, biometric, credential-provider, and Room transaction
-  evidence, but those modules currently contain policy that must move behind the Runtime seam.
-- The repository has no production Swift binding pipeline yet. Generated Swift async cancellation
-  does not reliably cancel the underlying Rust future, which agrees with the rule that caller
-  cancellation cannot retract accepted durable work.
+Can the shared closed Runtime protocol cross Web/WASM and native bindings without host policy?
 
 ## Answer
 
@@ -42,26 +26,5 @@ supplies an application-owned database location. Web alone implements the same c
 plans over IndexedDB. Hosts supply primitive HTTP/SSE, secure storage, biometric, lifecycle, and
 platform-feature adapters.
 
-Before production binding work expands beyond `RuntimeStatus`, one compile spike must prove the pinned
-toolchain can generate and execute:
-
-1. data-carrying closed request, response, and projection variants;
-2. an async host callback invoked from Rust;
-3. an observation callback closed exactly once;
-4. caller cancellation after durable acceptance without cancellation of Runtime-owned work;
-5. one WebAssembly artifact containing the Runtime API and existing crypto implementation; and
-6. headless native Runtime creation independent from an Activity or SwiftUI scene.
-
-Failure of that spike reopens only the binding mechanism, not Runtime ownership or Domain boundaries.
-
-## Source paths
-
-- `packages/crypto/port/src/key-ref.ts`
-- `packages/crypto/port/src/adapters/wasm-worker.ts`
-- `packages/crypto/port/src/wasm.worker.ts`
-- `packages/crypto/core/crates/bittery-crypto-api`
-- `packages/crypto/core/build-android.sh`
-- `packages/crypto/android/generated`
-- `apps/mobile/src-tauri/plugins/credential-provider/android`
-- `apps/mobile/src-tauri/plugins/keystore/android`
-- `apps/mobile/src-tauri/gen/apple`
+[Ticket 15](15-binding-compile-spike.md) completed the binding spike: native uses UniFFI,
+Web uses an explicit wasm-bindgen adapter. Native application link tests remain host-slice work.

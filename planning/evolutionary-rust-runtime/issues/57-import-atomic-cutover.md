@@ -3,120 +3,73 @@
 Type: task
 Status: ready-for-agent
 Blocked by: 56
-Parent: [28 — finalized E1–E10 frontier](28-remaining-item-write-kinds.md#2026-08-30--final-web-item-and-import-frontier-resolved)
+Parent: [28 — finalized E1–E10 frontier](28-remaining-item-write-kinds.md#final-web-item-and-import-frontier)
 
 ## Outcome
 
-The existing Import route and Web Import workflow switch atomically to durable Runtime
-`import_items`; provider presentation remains, but no transitional Import read, crypto, HTTP writer,
-cache repair, or second owner is reachable anywhere in the repository.
+Complete the Import cutover so Server, Runtime dispatch, and Web share one durable `import_items`
+contract. The Web hook retains provider presentation only; no transitional Import owner is reachable.
 
-## Work
+## Current state
 
-- Replace the existing Import handler in place with the Operation executor. Require
-  `Idempotency-Key`; fingerprint the canonical Vault path and exact ordered body; and atomically
-  commit the complete Item set, bulk audit and `vault_updated` when nonempty, retained outcome, and
-  `operation_resolved`. Empty applied batches emit only outcome and `operation_resolved`.
-- Open Ticket 56's production Runtime dispatch and exact recovery path. Do not retain a parallel
-  route, legacy response, or compatibility writer.
-- Reduce `apps/web/src/hooks/use-vault-import.ts` to file/provider parsing, localized preview,
-  mapping, progress, warnings, summaries, and calls to the shared Runtime client. Preserve
-  empty-Source-Vault filtering, existing/new Vault and multi-Account mapping, 200-Item batching,
-  earlier-batch success after a later rejection, failed-Vault summaries, and final counts.
-- Remove all reachable transitional key/storage reads, TypeScript encryption, direct HTTP,
-  invalidation, cache refresh, and repair code used by Import.
-- Add an executable whole-repository entry graph rooted at every Web, Desktop, Mobile, Extension,
-  and shared-package production entry. In the same commit it must fail on any legacy Import read or
-  writer reached through static, re-exported, lazy/dynamic, CommonJS, or side-effect edges.
+Commit `87386201` delivered the Server Operation executor, paged Item authority route, generated
+contracts, and Runtime acceptance byte bound. Its title overstates completion:
 
-## Path ownership and failure domain
+- `runtime/dispatch.rs` still skips `OperationKind::ImportItems`; the executor has no production port.
+- `RuntimeProjection` has no Operations variant.
+- `apps/web/src/hooks/use-vault-import.ts` still encrypts in TypeScript, calls the old importer shape,
+  and uses the parking store. It is incompatible with the changed Server/API contract.
+- The whole-repository Import gate is absent and seven provider round-trip E2Es remain skipped.
 
-This slice owns the Server Import handler/transaction and public OpenAPI generation, production
-Runtime transport/composition, Web Import hook/dialog integration, exact retired transitional Import
-paths, and the whole-repo reachability gate. It owns atomic batch/route compatibility, presentation-
-to-Runtime mapping, progress/summary, and cutover failures. It does not change provider parsing
-semantics, create-Vault behavior delivered by Ticket 54, unrelated Item mutations, or native host
-Runtime integration.
+The old handoff's “uncommitted Server work / preserved dirty ticket 58 files” condition ended with
+that commit. Resume from current source; a clean root CI or complete slice is not established here.
+
+## Accepted decisions
+
+- Use `POST /api/v1/vaults/{vaultId}/item-authority-pages` for the accepted identity set. Each page
+  is exactly `Vec<ItemResponseDto>`; `Bittery-Next-Cursor` carries continuation bound to the sorted,
+  deduplicated identity-set digest. Avoid 200 sequential single-Item fetches or host-reserialized
+  list responses.
+- Add one Account-scoped Operations projection for every accepted Operation: identity, kind,
+  attempt count, next attempt time, and resolution state. It contains no plaintext.
+  [Ticket 56](56-runtime-import-batch.md#progress) defines the Operation as the only progress record.
+- Remove `runtime-import-parking.ts` and `runtime-import-lifecycle.ts` completely. Durable Operations
+  and their projection replace the second owner of in-flight Import.
+- Preserve exact ordered fingerprinting, all-or-nothing batches of at most 200, and applied empty
+  zero. Empty success emits only outcome and `operation_resolved`; nonempty success also commits
+  Items, one bulk audit, and `vault_updated`.
+- Acceptance bounds exact serialized encrypted JSON to 15 MiB, below Server and aggregate authority
+  limits of 16 MiB. The existing tests pin envelope/page headroom. Plaintext length or item count
+  alone cannot determine whether an encrypted batch fits.
+
+## Remaining work
+
+1. Revalidate the landed Server half and its generated consumers. Preserve retained rejection,
+   exact replay, transaction atomicity, paginated authority, and acceptance-byte tests.
+2. Implement the production `ImportExecutorPort` and open dispatch. Reuse central Session renewal,
+   Account fencing, persisted backoff, and exact replay. Contradictory authority must not spin:
+   align with the existing create-Vault invariant-failure policy while preserving accepted bytes.
+   Distinguish fenced/missing commits from an actually scheduled retry.
+3. Generate and bind the Operations projection across Rust, Web, Kotlin, Swift, observation registry,
+   client facade/testing transport, and the shallow React hook.
+4. Replace the Web importer with Runtime calls plus parsing/preview/mapping/progress/warnings/
+   summaries. Preserve existing/new Vault and multi-Account mapping, empty-Source-Vault filtering,
+   all categories/favorites, earlier-batch success after later rejection, and exact final counts.
+   Handle byte-limit refusal before acceptance without losing an oversized Item's valid siblings.
+   Keep encrypted-size policy in Runtime/shared interface, not new host encryption.
+5. Remove parking and transitional Import key/storage/crypto/HTTP/cache-repair paths. Add a sibling
+   whole-repository gate over `buildRepositoryImportGraph()`, rooted at all app/shared production
+   entries and following re-export, dynamic, CommonJS, and side-effect edges.
+6. Replace parking coverage with projection coverage and restore the seven provider round-trip E2Es.
+   Finish and verify the joined Server/Runtime/Web behavior before resolving this ticket.
 
 ## Verification
 
-- Start with failing Server and actual-browser acceptance for every category and a favorite in both
-  newly created and existing Vaults, multi-Account mapping, empty zero, 200/201 bounds, response
-  loss, exact replay, every rejection, and a later-batch rejection that preserves earlier counts.
-- Prove no audit/`vault_updated` on empty, one atomic nonempty transaction, authoritative exact Item
-  reconciliation, warnings and summaries unchanged, and caller cancellation cannot discard an
-  accepted batch.
-- Run the whole-repository entry gate, focused Server/Web/browser tests, OpenAPI/generator and
-  affected type checks, `pnpm check:ci`, `pnpm check:ci:rust`, and `git diff --check`.
+Cover all five categories plus favorite in new/existing Vaults, multi-Account mapping, empty zero,
+200/201 and encrypted-byte limits, exact/changed replay, response loss, every retained rejection,
+caller cancellation, and a later-batch failure preserving prior success. No pending/rejected batch
+renders as imported; authoritative contradiction and fenced commits cannot spin.
 
-## Comments
-
-### 2026-09-01 — ready for agent
-
-Ticket 56 is resolved in commit `5dbbeec8cb806a56c83b053f34445966486ccbb4` with independent final
-standards and specification approval. It was this ticket's sole declared dependency, and the parent
-Ticket 28 E7–E10 frontier is decision-complete. The existing `ready-for-agent` status is therefore
-fully unblocked: this slice may open production Import dispatch, replace the Server Import handler in
-place, and cut the Web Import workflow over to the shared Runtime client.
-
-One working condition carries over. The worktree still holds the preserved uncommitted Ticket 58 Web
-aggregate described in the [2026-09-01 handoff](../handoff-2026-09-01.md), so root `pnpm check:ci` is
-expected to stop at that Biome and type-check overlap until Ticket 58 reconciles it. Keep those bytes
-unchanged and report the gate honestly instead of claiming a clean root CI pass.
-
-### 2026-09-01 — handovers from Ticket 56
-
-Ticket 56 left three decisions to whoever wires `runtime/import_executor.rs` into production
-dispatch:
-
-- **Repeated authority contradiction has no scheduling answer yet.** A failed `validate_authority`
-  or a changed `importedCount` currently returns `Err(InvariantViolation)` without advancing the
-  durable backoff. Once the executor runs inside the production scheduling loop, an authority that
-  keeps contradicting the retained outcome can spin. Decide how that case is scheduled — parked,
-  backed off, or surfaced as a terminal local failure — before opening the gate.
-- **`ImportExecutorPass::RetryScheduled` is misnamed at one edge.** The executor also returns it for
-  fenced or missing guarded commits, where nothing was scheduled at all. Revisit the name, or split
-  the variant, while wiring; do not build host behavior on the current spelling.
-- **The host-observable progress surface does not exist.** `RuntimeProjection` has no Operation
-  variant, so a host cannot observe an in-flight Import batch today. Ticket 56's progress effect is
-  the Operation itself, as recorded in
-  [its interpretation comment](56-runtime-import-batch.md#2026-09-01--interpretation-the-local-progress-effect).
-  This ticket must therefore deliver that projection, not merely style an existing one.
-
-### 2026-09-01 — frontier resolved before implementation
-
-Three questions blocked the slice. Ticket 56 named two of them; scoping this ticket found the third.
-The maintainer decided all three. Each answer is now binding for this slice.
-
-**The authority fetch needs a Server route that does not exist yet.** `ImportExecutorPort::fetch_items`
-expects a body that decodes as `Vec<ItemResponseDto>` under `deny_unknown_fields`, with a cursor. Today
-the repository has only `GET /items/{itemId}` (one Item) and `GET /vaults/{vaultId}/items`, which
-returns `CursorPage<VaultItemDetailsResponse>` — the same Item fields plus `attachments`, so it cannot
-decode. Decision: **this slice adds a paged bulk authority read route** that returns exactly
-`Vec<ItemResponseDto>` for the accepted Item identities, and the production port calls it once per
-page. The rejected alternatives were 200 sequential single-Item fetches, which would hold the Account
-execution lock for minutes and stall every other Operation on that Account, and re-serializing the
-existing list route client-side, which would make `raw_response_body` client-authored bytes and read
-the whole Vault instead of the accepted batch. This ticket already owns public OpenAPI generation, so
-the route regenerates `openapi.v1.json`, `@bittery/api-contract`, the Runtime server contract, and the
-route/operation count assertions.
-
-**The Operation projection is cut broad, not Import-shaped.** Decision: add one **Account-scoped
-Operations projection** covering every accepted Operation — kind, Operation identity, attempt count,
-next attempt time, and resolution state — rather than a variant that only describes an in-flight
-Import batch. One cross-language surface then serves Ticket 58 and every later host instead of
-forcing a second variant or a rename. It carries no plaintext: Ticket 56's interpretation forbids
-showing an imported Item before authority confirms it, so this projection describes accepted work,
-never Item content.
-
-**The parking store is retired in full.** `apps/web/src/hooks/runtime-import-parking.ts` and
-`apps/web/src/lib/runtime-import-lifecycle.ts` are removed, not reduced. The durable Operation plus
-the new projection become the single owner of "an Import is in flight". Leaving decrypted drafts in a
-module singleton would keep a second, independently stale owner reachable, which is exactly what this
-ticket forbids. The seven Chromium parking tests, the two AST wiring tests, and the active e2e test
-at `import-export.spec.ts:309` are replaced by coverage of the projection.
-
-**One derived scoping answer needs no maintainer.** The whole-repository Import gate is a **new
-sibling script**, not an edit to `apps/web/scripts/transitional-reachability.ts`. That file and its
-test are preserved uncommitted Ticket 58 work, and `create-vault-reachability.test.ts` is the existing
-precedent for a separate gate over `buildRepositoryImportGraph()`.
+Run focused Server/Runtime/Web and real-browser acceptance, all caller graphs, generated/OpenAPI
+and dependent type checks, `pnpm check:ci`, `pnpm check:ci:rust`, and `git diff --check`.
+Historical handoff failures are evidence to recheck, not permission to skip these gates.

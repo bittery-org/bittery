@@ -6,21 +6,7 @@ Blocked by: 04
 
 ## Question
 
-Choose how long the Server retains the semantic result of an accepted client Operation. The result is
-stored in the same transaction as the Domain mutation, audit row, and Sync event, so a retry can prove
-what happened after a lost response or long offline period.
-
-Decide between Account-lifetime retention, a bounded time window, or garbage collection after client
-acknowledgements establish that no enrolled Device can retry the Operation.
-
-## Evidence
-
-- Current HTTP idempotency claims and completed response bodies expire after 24 hours and commit
-  separately from the Domain transaction.
-- A device can retain an accepted local Operation longer than an arbitrary Server TTL.
-- Account-lifetime rows grow with successful and terminal Operations until Account deletion.
-- Acknowledgement-based collection requires a trustworthy per-Device floor and rules for removed or
-  permanently offline Devices; none exists today.
+How long must the Server retain an accepted Operation's semantic outcome?
 
 ## Answer
 

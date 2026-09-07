@@ -23,7 +23,7 @@ persistence contract and preserves the same Runtime ownership and observable beh
 The selected browser matrix, two-tab contention, crash recovery, offline restart, migration, quota,
 and storage-denial cases pass. A reachability audit proves one Web Replica authority per Account.
 
-## Comments
+## Conditional status
 
 This ticket remains `needs-info` unless ticket 39 explicitly selects SQLite. If IndexedDB remains the
-deployment choice, resolve this ticket as `wontfix` rather than building a dormant second writer.
+deployment choice, mark this ticket `wontfix` rather than building a dormant second writer.

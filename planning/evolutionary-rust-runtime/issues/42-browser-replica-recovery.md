@@ -6,24 +6,27 @@ Blocked by: 38, 39, 40, 41
 
 ## Outcome
 
-Browser storage corruption, capability loss, quota failure, and export/import have explicit behavior
-which never translates an unreadable Replica into successful discard of accepted Operations.
+Storage corruption, capability loss, quota failure, and export/import have explicit recovery
+behavior. An unreadable Replica must not be reported as successful discard of accepted Operations.
 
 ## Decision frontier
 
-Ask the maintainer in German which diagnostic/export surface ships, what an export includes, and when
-authoritative re-Bootstrap is allowed after quarantining a corrupt Replica. Recommend preserving or
-proving the absence of active Operations, overlays, and receipts before any reset.
+Choose the diagnostic/export surface, export contents, and conditions for authoritative
+re-Bootstrap after quarantine. Preserve durable work or prove its absence before any reset.
+Use the engine selected by tickets 39/41. If ticket 40 is `wontfix` because IndexedDB remains selected,
+that resolves the conditional branch; recovery still applies to IndexedDB.
 
-## Work
+## Work after the decision
 
-- Specify a visible storage-unavailable/corrupt state and quarantine behavior.
-- Preserve durable work before authoritative re-Bootstrap; never silently create an empty database
-  under another IndexedDB name or OPFS VFS.
+- Define visible storage-unavailable/corrupt states and quarantine.
+- Preserve active Operations, overlays, and receipts before re-Bootstrap; avoid silent empty-database
+  fallback or a second authority.
 - Define consistent export/import through the selected engine rather than copying live files.
-- Test user clearing, private mode, quota/persistence denial, corruption, partial import, and restart.
+- Exercise user-cleared storage, private mode, quota/persistence denial, corruption, partial import,
+  and restart. Irrecoverably missing bytes must be reported honestly, not claimed recovered.
 
 ## Verification
 
-Failure injection proves that no recovery path loses or duplicates an accepted Operation, exposes
-plaintext, crosses Account scope, or creates reachable dual writers.
+Inject failures and prove surviving accepted work is neither silently discarded nor duplicated.
+Unknown/lost state stays explicit. Recovery exposes no plaintext, crosses no Account scope, and
+creates no reachable dual writers.
