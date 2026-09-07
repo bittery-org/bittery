@@ -8,11 +8,11 @@ packages:
 
 catalog:
   '@types/react': ~19.2.18
-  '@types/react-dom': ~19.2.4
+  '@types/react-dom': ~19.2.7
   dotenv: ^17.4.2
   react: 19.2.8
   react-dom: 19.2.8
-  zod: ^4.1.13
+  zod: ^4.5.4
 
 onlyBuiltDependencies:
   - less
