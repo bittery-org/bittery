@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use utoipa::{IntoParams, IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -29,6 +30,7 @@ use crate::{
             ApiJson, ApiJsonBytes, ApiMergePatch, ApiMergePatchBytes, ApiQuery,
             AuthenticatedRequest,
         },
+        middleware::NEXT_CURSOR_HEADER,
         openapi::ORDINARY_API_BODY_LIMIT_BYTES,
         pagination::{
             decode_page_key, page_prefetched, page_prefetched_with_more, page_values, query_limit,
@@ -37,9 +39,9 @@ use crate::{
     },
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
-        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape, item_shape,
-        update_vault_shape, vault_available_member_shape, vault_details_shape,
-        vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
+        convert_vault_type_shape, create_attachment_shape, item_shape, update_vault_shape,
+        vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
+        vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
     AppState,
 };
@@ -53,6 +55,15 @@ pub(crate) mod travel_mode;
 mod vault_image_staging;
 
 pub(crate) const ITEM_BODY_LIMIT_BYTES: usize = ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024;
+
+/// The largest Import request body this Server will read.
+///
+/// It is deliberately *not* `BULK_IMPORT_ITEMS * ITEM_CIPHERTEXT_BYTES`, which would be about
+/// 200 MiB. A `413` here carries no Operation outcome, so the Client Runtime bounds one accepted
+/// batch's frozen request bytes below this limit at accept time instead — see
+/// `MAX_IMPORT_REQUEST_BYTES` in `runtime/import.rs`, guarded on this side by
+/// `import_request_bounds_match_the_runtime_batch_derivation`.
+pub(crate) const BULK_IMPORT_BODY_LIMIT_BYTES: usize = BULK_IMPORT_BYTES as usize;
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -183,6 +194,26 @@ struct CreateItemBody {
     encrypted_data: String,
     encryption_iv: String,
     encryption_algorithm: String,
+}
+
+/// The Item identities one authority page asks for, plus where to continue.
+// The identity set travels in a request body because up to 200 identities do not belong in a
+// query string. `get_item_authority_page` records the rest of the reasoning; it stays out of the
+// published contract, which describes vocabulary rather than Server internals.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ItemAuthorityPageBody {
+    #[schema(max_items = 200)]
+    item_ids: Vec<String>,
+    #[serde(default)]
+    cursor: Option<PageCursor>,
+    #[serde(default = "default_item_authority_page_limit")]
+    #[schema(minimum = 1, maximum = 200, default = 200)]
+    limit: u16,
+}
+
+fn default_item_authority_page_limit() -> u16 {
+    BULK_IMPORT_ITEMS
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -453,15 +484,6 @@ convert_vault_type_shape!(shape_from {
     vault::ConvertVaultTypeResponse => ConvertVaultTypeResponse
 });
 
-bulk_import_result_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct BulkImportItemsResponse
-});
-bulk_import_result_shape!(shape_from {
-    vault::BulkImportItemsResponse => BulkImportItemsResponse
-});
-
 create_attachment_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
     #[serde(rename_all = "camelCase")]
@@ -597,26 +619,64 @@ impl From<vault::VaultItemDetailsResponse> for ItemResponseDto {
     }
 }
 
-fn check_ciphertext(value: &str) -> Result<(), ApiError> {
-    if value.len() > ITEM_CIPHERTEXT_BYTES as usize {
-        Err(ApiError::payload_too_large(format!(
-            "Item ciphertext cannot exceed {ITEM_CIPHERTEXT_BYTES} bytes."
-        )))
-    } else {
-        Ok(())
-    }
-}
-
+/// The one Import refusal that is not a retained decision.
+///
+/// A batch beyond the published Item bound is malformed, not state-dependent: retrying the same
+/// bytes can never make it valid, and no closed Import rejection code describes it. It is also
+/// unreachable from a Client Runtime, which refuses both an over-count batch (`MAX_IMPORT_ITEMS`)
+/// and an over-byte batch (`MAX_IMPORT_REQUEST_BYTES`) at accept time, so no accepted Operation
+/// can meet this refusal and be left retrying a status that carries no outcome.
+///
+/// An oversized ciphertext is different: it reaches the executor and becomes
+/// `invalid_ciphertext`, a terminal answer the Runtime can retain and replay.
 fn check_bulk_import(body: &BulkImportBody) -> Result<(), ApiError> {
     if body.items.len() > BULK_IMPORT_ITEMS as usize {
         return Err(ApiError::payload_too_large(format!(
             "Bulk imports cannot contain more than {BULK_IMPORT_ITEMS} items."
         )));
     }
-    for item in &body.items {
-        check_ciphertext(&item.encrypted_data)?;
+    Ok(())
+}
+
+fn check_item_authority_page_limit(limit: u16) -> Result<u16, ApiError> {
+    if limit == 0 || limit > BULK_IMPORT_ITEMS {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidPageLimit,
+            format!("limit must be between 1 and {BULK_IMPORT_ITEMS}"),
+        ));
+    }
+    Ok(limit)
+}
+
+/// A published bound is the bound a request actually hits, so the schema's `maxItems` is enforced
+/// here rather than only documented. One authority read answers at most one Import batch, and
+/// `check_bulk_import` holds the same number on the sibling Import route.
+fn check_item_authority_page_ids(item_ids: &[String]) -> Result<(), ApiError> {
+    if item_ids.len() > BULK_IMPORT_ITEMS as usize {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidRequest,
+            format!("An authority page cannot name more than {BULK_IMPORT_ITEMS} Items."),
+        ));
     }
     Ok(())
+}
+
+/// Binds one authority cursor to the exact identity set it was issued for.
+///
+/// Two things make an authority page mean what it means: the Vault and the Item identities asked
+/// for. Both belong in the cursor's filters, or a cursor issued for one set could be replayed
+/// against a different set in the same Vault and silently skip past Items the caller named.
+/// `cursor_rejects_tampering_principal_endpoint_and_filters` is the rule this follows.
+fn item_authority_cursor_filters(vault_id: &str, item_ids: &[String]) -> String {
+    let mut identities: Vec<&str> = item_ids.iter().map(String::as_str).collect();
+    identities.sort_unstable();
+    identities.dedup();
+    let mut digest = Sha256::new();
+    for identity in identities {
+        digest.update((identity.len() as u64).to_be_bytes());
+        digest.update(identity.as_bytes());
+    }
+    format!("{vault_id}\0{}", hex::encode(digest.finalize()))
 }
 
 fn optional_patch_value(
@@ -867,6 +927,8 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(items::list_all_trashed_items))
         .routes(routes!(items::list_deleted_items))
         .routes(routes!(items::get_item))
+        // A read that names its Items in a body; see `items::get_item_authority_page`.
+        .routes(routes!(items::get_item_authority_page))
         .routes(routes!(catalog::stats))
         .routes(routes!(attachments::list_attachments))
         .routes(routes!(members::list_members))
@@ -901,7 +963,7 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .route_layer(DefaultBodyLimit::max(ITEM_BODY_LIMIT_BYTES));
     let bulk = OpenApiRouter::new()
         .routes(routes!(items::bulk_import_items))
-        .route_layer(DefaultBodyLimit::max(BULK_IMPORT_BYTES as usize));
+        .route_layer(DefaultBodyLimit::max(BULK_IMPORT_BODY_LIMIT_BYTES));
 
     reads.merge(ordinary_writes).merge(item_writes).merge(bulk)
 }
@@ -917,7 +979,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
+        check_bulk_import, check_item_authority_page_ids, check_item_authority_page_limit,
+        item_authority_cursor_filters, nullable_patch_value, router, AllItemsResponse,
         BulkImportBody, BulkImportItemInput, FavoriteBody, ItemCategory, UpdateVaultBody,
         VaultImageContentType, VaultImageStagingBody, VaultImageStagingStatusResponse,
         VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
@@ -1020,14 +1083,6 @@ mod tests {
         assert!(serde_json::from_value::<VaultImageContentType>(json!("text/plain")).is_err());
     }
 
-    #[test]
-    fn item_ciphertext_limit_is_byte_based_and_inclusive() {
-        assert!(check_ciphertext(&"a".repeat(1_048_576)).is_ok());
-        assert!(check_ciphertext(&"a".repeat(1_048_577)).is_err());
-        assert!(check_ciphertext(&"é".repeat(524_288)).is_ok());
-        assert!(check_ciphertext(&format!("{}a", "é".repeat(524_288))).is_err());
-    }
-
     #[tokio::test]
     async fn idempotent_item_json_preserves_unsupported_media_type() {
         let request = Request::builder()
@@ -1048,10 +1103,12 @@ mod tests {
         assert_eq!(body["code"], "UNSUPPORTED_MEDIA_TYPE");
     }
 
+    /// Only the Item bound is a request error now; an oversized ciphertext is a retained
+    /// `invalid_ciphertext` decision the executor makes, covered by the Import Operation tests.
     #[test]
-    fn bulk_import_rejects_too_many_items_and_oversized_ciphertext() {
-        let too_many = BulkImportBody {
-            items: (0..201)
+    fn bulk_import_refuses_only_a_batch_beyond_its_item_bound() {
+        let batch = |count: usize| BulkImportBody {
+            items: (0..count)
                 .map(|index| {
                     let mut value = item("ciphertext".to_string());
                     value.item_id = format!("item_{index}");
@@ -1059,12 +1116,53 @@ mod tests {
                 })
                 .collect(),
         };
-        assert!(check_bulk_import(&too_many).is_err());
-
+        assert!(check_bulk_import(&batch(201)).is_err());
+        assert!(check_bulk_import(&batch(200)).is_ok());
         assert!(check_bulk_import(&BulkImportBody {
             items: vec![item("a".repeat(1_048_577))],
         })
-        .is_err());
+        .is_ok());
+    }
+
+    #[test]
+    fn item_authority_page_limit_stays_within_one_import_batch() {
+        assert!(check_item_authority_page_limit(0).is_err());
+        assert!(check_item_authority_page_limit(1).is_ok());
+        assert!(check_item_authority_page_limit(200).is_ok());
+        assert!(check_item_authority_page_limit(201).is_err());
+
+        let ids = |count: usize| (0..count).map(|i| format!("item_{i}")).collect::<Vec<_>>();
+        assert!(check_item_authority_page_ids(&ids(0)).is_ok());
+        assert!(check_item_authority_page_ids(&ids(200)).is_ok());
+        assert!(check_item_authority_page_ids(&ids(201)).is_err());
+    }
+
+    /// A cursor means "after this Item, in this Vault, among these identities".
+    #[test]
+    fn item_authority_cursor_filters_bind_the_vault_and_the_identity_set() {
+        let set = |ids: &[&str]| {
+            item_authority_cursor_filters(
+                "vault_1",
+                &ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(set(&["a", "b"]), set(&["b", "a"]), "order is not identity");
+        assert_eq!(
+            set(&["a", "a", "b"]),
+            set(&["a", "b"]),
+            "a set has no duplicates"
+        );
+        assert_ne!(set(&["a", "b"]), set(&["a"]));
+        assert_ne!(
+            set(&["ab", "c"]),
+            set(&["a", "bc"]),
+            "parts are length-prefixed"
+        );
+        assert_ne!(
+            set(&["a"]),
+            item_authority_cursor_filters("vault_2", &["a".to_owned()]),
+            "the Vault stays part of the filters"
+        );
     }
 
     #[test]
@@ -1304,8 +1402,9 @@ mod tests {
         let rendered = openapi["paths"].to_string();
         // Counted over `paths` alone: the retained Operation outcome schema carries an
         // `operationId` property of its own, and that is a field name, not a route.
-        assert_eq!(rendered.matches("operationId").count(), 34);
+        assert_eq!(rendered.matches("operationId").count(), 47);
         assert!(rendered.contains("listAllTrashedItems"));
+        assert!(rendered.contains("getVaultItemAuthorityPage"));
         assert!(rendered.contains("/items/trashed"));
         assert!(!rendered.contains("lookupUser"));
         assert!(rendered.contains("If-Match"));

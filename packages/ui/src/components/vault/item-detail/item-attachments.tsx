@@ -16,18 +16,11 @@ import { toast } from "../../sonner";
 
 export interface AttachmentItem {
 	id: string;
+	accountId?: string;
 	itemId: string;
 	vaultId: string;
-	storageKey: string;
-	encryptedAttachmentKey: string;
-	attachmentKeyIv: string;
-	attachmentKeyAlgorithm: string;
-	envelopeVersion: number;
-	encryptedName: string;
-	encryptedContentType: string;
-	encryptionIv: string;
-	encryptedContentTypeIv: string;
-	encryptionAlgorithm: string;
+	name?: string;
+	contentType?: string;
 	fileSize: number;
 	uploadedBy: string;
 	createdAt: Date | string;

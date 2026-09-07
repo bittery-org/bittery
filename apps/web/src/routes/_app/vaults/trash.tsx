@@ -1,8 +1,3 @@
-import {
-	useDeletedItems,
-	usePermanentDeleteItem,
-	useRestoreItem,
-} from "@bittery/core/hooks";
 import { formatDate } from "@bittery/i18n/format/browser";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { maskCardNumber } from "@bittery/shared/credit-card";
@@ -27,6 +22,11 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
+import {
+	usePermanentDeleteItem,
+	useRestoreItem,
+} from "@/hooks/use-runtime-item-mutations";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/trash")({
@@ -52,7 +52,12 @@ function formatDeletedDate(
 
 function VaultTrashPage() {
 	const { m } = useI18n();
-	const { items: deletedItems, isLoading } = useDeletedItems();
+	const runtimeItems = useRuntimeItems();
+	const deletedItems = useMemo(
+		() => runtimeItems.items.filter((item) => item.deletedAt != null),
+		[runtimeItems.items],
+	);
+	const isLoading = runtimeItems.state === "loading";
 	const restoreItem = useRestoreItem();
 	const permanentDeleteItem = usePermanentDeleteItem();
 

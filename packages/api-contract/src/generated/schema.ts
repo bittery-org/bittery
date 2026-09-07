@@ -1396,6 +1396,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/vaults/{vaultId}/item-authority-pages": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["getVaultItemAuthorityPage"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/vaults/{vaultId}/item-imports": {
         readonly parameters: {
             readonly query?: never;
@@ -1799,11 +1815,6 @@ export interface components {
             readonly encryptionIv: string;
             readonly favorite?: boolean | null;
             readonly itemId: string;
-        };
-        readonly BulkImportItemsResponse: {
-            readonly importedCount: number;
-            readonly itemIds: readonly string[];
-            readonly success: boolean;
         };
         /** @enum {string} */
         readonly CheckoutPlan: "personal" | "family" | "team";
@@ -2270,6 +2281,16 @@ export interface components {
          * @enum {string}
          */
         readonly InvitationStatus: "pending" | "accepted" | "declined" | "expired";
+        /** @description The Item identities one authority page asks for, plus where to continue. */
+        readonly ItemAuthorityPageBody: {
+            readonly cursor?: null | components["schemas"]["PageCursor"];
+            readonly itemIds: readonly string[];
+            /**
+             * Format: int32
+             * @default 200
+             */
+            readonly limit: number;
+        };
         /**
          * @description Item category — maps to PostgreSQL `item_category` enum.
          * @enum {string}
@@ -12145,10 +12166,151 @@ export interface operations {
             };
         };
     };
-    readonly bulkImportItems: {
+    readonly getVaultItemAuthorityPage: {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
+            readonly path: {
+                readonly vaultId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ItemAuthorityPageBody"];
+            };
+        };
+        readonly responses: {
+            /** @description Authoritative state of the requested Items */
+            readonly 200: {
+                headers: {
+                    /** @description Present only when another page follows */
+                    readonly "Bittery-Next-Cursor"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["ItemResponseDto"][];
+                };
+            };
+            /** @description Bad request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Item version does not match */
+            readonly 412: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Payload too large */
+            readonly 413: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description If-Match is required */
+            readonly 428: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error */
+            readonly 500: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    readonly bulkImportItems: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
+            };
             readonly path: {
                 readonly vaultId: string;
             };
@@ -12160,13 +12322,13 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Success */
+            /** @description Retained semantic outcome */
             readonly 200: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["BulkImportItemsResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */

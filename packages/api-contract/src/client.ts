@@ -241,10 +241,11 @@ export interface ApiClient {
 			input: ConvertVaultInput,
 			options?: ApiWriteOptions,
 		): Promise<ApiResult<ConvertVaultResponse>>;
+		/** Import is one Operation, so the stable Operation ID is required, not optional. */
 		importItems(
 			vaultId: string,
 			input: BulkImportInput,
-			options?: ApiWriteOptions,
+			options: ApiWriteOptions & { readonly idempotencyKey: string },
 		): Promise<ApiResult<BulkImportResponse>>;
 		members: {
 			startRemovalRotation(
@@ -1107,7 +1108,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			importItems: (vaultId, input, write) =>
 				call("POST", "/api/v1/vaults/{vaultId}/item-imports", {
-					params: { path: { vaultId } },
+					params: {
+						path: { vaultId },
+						header: { "Idempotency-Key": write.idempotencyKey },
+					},
 					body: input,
 					headers: writeHeaders(write),
 				}),

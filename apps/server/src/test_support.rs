@@ -797,10 +797,15 @@ fn validate_openapi_response(method: &Method, uri: &str, response: &ApiTestRespo
         }
     }
     if let Some(headers) = declared.get("headers").and_then(Value::as_object) {
-        for name in headers
-            .keys()
-            .filter(|name| name.as_str() != "Idempotency-Replayed")
-        {
+        // Two contract headers are conditional by design: an idempotent route sets
+        // `Idempotency-Replayed` only on a replay, and a paged authority read sets
+        // `Bittery-Next-Cursor` only when another page follows.
+        for name in headers.keys().filter(|name| {
+            !matches!(
+                name.as_str(),
+                "Idempotency-Replayed" | "Bittery-Next-Cursor"
+            )
+        }) {
             let value = response.headers.get(name).unwrap_or_else(|| {
                 panic!("{method} {path_template} status {status} requires response header {name}")
             });

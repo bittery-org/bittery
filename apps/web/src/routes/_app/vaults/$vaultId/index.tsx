@@ -1,8 +1,6 @@
 import {
 	useAvailableTags,
 	useConvertVaultType,
-	useDeleteItem,
-	useUpdateItem,
 } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
@@ -49,6 +47,10 @@ import { ItemListState } from "@/components/vault/item-list-state";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
 import { useAcceptLoginItem } from "@/hooks/use-accept-login-item";
+import {
+	useDeleteItem,
+	useUpdateItem,
+} from "@/hooks/use-runtime-item-mutations";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { creatableVaults, findRuntimeVault } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";

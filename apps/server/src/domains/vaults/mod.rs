@@ -4,8 +4,8 @@ use crate::{
     db::enums::{ItemCategory, OperationRejectionCode, VaultRole, VaultType},
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
-        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape, item_shape,
-        success_shape, update_vault_shape, vault_available_member_shape, vault_details_shape,
+        convert_vault_type_shape, create_attachment_shape, item_shape, success_shape,
+        update_vault_shape, vault_available_member_shape, vault_details_shape,
         vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
 };
@@ -40,9 +40,9 @@ pub(crate) use catalog::{
 pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
     apply_create_item, apply_move_item, apply_permanently_delete_item, apply_restore_item,
-    apply_set_item_favorite, apply_trash_item, apply_update_item, bulk_import_vault_items,
+    apply_set_item_favorite, apply_trash_item, apply_update_item, execute_import_items_operation,
     get_vault_item, list_all_deleted_vault_items_page, list_all_vault_items_page,
-    list_deleted_vault_items_page, list_vault_items_page,
+    list_deleted_vault_items_page, list_vault_item_authority_page, list_vault_items_page,
 };
 pub(crate) use members::{
     add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
@@ -61,6 +61,8 @@ use attachments::{
     attachment_quota_lock_key, base64_encoded_length, encrypted_attachment_storage_size,
     pending_attachment_upload_expiry,
 };
+#[cfg(test)]
+use items::oversized;
 
 #[cfg(test)]
 mod tests;
@@ -297,20 +299,15 @@ bulk_import_item_shape!(service_struct {
     pub struct BulkImportItemInput
 });
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct BulkImportItemsInput {
+/// One accepted Import batch, with the exact bytes its fingerprint is taken from.
+pub struct ImportItemsOperationInput {
+    pub operation_id: String,
     pub vault_id: String,
     pub client_id: Option<String>,
+    pub raw_body: Vec<u8>,
     pub items: Vec<BulkImportItemInput>,
+    pub ciphertext_limit: usize,
 }
-
-bulk_import_result_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct BulkImportItemsResponse
-});
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

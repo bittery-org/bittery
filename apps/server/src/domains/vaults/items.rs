@@ -6,31 +6,36 @@ use time::OffsetDateTime;
 
 use super::{
     access::{
-        assert_item_read_access, assert_item_write_access, find_item_row, find_vault_access,
-        insert_item_sync_event, load_vault_access,
+        assert_item_read_access, find_item_row, find_vault_access, insert_item_sync_event,
+        load_vault_access,
     },
     attachments::load_item_attachments,
     pagination::{bounded_page_ids, ByteBoundedPage, ItemPageWeight, ITEM_PAGE_QUERY_BYTES},
 };
 use super::{
-    BulkImportItemsInput, BulkImportItemsResponse, CreateItemEffectInput,
-    DeletedVaultItemWithVaultResponse, FavoriteItemEffectInput, ItemEffect, ItemEffectInput,
-    ItemIdInput, MoveItemEffectInput, UpdateItemEffectInput, VaultIdInput,
-    VaultItemDetailsResponse, VaultItemResponse, VaultItemWithVaultResponse, VaultSummaryResponse,
+    CreateItemEffectInput, DeletedVaultItemWithVaultResponse, FavoriteItemEffectInput,
+    ImportItemsOperationInput, ItemEffect, ItemEffectInput, ItemIdInput, MoveItemEffectInput,
+    UpdateItemEffectInput, VaultIdInput, VaultItemDetailsResponse, VaultItemResponse,
+    VaultItemWithVaultResponse, VaultSummaryResponse,
 };
 use crate::{
     config::DeploymentMode,
     db::events::{
         begin_sync_event_transaction, generate_resource_id, insert_audit_event, insert_sync_event,
+        insert_user_sync_event,
     },
     db::{
         enums::{OperationRejectionCode, SyncEntityType, SyncEventType},
         models::{DbBootstrapItemRow, DbBootstrapVaultAccessRow, BOOTSTRAP_ITEM_COLUMNS},
     },
     domains::billing::entitlements::attachments_enabled_for_user,
+    domains::operations::{
+        import_items_operation_fingerprint, import_items_rejection_code, ImportItemsAppliedPayload,
+        ImportItemsOperationResult, OperationResolution,
+    },
     error::AppError,
     integrations::storage,
-    shared::transaction::database_error,
+    shared::transaction::{acquire_operation_lock, database_error},
 };
 
 pub(crate) async fn list_vault_items_page(
@@ -401,84 +406,257 @@ pub(crate) async fn apply_create_item(
     })
 }
 
-pub(crate) async fn bulk_import_vault_items(
+/// Runs one Import batch to a terminal answer, exactly once per `(User, Operation ID)`.
+///
+/// Import retains an applied *payload* rather than an entity identity and version, so it follows
+/// the create-Vault Operation shape: validate, fingerprint, lock the Operation, probe the retained
+/// answer, then apply or reject inside the one transaction that also writes `operation_resolved`.
+/// The Vault access check lives inside that transaction on purpose — a check taken outside it
+/// could let one replay answer differently from the batch it is replaying.
+pub(crate) async fn execute_import_items_operation(
     pool: &PgPool,
     user_id: &str,
-    input: BulkImportItemsInput,
-) -> Result<BulkImportItemsResponse, AppError> {
-    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Read-only access cannot create items")?;
-    if input.items.is_empty() {
-        return Ok(BulkImportItemsResponse {
-            success: true,
-            imported_count: 0,
-            item_ids: Vec::new(),
-        });
-    }
-    if input.items.len() > 200 {
-        return Err(AppError::bad_request(
-            "Cannot import more than 200 items at once",
-        ));
-    }
-
-    let item_ids: Vec<String> = input
-        .items
-        .iter()
-        .map(|item| item.item_id.clone())
-        .collect();
-    let unique_ids: std::collections::HashSet<&str> =
-        item_ids.iter().map(std::string::String::as_str).collect();
-    if unique_ids.len() != item_ids.len() {
-        return Err(AppError::bad_request(
-            "Duplicate item IDs in import payload",
-        ));
-    }
-
+    input: ImportItemsOperationInput,
+) -> Result<OperationResolution, AppError> {
+    let fingerprint = import_items_operation_fingerprint(&input.vault_id, &input.raw_body);
     let mut transaction = begin_sync_event_transaction(pool)
         .await
-        .map_err(|error| database_error(error, "Failed to start bulk import transaction"))?;
-    for item in &input.items {
-        query(
-			"INSERT INTO item (id, vault_id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, 1, 1, $8, $8)",
-		)
-		.bind(&item.item_id)
-		.bind(&input.vault_id)
-		.bind(item.category)
-		.bind(item.favorite.unwrap_or(false))
-		.bind(&item.encrypted_data)
-		.bind(&item.encryption_iv)
-		.bind(&item.encryption_algorithm)
-		.bind(user_id)
-		.execute(&mut *transaction)
-		.await
-		.map_err(|error| database_error(error, "Failed to import vault items"))?;
-    }
-    insert_bulk_import_sync_event(
-        &mut transaction,
-        &input.vault_id,
+        .map_err(|error| database_error(error, "Failed to start Import Operation"))?;
+    acquire_operation_lock(
+        &mut *transaction,
         user_id,
-        input.client_id.as_deref(),
-        json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
+        &input.operation_id,
+        "Failed to serialize Import Operation",
     )
     .await?;
-    insert_bulk_import_audit_event(
-        &mut *transaction,
-        "vault_updated",
-        &input.vault_id,
+    if let Some(existing) = query_as::<_, (Vec<u8>,)>(
+        "SELECT request_fingerprint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to load Import outcome"))?
+    {
+        if existing.0 != fingerprint {
+            transaction.rollback().await.ok();
+            return Ok(OperationResolution::IdReused);
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| database_error(error, "Failed to replay Import outcome"))?;
+        let outcome =
+            crate::domains::operations::get_operation_outcome(pool, user_id, &input.operation_id)
+                .await?
+                .ok_or_else(|| AppError::internal("Retained Import outcome disappeared"))?;
+        return Ok(OperationResolution::Outcome {
+            outcome,
+            newly_committed: false,
+        });
+    }
+
+    let result = apply_import_items(&mut transaction, user_id, &input, &fingerprint).await?;
+    insert_user_sync_event(
+        &mut transaction,
+        SyncEventType::OperationResolved,
+        &input.operation_id,
+        SyncEntityType::Operation,
         user_id,
-        json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
+        1,
+        input.client_id.as_deref(),
+        None,
     )
     .await?;
     transaction
         .commit()
         .await
-        .map_err(|error| database_error(error, "Failed to commit bulk import"))?;
-
-    Ok(BulkImportItemsResponse {
-        success: true,
-        imported_count: item_ids.len(),
-        item_ids,
+        .map_err(|error| database_error(error, "Failed to commit Import Operation"))?;
+    Ok(OperationResolution::Outcome {
+        outcome: crate::domains::operations::OperationOutcome::new_import_items(
+            input.operation_id,
+            result,
+        ),
+        newly_committed: true,
     })
+}
+
+/// Decides one Import batch inside the caller's Operation transaction and retains the answer.
+///
+/// Every refusal here is a terminal semantic rejection, never a transport error: the request was
+/// well formed and authenticated, and the Server decided. Only a database failure leaves through
+/// `Err`, and that rolls the whole Operation back without retaining anything.
+async fn apply_import_items(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    input: &ImportItemsOperationInput,
+    fingerprint: &[u8; 32],
+) -> Result<ImportItemsOperationResult, AppError> {
+    let mut rejection = if input
+        .items
+        .iter()
+        .any(|item| oversized(Some(&item.encrypted_data), input.ciphertext_limit))
+    {
+        Some(OperationRejectionCode::InvalidCiphertext)
+    } else {
+        writable_vault_rejection(
+            &mut **transaction,
+            &input.vault_id,
+            user_id,
+            OperationRejectionCode::VaultAccessDenied,
+            OperationRejectionCode::VaultReadOnly,
+        )
+        .await?
+    };
+
+    if rejection.is_none() && !input.items.is_empty() {
+        // One statement inserts the whole batch, and a savepoint keeps it all-or-nothing.
+        //
+        // `ON CONFLICT DO NOTHING` answers both ways an identity can already be taken: an Item
+        // that exists in any Vault, and a second occurrence of the same ID inside these frozen
+        // bytes. The Server cannot tell those apart at commit time and must not answer one
+        // collision two ways, so both are `ItemIdConflict` — a retained, replayable decision
+        // rather than a request error the Runtime would retry forever. Anything skipped means the
+        // batch is not the complete set the caller asked for, so the savepoint discards the rest.
+        let mut batch = sqlx::Acquire::begin(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to open the Import batch savepoint"))?;
+        let inserted = query(
+            r#"INSERT INTO item (id, vault_id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by)
+            SELECT draft.id, $1, draft.category::item_category, draft.favorite, draft.encrypted_data, draft.encryption_iv, draft.encryption_algorithm, 1, 1, $2, $2
+            FROM UNNEST($3::text[], $4::text[], $5::bool[], $6::text[], $7::text[], $8::text[])
+                AS draft(id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm)
+            ON CONFLICT (id) DO NOTHING"#,
+        )
+        .bind(&input.vault_id)
+        .bind(user_id)
+        .bind(input.items.iter().map(|item| item.item_id.clone()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.category.as_str().to_owned()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.favorite.unwrap_or(false)).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.encrypted_data.clone()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.encryption_iv.clone()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.encryption_algorithm.clone()).collect::<Vec<_>>())
+        .execute(&mut *batch)
+        .await
+        .map_err(|error| database_error(error, "Failed to import Vault Items"))?;
+        if inserted.rows_affected() == input.items.len() as u64 {
+            batch
+                .commit()
+                .await
+                .map_err(|error| database_error(error, "Failed to close the Import batch"))?;
+        } else {
+            batch.rollback().await.map_err(|error| {
+                database_error(error, "Failed to discard the conflicted Import batch")
+            })?;
+            rejection = Some(OperationRejectionCode::ItemIdConflict);
+        }
+    }
+
+    if let Some(code) = rejection {
+        // The rejection audit row every sibling Operation writes: `vault_create_rejected` in
+        // `catalog.rs`, `share_create_rejected` in `operations/mod.rs`, `item_create_rejected`
+        // above. It records that the Server decided and why.
+        //
+        // It is on the Operation, not on the Vault, and its action is not `vault_updated`. That
+        // keeps it strictly separate from the applied batch's Vault audit row, so "an applied
+        // empty batch writes no audit and no `vault_updated`" stays exactly true.
+        insert_audit_event(
+            &mut **transaction,
+            &generate_resource_id("audit"),
+            user_id,
+            "item_import_rejected",
+            "operation",
+            &input.operation_id,
+            Some(json!({ "vaultId": input.vault_id, "code": code.as_str() })),
+        )
+        .await?;
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, 'import_items', $3, 'rejected', $4::operation_rejection_code)",
+        )
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .bind(fingerprint.as_slice())
+        .bind(code)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to retain rejected Import outcome"))?;
+        return Ok(ImportItemsOperationResult::Rejected {
+            code: import_items_rejection_code(code)?,
+        });
+    }
+
+    let imported_count = input.items.len();
+    // An applied empty batch is a decision about the Vault, not a change to it: no Item moved, so
+    // no audit row and no `vault_updated` may claim one did.
+    if imported_count > 0 {
+        let metadata = json!({ "reason": "bulk_import", "importedCount": imported_count });
+        insert_bulk_import_sync_event(
+            transaction,
+            &input.vault_id,
+            user_id,
+            input.client_id.as_deref(),
+            metadata.clone(),
+        )
+        .await?;
+        insert_bulk_import_audit_event(
+            &mut **transaction,
+            "vault_updated",
+            &input.vault_id,
+            user_id,
+            metadata,
+        )
+        .await?;
+    }
+    let imported_count = i32::try_from(imported_count)
+        .map_err(|_| AppError::internal("Import batch size is out of range"))?;
+    let payload = serde_json::to_value(ImportItemsAppliedPayload {
+        vault_id: input.vault_id.clone(),
+        imported_count,
+    })
+    .map_err(|_| AppError::internal("Failed to encode Import outcome"))?;
+    query(
+        "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, $2, 'import_items', $3, 'applied', $4)",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .bind(fingerprint.as_slice())
+    .bind(payload)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to retain applied Import outcome"))?;
+    Ok(ImportItemsOperationResult::Applied {
+        vault_id: input.vault_id.clone(),
+        imported_count,
+    })
+}
+
+/// Reads the authoritative state of an explicit set of Item identities inside one Vault.
+///
+/// Ordered by identity so one page's last ID is a cursor the next page strictly advances past.
+/// Identities outside this Vault, and identities that do not exist, simply do not answer.
+pub(crate) async fn list_vault_item_authority_page(
+    pool: &PgPool,
+    user_id: &str,
+    vault_id: &str,
+    item_ids: &[String],
+    after_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<VaultItemResponse>, AppError> {
+    assert_item_read_access(pool, vault_id, user_id).await?;
+    let rows = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE vault_id = $1 AND id = ANY($2) AND ($3::text IS NULL OR id > $3) ORDER BY id LIMIT $4"
+    ))
+    .bind(vault_id)
+    .bind(item_ids)
+    .bind(after_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to load the Item authority page"))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| VaultItemResponse::compose(row.into()))
+        .collect())
 }
 
 /// Applies one Item update inside the caller's Operation transaction, or proves why it cannot.
@@ -580,7 +758,7 @@ pub(crate) async fn apply_update_item(
 }
 
 /// Whether a ciphertext the caller supplied exceeds the Item ciphertext budget.
-fn oversized(value: Option<&str>, limit: usize) -> bool {
+pub(super) fn oversized(value: Option<&str>, limit: usize) -> bool {
     value.is_some_and(|value| value.len() > limit)
 }
 

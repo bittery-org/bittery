@@ -750,3 +750,54 @@ async fn import_items_persistence_lookup_and_rollback_are_closed() {
     })
     .await;
 }
+
+/// Pins the Import fingerprint to the bytes the Runtime already froze.
+///
+/// Both vectors are lifted verbatim from the shared replica-conformance corpus
+/// (`packages/client-runtime/generated/replica-conformance/history-corpus.json`), where the
+/// Runtime records the fingerprint it stored for an accepted batch. If the Server ever hashed a
+/// different part order — or embedded the HTTP method, the way every other Server fingerprint
+/// does — these two digests would move and every exact replay would answer `IdReused`.
+#[test]
+fn import_items_fingerprint_matches_the_runtime_byte_for_byte() {
+    use super::import_items_operation_fingerprint;
+
+    for (vault_id, body, expected) in [
+        (
+            "vault-1",
+            br#"{"items":[]}"#.as_slice(),
+            "68011e43d5e987dbc7cd486e4be56b09740218d6bbed6df0c0438b9fd0119f15",
+        ),
+        (
+            "vault-1",
+            br#"{"items":[{"category":"login","encryptedData":"opaque-import-ciphertext-operation-import-login-0","encryptionAlgorithm":"AES-GCM-AAD-V1","encryptionIv":"BBBBBBBBBBBBBBBB","favorite":true,"itemId":"operation-import-login-item-0"}]}"#.as_slice(),
+            "b623944d32558741cff2d096bc67e5ee0619e43bda662cc809ffcc7dd2581d9e",
+        ),
+    ] {
+        assert_eq!(
+            hex::encode(import_items_operation_fingerprint(vault_id, body)),
+            expected,
+            "Import fingerprint drifted from the frozen Runtime corpus"
+        );
+    }
+}
+
+/// The Import fingerprint must separate the Vault, the body, and every other Operation kind.
+#[test]
+fn import_items_fingerprint_separates_route_vault_and_body() {
+    use super::{create_vault_operation_fingerprint, import_items_operation_fingerprint};
+
+    let base = import_items_operation_fingerprint("vault-1", br#"{"items":[]}"#);
+    assert_ne!(
+        base,
+        import_items_operation_fingerprint("vault-2", br#"{"items":[]}"#)
+    );
+    assert_ne!(
+        base,
+        import_items_operation_fingerprint("vault-1", br#"{"items":[ ]}"#)
+    );
+    assert_ne!(
+        base,
+        create_vault_operation_fingerprint("vault-1", br#"{"items":[]}"#)
+    );
+}

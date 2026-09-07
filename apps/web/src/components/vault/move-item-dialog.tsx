@@ -1,9 +1,6 @@
-import { useMoveItem, useMoveTargetVaults } from "@bittery/core/hooks";
 import {
-	AccountAvatar,
 	Button,
 	Command,
-	CommandGroup,
 	CommandInput,
 	CommandItem,
 	CommandList,
@@ -13,7 +10,6 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-	getAccountLabel,
 	type MoveItemDialogProps,
 	toast,
 	VaultAvatar,
@@ -21,10 +17,14 @@ import {
 import {
 	IconCheck as Check,
 	IconLoaderCircle as LoaderCircle,
-	IconTriangleAlert as TriangleAlert,
 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import {
+	runtimeMoveTargets,
+	useMoveItem,
+} from "@/hooks/use-runtime-item-mutations";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function MoveItemDialog({
@@ -36,10 +36,16 @@ export function MoveItemDialog({
 	const { m } = useI18n();
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
 	const [searchQuery, setSearchQuery] = useState("");
-	// Only resolve/hydrate cross-account move targets while the dialog is open;
-	// the dialog stays mounted with the item detail pane, so an unconditional
-	// call would hydrate every unlocked account's repo on every item view.
-	const { vaultKeys, isLoading } = useMoveTargetVaults({ enabled: open });
+	// Runtime projections are already scoped to the explicit active Account.
+	const runtimeItems = useRuntimeItems();
+	const vaultKeys = useMemo(
+		() =>
+			runtimeItems.accountId === null
+				? []
+				: runtimeMoveTargets(runtimeItems.accountId, runtimeItems.vaults),
+		[runtimeItems.accountId, runtimeItems.vaults],
+	);
+	const isLoading = open && runtimeItems.state === "loading";
 	const moveItem = useMoveItem();
 	const navigate = useNavigate();
 
@@ -51,27 +57,10 @@ export function MoveItemDialog({
 	const filteredVaultKeys = useMemo(() => {
 		if (!searchQuery.trim()) return vaultKeys;
 		const query = searchQuery.toLowerCase();
-		return vaultKeys.filter(
-			(vk) =>
-				vk.vaultName.toLowerCase().includes(query) ||
-				vk.accountName?.toLowerCase().includes(query) ||
-				vk.accountTeamName?.toLowerCase().includes(query),
+		return vaultKeys.filter((vk) =>
+			vk.vaultName.toLowerCase().includes(query),
 		);
 	}, [vaultKeys, searchQuery]);
-
-	// Move targets are surfaced across every unlocked account, so the list is
-	// always account-grouped (the current vault is rendered disabled).
-	const vaultsByAccount = useMemo(() => {
-		const grouped: Record<string, typeof filteredVaultKeys> = {};
-		for (const vault of filteredVaultKeys) {
-			const accountKey = vault.accountId;
-			if (!grouped[accountKey]) {
-				grouped[accountKey] = [];
-			}
-			grouped[accountKey].push(vault);
-		}
-		return grouped;
-	}, [filteredVaultKeys]);
 
 	const selectedVault = useMemo(() => {
 		return vaultKeys.find((vk) => vk.vaultId === selectedVaultId);
@@ -94,22 +83,10 @@ export function MoveItemDialog({
 		}
 
 		try {
-			const {
-				id: _id,
-				vaultId: _vaultId,
-				category: _category,
-				favorite: _favorite,
-				createdAt: _createdAt,
-				updatedAt: _updatedAt,
-				...decryptedData
-			} = item;
-
 			const result = await moveItem.mutateAsync({
 				itemId: item.id,
 				sourceVaultId: currentVaultId,
 				targetVaultId: selectedVaultId,
-				category: item.category,
-				decryptedData,
 				accountId: sourceAccountId,
 				targetAccountId: selectedVault.accountId,
 			});
@@ -158,7 +135,7 @@ export function MoveItemDialog({
 					</DialogTitle>
 				</DialogHeader>
 
-				{/* Filtering stays manual (name + account/team match), Command only
+				{/* Filtering stays manual by Vault name; Command only
 				    provides keyboard navigation between vault rows. */}
 				<Command shouldFilter={false} className="rounded-none bg-transparent">
 					<CommandInput
@@ -182,30 +159,7 @@ export function MoveItemDialog({
 								{m.vaults_detail_items_move_dialog_empty_no_matches()}
 							</div>
 						) : (
-							Object.entries(vaultsByAccount).map(([accountId, vaults]) => {
-								const [firstVault] = vaults;
-								if (!firstVault) return null;
-
-								const account = {
-									email: firstVault.accountEmail ?? "",
-									name: firstVault.accountName,
-									teamName: firstVault.accountTeamName,
-									teamAvatarUrl: firstVault.accountTeamAvatarUrl,
-								};
-								const accountName =
-									getAccountLabel(account) ||
-									m.vaults_detail_items_move_dialog_account_unknown();
-
-								return (
-									<CommandGroup key={accountId} className="p-0 pb-1">
-										<div className="flex items-center gap-2 px-2.5 py-2">
-											<AccountAvatar account={account} size="xs" />
-											<span className="truncate font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
-												{accountName}
-											</span>
-										</div>
-
-										{vaults.map((vaultKey) => {
+							filteredVaultKeys.map((vaultKey) => {
 											const isCurrentVault =
 												vaultKey.vaultId === currentVaultId;
 											const isReadOnly = vaultKey.role === "read-only";
@@ -266,22 +220,10 @@ export function MoveItemDialog({
 													)}
 												</CommandItem>
 											);
-										})}
-									</CommandGroup>
-								);
 							})
 						)}
 					</CommandList>
 				</Command>
-
-				{isCrossAccount && selectedVault && (
-					<div className="mx-4 mb-3 flex items-start gap-2.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-amber-600 text-sm dark:text-amber-400">
-						<TriangleAlert className="mt-0.5 size-4 shrink-0" />
-						<span>
-							{m.vaults_detail_items_move_dialog_warning_cross_account()}
-						</span>
-					</div>
-				)}
 
 				<DialogFooter className="border-t p-4">
 					<Button

@@ -55,6 +55,174 @@ describe("Runtime client requests", () => {
 		await Promise.all(pending);
 	});
 
+	test("routes every ordinary Item mutation through its generated Runtime request", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const mutations = [
+			client.updateItem({
+				accountId: "account-1",
+				itemId: "item-1",
+				draft: { category: "login", data: { title: "Updated" } },
+			}),
+			client.setItemFavorite({
+				accountId: "account-1",
+				itemId: "item-1",
+				favorite: true,
+			}),
+			client.trashItem({ accountId: "account-1", itemId: "item-1" }),
+			client.restoreItem({ accountId: "account-1", itemId: "item-1" }),
+			client.moveItem({
+				accountId: "account-1",
+				itemId: "item-1",
+				targetVaultId: "vault-2",
+			}),
+			client.permanentlyDeleteItem({
+				accountId: "account-1",
+				itemId: "item-1",
+			}),
+		];
+		await transport.settled();
+
+		expect(transport.pendingRequests().map(({ request }) => request)).toEqual([
+			{
+				type: "updateItem",
+				accountId: "account-1",
+				itemId: "item-1",
+				draft: { category: "login", data: { title: "Updated" } },
+			},
+			{
+				type: "setItemFavorite",
+				accountId: "account-1",
+				itemId: "item-1",
+				favorite: true,
+			},
+			{ type: "trashItem", accountId: "account-1", itemId: "item-1" },
+			{ type: "restoreItem", accountId: "account-1", itemId: "item-1" },
+			{
+				type: "moveItem",
+				accountId: "account-1",
+				itemId: "item-1",
+				targetVaultId: "vault-2",
+			},
+			{
+				type: "permanentlyDeleteItem",
+				accountId: "account-1",
+				itemId: "item-1",
+			},
+		]);
+
+		for (let index = 0; index < mutations.length; index += 1) {
+			transport.answer({
+				type: "succeeded",
+				value: {
+					type: "accepted",
+					operationId: `operation-${index}`,
+					itemId: "item-1",
+					replicaRevision: String(index),
+				},
+			});
+		}
+		await Promise.all(mutations);
+	});
+
+	test("routes foreground Attachment work through the closed Runtime requests", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const requests = [
+			client.renameAttachment({
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+				name: "renamed.txt",
+			}),
+			client.deleteAttachment({
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+			}),
+			client.downloadAttachment({
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+				sinkCapabilityId: "sink-1",
+			}),
+			client.uploadAttachment({
+				accountId: "account-1",
+				itemId: "item-1",
+				name: "upload.txt",
+				contentType: "text/plain",
+				fileSize: "12",
+				sourceCapabilityId: "source-1",
+			}),
+		];
+		await transport.settled();
+
+		expect(transport.pendingRequests().map(({ request }) => request)).toEqual([
+			{
+				type: "renameAttachment",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+				name: "renamed.txt",
+			},
+			{
+				type: "deleteAttachment",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+			},
+			{
+				type: "downloadAttachment",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+				sinkCapabilityId: "sink-1",
+			},
+			{
+				type: "uploadAttachment",
+				accountId: "account-1",
+				itemId: "item-1",
+				name: "upload.txt",
+				contentType: "text/plain",
+				fileSize: "12",
+				sourceCapabilityId: "source-1",
+			},
+		]);
+
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "attachmentRenamed",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+			},
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "attachmentDeleted",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+			},
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "attachmentDownloaded",
+				accountId: "account-1",
+				attachmentId: "attachment-1",
+			},
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "attachmentUploaded",
+				attachmentId: "attachment-2",
+				replicaRevision: "9",
+			},
+		});
+
+		expect(await Promise.all(requests)).toEqual([
+			{ accountId: "account-1", attachmentId: "attachment-1" },
+			{ accountId: "account-1", attachmentId: "attachment-1" },
+			{ accountId: "account-1", attachmentId: "attachment-1" },
+			{ attachmentId: "attachment-2", replicaRevision: "9" },
+		]);
+	});
 	test("signs in over the generated request and response shapes", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });

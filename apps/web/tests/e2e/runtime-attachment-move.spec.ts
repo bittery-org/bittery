@@ -522,10 +522,10 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 		const upload = (await page.evaluate(
 			async ({ accountId, itemId, suffix }) => {
 				const cryptoModulePath = "/src/lib/crypto.ts";
-				const { attachmentUploads, runtime } = await import(cryptoModulePath);
+				const { attachmentUploadSources, runtime } = await import(cryptoModulePath);
 				const plaintext = new TextEncoder().encode(`ticket-28-d-${suffix}`);
 				let offset = 0;
-				const sourceCapabilityId = attachmentUploads.grant({
+				const sourceCapabilityId = attachmentUploadSources.grant({
 					accountId,
 					itemId,
 					name: `move-${suffix}.txt`,

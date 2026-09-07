@@ -167,6 +167,27 @@ fn key_schemas_publish_their_named_limits() {
     );
 }
 
+/// The Client Runtime derives its accepted Import batch bound from these two published numbers.
+///
+/// It cannot import them — the crates do not depend on each other — so it mirrors the literals in
+/// `packages/client-runtime/crates/bittery-client-core/src/runtime/import.rs` and guards them
+/// there with `import_batch_bytes_fit_the_server_and_authority_ceilings`. This is the other half
+/// of that guard. If either number moves here without moving there, Runtime can accept a batch
+/// this Server will refuse with a `413`, which carries no Operation outcome, so the accepted
+/// Operation would retry forever instead of terminating.
+#[test]
+fn import_request_bounds_match_the_runtime_batch_derivation() {
+    assert_eq!(BULK_IMPORT_BYTES, 16 * 1024 * 1024);
+    assert_eq!(BULK_IMPORT_ITEMS, 200);
+
+    // The published per-Item bound deliberately does not multiply out to the body limit: at 200
+    // Items it would be about 200 MiB. The total is bounded once, at Runtime acceptance.
+    assert!(
+        u64::from(BULK_IMPORT_ITEMS) * ITEM_CIPHERTEXT_BYTES > BULK_IMPORT_BYTES,
+        "if the per-Item bounds ever fit the body limit, the Runtime batch bound can be retired",
+    );
+}
+
 /// The runtime validators and the published bounds must agree.
 #[test]
 fn published_limits_match_the_runtime_validators() {

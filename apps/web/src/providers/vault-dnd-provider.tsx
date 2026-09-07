@@ -1,5 +1,4 @@
-import { useMoveItem } from "@bittery/core/hooks";
-import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
+import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	type DragItemData,
 	type DropVaultData,
@@ -17,6 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, type ReactNode, useContext, useState } from "react";
+import { useMoveItem } from "@/hooks/use-runtime-item-mutations";
 import { getServerUrl } from "@/lib/auth-server";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -98,47 +98,11 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 			return;
 		}
 
-		const decryptedData: DecryptedItemData = {
-			title: draggedItem.title,
-			url: draggedItem.url,
-			urls: draggedItem.urls,
-			username: draggedItem.username,
-			password: draggedItem.password,
-			notes: draggedItem.notes,
-			note: draggedItem.note,
-			customFields: draggedItem.customFields,
-			tags: draggedItem.tags,
-			cardholderName: draggedItem.cardholderName,
-			cardNumber: draggedItem.cardNumber,
-			cvv: draggedItem.cvv,
-			expiryDate: draggedItem.expiryDate,
-			billingAddress: draggedItem.billingAddress,
-			firstName: draggedItem.firstName,
-			middleName: draggedItem.middleName,
-			lastName: draggedItem.lastName,
-			email: draggedItem.email,
-			addresses: draggedItem.addresses,
-			phoneNumbers: draggedItem.phoneNumbers,
-			ssn: draggedItem.ssn,
-			passportNumber: draggedItem.passportNumber,
-			driversLicense: draggedItem.driversLicense,
-			dateOfBirth: draggedItem.dateOfBirth,
-			totpSecret: draggedItem.totpSecret,
-			totpIssuer: draggedItem.totpIssuer,
-			totpAccountName: draggedItem.totpAccountName,
-			totpAlgorithm: draggedItem.totpAlgorithm,
-			totpDigits: draggedItem.totpDigits,
-			totpPeriod: draggedItem.totpPeriod,
-			linkedItemId: draggedItem.linkedItemId,
-		};
-
 		moveItem.mutate(
 			{
 				itemId: draggedItem.id,
 				sourceVaultId: draggedSourceVaultId,
 				targetVaultId,
-				category: draggedItem.category,
-				decryptedData,
 				accountId: draggedSourceAccountId,
 				targetAccountId: dropData.accountId,
 			},

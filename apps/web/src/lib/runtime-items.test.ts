@@ -173,6 +173,46 @@ describe("Runtime Items projection mapping", () => {
 		expect(mapped?.customFields).toBeUndefined();
 	});
 
+	test("keeps deleted and Attachment authority in the Runtime-backed host shape", () => {
+		const [mapped] = mapRuntimeItemsProjection({
+			...ONE_ITEM,
+			items: [
+				{
+					...ONE_ITEM.items[0]!,
+					deletedAt: "2026-08-30T12:00:00Z",
+					attachments: [
+						{
+							accountId: "account-1",
+							attachmentId: "attachment-1",
+							itemId: "item-1",
+							vaultId: "vault-1",
+							name: "report.txt",
+							contentType: "text/plain",
+							fileSize: 42,
+							uploadedBy: "user-1",
+							createdAt: "2026-08-30T11:00:00Z",
+						},
+					],
+				},
+			],
+		});
+
+		expect(mapped?.deletedAt).toBe("2026-08-30T12:00:00Z");
+		expect(mapped?.attachments).toEqual([
+			{
+				id: "attachment-1",
+				accountId: "account-1",
+				itemId: "item-1",
+				vaultId: "vault-1",
+				name: "report.txt",
+				contentType: "text/plain",
+				fileSize: 42,
+				uploadedBy: "user-1",
+				createdAt: "2026-08-30T11:00:00Z",
+			},
+		]);
+	});
+
 	test("an Item carries its Vault, so no page needs a second source", () => {
 		const [mapped] = mapRuntimeItemsProjection({
 			...ONE_ITEM,

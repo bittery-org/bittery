@@ -82,3 +82,41 @@ dispatch:
   the Operation itself, as recorded in
   [its interpretation comment](56-runtime-import-batch.md#2026-09-01--interpretation-the-local-progress-effect).
   This ticket must therefore deliver that projection, not merely style an existing one.
+
+### 2026-09-01 — frontier resolved before implementation
+
+Three questions blocked the slice. Ticket 56 named two of them; scoping this ticket found the third.
+The maintainer decided all three. Each answer is now binding for this slice.
+
+**The authority fetch needs a Server route that does not exist yet.** `ImportExecutorPort::fetch_items`
+expects a body that decodes as `Vec<ItemResponseDto>` under `deny_unknown_fields`, with a cursor. Today
+the repository has only `GET /items/{itemId}` (one Item) and `GET /vaults/{vaultId}/items`, which
+returns `CursorPage<VaultItemDetailsResponse>` — the same Item fields plus `attachments`, so it cannot
+decode. Decision: **this slice adds a paged bulk authority read route** that returns exactly
+`Vec<ItemResponseDto>` for the accepted Item identities, and the production port calls it once per
+page. The rejected alternatives were 200 sequential single-Item fetches, which would hold the Account
+execution lock for minutes and stall every other Operation on that Account, and re-serializing the
+existing list route client-side, which would make `raw_response_body` client-authored bytes and read
+the whole Vault instead of the accepted batch. This ticket already owns public OpenAPI generation, so
+the route regenerates `openapi.v1.json`, `@bittery/api-contract`, the Runtime server contract, and the
+route/operation count assertions.
+
+**The Operation projection is cut broad, not Import-shaped.** Decision: add one **Account-scoped
+Operations projection** covering every accepted Operation — kind, Operation identity, attempt count,
+next attempt time, and resolution state — rather than a variant that only describes an in-flight
+Import batch. One cross-language surface then serves Ticket 58 and every later host instead of
+forcing a second variant or a rename. It carries no plaintext: Ticket 56's interpretation forbids
+showing an imported Item before authority confirms it, so this projection describes accepted work,
+never Item content.
+
+**The parking store is retired in full.** `apps/web/src/hooks/runtime-import-parking.ts` and
+`apps/web/src/lib/runtime-import-lifecycle.ts` are removed, not reduced. The durable Operation plus
+the new projection become the single owner of "an Import is in flight". Leaving decrypted drafts in a
+module singleton would keep a second, independently stale owner reachable, which is exactly what this
+ticket forbids. The seven Chromium parking tests, the two AST wiring tests, and the active e2e test
+at `import-export.spec.ts:309` are replaced by coverage of the projection.
+
+**One derived scoping answer needs no maintainer.** The whole-repository Import gate is a **new
+sibling script**, not an edit to `apps/web/scripts/transitional-reachability.ts`. That file and its
+test are preserved uncommitted Ticket 58 work, and `create-vault-reachability.test.ts` is the existing
+precedent for a separate gate over `buildRepositoryImportGraph()`.

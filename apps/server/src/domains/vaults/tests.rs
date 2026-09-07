@@ -5615,16 +5615,16 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
             let owner_session = app.issue_session(&fixture.owner_user_id).await;
-            let owner_headers = authenticated_json_headers(&owner_session.token);
             let created_item_id = "vault_created_item";
             let imported_item_a = "vault_import_item_a";
             let imported_item_b = "vault_import_item_b";
 
             let empty_import_response = app
-                .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [] })), owner_headers.clone())
+                .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [] })), idempotency_headers(&owner_session.token, "lifecycle-empty-import"))
                 .await;
             empty_import_response.assert_contract_status();
-            assert_eq!(empty_import_response.body["importedCount"], json!(0));
+            assert_eq!(empty_import_response.body["kind"], json!("import_items"));
+            assert_eq!(empty_import_response.body["result"]["importedCount"], json!(0));
 
             let create_item_response = app
                 .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.owner_personal_vault_id, created_item_id), Some(json!({ "category": "login", "encryptedData": "created-encrypted-data", "encryptionIv": "created-iv", "encryptionAlgorithm": "aes-gcm" })), idempotency_headers(&owner_session.token, "lifecycle-create-item"))
@@ -5649,10 +5649,11 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                                 "encryptionIv": "imported-b-iv",
                                 "encryptionAlgorithm": "aes-gcm"
                             }
-                        ] })), owner_headers.clone())
+                        ] })), idempotency_headers(&owner_session.token, "lifecycle-bulk-import"))
                 .await;
             bulk_import_response.assert_contract_status();
-            assert_eq!(bulk_import_response.body["importedCount"], json!(2));
+            assert_eq!(bulk_import_response.body["kind"], json!("import_items"));
+            assert_eq!(bulk_import_response.body["result"]["importedCount"], json!(2));
 
             let current_version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
                 .bind(&fixture.active_item_id)
@@ -6659,7 +6660,6 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let fixture = build_vault_router_fixture(&app.pool).await;
             let owner_session = app.issue_session(&fixture.owner_user_id).await;
             let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
-            let owner_headers = authenticated_json_headers(&owner_session.token);
 
             let readonly_create_response = app
                 .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotency_headers(&readonly_session.token, "readonly-create-item"))
@@ -6697,13 +6697,15 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                                 "encryptionIv": "duplicate-b-iv",
                                 "encryptionAlgorithm": "aes-gcm"
                             }
-                        ] })), owner_headers.clone())
+                        ] })), idempotency_headers(&owner_session.token, "duplicate-import"))
                 .await;
             duplicate_import_response.assert_contract_status();
-            assert_handler_error(
+            // A repeated identity inside one body is the same collision as an identity that
+            // already exists, so it is one retained decision rather than a request error.
+            assert_rejected(
                 &duplicate_import_response.body,
-                "BAD_REQUEST",
-                "Duplicate item IDs in import payload",
+                "import_items",
+                "item_id_conflict",
             );
 
             let stale_update_response = app
@@ -10053,4 +10055,732 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
         },
     )
     .await;
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 57 — Import is one Operation, and one paged authority read serves it.
+// ---------------------------------------------------------------------------
+
+/// Every wire category an Import batch may carry, in the spelling the closed set publishes.
+const IMPORT_CATEGORIES: [&str; 5] = ["login", "secure-note", "credit-card", "identity", "totp"];
+
+fn import_item(item_id: &str, category: &str, favorite: bool, ciphertext: &str) -> Value {
+    json!({
+        "itemId": item_id,
+        "category": category,
+        "favorite": favorite,
+        "encryptedData": ciphertext,
+        "encryptionIv": "import-iv",
+        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+    })
+}
+
+/// Everything one Import batch may have written, counted from the persistence seam.
+#[derive(Debug, PartialEq, Eq)]
+struct ImportFootprint {
+    items: i64,
+    audit: i64,
+    vault_updated: i64,
+    outcome: i64,
+    resolved: i64,
+}
+
+async fn import_footprint(
+    pool: &PgPool,
+    user_id: &str,
+    vault_id: &str,
+    operation_id: &str,
+) -> ImportFootprint {
+    let scalar = |sql: &'static str, first: String, second: String| async move {
+        query_scalar::<_, i64>(sql)
+            .bind(first)
+            .bind(second)
+            .fetch_one(pool)
+            .await
+            .expect("Import footprint should load")
+    };
+    ImportFootprint {
+        items: scalar(
+            "SELECT COUNT(*)::bigint FROM item WHERE vault_id = $1 AND encryption_iv = $2",
+            vault_id.to_owned(),
+            "import-iv".to_owned(),
+        )
+        .await,
+        audit: scalar(
+            "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = $2",
+            vault_id.to_owned(),
+            "vault_updated".to_owned(),
+        )
+        .await,
+        vault_updated: scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type::text = $2",
+            vault_id.to_owned(),
+            "vault_updated".to_owned(),
+        )
+        .await,
+        outcome: scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            user_id.to_owned(),
+            operation_id.to_owned(),
+        )
+        .await,
+        resolved: scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type::text = $2",
+            operation_id.to_owned(),
+            "operation_resolved".to_owned(),
+        )
+        .await,
+    }
+}
+
+/// An empty applied batch is a decision, not a no-op — and it must leave nothing else behind.
+#[tokio::test]
+async fn import_items_applies_an_empty_batch_without_audit_or_vault_event() {
+    with_api_test_app("import_items_empty_batch", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let operation_id = "import-empty-batch";
+
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [] })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        response.assert_contract_status();
+        assert_eq!(
+            response.body,
+            json!({
+                "kind": "import_items",
+                "operationId": operation_id,
+                "result": { "status": "applied", "vaultId": vault_id, "importedCount": 0 }
+            })
+        );
+        let footprint =
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await;
+        assert_eq!(
+            footprint,
+            ImportFootprint {
+                items: 0,
+                audit: 0,
+                vault_updated: 0,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+        let operation_audit: i64 =
+            query_scalar("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1")
+                .bind(operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("Operation audit count should load");
+        assert_eq!(
+            operation_audit, 0,
+            "an applied empty batch decided nothing to audit"
+        );
+
+        // The exact same empty bytes again: the retained answer, and not one new row anywhere.
+        let replay = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [] })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        replay.assert_contract_status();
+        assert_eq!(replay.body, response.body);
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            footprint
+        );
+
+        // A different body under the same Operation ID is still the one structured refusal.
+        let reused = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(
+                    json!({ "items": [import_item("import_empty_reuse", "login", false, "enc")] }),
+                ),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            footprint
+        );
+    })
+    .await;
+}
+
+/// One nonempty batch commits every Item, exactly one Vault event and exactly one audit row.
+#[tokio::test]
+async fn import_items_applies_one_nonempty_batch_atomically() {
+    with_api_test_app("import_items_nonempty_batch", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let operation_id = "import-nonempty-batch";
+        // One Item per category, because the executor encodes the category as text into a
+        // `text[]` and casts it back to `item_category`. A login-only batch cannot see a
+        // mis-encoded category; five can.
+        let items: Vec<Value> = IMPORT_CATEGORIES
+            .iter()
+            .enumerate()
+            .map(|(index, category)| {
+                import_item(
+                    &format!("import_batch_item_{index}"),
+                    category,
+                    index % 2 == 0,
+                    &format!("import-{index}"),
+                )
+            })
+            .collect();
+        let body = json!({ "items": items });
+
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(body.clone()),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        response.assert_contract_status();
+        assert_eq!(
+            response.body,
+            json!({
+                "kind": "import_items",
+                "operationId": operation_id,
+                "result": { "status": "applied", "vaultId": vault_id, "importedCount": 5 }
+            })
+        );
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 5,
+                audit: 1,
+                vault_updated: 1,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+        let rows = query_as::<_, (String, String, bool, i32, i32)>(
+            "SELECT id, category::text, favorite, version, encryption_version FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv' ORDER BY id",
+        )
+        .bind(&vault_id)
+        .fetch_all(&app.pool)
+        .await
+        .expect("imported rows should load");
+        assert_eq!(
+            rows,
+            IMPORT_CATEGORIES
+                .iter()
+                .enumerate()
+                .map(|(index, category)| (
+                    format!("import_batch_item_{index}"),
+                    (*category).to_owned(),
+                    index % 2 == 0,
+                    1,
+                    1
+                ))
+                .collect::<Vec<_>>(),
+            "every category must survive the text[] round trip unchanged"
+        );
+
+        // The exact bytes again: the retained answer, and not one new row anywhere.
+        let replay = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(body),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        replay.assert_contract_status();
+        assert_eq!(replay.body, response.body);
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 5,
+                audit: 1,
+                vault_updated: 1,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+
+        // The same Operation ID with different bytes is the one structured refusal.
+        let reused = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [import_item("import_batch_item_c", "login", false, "import-c")] })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 5,
+                audit: 1,
+                vault_updated: 1,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+    })
+    .await;
+}
+
+/// The Operation ID is the batch's identity; without it there is nothing to retain an answer for.
+#[tokio::test]
+async fn import_items_requires_a_stable_operation_id() {
+    with_api_test_app("import_items_requires_operation_id", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [import_item("import_headerless_item", "login", false, "x")] })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert_eq!(response.body["code"], json!("INVALID_OPERATION_ID"));
+        let items: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv'",
+        )
+        .bind(&vault_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("item count should load");
+        assert_eq!(items, 0);
+    })
+    .await;
+}
+
+/// Every refusal Import can reach is terminal, retained and replayable.
+#[tokio::test]
+async fn import_items_rejections_are_terminal_and_replayable() {
+    with_api_test_app("import_items_rejections", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let readonly = app.issue_session(&fixture.readonly_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let oversized = "o".repeat(1_048_577);
+
+        for (name, token, vault_id, items, code) in [
+            (
+                "read-only",
+                readonly.token.clone(),
+                fixture.main_vault_id.clone(),
+                json!([import_item("import_reject_readonly", "login", false, "enc")]),
+                "vault_read_only",
+            ),
+            (
+                "no-access",
+                outsider.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([import_item("import_reject_outsider", "login", false, "enc")]),
+                "vault_access_denied",
+            ),
+            (
+                "existing-identity",
+                owner.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([
+                    import_item("import_reject_fresh", "login", false, "enc"),
+                    import_item(&fixture.active_item_id, "login", false, "enc"),
+                ]),
+                "item_id_conflict",
+            ),
+            (
+                "duplicate-identity",
+                owner.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([
+                    import_item("import_reject_duplicate", "login", false, "enc-a"),
+                    import_item("import_reject_duplicate", "login", false, "enc-b"),
+                ]),
+                "item_id_conflict",
+            ),
+            (
+                "oversized-ciphertext",
+                owner.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([import_item("import_reject_oversized", "login", false, &oversized)]),
+                "invalid_ciphertext",
+            ),
+        ] {
+            let operation_id = format!("import-reject-{name}");
+            let body = json!({ "items": items });
+            let expected = json!({
+                "kind": "import_items",
+                "operationId": operation_id,
+                "result": { "status": "rejected", "code": code }
+            });
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                    Some(body.clone()),
+                    idempotency_headers(&token, &operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.body, expected, "{name} was not rejected");
+
+            let footprint =
+                import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, &operation_id).await;
+            assert_eq!(footprint.items, 0, "{name} left Items behind");
+            assert_eq!(footprint.audit, 0, "{name} wrote a bulk audit row");
+            assert_eq!(footprint.vault_updated, 0, "{name} emitted vault_updated");
+            assert_eq!(
+                footprint.resolved, 1,
+                "{name} did not resolve its Operation"
+            );
+            // The rejection audit row every sibling Operation writes, on the Operation rather
+            // than the Vault so it can never be mistaken for an applied batch.
+            let rejected_audit: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_type = 'operation' AND entity_id = $1 AND action = 'item_import_rejected' AND metadata::jsonb->>'code' = $2",
+            )
+            .bind(&operation_id)
+            .bind(code)
+            .fetch_one(&app.pool)
+            .await
+            .expect("rejection audit count should load");
+            assert_eq!(rejected_audit, 1, "{name} wrote no rejection audit row");
+
+            let replay = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                    Some(body),
+                    idempotency_headers(&token, &operation_id),
+                )
+                .await;
+            replay.assert_contract_status();
+            assert_eq!(replay.body, expected, "{name} did not replay its rejection");
+        }
+    })
+    .await;
+}
+
+/// A batch beyond the published Item bound is a malformed request, not a retained decision.
+///
+/// No closed Import rejection code describes it, and no Runtime can produce one: acceptance
+/// enforces the same 200 before an Operation exists.
+#[tokio::test]
+async fn import_items_refuses_a_batch_beyond_its_item_bound() {
+    with_api_test_app("import_items_item_bound", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let operation_id = "import-over-bound";
+
+        let over: Vec<Value> = (0..201)
+            .map(|index| import_item(&format!("import_bound_item_{index}"), "login", false, "enc"))
+            .collect();
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": over })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 0,
+                audit: 0,
+                vault_updated: 0,
+                outcome: 0,
+                resolved: 0
+            }
+        );
+
+        let at_bound: Vec<Value> = (0..200)
+            .map(|index| import_item(&format!("import_bound_item_{index}"), "login", false, "enc"))
+            .collect();
+        let accepted = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": at_bound })),
+                idempotency_headers(&session.token, "import-at-bound"),
+            )
+            .await;
+        accepted.assert_contract_status();
+        assert_eq!(accepted.body["result"]["importedCount"], json!(200));
+    })
+    .await;
+}
+
+/// The Item authority page answers exactly the identities asked for, and pages them.
+#[tokio::test]
+async fn vault_item_authority_pages_answer_the_requested_identities_only() {
+    with_api_test_app("vault_item_authority_pages", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let authority_path = format!("/api/v1/vaults/{vault_id}/item-authority-pages");
+        let ids = ["authority_item_a", "authority_item_b", "authority_item_c"];
+
+        let imported = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": ids
+                    .iter()
+                    .map(|id| import_item(id, "login", false, "enc"))
+                    .collect::<Vec<_>>() })),
+                idempotency_headers(&owner.token, "authority-seed-import"),
+            )
+            .await;
+        imported.assert_contract_status();
+
+        // One complete page: exactly the requested identities, in a body that is a bare array.
+        let complete = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_c", "authority_item_a", "authority_item_b"] })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        complete.assert_contract_status();
+        let returned: Vec<String> = complete
+            .body
+            .as_array()
+            .expect("the authority page is a bare Item array")
+            .iter()
+            .map(|item| item["id"].as_str().expect("id").to_owned())
+            .collect();
+        assert_eq!(
+            returned,
+            vec!["authority_item_a", "authority_item_b", "authority_item_c"]
+        );
+        assert!(
+            complete.body[0].get("attachments").is_none(),
+            "the authority page must carry the attachment-free Item shape"
+        );
+        assert_eq!(complete.body[0]["vaultId"], json!(vault_id));
+        assert_eq!(complete.body[0]["version"], json!(1));
+        assert!(
+            complete.headers.get("bittery-next-cursor").is_none(),
+            "a complete page may not offer another"
+        );
+
+        // Paged: every page carries Items, and the cursor strictly advances.
+        let mut cursor: Option<String> = None;
+        let mut paged = Vec::new();
+        for _ in 0..3 {
+            let mut request = json!({ "itemIds": ids, "limit": 1 });
+            if let Some(cursor) = cursor.as_deref() {
+                request["cursor"] = json!(cursor);
+            }
+            let page = app
+                .api_json(
+                    Method::POST,
+                    &authority_path,
+                    Some(request),
+                    authenticated_json_headers(&owner.token),
+                )
+                .await;
+            page.assert_contract_status();
+            let values = page.body.as_array().expect("page array").clone();
+            assert_eq!(values.len(), 1);
+            paged.push(values[0]["id"].as_str().expect("id").to_owned());
+            cursor = page
+                .headers
+                .get("bittery-next-cursor")
+                .map(|value| value.to_str().expect("cursor is ASCII").to_owned());
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            paged,
+            vec!["authority_item_a", "authority_item_b", "authority_item_c"]
+        );
+        assert!(cursor.is_none(), "the last page may not offer another");
+
+        // A cursor that cannot advance is refused rather than answered with an empty page.
+        let exhausted = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"], "limit": 1 })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        exhausted.assert_contract_status();
+        assert!(exhausted.headers.get("bittery-next-cursor").is_none());
+
+        let stale = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"], "limit": 1, "cursor": "not-a-cursor" })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(stale.status, StatusCode::BAD_REQUEST);
+
+        let first = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ids, "limit": 1 })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        let issued = first
+            .headers
+            .get("bittery-next-cursor")
+            .expect("a truncated page offers a cursor")
+            .to_str()
+            .expect("cursor is ASCII")
+            .to_owned();
+        let non_advancing = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"], "limit": 1, "cursor": issued })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(non_advancing.status, StatusCode::BAD_REQUEST);
+        assert_eq!(non_advancing.body["code"], json!("INVALID_CURSOR"));
+
+        // Identities outside the Vault, and Vaults outside the caller's access, stay invisible.
+        let foreign = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": [fixture.active_item_id, "authority_item_a"] })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        foreign.assert_contract_status();
+        assert_eq!(
+            foreign.body.as_array().expect("array").len(),
+            1,
+            "an Item in another Vault must not answer this Vault's authority page"
+        );
+
+        let denied = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"] })),
+                authenticated_json_headers(&outsider.token),
+            )
+            .await;
+        assert_eq!(denied.status, StatusCode::FORBIDDEN);
+
+        // The published `maxItems` is the bound a request actually hits.
+        let over_bound: Vec<String> = (0..=200).map(|index| format!("bulk_{index}")).collect();
+        let too_many = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": over_bound })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(too_many.status, StatusCode::BAD_REQUEST);
+        assert_eq!(too_many.body["code"], json!("INVALID_REQUEST"));
+
+        let at_bound: Vec<String> = (0..200).map(|index| format!("bulk_{index}")).collect();
+        let bounded = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": at_bound })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        bounded.assert_contract_status();
+
+        // A cursor names one identity set. Replayed against another it must not advance past
+        // Items the second caller asked for, so the cursor's filters carry the set.
+        let issued_for_three = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ids, "limit": 1 })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        let cursor = issued_for_three
+            .headers
+            .get("bittery-next-cursor")
+            .expect("a truncated page offers a cursor")
+            .to_str()
+            .expect("cursor is ASCII")
+            .to_owned();
+        let foreign_set = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({
+                    "itemIds": ["authority_item_a", "authority_item_b"],
+                    "limit": 1,
+                    "cursor": cursor,
+                })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(foreign_set.status, StatusCode::BAD_REQUEST);
+        assert_eq!(foreign_set.body["code"], json!("INVALID_CURSOR"));
+
+        // The same set in a different order is the same set, so its cursor still works.
+        let reordered = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({
+                    "itemIds": ["authority_item_c", "authority_item_b", "authority_item_a"],
+                    "limit": 1,
+                    "cursor": cursor,
+                })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        reordered.assert_contract_status();
+        assert_eq!(reordered.body[0]["id"], json!("authority_item_b"));
+    })
+    .await;
+}
+
+/// The ciphertext bound is a byte bound, and inclusive at the published limit.
+///
+/// It used to be a transport check on the Import route. It is now the one predicate every Item
+/// write and the Import executor share, so the property is pinned where it lives.
+#[test]
+fn item_ciphertext_limit_is_byte_based_and_inclusive() {
+    use super::oversized;
+
+    let limit = crate::http::dto::ITEM_CIPHERTEXT_BYTES as usize;
+    assert!(!oversized(Some(&"a".repeat(1_048_576)), limit));
+    assert!(oversized(Some(&"a".repeat(1_048_577)), limit));
+    assert!(!oversized(Some(&"é".repeat(524_288)), limit));
+    assert!(oversized(Some(&format!("{}a", "é".repeat(524_288))), limit));
+    assert!(!oversized(None, limit));
 }

@@ -336,27 +336,115 @@ async fn run_item_operation(
     }
 }
 
-#[utoipa::path(post, path = "/vaults/{vaultId}/item-imports", operation_id = "bulkImportItems", tag = "items", params(("vaultId" = String, Path)), request_body = BulkImportBody, responses((status = 200, description = "Success", body = BulkImportItemsResponse), VaultErrorResponses))]
+// Import is one Operation now. The route keeps its path and its 16 MiB body limit; everything
+// else about it is the same Operation contract every Item mutation uses.
+#[utoipa::path(post, path = "/vaults/{vaultId}/item-imports", operation_id = "bulkImportItems", tag = "items", params(("vaultId" = String, Path), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = BulkImportBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), VaultErrorResponses))]
 pub(super) async fn bulk_import_items(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
+    headers: HeaderMap,
     Path(vault_id): Path<String>,
-    ApiJson(body): ApiJson<BulkImportBody>,
-) -> Result<Json<BulkImportItemsResponse>, ApiError> {
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<BulkImportBody, BULK_IMPORT_BODY_LIMIT_BYTES>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    // The one refusal on this route that is not a retained decision; `check_bulk_import` says why.
     check_bulk_import(&body)?;
-    let pool = &state.db_pool;
-    let result = vault::bulk_import_vault_items(
-        pool,
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    let resolution = vault::execute_import_items_operation(
+        &state.db_pool,
         &auth.session.user_id,
-        vault::BulkImportItemsInput {
+        vault::ImportItemsOperationInput {
+            operation_id,
             vault_id,
             client_id: auth.effective_client_id(),
+            raw_body: bytes,
             items: body.items.into_iter().map(Into::into).collect(),
+            ciphertext_limit: ITEM_CIPHERTEXT_BYTES as usize,
         },
     )
-    .await
-    .notify_sync(&state)?;
-    Ok(Json(result.into()))
+    .await?;
+    match resolution {
+        OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
+        }
+        OperationResolution::IdReused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
+}
+
+#[utoipa::path(post, path = "/vaults/{vaultId}/item-authority-pages", operation_id = "getVaultItemAuthorityPage", tag = "items", params(("vaultId" = String, Path)), request_body = ItemAuthorityPageBody, responses((status = 200, description = "Authoritative state of the requested Items", body = Vec<ItemResponseDto>, headers(("Bittery-Next-Cursor" = String, description = "Present only when another page follows"))), VaultErrorResponses))]
+pub(super) async fn get_item_authority_page(
+    State(state): State<AppState>,
+    auth: AuthenticatedRequest,
+    Path(vault_id): Path<String>,
+    ApiJson(body): ApiJson<ItemAuthorityPageBody>,
+) -> Result<Response, ApiError> {
+    // Why this is a POST that reads: the caller names up to 200 Item identities at once, which no
+    // query string should carry, so the identity set travels as a request body. That is the shape
+    // `getVaultImageStagingStatus` already uses for a read. Nothing here mutates, so the route
+    // sits in the `reads` sub-router.
+    //
+    // Why `listVaultItems` cannot serve it: this body is a bare array of the attachment-free Item
+    // shape, because a client reconciles an accepted Import batch against exactly these bytes and
+    // refuses an unknown field. `listVaultItems` answers a paged envelope of the same fields plus
+    // attachments, and reads the whole Vault rather than one named set.
+    check_item_authority_page_ids(&body.item_ids)?;
+    let page = PageRequest {
+        cursor: body.cursor,
+        limit: check_item_authority_page_limit(body.limit)?,
+    };
+    // The cursor is bound to the identity set as well as the Vault, so a cursor issued for one
+    // set cannot be replayed against another and skip Items the caller named.
+    let filters = item_authority_cursor_filters(&vault_id, &body.item_ids);
+    let context = || {
+        CursorContext::new(
+            &auth.session.user_id,
+            "vault-item-authority",
+            &filters,
+            &state.config.auth.jwt_secret,
+        )
+    };
+    let after_id = decode_page_key(&page, context())?;
+    let values = vault::list_vault_item_authority_page(
+        &state.db_pool,
+        &auth.session.user_id,
+        &vault_id,
+        &body.item_ids,
+        after_id.as_deref(),
+        i64::from(page.limit) + 1,
+    )
+    .await?;
+    // Pages are ordered by identity, so a cursor always advances, and one is only ever issued
+    // when Items remain. A cursor that now selects nothing therefore did not advance: refusing it
+    // is honest, where an empty page would look like a complete answer.
+    if after_id.is_some() && values.is_empty() {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidCursor,
+            "The page cursor is invalid for this request.",
+        ));
+    }
+    let values: Vec<ItemResponseDto> = values
+        .into_iter()
+        .map(|item| ItemResponseDto::compose(item.decompose().0))
+        .collect();
+    let page = page_prefetched(values, &page, context(), |item| item.id.clone())?;
+    // The next cursor cannot ride in the body, because the body is the bare Item array the client
+    // decodes. It rides in a response header instead, present only when another page follows.
+    let mut response = Json(page.items).into_response();
+    if let Some(cursor) = page.next_cursor {
+        response.headers_mut().insert(
+            NEXT_CURSOR_HEADER,
+            HeaderValue::from_str(cursor.as_str()).map_err(|_| ApiError::internal())?,
+        );
+    }
+    Ok(response)
 }
 
 #[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body(content = UpdateItemBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]

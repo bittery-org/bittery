@@ -1,12 +1,7 @@
 import type { ItemProjectionStatus } from "@bittery/client-runtime/protocol";
 import { useRuntimeClient } from "@bittery/client-runtime/react";
 import {
-	getAttachmentUploadErrorCode,
-	type UnifiedItem,
-	useItemAttachments,
 	useQueryInvalidator,
-	useToggleFavorite,
-	useUpdateItem,
 } from "@bittery/core/hooks";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
@@ -48,7 +43,16 @@ import {
 	useCreateShare,
 	usePendingShareResults,
 } from "@/hooks/use-create-share";
+import {
+	useToggleFavorite,
+	useUpdateItem,
+} from "@/hooks/use-runtime-item-mutations";
+import {
+	getRuntimeAttachmentUploadErrorCode,
+	useRuntimeItemAttachments,
+} from "@/hooks/use-runtime-item-attachments";
 import { useI18n } from "@/providers/i18n-provider";
+import type { RuntimeListItem } from "@/lib/runtime-items";
 
 export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
 	const blob = new Blob([bytes as unknown as BlobPart]);
@@ -76,7 +80,7 @@ export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
 }
 
 /** The pane's Item, plus what the Runtime says about it when the Runtime is the reader. */
-export type ItemDetailEntry = UnifiedItem & {
+export type ItemDetailEntry = Omit<RuntimeListItem, "runtimeStatus"> & {
 	runtimeStatus?: ItemProjectionStatus;
 };
 
@@ -137,11 +141,7 @@ export function ItemDetailPane({
 		},
 		[runtimeClient],
 	);
-	const itemAttachments = useItemAttachments(
-		selectedItem?.id,
-		selectedItem?.vaultId,
-		selectedItem?.accountId ?? "",
-	);
+	const itemAttachments = useRuntimeItemAttachments(selectedItem);
 	const shareLinks = useQuery({
 		...apiQueries.shares.list(api, selectedItem?.id ?? ""),
 		enabled: Boolean(selectedItem) && isShareHistoryOpen,
@@ -368,7 +368,7 @@ export function ItemDetailPane({
 							onDelete={(attachmentId) =>
 								itemAttachments.remove.mutateAsync(attachmentId)
 							}
-							getUploadErrorCode={getAttachmentUploadErrorCode}
+							getUploadErrorCode={getRuntimeAttachmentUploadErrorCode}
 							canEdit={canWriteItems}
 							handleDownloadedFile={handleDownloadedFile}
 						/>

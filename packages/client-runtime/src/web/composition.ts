@@ -28,10 +28,15 @@ export type {
 	AtomicAttachmentDownloadSink,
 	AttachmentDownloadSinkGrant,
 } from "../web-attachment-download-sink";
+
+import type { AttachmentDownloadSinkGrant } from "../web-attachment-download-sink";
+
 export type {
 	AtomicAttachmentUploadSource,
 	AttachmentUploadSourceGrant,
 } from "../web-attachment-upload-source";
+
+import type { AttachmentUploadSourceGrant } from "../web-attachment-upload-source";
 
 import { WebPlatformStorageHost } from "../web-platform-storage-host";
 import {
@@ -71,14 +76,27 @@ export interface WebClientRuntime {
 	normalizeAccountEmail(value: string): Promise<string>;
 	/** The Crypto channel. The host wraps it in a `CryptoPort`; ticket 22 removes it. */
 	cryptoChannel: WorkerRpcChannel;
-	attachmentDownloads: WebAttachmentDownloadSinkRegistry;
-	attachmentUploads: WebAttachmentUploadSourceRegistry;
+	attachmentDownloadSinks: AttachmentDownloadSinkGrants;
+	/**
+	 * The only Upload-source authority a JavaScript host receives. Runtime-incarnation,
+	 * reverse-RPC, retirement, and cleanup remain private to this composition root.
+	 */
+	attachmentUploadSources: AttachmentUploadSourceGrants;
 	/** Narrow host-neutral grants; lifecycle and registry authority remain private. */
 	vaultImageSources: VaultImageSourceGrants;
 	workerOwner: SharedWorkerOwner;
 	close(): Promise<void>;
 }
 
+/** A reusable JavaScript-host facade for granting one plaintext Upload source. */
+export interface AttachmentUploadSourceGrants {
+	grant(source: AttachmentUploadSourceGrant): string;
+}
+
+/** A reusable JavaScript-host facade for granting one atomic plaintext Download sink. */
+export interface AttachmentDownloadSinkGrants {
+	grant(sink: AttachmentDownloadSinkGrant): string;
+}
 export interface VaultImageSourceGrants {
 	grant(source: VaultImageSourceGrant): string;
 	discard(capabilityId: string): Promise<void>;
@@ -89,9 +107,15 @@ export function createWebClientRuntime(
 ): WebClientRuntime {
 	const platformStorage = new WebPlatformStorageHost();
 	const attachmentDownloads = new WebAttachmentDownloadSinkRegistry();
+	const attachmentDownloadSinks: AttachmentDownloadSinkGrants = {
+		grant: (sink) => attachmentDownloads.grant(sink),
+	};
 	const attachmentUploads = new WebAttachmentUploadSourceRegistry();
 	const vaultImages = createVaultImageSourceRegistryOwner();
 	const vaultImageSources: VaultImageSourceGrants = vaultImages.grants;
+	const attachmentUploadSources: AttachmentUploadSourceGrants = {
+		grant: (source) => attachmentUploads.grant(source),
+	};
 	const fallbackHostRequest =
 		deps.handleHostRequest ?? platformStorage.invoke.bind(platformStorage);
 	const transitionAttachmentRuntimeIncarnation =
@@ -213,8 +237,8 @@ export function createWebClientRuntime(
 	const runtime = createWorkerRuntime(workerOwner.channel("runtime"), close);
 	return {
 		workerOwner,
-		attachmentDownloads,
-		attachmentUploads,
+		attachmentDownloadSinks,
+		attachmentUploadSources,
 		vaultImageSources,
 		cryptoChannel: workerOwner.channel("crypto"),
 		runtime,

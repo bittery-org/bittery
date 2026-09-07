@@ -253,6 +253,12 @@ _Avoid_: finding, alert, vulnerability
 
 ### Sync
 
+**Authority**:
+The Server's confirmed record of an Item, in the shape the Server answers with. A Replica installs
+authority instead of trusting its own accepted work, so a client can prove what actually landed
+rather than assume it.
+_Avoid_: source of truth, canonical copy, server state, remote record
+
 **Replica**:
 The durable Account-scoped local state owned by the Client Runtime: encrypted authoritative entities,
 accepted Operations and their optimistic effects, retained Operation outcomes already observed, and

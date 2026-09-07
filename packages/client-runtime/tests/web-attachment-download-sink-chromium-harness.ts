@@ -223,7 +223,7 @@ Object.assign(globalThis, {
 			await warmup.catch(() => undefined);
 			let grantRejected = false;
 			try {
-				composition.attachmentDownloads.grant({
+				composition.attachmentDownloadSinks.grant({
 					accountId: "account-one",
 					attachmentId: "attachment-one",
 					sink: sink({
@@ -246,7 +246,7 @@ Object.assign(globalThis, {
 		}
 		let grantRejected = false;
 		try {
-			composition.attachmentDownloads.grant({
+			composition.attachmentDownloadSinks.grant({
 				accountId: "account-one",
 				attachmentId: "attachment-one",
 				sink: sink({
@@ -273,7 +273,7 @@ Object.assign(globalThis, {
 			retained: [],
 		};
 		await composition.runtime.request("warmup", "warmup");
-		const capabilityId = composition.attachmentDownloads.grant({
+		const capabilityId = composition.attachmentDownloadSinks.grant({
 			accountId: "account-one",
 			attachmentId: "attachment-one",
 			sink: sink(state),
@@ -300,7 +300,7 @@ Object.assign(globalThis, {
 			publishedDuringWrite: false,
 			retained: [],
 		};
-		const cleanupCapabilityId = composition.attachmentDownloads.grant({
+		const cleanupCapabilityId = composition.attachmentDownloadSinks.grant({
 			accountId: "account-one",
 			attachmentId: "attachment-two",
 			sink: sink(cleanup),

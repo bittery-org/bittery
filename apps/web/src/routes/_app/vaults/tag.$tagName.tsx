@@ -1,8 +1,4 @@
-import {
-	useAvailableTags,
-	useDeleteItem,
-	useUpdateItem,
-} from "@bittery/core/hooks";
+import { useAvailableTags } from "@bittery/core/hooks";
 import type {
 	DecryptedItem,
 	DecryptedItemData,
@@ -31,6 +27,10 @@ import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
 import { ItemListState } from "@/components/vault/item-list-state";
 import { useAcceptLoginItem } from "@/hooks/use-accept-login-item";
+import {
+	useDeleteItem,
+	useUpdateItem,
+} from "@/hooks/use-runtime-item-mutations";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { canWriteVault, creatableVaults } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";

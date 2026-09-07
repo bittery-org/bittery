@@ -96,34 +96,17 @@ describe("what the Web may still reach in the transitional stack", () => {
 		const reads = audit.reached.filter(
 			(item) => item.kind === "item-read" || item.kind === "vault-read",
 		);
-		// Only the recorded holdouts survive, and each one exists to serve a write kind
-		// ticket 28 has not moved yet.
-		expect(reads.map((item) => `${item.symbol} ${item.file}`).sort()).toEqual([
-			"useDeletedItems src/routes/_app/vaults/trash.tsx",
-			"useItemAttachments src/components/vault/item-detail-pane.tsx",
-			"useMoveTargetVaults src/components/vault/move-item-dialog.tsx",
-		]);
+		expect(reads).toEqual([]);
 	});
 });
 
 describe("what this audit deliberately does not assert yet", () => {
-	test("the remaining Item write kinds are still transitional", () => {
-		// Ticket 22's maintainer decision: update, delete, favorite, move and share keep
-		// writing to the transitional repository until ticket 28 ports them, and gating
-		// them in the meantime would be throwaway work. Ticket 28 tightens the audit by
-		// adding "item-write" here and deleting the call sites this lists.
+	test("no Web entry reaches a transitional Item writer", () => {
 		expect(FORBIDDEN_KINDS.has("item-write")).toBe(false);
 		const writes = audit.reached
 			.filter((item) => item.kind === "item-write")
 			.map((item) => item.symbol);
-		expect([...new Set(writes)].sort()).toEqual([
-			"useDeleteItem",
-			"useMoveItem",
-			"usePermanentDeleteItem",
-			"useRestoreItem",
-			"useToggleFavorite",
-			"useUpdateItem",
-		]);
+		expect([...new Set(writes)].sort()).toEqual([]);
 	});
 
 	test("Share creation cannot reach its retired transitional writer", () => {

@@ -48,17 +48,6 @@ macro_rules! bulk_import_item_shape {
     };
 }
 
-/// The outcome of a bulk import.
-macro_rules! bulk_import_result_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            success: bool,
-            imported_count: usize,
-            item_ids: Vec<String>,
-        } }
-    };
-}
-
 /// The id of a freshly registered attachment.
 macro_rules! create_attachment_shape {
     ($emit:ident $args:tt) => {
@@ -176,8 +165,8 @@ macro_rules! vault_stats_shape {
 }
 
 pub(crate) use {
-    attachment_download_shape, bulk_import_item_shape, bulk_import_result_shape,
-    convert_vault_type_shape, create_attachment_shape, success_shape, update_vault_shape,
-    vault_available_member_shape, vault_details_shape, vault_list_entry_shape, vault_member_shape,
-    vault_stats_shape, vault_summary_shape,
+    attachment_download_shape, bulk_import_item_shape, convert_vault_type_shape,
+    create_attachment_shape, success_shape, update_vault_shape, vault_available_member_shape,
+    vault_details_shape, vault_list_entry_shape, vault_member_shape, vault_stats_shape,
+    vault_summary_shape,
 };

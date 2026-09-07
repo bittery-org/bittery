@@ -123,6 +123,26 @@ export type RuntimeVaultCreationAccepted = Omit<
 	Extract<RuntimeResponse, { type: "vaultCreationAccepted" }>,
 	"type"
 >;
+export type SetItemFavoriteInput = Omit<
+	Extract<RuntimeRequest, { type: "setItemFavorite" }>,
+	"type"
+>;
+export type TrashItemInput = Omit<
+	Extract<RuntimeRequest, { type: "trashItem" }>,
+	"type"
+>;
+export type RestoreItemInput = Omit<
+	Extract<RuntimeRequest, { type: "restoreItem" }>,
+	"type"
+>;
+export type MoveItemInput = Omit<
+	Extract<RuntimeRequest, { type: "moveItem" }>,
+	"type"
+>;
+export type PermanentlyDeleteItemInput = Omit<
+	Extract<RuntimeRequest, { type: "permanentlyDeleteItem" }>,
+	"type"
+>;
 /**
  * One ordered, all-or-nothing Import batch of at most 200 plaintext drafts. The host supplies
  * category data and Favorite only; Rust mints every Item ID and owns the ciphertext.
@@ -137,6 +157,38 @@ export type ImportItemsInput = Omit<
  */
 export type RuntimeImportBatchAccepted = Omit<
 	Extract<RuntimeResponse, { type: "importBatchAccepted" }>,
+	"type"
+>;
+export type RenameAttachmentInput = Omit<
+	Extract<RuntimeRequest, { type: "renameAttachment" }>,
+	"type"
+>;
+export type DeleteAttachmentInput = Omit<
+	Extract<RuntimeRequest, { type: "deleteAttachment" }>,
+	"type"
+>;
+export type DownloadAttachmentInput = Omit<
+	Extract<RuntimeRequest, { type: "downloadAttachment" }>,
+	"type"
+>;
+export type UploadAttachmentInput = Omit<
+	Extract<RuntimeRequest, { type: "uploadAttachment" }>,
+	"type"
+>;
+export type RuntimeAttachmentRenamed = Omit<
+	Extract<RuntimeResponse, { type: "attachmentRenamed" }>,
+	"type"
+>;
+export type RuntimeAttachmentDeleted = Omit<
+	Extract<RuntimeResponse, { type: "attachmentDeleted" }>,
+	"type"
+>;
+export type RuntimeAttachmentDownloaded = Omit<
+	Extract<RuntimeResponse, { type: "attachmentDownloaded" }>,
+	"type"
+>;
+export type RuntimeAttachmentUploaded = Omit<
+	Extract<RuntimeResponse, { type: "attachmentUploaded" }>,
 	"type"
 >;
 export interface CreateShareInput {
@@ -225,6 +277,26 @@ export interface RuntimeClient {
 		input: UpdateItemInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeAccepted>;
+	setItemFavorite(
+		input: SetItemFavoriteInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	trashItem(
+		input: TrashItemInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	restoreItem(
+		input: RestoreItemInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	moveItem(
+		input: MoveItemInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	permanentlyDeleteItem(
+		input: PermanentlyDeleteItemInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
 	/**
 	 * Durably accepts one ordered Import batch. Resolving means the batch survives a restart, not
 	 * that the Server applied it.
@@ -233,6 +305,22 @@ export interface RuntimeClient {
 		input: ImportItemsInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeImportBatchAccepted>;
+	renameAttachment(
+		input: RenameAttachmentInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAttachmentRenamed>;
+	deleteAttachment(
+		input: DeleteAttachmentInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAttachmentDeleted>;
+	downloadAttachment(
+		input: DownloadAttachmentInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAttachmentDownloaded>;
+	uploadAttachment(
+		input: UploadAttachmentInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAttachmentUploaded>;
 	createShare(
 		input: CreateShareInput,
 		options?: RuntimeCallOptions,
@@ -389,12 +477,42 @@ export function createRuntimeClient(
 			return { operationId, itemId, replicaRevision };
 		},
 		async updateItem(input, callOptions) {
-			const { operationId, itemId, replicaRevision } = await call(
-				{ type: "updateItem", ...input },
-				"accepted",
-				callOptions,
+			return accepted(
+				await call({ type: "updateItem", ...input }, "accepted", callOptions),
 			);
-			return { operationId, itemId, replicaRevision };
+		},
+		async setItemFavorite(input, callOptions) {
+			return accepted(
+				await call(
+					{ type: "setItemFavorite", ...input },
+					"accepted",
+					callOptions,
+				),
+			);
+		},
+		async trashItem(input, callOptions) {
+			return accepted(
+				await call({ type: "trashItem", ...input }, "accepted", callOptions),
+			);
+		},
+		async restoreItem(input, callOptions) {
+			return accepted(
+				await call({ type: "restoreItem", ...input }, "accepted", callOptions),
+			);
+		},
+		async moveItem(input, callOptions) {
+			return accepted(
+				await call({ type: "moveItem", ...input }, "accepted", callOptions),
+			);
+		},
+		async permanentlyDeleteItem(input, callOptions) {
+			return accepted(
+				await call(
+					{ type: "permanentlyDeleteItem", ...input },
+					"accepted",
+					callOptions,
+				),
+			);
 		},
 		async importItems(input, callOptions) {
 			const { operationId, vaultId, itemIds, replicaRevision } = await call(
@@ -403,6 +521,38 @@ export function createRuntimeClient(
 				callOptions,
 			);
 			return { operationId, vaultId, itemIds, replicaRevision };
+		},
+		async renameAttachment(input, callOptions) {
+			const { accountId, attachmentId } = await call(
+				{ type: "renameAttachment", ...input },
+				"attachmentRenamed",
+				callOptions,
+			);
+			return { accountId, attachmentId };
+		},
+		async deleteAttachment(input, callOptions) {
+			const { accountId, attachmentId } = await call(
+				{ type: "deleteAttachment", ...input },
+				"attachmentDeleted",
+				callOptions,
+			);
+			return { accountId, attachmentId };
+		},
+		async downloadAttachment(input, callOptions) {
+			const { accountId, attachmentId } = await call(
+				{ type: "downloadAttachment", ...input },
+				"attachmentDownloaded",
+				callOptions,
+			);
+			return { accountId, attachmentId };
+		},
+		async uploadAttachment(input, callOptions) {
+			const { attachmentId, replicaRevision } = await call(
+				{ type: "uploadAttachment", ...input },
+				"attachmentUploaded",
+				callOptions,
+			);
+			return { attachmentId, replicaRevision };
 		},
 		async createShare(input, callOptions) {
 			const { operationId, itemId, replicaRevision } = await call(
@@ -461,6 +611,13 @@ export function createRuntimeClient(
 function teardownOutcome(answer: RuntimeTeardownResponse): RuntimeTeardown {
 	const { scope, status, failures } = answer;
 	return { scope, status, failures: failures ?? [] };
+}
+
+function accepted(
+	answer: Extract<RuntimeResponse, { type: "accepted" }>,
+): RuntimeAccepted {
+	const { operationId, itemId, replicaRevision } = answer;
+	return { operationId, itemId, replicaRevision };
 }
 
 /**

@@ -172,13 +172,15 @@ describe("Attachment Upload joined production path in actual Chromium", () => {
 						failure,
 						{
 							failed: true,
-							registryRequests: ["claim", "close"],
-							reads: 0,
+							reads: failure === "cancelled" ? 1 : 0,
 							closes: 1,
 						},
 					]),
 				),
 			);
+			// The cancelled early-exit now reaches the source read through the public grant
+			// facade. Keep the joined happy-path observation invocation-scoped.
+			routes.length = 0;
 			const result = await page.evaluate(() =>
 				globalThis.exerciseAttachmentUpload(),
 			);

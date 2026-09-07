@@ -31,30 +31,14 @@ Object.assign(globalThis, {
 				failure === "item-missing" ? "missing-item" : "item-existing";
 			let reads = 0;
 			let closes = 0;
-			const registryRequests: string[] = [];
 			const cancellation = new AbortController();
-			const invoke = composition.attachmentUploads.invoke.bind(
-				composition.attachmentUploads,
-			);
-			composition.attachmentUploads.invoke = async (...args) => {
-				const type = (JSON.parse(args[0]) as { type: string }).type;
-				registryRequests.push(type);
-				const response = await invoke(...args);
-				if (
-					failure === "cancelled" &&
-					type === "claim" &&
-					JSON.parse(response.controlResponseJson).type === "claimed"
-				)
-					cancellation.abort();
-				return response;
-			};
 			const observationId = `early-status-${failure}`;
 			await composition.runtime.observe(
 				observationId,
 				'{"type":"runtimeStatus","accountId":null}',
 				() => undefined,
 			);
-			const capabilityId = composition.attachmentUploads.grant({
+			const capabilityId = composition.attachmentUploadSources.grant({
 				accountId,
 				itemId,
 				name: `${failure}.txt`,
@@ -63,6 +47,7 @@ Object.assign(globalThis, {
 				source: {
 					async read() {
 						reads += 1;
+						if (failure === "cancelled") cancellation.abort();
 						return new Uint8Array([1]);
 					},
 					async close() {
@@ -99,9 +84,6 @@ Object.assign(globalThis, {
 			await composition.close();
 			results[failure] = {
 				failed,
-				registryRequests: registryRequests.filter(
-					(type) => type === "claim" || type === "read" || type === "close",
-				),
 				reads,
 				closes,
 			};
@@ -122,7 +104,7 @@ Object.assign(globalThis, {
 			'{"type":"items","accountId":"account-1"}',
 			(json) => projections.push(JSON.parse(json) as Record<string, unknown>),
 		);
-		const capabilityId = composition.attachmentUploads.grant({
+		const capabilityId = composition.attachmentUploadSources.grant({
 			accountId: "account-1",
 			itemId: "item-existing",
 			name: "joined.txt",

@@ -141,7 +141,11 @@ export type PresignedUpload = Schema<"PresignedUploadResponse">;
 export type ConvertVaultInput = Schema<"ConvertVaultBody">;
 export type ConvertVaultResponse = Schema<"ConvertVaultTypeResponse">;
 export type BulkImportInput = Schema<"BulkImportBody">;
-export type BulkImportResponse = Schema<"BulkImportItemsResponse">;
+/**
+ * Import is one Operation now, so it answers with the retained outcome every Operation answers
+ * with. The legacy `BulkImportItemsResponse` no longer exists in the contract.
+ */
+export type BulkImportResponse = Schema<"OperationOutcome">;
 
 /**
  * The fields every server Item payload carries, whichever endpoint returned it.

@@ -121,37 +121,16 @@ export const TRANSITIONAL_SURFACE: readonly TransitionalEntry[] = [
 		module: HOOKS,
 		symbol: "useMoveTargetVaults",
 		kind: "vault-read",
-		holdouts: [
-			{
-				file: "src/components/vault/move-item-dialog.tsx",
-				ticket: 28,
-				why: "the move dialog offers the targets of a move the Runtime cannot perform yet",
-			},
-		],
 	},
 	{
 		module: HOOKS,
 		symbol: "useDeletedItems",
 		kind: "item-read",
-		holdouts: [
-			{
-				file: "src/routes/_app/vaults/trash.tsx",
-				ticket: 28,
-				why: "Trash lists what transitional delete produced; the Runtime has no deleted-Item projection until delete moves",
-			},
-		],
 	},
 	{
 		module: HOOKS,
 		symbol: "useItemAttachments",
 		kind: "item-read",
-		holdouts: [
-			{
-				file: "src/components/vault/item-detail-pane.tsx",
-				ticket: 28,
-				why: "the first Runtime slice models no Attachments, so the detail pane still reads them transitionally",
-			},
-		],
 	},
 
 	// --- Item writes: ticket 28 ------------------------------------------------------

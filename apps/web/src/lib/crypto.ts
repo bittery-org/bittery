@@ -50,8 +50,12 @@ export const webWorkerOwner = composition.workerOwner;
 export const crypto = createWasmWorkerCryptoPort(composition.cryptoChannel);
 /** Shared Worker Runtime. Web Items observation consumes `observe(Items)`. */
 export const runtime = composition.runtime;
-/** Opaque, single-use plaintext sources consumed only by generated Runtime requests. */
-export const attachmentUploads = composition.attachmentUploads;
+/** Opaque, single-use plaintext grants; Runtime lifecycle remains package-private. */
+export const attachmentUploadSources = composition.attachmentUploadSources;
+/** Atomic plaintext Download grants; Runtime lifecycle remains package-private. */
+export const attachmentDownloadSinks = composition.attachmentDownloadSinks;
+/** Browser-only Vault-image source registration; Rust binds generated identities on claim. */
+export const vaultImageSources = composition.vaultImageSources;
 /** Rust-owned Account identity normalization used before durable deletion markers. */
 export const normalizeAccountEmail = composition.normalizeAccountEmail;
 /**

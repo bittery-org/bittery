@@ -1919,3 +1919,163 @@ async fn caller_cancellation_after_acceptance_only_detaches_the_waiter() {
     assert_eq!(snapshot.operations.len(), 1);
     assert!(snapshot.items.is_empty());
 }
+
+/// The accepted batch bound must sit under both ceilings it has to pass.
+///
+/// A change to the Server's Import body limit, to `MAX_IMPORT_AUTHORITY_BYTES`, to
+/// `MAX_IMPORT_ITEMS`, or to the measured per-Item envelope goes red here rather than silently
+/// letting Runtime accept a batch that can never reach a semantic outcome.
+#[test]
+fn import_batch_bytes_fit_the_server_and_authority_ceilings() {
+    use super::import::{
+        AUTHORITY_ITEM_ENVELOPE_BYTES, AUTHORITY_PAGE_FRAMING_BYTES,
+        DERIVED_IMPORT_REQUEST_CEILING, MAX_IMPORT_AUTHORITY_BYTES, MAX_IMPORT_REQUEST_BYTES,
+        SERVER_IMPORT_BODY_BYTES,
+    };
+
+    // The Server literal this derivation mirrors. `apps/server/src/http/limits.rs` pins the same
+    // number from the other side, so the two cannot drift apart unnoticed.
+    assert_eq!(SERVER_IMPORT_BODY_BYTES, 16 * 1024 * 1024);
+    assert_eq!(crate::replica::MAX_IMPORT_ITEMS, 200);
+
+    // Bound to locals so the comparisons carry a message. `import.rs` states the same arithmetic
+    // as `const _: () = assert!(..)`, which fails the build; this states it with an explanation.
+    let batch = MAX_IMPORT_REQUEST_BYTES;
+    let body_ceiling = SERVER_IMPORT_BODY_BYTES;
+    let authority_ceiling = MAX_IMPORT_AUTHORITY_BYTES;
+    let derived = DERIVED_IMPORT_REQUEST_CEILING;
+    let authority_cost = crate::replica::MAX_IMPORT_ITEMS * AUTHORITY_ITEM_ENVELOPE_BYTES
+        + AUTHORITY_PAGE_FRAMING_BYTES;
+
+    assert!(
+        batch <= body_ceiling,
+        "an accepted batch must fit the Server's Import body limit"
+    );
+    assert!(
+        batch + authority_cost <= authority_ceiling,
+        "an accepted batch must leave room for the authority read that reconciles it"
+    );
+    assert!(
+        batch <= derived,
+        "the published batch bound must stay under the derived ceiling"
+    );
+    assert!(
+        derived - batch >= 512 * 1024,
+        "the batch bound must keep honest slack, not be tuned to the last byte"
+    );
+}
+
+/// The per-Item authority envelope must cover the widest Item the Server can answer with.
+///
+/// The 64-character identifier is `validate_resource_id`'s ceiling in
+/// `apps/server/src/shared/mod.rs`. Unlike the Server's Import body limit and Item count, that
+/// bound is not published in `http::limits` and is not cross-pinned, so this test states the
+/// assumption rather than proving it: an identifier scheme that grew past 64 characters would
+/// need the envelope revisited.
+#[test]
+fn an_authority_item_stays_inside_its_measured_envelope() {
+    use super::import::AUTHORITY_ITEM_ENVELOPE_BYTES;
+
+    let identifier = "x".repeat(64);
+    let timestamp = "2026-09-01T12:34:56.123456789Z".to_owned();
+    let request = super::import::ImportRequestItem {
+        item_id: identifier.clone(),
+        category: crate::server_contract::ItemCategory::SecureNote,
+        favorite: true,
+        encrypted_data: "ciphertext".to_owned(),
+        encryption_iv: "AAAAAAAAAAAAAAAA".to_owned(),
+        encryption_algorithm: "AES-GCM-AAD-V1".to_owned(),
+    };
+    let authority = crate::server_contract::ItemResponseDto {
+        id: request.item_id.clone(),
+        vault_id: identifier.clone(),
+        category: request.category.clone(),
+        favorite: request.favorite,
+        encrypted_data: request.encrypted_data.clone(),
+        encryption_iv: request.encryption_iv.clone(),
+        encryption_algorithm: request.encryption_algorithm.clone(),
+        version: i32::MIN,
+        encryption_version: i32::MIN,
+        encrypted_by_user_id: identifier.clone(),
+        last_modified_by: identifier,
+        created_at: timestamp.clone(),
+        updated_at: timestamp.clone(),
+        deleted_at: Some(timestamp),
+    };
+    let request_bytes = serde_json::to_vec(&request).unwrap().len();
+    let authority_bytes = serde_json::to_vec(&authority).unwrap().len();
+    assert!(authority_bytes > request_bytes);
+    assert!(
+        authority_bytes - request_bytes <= AUTHORITY_ITEM_ENVELOPE_BYTES,
+        "one authority Item costs {} bytes over its request, past the {AUTHORITY_ITEM_ENVELOPE_BYTES} byte envelope",
+        authority_bytes - request_bytes
+    );
+}
+
+/// A batch neither ceiling could carry is refused at accept time, so it never becomes durable.
+#[tokio::test]
+async fn a_batch_past_the_byte_bound_is_refused_before_it_becomes_durable() {
+    let (runtime, account_id) = ready_runtime().await;
+
+    // One draft whose plaintext alone exceeds the frozen-body bound. The count bound cannot see
+    // it: a single Item is far inside `MAX_IMPORT_ITEMS`.
+    let mut oversized = draft(false);
+    let ItemDraft::Login(data) = &mut oversized.draft else {
+        panic!("the fixture draft is a Login")
+    };
+    data.notes = Some("n".repeat(super::import::MAX_IMPORT_REQUEST_BYTES + 4096));
+
+    let error = runtime
+        .accept_import_items(
+            account_id.clone(),
+            TEST_VAULT_ID.into(),
+            vec![oversized],
+            RequestCancellation::new(),
+            || {},
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::SizeRejected);
+    assert!(
+        runtime
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .operations
+            .is_empty(),
+        "a batch past the byte bound never became durable work"
+    );
+
+    // The same Account still accepts an ordinary batch, so the bound refuses one request rather
+    // than failing the Account.
+    let (_, item_ids) = accept(&runtime, &account_id, vec![draft(true)]).await;
+    assert_eq!(item_ids.len(), 1);
+}
+
+/// A persisted batch past the byte bound is refused where the executor reads it, too.
+///
+/// Acceptance is the gate that matters, but a record that reached durable storage another way —
+/// an older build, a tampered store — must not be sent either, because the Server would answer a
+/// status that carries no outcome and the Operation could never terminate.
+#[tokio::test]
+async fn a_persisted_batch_past_the_byte_bound_is_refused_where_the_executor_reads_it() {
+    let (runtime, account_id) = ready_runtime().await;
+    accept(&runtime, &account_id, vec![draft(true)]).await;
+    let mut operation = runtime.replica().snapshot(&account_id).unwrap().operations[0].clone();
+    assert!(super::import::decode_import_request(&operation).is_ok());
+
+    let mut body: super::import::ImportRequestBody =
+        serde_json::from_slice(&operation.request.body).unwrap();
+    body.items[0]
+        .encrypted_data
+        .push_str(&"c".repeat(super::import::MAX_IMPORT_REQUEST_BYTES));
+    operation.request.body = serde_json::to_vec(&body).unwrap();
+    // The record stays internally consistent, so only the byte bound can refuse it.
+    operation.request_fingerprint =
+        super::import::import_items_fingerprint(operation.vault_id(), &operation.request.body);
+
+    let error = super::import::decode_import_request(&operation)
+        .err()
+        .expect("an over-byte persisted batch is not readable");
+    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+}

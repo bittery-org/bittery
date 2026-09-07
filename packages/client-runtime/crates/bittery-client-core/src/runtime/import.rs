@@ -28,6 +28,88 @@ pub(crate) const MAX_IMPORT_AUTHORITY_PAGES: usize = MAX_IMPORT_ITEMS;
 /// ceiling because both bound the same thing: how much of one answer this Device holds at once.
 pub(crate) const MAX_IMPORT_AUTHORITY_CURSOR_BYTES: usize = MAX_IMPORT_AUTHORITY_BYTES;
 
+/// The Server's published Import request body limit, mirrored from
+/// `apps/server/src/http/limits.rs::BULK_IMPORT_BYTES`.
+///
+/// The two crates cannot share a constant, so both sides pin the literal instead:
+/// `import_batch_bytes_fit_the_server_and_authority_ceilings` guards it here and
+/// `import_request_bounds_match_the_runtime_batch_derivation` guards it there.
+/// `CREATE_VAULT_ENCRYPTED_KEY_MAX_BYTES` in `replica/domain.rs` mirrors a Server bound the same
+/// way.
+///
+/// `GET /api/meta` does publish this number, as `bulkImportBytes` alongside `bulkImportItems`,
+/// and under ADR 0011 that document is the contract a self-hosted operator consumes. The Runtime
+/// deliberately does not read it here: acceptance has to work offline, before any Server has been
+/// reached, and `DERIVED_IMPORT_REQUEST_CEILING` has to be a `const` so the arithmetic can fail
+/// the build rather than a request. A self-hosted Server on a different release could publish a
+/// smaller bound; consuming `/api/meta` to tighten the budget at run time is a separate decision,
+/// not something this constant quietly assumes away.
+pub(super) const SERVER_IMPORT_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// The most non-ciphertext bytes one Item adds to an authority page over the request that froze
+/// it.
+///
+/// An `ItemResponseDto` repeats every request field, renaming `itemId` to `id`, and adds eight
+/// more — `vaultId`, `version`, `encryptionVersion`, `encryptedByUserId`, `lastModifiedBy`,
+/// `createdAt`, `updatedAt`, `deletedAt`. Measured at 433 bytes with 64-character identifiers and
+/// nanosecond timestamps: the eight added fields, less the four bytes the shorter key name gives
+/// back. This leaves more than double that, and
+/// `an_authority_item_stays_inside_its_measured_envelope` holds the measurement.
+pub(super) const AUTHORITY_ITEM_ENVELOPE_BYTES: usize = 1024;
+
+/// Array framing for the worst case paging, which is one page per accepted Item.
+///
+/// Each page costs the two bytes of its `[]`; eight is that rounded up in the safe direction, so
+/// a future page wrapper cannot quietly outgrow the allowance.
+pub(super) const AUTHORITY_PAGE_FRAMING_BYTES: usize = MAX_IMPORT_ITEMS * 8;
+
+/// The largest frozen request body both ceilings can carry.
+pub(super) const DERIVED_IMPORT_REQUEST_CEILING: usize = {
+    let under_authority = MAX_IMPORT_AUTHORITY_BYTES
+        - MAX_IMPORT_ITEMS * AUTHORITY_ITEM_ENVELOPE_BYTES
+        - AUTHORITY_PAGE_FRAMING_BYTES;
+    if under_authority < SERVER_IMPORT_BODY_BYTES {
+        under_authority
+    } else {
+        SERVER_IMPORT_BODY_BYTES
+    }
+};
+
+/// The most one accepted Import batch's frozen request body may weigh.
+///
+/// # Why a byte bound exists at all
+///
+/// `MAX_IMPORT_ITEMS` bounds how many Items a batch carries, never how many bytes. The published
+/// per-Item bounds do not fit inside either ceiling this batch must pass: 200 Items at the
+/// Server's 1 MiB ciphertext bound is roughly 200 MiB, twelve times the Server's Import body
+/// limit. Such a batch would be accepted durably, answered `413`, read as
+/// [`SemanticAnswer::Transient`](super::outcome::SemanticAnswer) by `read_dispatch_answer` — the
+/// only thing a non-`200`, non-`OPERATION_ID_REUSED` status can be — and retried forever without
+/// ever reaching a semantic outcome. Sixteen valid 1 MiB Items already reach that state, once the
+/// JSON envelope counts. So the bound belongs at acceptance, before anything durable exists to
+/// strand.
+///
+/// # Why this number
+///
+/// Two ceilings bound one accepted batch:
+///
+/// * the Server refuses an Import request body over `SERVER_IMPORT_BODY_BYTES`; and
+/// * `fetch_import_authority` refuses an authority read over `MAX_IMPORT_AUTHORITY_BYTES`, summed
+///   across every page, so paging cannot buy room.
+///
+/// The authority read is bounded by the request body plus
+/// `MAX_IMPORT_ITEMS * AUTHORITY_ITEM_ENVELOPE_BYTES` plus page framing, which makes
+/// `DERIVED_IMPORT_REQUEST_CEILING` the largest body both ceilings admit. This value is a round
+/// 15 MiB, roughly 800 KiB under that ceiling, rather than tuned to the last byte, so a small
+/// change to any input stays safe.
+pub(crate) const MAX_IMPORT_REQUEST_BYTES: usize = 15 * 1024 * 1024;
+
+// The arithmetic is a build invariant, not only a tested one. A change to the Server body limit,
+// to `MAX_IMPORT_AUTHORITY_BYTES`, to `MAX_IMPORT_ITEMS`, or to the measured per-Item envelope
+// that would let acceptance take a batch it can never reconcile fails to compile here.
+const _: () = assert!(MAX_IMPORT_REQUEST_BYTES <= DERIVED_IMPORT_REQUEST_CEILING);
+const _: () = assert!(DERIVED_IMPORT_REQUEST_CEILING - MAX_IMPORT_REQUEST_BYTES >= 512 * 1024);
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ImportRequestItem {
@@ -76,6 +158,9 @@ pub(crate) fn decode_import_request(
     if body.items.len() > MAX_IMPORT_ITEMS {
         return Err(invalid_request("Import Operation exceeds its Item bound"));
     }
+    if operation.request.body.len() > MAX_IMPORT_REQUEST_BYTES {
+        return Err(invalid_request("Import Operation exceeds its byte bound"));
+    }
     if import_items_fingerprint(operation.vault_id(), &operation.request.body)
         != operation.request_fingerprint
     {
@@ -107,6 +192,8 @@ impl Runtime {
         if cancellation.is_cancelled() {
             return Err(cancelled_before_acceptance());
         }
+        // Two bounds refuse a batch that could never be sent and reconciled: the Item count here,
+        // and the frozen request bytes once encryption has produced them.
         if drafts.len() > MAX_IMPORT_ITEMS {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::SizeRejected,
@@ -219,6 +306,15 @@ impl Runtime {
         drop(vault_key);
         let body = serde_json::to_vec(&ImportRequestBody { items })
             .map_err(|_| invalid_request("Import request could not be serialized"))?;
+        // The exact bytes are the only honest measure, so the bound is checked on them rather
+        // than estimated from the drafts. This is still accept time: nothing durable exists yet,
+        // so a batch neither ceiling can carry is refused instead of stranded.
+        if body.len() > MAX_IMPORT_REQUEST_BYTES {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::SizeRejected,
+                "an Import batch exceeds its byte bound",
+            ));
+        }
         let request_fingerprint = import_items_fingerprint(&vault_id, &body);
         let operation = OperationRecord {
             operation_id: operation_id.clone(),

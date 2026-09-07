@@ -341,7 +341,7 @@ pub(crate) enum ImportItemsOperationRejectionCode {
     ItemIdConflict,
 }
 
-fn import_items_rejection_code(
+pub(crate) fn import_items_rejection_code(
     code: OperationRejectionCode,
 ) -> Result<ImportItemsOperationRejectionCode, AppError> {
     Ok(match code {
@@ -576,6 +576,26 @@ pub(crate) fn create_vault_operation_fingerprint(vault_id: &str, raw_body: &[u8]
         vault_id.as_bytes(),
         raw_body,
         b"".as_slice(),
+    ] {
+        fingerprint_part(&mut hasher, part);
+    }
+    hasher.finalize().into()
+}
+
+/// Hashes one Import batch: protocol, kind, the concrete route, and the exact ordered body bytes.
+///
+/// This is the one Server fingerprint whose route part carries no HTTP method. The Runtime froze
+/// the same four parts in `replica::import_items_fingerprint` before this handler existed, and an
+/// accepted batch's fingerprint is already durable on every Device that holds one. The trust
+/// boundary therefore re-derives the Runtime's definition rather than the Server's house style;
+/// `import_items_fingerprint_matches_the_runtime_byte_for_byte` pins it to the shared corpus.
+pub(crate) fn import_items_operation_fingerprint(vault_id: &str, raw_body: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    for part in [
+        OPERATION_DISCRIMINATOR,
+        b"import_items".as_slice(),
+        format!("/api/v1/vaults/{vault_id}/item-imports").as_bytes(),
+        raw_body,
     ] {
         fingerprint_part(&mut hasher, part);
     }

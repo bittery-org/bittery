@@ -12,6 +12,7 @@ import type { UnifiedItem } from "@bittery/core/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import type { VaultRole } from "@bittery/shared/vault-mapping";
 import type { VaultOption } from "@bittery/ui";
+import type { AttachmentItem } from "@bittery/ui";
 
 /**
  * A list Item plus what the Runtime says about it.
@@ -20,7 +21,8 @@ import type { VaultOption } from "@bittery/ui";
  * that has not landed yet, so the status rides alongside it instead of being squeezed into a
  * field that means something else. Ticket 22 replaces the whole shape.
  */
-export type RuntimeListItem = UnifiedItem & {
+export type RuntimeListItem = Omit<UnifiedItem, "attachments"> & {
+	readonly attachments?: AttachmentItem[];
 	readonly runtimeStatus: ItemProjectionStatus;
 };
 
@@ -164,7 +166,7 @@ export function mapRuntimeItemsProjection(
 		// than folded into `optimisticFailure`, which would need an `operationId` and a
 		// rejection code this projection does not carry and must not invent.
 		runtimeStatus: item.status,
-		deletedAt: null,
+		deletedAt: item.deletedAt ?? null,
 		version: 1,
 		lastModifiedBy: "",
 		encryptionVersion: 1,
@@ -174,6 +176,17 @@ export function mapRuntimeItemsProjection(
 			iv: "",
 			algorithm: "",
 		},
+		attachments: item.attachments?.map((attachment) => ({
+			id: attachment.attachmentId,
+			accountId: attachment.accountId,
+			itemId: attachment.itemId,
+			vaultId: attachment.vaultId,
+			name: attachment.name,
+			contentType: attachment.contentType,
+			fileSize: attachment.fileSize,
+			uploadedBy: attachment.uploadedBy,
+			createdAt: attachment.createdAt,
+		})),
 		// The Runtime names the Vault in the same projection, so the dashboard, the
 		// security report and the list all read one source. An Item whose Vault the
 		// projection does not carry keeps an empty name rather than borrowing another
