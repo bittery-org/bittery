@@ -518,6 +518,12 @@ pub enum OperationKind {
     CreateShare,
     CreateVault,
     ImportItems,
+    CreateVaultMemberRemovalRotationPlans,
+    FinalizeVaultMemberRemovalRotationPlans,
+    CreateTeamLeaveRotationPlans,
+    FinalizeTeamLeaveRotationPlans,
+    CreateTeamMemberRemovalRotationPlans,
+    FinalizeTeamMemberRemovalRotationPlans,
 }
 
 closed_enum!(OperationKind, "operation_kind", {
@@ -531,6 +537,13 @@ closed_enum!(OperationKind, "operation_kind", {
     CreateShare => "create_share",
     CreateVault => "create_vault",
     ImportItems => "import_items",
+    CreateVaultMemberRemovalRotationPlans => "create_vault_member_removal_rotation_plans",
+    FinalizeVaultMemberRemovalRotationPlans => "finalize_vault_member_removal_rotation_plans",
+    CreateTeamLeaveRotationPlans => "create_team_leave_rotation_plans",
+    FinalizeTeamLeaveRotationPlans => "finalize_team_leave_rotation_plans",
+    CreateTeamMemberRemovalRotationPlans => "create_team_member_removal_rotation_plans",
+    FinalizeTeamMemberRemovalRotationPlans => "finalize_team_member_removal_rotation_plans",
+
 });
 
 /// Whether a retained Operation applied its effect or proved a terminal rejection.
@@ -546,12 +559,8 @@ closed_enum!(OperationOutcomeStatus, "operation_outcome_status", {
     Rejected => "rejected",
 });
 
-/// The terminal semantic rejections an Item Operation can prove.
-///
-/// One set, not one per kind. `invalid_ciphertext`, `vault_access_denied` and `vault_read_only`
-/// are the same fact whichever mutation met them, and a client that learns to read them once can
-/// read them everywhere. Each kind then contributes only its own genuinely new failures, and the
-/// handler -- not the wire type -- decides which subset it can ever prove.
+/// Storage vocabulary for terminal semantic Operation rejections.
+/// Each wire result and the database shape constraint restrict this vocabulary to its own kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationRejectionCode {
@@ -573,6 +582,25 @@ pub enum OperationRejectionCode {
     TeamMembershipRequired,
     VaultSharingEntitlementDenied,
     SharedVaultLimitReached,
+    VaultMemberNotFound,
+    SelfRemovalForbidden,
+    VaultOwnerProtected,
+    VaultAdminPeerProtected,
+    SharedVaultRequired,
+    VaultMembershipChanged,
+    RotationPlanUnavailable,
+    RotationPlanMismatch,
+    RotationPlanIncomplete,
+    RotationPlanStale,
+    TeamMemberNotFound,
+    PersonalTeamDepartureForbidden,
+    TeamOwnerLeaveForbidden,
+    TeamMembershipChanged,
+    RotationPlanSetMismatch,
+    TeamManagementDenied,
+    TeamOwnerProtected,
+    TeamManagementEntitlementDenied,
+    VaultManagementIncomplete,
 }
 
 closed_enum!(OperationRejectionCode, "operation_rejection_code", {
@@ -594,6 +622,26 @@ closed_enum!(OperationRejectionCode, "operation_rejection_code", {
     TeamMembershipRequired => "team_membership_required",
     VaultSharingEntitlementDenied => "vault_sharing_entitlement_denied",
     SharedVaultLimitReached => "shared_vault_limit_reached",
+    VaultMemberNotFound => "vault_member_not_found",
+    SelfRemovalForbidden => "self_removal_forbidden",
+    VaultOwnerProtected => "vault_owner_protected",
+    VaultAdminPeerProtected => "vault_admin_peer_protected",
+    SharedVaultRequired => "shared_vault_required",
+    VaultMembershipChanged => "vault_membership_changed",
+    RotationPlanUnavailable => "rotation_plan_unavailable",
+    RotationPlanMismatch => "rotation_plan_mismatch",
+    RotationPlanIncomplete => "rotation_plan_incomplete",
+    RotationPlanStale => "rotation_plan_stale",
+    TeamMemberNotFound => "team_member_not_found",
+    PersonalTeamDepartureForbidden => "personal_team_departure_forbidden",
+    TeamOwnerLeaveForbidden => "team_owner_leave_forbidden",
+    TeamMembershipChanged => "team_membership_changed",
+    RotationPlanSetMismatch => "rotation_plan_set_mismatch",
+    TeamManagementDenied => "team_management_denied",
+    TeamOwnerProtected => "team_owner_protected",
+    TeamManagementEntitlementDenied => "team_management_entitlement_denied",
+    VaultManagementIncomplete => "vault_management_incomplete",
+
 });
 
 #[cfg(test)]

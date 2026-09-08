@@ -13,7 +13,7 @@ import {
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 const PRIOR_DB_VERSION = 6;
 const PRIOR_STORE_NAMES = [
 	"heads",

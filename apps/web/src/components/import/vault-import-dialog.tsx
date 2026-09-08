@@ -314,10 +314,6 @@ function getImportErrorMessage(
 			});
 		case "missing-target-mapping":
 			return m.vaults_import_error_missing_target_mapping();
-		case "target-vault-key-decrypt-failed":
-			return m.vaults_import_error_target_vault_key_decrypt_failed({
-				targetVaultName: getStringParam(error.params, "targetVaultName"),
-			});
 		case "vault-import-failed":
 			return m.vaults_import_error_vault_import_failed();
 		case "parse-failed":
@@ -326,8 +322,6 @@ function getImportErrorMessage(
 			return m.vaults_import_error_execution_failed();
 		case "create-vault-account-required":
 			return m.vaults_import_error_create_vault_account_required();
-		case "runtime-import-pending":
-			return m.vaults_import_error_runtime_pending();
 		case "unsupported-file-type":
 			return m.vaults_import_error_unsupported_file_type({
 				format: getStringParam(error.params, "format"),
@@ -429,6 +423,7 @@ export function VaultImportDialog({
 		mappings,
 		existingVaults,
 		progress,
+		pendingImport,
 		summary,
 		error,
 		isBusy,
@@ -471,10 +466,9 @@ export function VaultImportDialog({
 				: selectedProvider,
 		[preview?.providerId, selectedProvider],
 	);
-	const isParked = progress.stage === "awaiting-runtime-import";
 
 	const canStartImport = useMemo(() => {
-		if (!preview || isBusy || isParked) {
+		if (!preview || isBusy) {
 			return false;
 		}
 
@@ -488,7 +482,7 @@ export function VaultImportDialog({
 			}
 			return !!mapping.targetVaultId;
 		});
-	}, [preview, mappings, isBusy, isParked]);
+	}, [preview, mappings, isBusy]);
 
 	const displayError = useMemo(() => {
 		if (!error) {
@@ -734,6 +728,11 @@ export function VaultImportDialog({
 				</DialogHeader>
 
 				<div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+					{pendingImport && !isBusy && (
+						<p role="status" className="text-muted-foreground text-sm">
+							{m.vaults_import_progress_uploading_default()}
+						</p>
+					)}
 					{showManagerStep && (
 						<div className="space-y-4">
 							<div className="rounded-xl border bg-muted/20 p-4">
@@ -822,7 +821,7 @@ export function VaultImportDialog({
 									variant="ghost"
 									size="sm"
 									onClick={() => setDialogStep("manager")}
-									disabled={isBusy || isParked}
+									disabled={isBusy}
 								>
 									{m.vaults_import_upload_change_provider()}
 								</Button>
@@ -924,7 +923,7 @@ export function VaultImportDialog({
 										variant="ghost"
 										size="sm"
 										onClick={handleChooseAnotherFile}
-										disabled={isBusy || isParked}
+										disabled={isBusy}
 									>
 										{m.vaults_import_preview_choose_another_file()}
 									</Button>
@@ -1057,7 +1056,7 @@ export function VaultImportDialog({
 														onValueChange={(value: "create" | "existing") =>
 															setMappingMode(sourceVault.id, value)
 														}
-														disabled={isBusy || isParked}
+														disabled={isBusy}
 													>
 														<SelectTrigger>
 															<SelectValue />
@@ -1082,7 +1081,7 @@ export function VaultImportDialog({
 																)
 															}
 															placeholder={m.vaults_import_mapping_placeholder_new_vault_name()}
-															disabled={isBusy || isParked}
+															disabled={isBusy}
 														/>
 													) : (
 														<Select
@@ -1090,7 +1089,7 @@ export function VaultImportDialog({
 															onValueChange={(value) =>
 																setMappingTargetVaultId(sourceVault.id, value)
 															}
-															disabled={isBusy || isParked}
+															disabled={isBusy}
 														>
 															<SelectTrigger>
 																<SelectValue

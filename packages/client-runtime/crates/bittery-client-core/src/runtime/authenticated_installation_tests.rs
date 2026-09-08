@@ -418,6 +418,7 @@ struct RoutingAuthHttp {
     bootstrap_pages: Mutex<Vec<Value>>,
     changes_pages: Mutex<Vec<Value>>,
     item_bodies: Mutex<HashMap<String, Value>>,
+    item_status: Mutex<Option<u16>>,
     sse_body: Mutex<Vec<u8>>,
     refresh_status: Mutex<Option<u16>>,
     disconnected: AtomicBool,
@@ -467,6 +468,7 @@ impl RoutingAuthHttp {
             bootstrap_pages: Mutex::new(Vec::new()),
             changes_pages: Mutex::new(Vec::new()),
             item_bodies: Mutex::new(HashMap::new()),
+            item_status: Mutex::new(None),
             sse_body: Mutex::new(Vec::new()),
             refresh_status: Mutex::new(None),
             disconnected: AtomicBool::new(false),
@@ -641,8 +643,23 @@ impl RoutingAuthHttp {
     }
 
     fn item(&self, item_id: &str) -> String {
-        match self.item_bodies.lock().unwrap().get(item_id) {
-            Some(body) => routing_completed(200, body.clone()),
+        if let Some(status) = *self.item_status.lock().unwrap() {
+            return routing_completed(status, json!({"error": "injected Item fetch failure"}));
+        }
+        let complete_id = item_id.strip_suffix("/authority");
+        match self
+            .item_bodies
+            .lock()
+            .unwrap()
+            .get(complete_id.unwrap_or(item_id))
+        {
+            Some(body) => {
+                let mut body = body.clone();
+                if complete_id.is_some() {
+                    body["attachments"] = json!([]);
+                }
+                routing_completed(200, body)
+            }
             None => routing_completed(404, json!({"error": "missing"})),
         }
     }
@@ -893,7 +910,7 @@ async fn harness() -> (
 }
 
 async fn routing_harness(
-    http: Arc<RoutingAuthHttp>,
+    http: Arc<dyn crate::http_transport::SerializedHttpExecutor>,
 ) -> (
     Arc<Runtime>,
     Arc<InstallationReplica>,
@@ -2861,6 +2878,15 @@ async fn lock_close_and_close_racing_final_publication_retire_live_keys_without_
 }
 
 fn sealed_login_item(item_id: &str, title: &str, password: &str) -> (String, Value) {
+    sealed_login_item_with_key(item_id, title, password, &generate_encryption_key())
+}
+
+fn sealed_login_item_with_key(
+    item_id: &str,
+    title: &str,
+    password: &str,
+    vault_key: &[u8; 32],
+) -> (String, Value) {
     let derived = derive_keys(
         MASTER_PASSWORD,
         SECRET_KEY,
@@ -2868,9 +2894,8 @@ fn sealed_login_item(item_id: &str, title: &str, password: &str) -> (String, Val
         &current_kdf_profile(),
     )
     .unwrap();
-    let vault_key = generate_encryption_key();
     let wrapped = encrypt_vault_key_with_muk(
-        &vault_key,
+        vault_key,
         &derived.master_unlock_key,
         &VaultKeyWrapContext::new("vault-1", "user-1", 1),
     )
@@ -2882,7 +2907,7 @@ fn sealed_login_item(item_id: &str, title: &str, password: &str) -> (String, Val
             "password": password
         })
         .to_string(),
-        &vault_key,
+        vault_key,
         &AadContext {
             vault_id: "vault-1".into(),
             entity_id: item_id.into(),
@@ -3878,8 +3903,6 @@ async fn failed_authority_fetch_leaves_prior_generation_and_cursor() {
         panic!("expected SignedIn");
     };
     let before = runtime.replica.snapshot(&account_id).unwrap();
-    let previous_generation = before.bootstrap.active_generation.clone();
-    let previous_cursor = before.bootstrap.active_cursor.clone();
     *http.changes_pages.lock().unwrap() = vec![json!({
         "cursor": { "id": "evt-2" },
         "events": [{
@@ -3898,18 +3921,35 @@ async fn failed_authority_fetch_leaves_prior_generation_and_cursor() {
         "requiresFullRefresh": false
     })];
     http.state.lock().unwrap().changes_index = 0;
+    *http.item_status.lock().unwrap() = Some(503);
+    let error = runtime
+        .bootstrap_account(&account_id, RequestCancellation::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::RetryableTransport);
+    let after = runtime.replica.snapshot(&account_id).unwrap();
+    assert_eq!(after, before);
+    assert_eq!(
+        runtime.replica.load_uncached(&account_id).await.unwrap(),
+        Some(before.clone())
+    );
+    // The same page can advance only after an authoritative response; 404 proves absence.
+    *http.item_status.lock().unwrap() = None;
+    http.state.lock().unwrap().changes_index = 0;
     runtime
         .bootstrap_account(&account_id, RequestCancellation::new())
         .await
         .unwrap();
-    let after = runtime.replica.snapshot(&account_id).unwrap();
-    assert_eq!(after.bootstrap.active_generation, previous_generation);
-    assert_eq!(after.bootstrap.active_cursor, previous_cursor);
-    assert!(!after
-        .bootstrap
-        .items
-        .keys()
-        .any(|(_, item_id)| item_id == "item-2"));
+    let replayed = runtime.replica.snapshot(&account_id).unwrap();
+    assert_eq!(
+        replayed.bootstrap.active_generation,
+        before.bootstrap.active_generation
+    );
+    assert_eq!(replayed.bootstrap.items, before.bootstrap.items);
+    assert_eq!(
+        replayed.bootstrap.active_cursor,
+        crate::replica::SyncCursor::CapturedValue { id: "evt-2".into() }
+    );
 }
 
 #[tokio::test]
@@ -3919,8 +3959,11 @@ async fn failed_authority_commit_leaves_prior_generation_and_cursor() {
         RoutingAuthBehavior::Success,
         None,
     ));
-    let (_wrapped, item) = sealed_login_item("item-1", "Bank", "secret-password");
-    let (_wrapped, mut next_item) = sealed_login_item("item-2", "Treasury", "new-password");
+    let vault_key = generate_encryption_key();
+    let (_wrapped, item) =
+        sealed_login_item_with_key("item-1", "Bank", "secret-password", &vault_key);
+    let (_wrapped, mut next_item) =
+        sealed_login_item_with_key("item-2", "Treasury", "new-password", &vault_key);
     next_item.as_object_mut().unwrap().remove("attachments");
     next_item.as_object_mut().unwrap().remove("vault");
     *http.bootstrap_pages.lock().unwrap() = vec![json!({
@@ -3941,8 +3984,6 @@ async fn failed_authority_commit_leaves_prior_generation_and_cursor() {
         panic!("expected SignedIn");
     };
     let before = runtime.replica.snapshot(&account_id).unwrap();
-    let previous_generation = before.bootstrap.active_generation.clone();
-    let previous_cursor = before.bootstrap.active_cursor.clone();
     http.item_bodies
         .lock()
         .unwrap()
@@ -3971,13 +4012,42 @@ async fn failed_authority_commit_leaves_prior_generation_and_cursor() {
         .await
         .unwrap();
     let after = runtime.replica.snapshot(&account_id).unwrap();
-    assert_eq!(after.bootstrap.active_generation, previous_generation);
-    assert_eq!(after.bootstrap.active_cursor, previous_cursor);
-    assert!(!after
-        .bootstrap
-        .items
-        .keys()
-        .any(|(_, item_id)| item_id == "item-2"));
+    assert_eq!(after, before);
+    assert_eq!(
+        runtime.replica.load_uncached(&account_id).await.unwrap(),
+        Some(before.clone())
+    );
+
+    assert!(
+        !replica.fail_next_commit.load(Ordering::SeqCst),
+        "the authority commit fault must be reached"
+    );
+    http.state.lock().unwrap().changes_index = 0;
+    runtime
+        .bootstrap_account(&account_id, RequestCancellation::new())
+        .await
+        .unwrap();
+    let replayed = runtime.replica.snapshot(&account_id).unwrap();
+    assert_eq!(
+        replayed.bootstrap.active_generation,
+        before.bootstrap.active_generation
+    );
+    assert_eq!(
+        replayed.bootstrap.active_cursor,
+        crate::replica::SyncCursor::CapturedValue { id: "evt-2".into() }
+    );
+    let sink = Arc::new(Sink::default());
+    let _items = runtime
+        .observe(ObservationRequest::Items { account_id }, sink.clone())
+        .unwrap();
+    let RuntimeProjection::Items(projection) = sink.0.lock().unwrap().last().cloned().unwrap()
+    else {
+        panic!("expected Items");
+    };
+    assert_eq!(projection.items.len(), 2);
+    assert!(projection.items.iter().any(
+        |item| item.data.title() == "Treasury" && item.data.password() == Some("new-password")
+    ));
 }
 
 fn generation_storage_key(account: &str, incarnation: &str, document: &str) -> String {
@@ -4003,7 +4073,8 @@ fn last_status_access(sink: &Sink, account_id: &AccountId) -> Option<AccountAcce
             RuntimeProjection::RuntimeStatus(status) => Some(status.clone()),
             RuntimeProjection::Items(_)
             | RuntimeProjection::PendingShareResults(_)
-            | RuntimeProjection::WritableVaultCatalog(_) => None,
+            | RuntimeProjection::WritableVaultCatalog(_)
+            | RuntimeProjection::Operations(_) => None,
         })?
         .accounts
         .into_iter()
@@ -4261,4 +4332,167 @@ async fn repeated_and_unknown_sign_out_and_lock_answer_without_failing() {
         }
     );
     assert!(runtime.replica.snapshot(&unknown).is_none());
+}
+
+struct HeldSyncAuthHttp {
+    first: Arc<RoutingAuthHttp>,
+    second: Arc<RoutingAuthHttp>,
+    streams: Mutex<HashMap<String, String>>,
+    opened: tokio::sync::Semaphore,
+}
+
+#[async_trait]
+impl crate::http_transport::SerializedHttpExecutor for HeldSyncAuthHttp {
+    async fn invoke(&self, request: String) -> Result<String, RuntimeError> {
+        let value: Value = serde_json::from_str(&request).unwrap();
+        if value["type"] == "openStream" {
+            self.streams.lock().unwrap().insert(
+                value["request"]["dispatchId"].as_str().unwrap().into(),
+                value["request"]["url"].as_str().unwrap().into(),
+            );
+            self.opened.add_permits(1);
+            return Ok(json!({"type":"opened","status":200,"headers":[{"name":"Content-Type","value":"text/event-stream"}]}).to_string());
+        }
+        if value["type"] == "readStream" {
+            return std::future::pending().await;
+        }
+        if value["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://second.example.com/")
+        {
+            self.second.invoke(request).await
+        } else {
+            self.first.invoke(request).await
+        }
+    }
+    fn cancel(&self, id: &str) {
+        self.streams.lock().unwrap().remove(id);
+    }
+}
+
+#[tokio::test]
+async fn live_sync_held_stream_does_not_block_real_second_account_sign_in_or_mutation_and_lock_is_isolated(
+) {
+    let server = || {
+        let http = Arc::new(RoutingAuthHttp::new(
+            current_kdf_profile(),
+            RoutingAuthBehavior::Success,
+            None,
+        ));
+        let (_, mut item) = sealed_login_item("seed-item", "Seed", "password");
+        let vault = item.as_object_mut().unwrap().remove("vault").unwrap();
+        *http.bootstrap_pages.lock().unwrap() = vec![
+            json!({"phase":"vaults","vaults":[vault],"hasMore":false,"nextCursor":null,"syncCursor":{"id":"seed"}}),
+            json!({"phase":"items","items":[item],"hasMore":false,"nextCursor":null,"syncCursor":{"id":"seed"}}),
+        ];
+        http
+    };
+    let http = Arc::new(HeldSyncAuthHttp {
+        first: server(),
+        second: server(),
+        streams: Mutex::new(HashMap::new()),
+        opened: tokio::sync::Semaphore::new(0),
+    });
+    let (runtime, _, platform) = routing_harness(http.clone()).await;
+    let RuntimeResponse::SignedIn {
+        account_id: first, ..
+    } = runtime
+        .request(
+            sign_in_request(NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("first Sign-in failed")
+    };
+    assert_eq!(
+        runtime.replica.snapshot(&first).unwrap().bootstrap.state,
+        crate::replica::ReplicaState::Ready
+    );
+    assert_eq!(
+        runtime
+            .replica
+            .snapshot(&first)
+            .unwrap()
+            .bootstrap
+            .snapshot()
+            .visible_items
+            .len(),
+        1
+    );
+    let runner = tokio::spawn(runtime.clone().run_live_sync());
+    tokio::time::timeout(std::time::Duration::from_secs(2), http.opened.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert_eq!(http.streams.lock().unwrap().len(), 1);
+    let RuntimeResponse::SignedIn {
+        account_id: second, ..
+    } = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        runtime.request(
+            sign_in_request_to("https://second.example.com", NORMALIZED_EMAIL),
+            RequestCancellation::new(),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    else {
+        panic!("second Sign-in failed")
+    };
+    assert_ne!(first, second);
+    assert_eq!(platform.catalog().unwrap().accounts.len(), 2);
+    tokio::time::timeout(std::time::Duration::from_secs(2), http.opened.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert_eq!(http.streams.lock().unwrap().len(), 2);
+    assert!(matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.request(create_request(second.as_str()), RequestCancellation::new())
+        )
+        .await
+        .unwrap()
+        .unwrap(),
+        RuntimeResponse::Accepted { .. }
+    ));
+    assert_eq!(
+        runtime.replica.snapshot(&first).unwrap().operations.len(),
+        0
+    );
+    let second_work = runtime.replica.snapshot(&second).unwrap().operations;
+    assert_eq!(second_work.len(), 1);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        runtime.mark_account_locked(&first),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        http.streams
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["https://second.example.com/api/v1/sync/events"]
+    );
+    assert_eq!(
+        runtime.account_access_state(&second),
+        Some(AccountAccessState::Unlocked)
+    );
+    assert_eq!(
+        runtime.replica.snapshot(&second).unwrap().operations,
+        second_work
+    );
+    runtime.close().await;
+    runner.await.unwrap();
+    assert!(http.streams.lock().unwrap().is_empty());
 }

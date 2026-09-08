@@ -7,13 +7,10 @@ import type {
 	ShareAccessMode,
 	ShareExpiration,
 } from "@bittery/client-runtime/protocol";
-import {
-	useRuntimeClient,
-	useRuntimePendingShareResults,
-} from "@bittery/client-runtime/react";
-import { useQueryInvalidator } from "@bittery/core/hooks";
+import { useRuntimeClient } from "@bittery/client-runtime/react";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { useMutation } from "@tanstack/react-query";
+import { observeAccountDeparture } from "@/lib/runtime-account-presentation";
+import { useRuntimeMutation } from "./use-runtime-mutation";
 
 export interface CreateShareInput {
 	item: DecryptedItemWithContext;
@@ -41,31 +38,66 @@ function pendingResult(
 		: undefined;
 }
 
-/** Waits without a transport-attempt bound; only Runtime semantic resolution can finish it. */
+/** Observe semantic resolution; detaching presentation leaves accepted work in Runtime. */
 export function waitForPendingShareResult(
 	client: RuntimeClient,
 	accountId: string,
 	operationId: string,
+	signal?: AbortSignal,
 ): Promise<PendingShareResult> {
-	const store = client.pendingShareResults(accountId);
-	const existing = pendingResult(store, operationId);
-	if (existing) return Promise.resolve(existing);
+	const results = client.pendingShareResults(accountId);
+	const operations = client.operations(accountId);
 	return new Promise((resolve, reject) => {
-		let unsubscribe: () => void = () => undefined;
-		const inspect = () => {
-			const snapshot = store.getSnapshot();
-			if (snapshot.state === "failed") {
-				unsubscribe();
-				reject(new Error(`Share result observation failed: ${snapshot.code}`));
-				return;
-			}
-			const result = pendingResult(store, operationId);
-			if (result) {
-				unsubscribe();
-				resolve(result);
-			}
+		const releases: Array<() => void> = [];
+		let settled = false;
+		const finish = (result?: PendingShareResult, error?: Error) => {
+			if (settled) return;
+			settled = true;
+			for (const release of releases) release();
+			signal?.removeEventListener("abort", abort);
+			if (error) reject(error);
+			else if (result) resolve(result);
 		};
-		unsubscribe = store.subscribe(inspect);
+		const abort = () =>
+			finish(
+				undefined,
+				new DOMException("Share presentation detached", "AbortError"),
+			);
+		const inspect = () => {
+			if (settled) return;
+			if (signal?.aborted) return abort();
+			const result = pendingResult(results, operationId);
+			if (result) return finish(result);
+			for (const store of [results, operations]) {
+				const snapshot = store.getSnapshot();
+				if (snapshot.state === "failed")
+					return finish(
+						undefined,
+						new Error(`Share result observation failed: ${snapshot.code}`),
+					);
+			}
+			const snapshot = operations.getSnapshot();
+			const operation =
+				snapshot.state === "ready"
+					? snapshot.value.operations.find(
+							(entry) => entry.operationId === operationId,
+						)
+					: undefined;
+			if (operation?.resolution === "rejected")
+				finish(
+					undefined,
+					new Error(
+						`Share Operation rejected: ${operation.rejectionCode ?? "unknown"}`,
+					),
+				);
+		};
+		signal?.addEventListener("abort", abort, { once: true });
+		for (const store of [results, operations]) {
+			if (settled) break;
+			const release = store.subscribe(inspect);
+			if (settled) release();
+			else releases.push(release);
+		}
 		inspect();
 	});
 }
@@ -73,43 +105,54 @@ export function waitForPendingShareResult(
 export async function createShareWithRuntime(
 	runtime: RuntimeClient,
 	input: CreateShareInput,
+	signal?: AbortSignal,
 ): Promise<CreateShareResult> {
 	const accountId = input.item.accountId ?? input.item.account?.accountId;
 	if (!accountId) {
 		throw new Error("Account context is required to create a share");
 	}
-	const accepted = await runtime.createShare({
-		accountId,
-		itemId: input.item.id,
-		draft: {
-			accessMode: input.accessMode,
-			expiresIn: input.expiresIn,
-			isOneTimeUse: input.isOneTimeUse,
-			allowedEmails: input.allowedEmails,
-		},
-	});
-	return {
-		...(await waitForPendingShareResult(
-			runtime,
+	const attempt = new AbortController();
+	const abort = () => attempt.abort();
+	const release = observeAccountDeparture(runtime, accountId, abort);
+	signal?.addEventListener("abort", abort, { once: true });
+	if (signal?.aborted) abort();
+	try {
+		attempt.signal.throwIfAborted();
+		const accepted = await runtime.createShare(
+			{
+				accountId,
+				itemId: input.item.id,
+				draft: {
+					accessMode: input.accessMode,
+					expiresIn: input.expiresIn,
+					isOneTimeUse: input.isOneTimeUse,
+					allowedEmails: input.allowedEmails,
+				},
+			},
+			{ signal: attempt.signal },
+		);
+		return {
+			...(await waitForPendingShareResult(
+				runtime,
+				accountId,
+				accepted.operationId,
+				attempt.signal,
+			)),
 			accountId,
-			accepted.operationId,
-		)),
-		accountId,
-	};
+		};
+	} finally {
+		release();
+		signal?.removeEventListener("abort", abort);
+	}
 }
 
 export function useCreateShare() {
 	const runtime = useRuntimeClient();
-	const invalidator = useQueryInvalidator();
-	return useMutation({
-		mutationFn: (input: CreateShareInput) =>
-			createShareWithRuntime(runtime, input),
-		onSuccess: async (_result, input) => {
-			await invalidator.invalidateShare(input.item.id);
-		},
+	// The shared presentation adapter retires callbacks; Runtime keeps accepted work.
+	return useRuntimeMutation({
+		accountId: (input: CreateShareInput) =>
+			input.item.accountId ?? input.item.account?.accountId,
+		mutationFn: (input: CreateShareInput, signal) =>
+			createShareWithRuntime(runtime, input, signal),
 	});
-}
-
-export function usePendingShareResults(accountId: string | null | undefined) {
-	return useRuntimePendingShareResults(accountId);
 }

@@ -1,20 +1,17 @@
 import { RuntimeRequestError } from "@bittery/client-runtime/client";
 import { useRuntimeClient } from "@bittery/client-runtime/react";
-import type {
-	AtomicAttachmentDownloadSink,
-	AtomicAttachmentUploadSource,
-} from "@bittery/client-runtime/web";
+import type { AtomicAttachmentUploadSource } from "@bittery/client-runtime/web";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
-import type {
-	AttachmentItem,
-	AttachmentUploadErrorCode,
-} from "@bittery/ui";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import {
-	attachmentDownloadSinks,
-	attachmentUploadSources,
-} from "@/lib/crypto";
+import type { AttachmentItem, AttachmentUploadErrorCode } from "@bittery/ui";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { createAttachmentDownloadBuffer } from "@/lib/attachment-download-buffer";
+import { attachmentDownloadSinks, attachmentUploadSources } from "@/lib/crypto";
+import { observeAccountDeparture } from "@/lib/runtime-account-presentation";
+import { useRuntimeMutation } from "./use-runtime-mutation";
+
+export { createAttachmentDownloadBuffer } from "@/lib/attachment-download-buffer";
 
 export function createFileAttachmentUploadSource(
 	file: Blob,
@@ -34,47 +31,6 @@ export function createFileAttachmentUploadSource(
 		},
 		async close() {
 			closed = true;
-		},
-	};
-}
-
-export interface AttachmentDownloadBuffer extends AtomicAttachmentDownloadSink {
-	take(): Uint8Array;
-}
-
-export function createAttachmentDownloadBuffer(
-	expectedBytes: number,
-): AttachmentDownloadBuffer {
-	if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0)
-		throw new Error("Attachment Download size is invalid");
-	let bytes = new Uint8Array(expectedBytes);
-	let offset = 0;
-	let committed = false;
-	return {
-		async write(chunk) {
-			if (committed || offset + chunk.byteLength > bytes.byteLength)
-				throw new Error("Attachment Download length is invalid");
-			bytes.set(chunk, offset);
-			offset += chunk.byteLength;
-		},
-		async commit() {
-			if (offset !== bytes.byteLength)
-				throw new Error("Attachment Download is incomplete");
-			committed = true;
-		},
-		async discard() {
-			bytes.fill(0);
-			offset = 0;
-			committed = false;
-		},
-		take() {
-			if (!committed)
-				throw new Error("Attachment Download is not committed");
-			const result = bytes;
-			bytes = new Uint8Array(0);
-			offset = 0;
-			committed = false;
-			return result;
 		},
 	};
 }
@@ -103,9 +59,24 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 	});
 	const accountId = item?.accountId;
 	const itemId = item?.id;
+	const downloads = useRef(new Set<AbortController>());
+	const owner = useMemo(() => ({ accountId, itemId }), [accountId, itemId]);
+	const displayedOwner = useRef(owner);
+	displayedOwner.current = owner;
+	const mounted = useRef(true);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Replacing the displayed Item retires its foreground downloads.
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			for (const download of downloads.current) download.abort();
+			downloads.current.clear();
+		};
+	}, [owner]);
 
-	const upload = useMutation({
-		mutationFn: async (file: File & { displayName?: string }) => {
+	const upload = useRuntimeMutation({
+		accountId: () => accountId,
+		mutationFn: async (file: File & { displayName?: string }, signal) => {
 			if (!accountId || !itemId)
 				throw new Error("Runtime Item authority is unavailable");
 			const name = file.displayName?.trim() || file.name;
@@ -118,55 +89,82 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 				expectedBytes: BigInt(file.size),
 				source: createFileAttachmentUploadSource(file),
 			});
-			return runtime.uploadAttachment({
-				accountId,
-				itemId,
-				name,
-				contentType,
-				fileSize: String(file.size),
-				sourceCapabilityId,
-			});
+			return runtime.uploadAttachment(
+				{
+					accountId,
+					itemId,
+					name,
+					contentType,
+					fileSize: String(file.size),
+					sourceCapabilityId,
+				},
+				{ signal },
+			);
 		},
 	});
 
-	const download = useMutation({
-		mutationFn: async (attachment: AttachmentItem) => {
-			if (!accountId)
-				throw new Error("Runtime Account authority is unavailable");
+	const download = useCallback(
+		async (attachment: AttachmentItem) => {
+			if (!mounted.current || displayedOwner.current !== owner)
+				throw new DOMException("Download presentation detached", "AbortError");
+			if (!accountId || !itemId || attachment.itemId !== itemId)
+				throw new Error("Runtime Item authority is unavailable");
 			if (!attachment.name)
 				throw new Error("Runtime Attachment name is unavailable");
+			const attempt = new AbortController();
+			downloads.current.add(attempt);
+			const release = observeAccountDeparture(runtime, accountId, () =>
+				attempt.abort(),
+			);
 			const sink = createAttachmentDownloadBuffer(attachment.fileSize);
-			const sinkCapabilityId = attachmentDownloadSinks.grant({
-				accountId,
-				attachmentId: attachment.id,
-				sink,
-			});
 			try {
-				await runtime.downloadAttachment({
+				attempt.signal.throwIfAborted();
+				const sinkCapabilityId = attachmentDownloadSinks.grant({
 					accountId,
 					attachmentId: attachment.id,
-					sinkCapabilityId,
+					sink,
 				});
+				await runtime.downloadAttachment(
+					{ accountId, attachmentId: attachment.id, sinkCapabilityId },
+					{ signal: attempt.signal },
+				);
+				attempt.signal.throwIfAborted();
 				return { bytes: sink.take(), fileName: attachment.name };
 			} catch (error) {
 				await sink.discard();
 				throw error;
+			} finally {
+				release();
+				downloads.current.delete(attempt);
 			}
 		},
-	});
+		[runtime, accountId, itemId, owner],
+	);
 
-	const rename = useMutation({
-		mutationFn: ({ attachmentId, newName }: { attachmentId: string; newName: string }) => {
+	const rename = useRuntimeMutation({
+		accountId: () => accountId,
+		mutationFn: (
+			{ attachmentId, newName }: { attachmentId: string; newName: string },
+			signal,
+		) => {
 			if (!accountId)
 				throw new Error("Runtime Account authority is unavailable");
-			return runtime.renameAttachment({ accountId, attachmentId, name: newName });
+			return runtime.renameAttachment(
+				{
+					accountId,
+					attachmentId,
+					name: newName,
+				},
+				{ signal },
+			);
 		},
 	});
-	const remove = useMutation({
-		mutationFn: (attachmentId: string) => {
+	const remove = useRuntimeMutation({
+		accountId: () => accountId,
+		mutationFn: (attachmentId: string, signal) => {
 			if (!accountId)
 				throw new Error("Runtime Account authority is unavailable");
-			return runtime.deleteAttachment({ accountId, attachmentId });
+			return runtime.deleteAttachment({ accountId, attachmentId }, { signal });
 		},
 	});
 
@@ -181,7 +179,8 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 			return { name: attachment.name };
 		},
 		upload,
-		download,
+		// Foreground plaintext goes to the caller, never into a mutation cache.
+		download: { mutateAsync: download },
 		rename,
 		remove,
 	};

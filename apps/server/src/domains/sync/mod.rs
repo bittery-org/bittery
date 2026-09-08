@@ -9,9 +9,9 @@ use crate::{
     db::models::*,
     domains::billing::entitlements::attachments_enabled_for_user,
     domains::sync::records::{
-        fetch_bootstrap_items, fetch_bootstrap_vaults, fetch_latest_visible_event_id,
-        fetch_user_vault_ids, fetch_visible_cursor_event, fetch_visible_events_since,
-        load_bootstrap_attachment_rows,
+        fetch_bootstrap_item, fetch_bootstrap_items, fetch_bootstrap_vaults,
+        fetch_latest_visible_event_id, fetch_user_vault_ids, fetch_visible_cursor_event,
+        fetch_visible_events_since, load_bootstrap_attachment_rows,
     },
     error::AppError,
     integrations::storage,
@@ -293,26 +293,50 @@ pub(crate) async fn bootstrap_items(
         None
     };
 
-    let attachments_by_item = if attachments_enabled && !result_items.is_empty() {
-        load_bootstrap_attachments(pool, &result_items).await?
-    } else {
-        std::collections::HashMap::new()
-    };
     Ok(BootstrapItemsResponse::Items {
-        items: result_items
-            .into_iter()
-            .map(|item| {
-                let attachments = attachments_by_item
-                    .get(&item.id)
-                    .cloned()
-                    .unwrap_or_default();
-                BootstrapItemResponse::compose(item.into(), attachments)
-            })
-            .collect(),
+        items: compose_bootstrap_items(pool, result_items, attachments_enabled).await?,
         next_cursor,
         sync_cursor,
         has_more,
     })
+}
+
+/// Complete authority for one changed Item, with the same visibility as Bootstrap.
+pub(crate) async fn item_authority(
+    pool: &PgPool,
+    deployment_mode: DeploymentMode,
+    user_id: &str,
+    item_id: &str,
+) -> Result<BootstrapItemResponse, AppError> {
+    validate_resource_id(item_id)?;
+    let item = fetch_bootstrap_item(pool, user_id, item_id).await?;
+    let attachments_enabled = attachments_enabled_for_user(pool, user_id, deployment_mode).await?;
+    compose_bootstrap_items(pool, vec![item], attachments_enabled)
+        .await?
+        .pop()
+        .ok_or_else(|| AppError::not_found("Item not found"))
+}
+
+async fn compose_bootstrap_items(
+    pool: &PgPool,
+    items: Vec<DbBootstrapItemRow>,
+    attachments_enabled: bool,
+) -> Result<Vec<BootstrapItemResponse>, AppError> {
+    let attachments_by_item = if attachments_enabled && !items.is_empty() {
+        load_bootstrap_attachments(pool, &items).await?
+    } else {
+        std::collections::HashMap::new()
+    };
+    Ok(items
+        .into_iter()
+        .map(|item| {
+            let attachments = attachments_by_item
+                .get(&item.id)
+                .cloned()
+                .unwrap_or_default();
+            BootstrapItemResponse::compose(item.into(), attachments)
+        })
+        .collect())
 }
 
 pub(crate) fn timestamp_millis(value: OffsetDateTime) -> i64 {

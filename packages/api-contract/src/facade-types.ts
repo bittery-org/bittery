@@ -211,9 +211,24 @@ export type AvailableTeamMember = Schema<"VaultAvailableMemberResponse">;
 export type VaultMember = Schema<"VaultMemberResponse">;
 export type AddVaultMemberInput = Schema<"AddVaultMemberBody">;
 export type UpdateVaultMemberRoleInput = Schema<"UpdateVaultMemberRoleBody">;
-export type RotationPlanSet = Schema<"PlanSetResponse">;
+export type RotationOperationOutcome = Extract<
+	OperationOutcome,
+	{
+		kind:
+			| "create_vault_member_removal_rotation_plans"
+			| "finalize_vault_member_removal_rotation_plans"
+			| "create_team_leave_rotation_plans"
+			| "finalize_team_leave_rotation_plans"
+			| "create_team_member_removal_rotation_plans"
+			| "finalize_team_member_removal_rotation_plans";
+	}
+>;
+export type RotationOutcome<Kind extends RotationOperationOutcome["kind"]> =
+	Extract<RotationOperationOutcome, { kind: Kind }>;
+export interface RotationOperationWriteOptions extends ApiWriteOptions {
+	readonly idempotencyKey: string;
+}
 export type RotationPlanSetFinalizeInput = Schema<"FinalizePlanSetRequest">;
-export type RotationPlanSetFinalizeResponse = Schema<"FinalizePlanSetResponse">;
 export type RotationPreparationPage = Schema<"PreparationPage">;
 export type RotationStageInput = Schema<"StageRequest">;
 

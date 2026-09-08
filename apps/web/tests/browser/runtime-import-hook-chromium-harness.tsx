@@ -1,385 +1,224 @@
+import { RuntimeRequestError } from "@bittery/client-runtime/client";
 import { flushSync } from "react-dom";
-import { createRoot, type Root } from "react-dom/client";
-import { runtimeImportParking } from "../../src/hooks/runtime-import-parking";
+import { createRoot } from "react-dom/client";
+import { validateRuntimeRequest } from "../../../../packages/client-runtime/generated/runtime-protocol/validator.js";
 import { useVaultImport } from "../../src/hooks/use-vault-import";
-import { webRuntimeClient } from "../../src/lib/web-runtime-client";
+import type { ImportPreview } from "../../src/lib/import";
 
 declare global {
-	var __runtimeImportActiveAccount: string | null;
-	var __runtimeImportAccountListeners: Set<() => void>;
-	var __runtimeImportParse: (file: File) => Promise<unknown>;
-	var __runtimeImportCreateVault: (input: unknown) => Promise<unknown>;
-	var exerciseDelayedRuntimeImportParseSwitch: () => Promise<unknown>;
-	var exerciseDelayedRuntimeVaultAcceptanceSwitch: () => Promise<unknown>;
-	var exercisePartialRuntimeVaultCreationSignOut: () => Promise<unknown>;
-	var exercisePartialRuntimeVaultCreationRemount: () => Promise<unknown>;
-	var exerciseRuntimeImportAcceptanceRetirementRaces: () => Promise<unknown>;
+	var __importClient: unknown;
+	var __importVaults: unknown[];
+	var __importParse: () => Promise<ImportPreview>;
+	var __importAccount: string;
+	var __importAccountListeners: Set<() => void>;
+	var exerciseImport: (scenario: string) => Promise<unknown>;
 }
 
-type ImportHook = ReturnType<typeof useVaultImport>;
-
-let latestHook: ImportHook | null = null;
-
-function currentHook(): ImportHook {
-	if (latestHook === null) throw new Error("Import hook is not mounted");
-	return latestHook;
-}
-
+let hook: ReturnType<typeof useVaultImport>;
 function Probe() {
-	latestHook = useVaultImport();
-	return (
-		<output data-testid="preview">
-			{latestHook.preview?.sourceVaults[0]?.name ?? "none"}
-		</output>
-	);
+	hook = useVaultImport();
+	return <output>{hook.preview?.sourceVaults[0]?.name ?? "none"}</output>;
 }
-
-function preview(
-	vaultNames: readonly string[],
-): Parameters<typeof runtimeImportParking.park>[1]["preview"] {
-	return {
-		providerId: "chrome",
-		sourceVaults: vaultNames.map((name, index) => ({
-			id: `source-${index + 1}`,
-			name,
-			itemCount: 1,
-			skippedCount: 0,
-		})),
-		sourceItems: [],
-		warnings: [],
-		errors: [],
-		summary: {
-			vaultCount: vaultNames.length,
-			itemCount: vaultNames.length,
-			skippedCount: 0,
-			warningCount: 0,
-			errorCount: 0,
-		},
-	};
-}
-
-function parkDraft(
-	draft: Parameters<typeof runtimeImportParking.park>[1],
-): void {
-	const lease = runtimeImportParking.capture(draft.accountId);
-	try {
-		runtimeImportParking.park(lease, draft);
-	} finally {
-		runtimeImportParking.release(lease);
-	}
-}
-
-function switchAccount(accountId: string): void {
-	globalThis.__runtimeImportActiveAccount = accountId;
-	flushSync(() => {
-		for (const listener of globalThis.__runtimeImportAccountListeners)
-			listener();
-	});
-}
+const frame = () =>
+	new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 Object.assign(globalThis, {
-	__runtimeImportActiveAccount: null,
-	__runtimeImportAccountListeners: new Set<() => void>(),
-	__runtimeImportCreateVault: async () => {
-		throw new Error("unexpected createVault");
-	},
-	async exerciseDelayedRuntimeImportParseSwitch() {
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root: Root = createRoot(container);
-		switchAccount("account-a");
-		flushSync(() => root.render(<Probe />));
-
-		let resolveParse: (value: unknown) => void = () => {
-			throw new Error("parse did not start");
+	__importAccount: "account-a",
+	__importAccountListeners: new Set<() => void>(),
+	async exerciseImport(scenario: string) {
+		const calls: Array<{
+			accountId: string;
+			items: number;
+			categories: string[];
+			favorites: boolean[];
+			drafts: Array<{ category: string; data: { title: string } }>;
+		}> = [];
+		const receipts: Array<{
+			operationId: string;
+			kind: string;
+			resolution: string;
+			importedCount: number | null;
+		}> = [];
+		const listeners = new Set<() => void>();
+		let sequence = 0;
+		let subscriptions = 0;
+		const notify = () => {
+			for (const listener of listeners) listener();
 		};
-		globalThis.__runtimeImportParse = () =>
-			new Promise((resolve) => {
-				resolveParse = resolve;
-			});
-		const parsing = currentHook().parseFile(
-			new File(["account-a"], "account-a.csv"),
-			"chrome",
-		);
-		switchAccount("account-b");
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		resolveParse(preview(["Account A plaintext"]));
-		await parsing;
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-
-		const result = {
-			visiblePreview: document.querySelector('[data-testid="preview"]')
-				?.textContent,
-			providerId: currentHook().providerId ?? null,
-			stage: currentHook().progress.stage,
-		};
-		root.unmount();
-		container.remove();
-		return result;
-	},
-	async exercisePartialRuntimeVaultCreationRemount() {
-		runtimeImportParking.retire("account-a");
-		const container = document.createElement("div");
-		document.body.append(container);
-		let root: Root = createRoot(container);
-		switchAccount("account-a");
-		globalThis.__runtimeImportParse = async () =>
-			preview(["First target", "Second target"]);
-		let createCalls = 0;
-		globalThis.__runtimeImportCreateVault = async () => {
-			createCalls += 1;
-			if (createCalls === 1) {
-				return {
-					operationId: "operation-1",
-					vaultId: "accepted-vault-1",
-					replicaRevision: 1,
+		const store = {
+			getSnapshot: () => ({ state: "ready", value: { operations: receipts } }),
+			subscribe: (listener: () => void) => {
+				subscriptions++;
+				listeners.add(listener);
+				return () => {
+					subscriptions--;
+					listeners.delete(listener);
 				};
-			}
-			throw new Error("second target rejected");
+			},
 		};
-		flushSync(() => root.render(<Probe />));
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		await currentHook().parseFile(new File(["two"], "two.csv"), "chrome");
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		try {
-			await currentHook().executeImport();
-		} catch {
-			// The public hook reports the parked state after an accepted partial prefix.
-		}
-		root.unmount();
-
-		latestHook = null;
-		root = createRoot(container);
-		flushSync(() => root.render(<Probe />));
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		const result = {
-			createCalls,
-			stage: currentHook().progress.stage,
-			error: currentHook().error?.code ?? null,
-			summary: currentHook().summary ?? null,
-			firstTargetVaultId:
-				currentHook().mappings["source-1"]?.targetVaultId ?? null,
-			secondTargetVaultId:
-				currentHook().mappings["source-2"]?.targetVaultId ?? null,
-		};
-		runtimeImportParking.retire("account-a");
-		root.unmount();
-		container.remove();
-		return result;
-	},
-	async exercisePartialRuntimeVaultCreationSignOut() {
-		runtimeImportParking.retire("account-a");
-		runtimeImportParking.retire("account-b");
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root: Root = createRoot(container);
-		switchAccount("account-a");
-		globalThis.__runtimeImportParse = async () =>
-			preview(["First target", "Second target"]);
-		let createCalls = 0;
-		globalThis.__runtimeImportCreateVault = async () => {
-			createCalls += 1;
-			if (createCalls === 1) {
-				return {
-					operationId: "operation-1",
-					vaultId: "accepted-vault-1",
-					replicaRevision: 1,
-				};
-			}
-			throw new Error("second target rejected");
-		};
-		flushSync(() => root.render(<Probe />));
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		await currentHook().parseFile(new File(["two"], "two.csv"), "chrome");
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		try {
-			await currentHook().executeImport();
-		} catch {
-			// The first accepted target remains visibly parked after the second fails.
-		}
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		const beforeSignOut = {
-			stage: currentHook().progress.stage,
-			error: currentHook().error?.code ?? null,
-			summary: currentHook().summary ?? null,
-			firstTargetVaultId:
-				currentHook().mappings["source-1"]?.targetVaultId ?? null,
-			secondTargetVaultId:
-				currentHook().mappings["source-2"]?.targetVaultId ?? null,
-		};
-
-		parkDraft({
-			...(runtimeImportParking.read("account-a") as NonNullable<
-				ReturnType<typeof runtimeImportParking.read>
-			>),
-			accountId: "account-b",
-		});
-		globalThis.__runtimeImportLifecycleCalls = [];
-		await webRuntimeClient.signOut("account-a");
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		const afterSignOut = {
-			preview: currentHook().preview,
-			mappings: currentHook().mappings,
-			stage: currentHook().progress.stage,
-			error: currentHook().error?.code ?? null,
-			accountADraft: runtimeImportParking.read("account-a"),
-			accountBDraft: runtimeImportParking.read("account-b")?.accountId ?? null,
-		};
-
-		runtimeImportParking.retire("account-b");
-		root.unmount();
-		container.remove();
-		return {
-			createCalls,
-			calls: globalThis.__runtimeImportLifecycleCalls,
-			beforeSignOut,
-			afterSignOut,
-		};
-	},
-	async exerciseDelayedRuntimeVaultAcceptanceSwitch() {
-		runtimeImportParking.retire("account-a");
-		runtimeImportParking.retire("account-b");
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root: Root = createRoot(container);
-		switchAccount("account-a");
-		globalThis.__runtimeImportParse = async () => preview(["Account A target"]);
-		let resolveCreate: (value: unknown) => void = () => {
-			throw new Error("create did not start");
-		};
-		globalThis.__runtimeImportCreateVault = () =>
-			new Promise((resolve) => {
-				resolveCreate = resolve;
-			});
-		flushSync(() => root.render(<Probe />));
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		await currentHook().parseFile(new File(["one"], "one.csv"), "chrome");
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		const executing = currentHook().executeImport();
-		switchAccount("account-b");
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		resolveCreate({
-			operationId: "operation-a",
-			vaultId: "accepted-vault-a",
-			replicaRevision: 1,
-		});
-		const outcome = await executing;
-		await new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
-		const result = {
-			outcome,
-			visiblePreview: document.querySelector('[data-testid="preview"]')
-				?.textContent,
-			accountATarget:
-				runtimeImportParking.read("account-a")?.mappings["source-1"]
-					?.targetVaultId ?? null,
-			accountBDraft: runtimeImportParking.read("account-b")?.accountId ?? null,
-		};
-		runtimeImportParking.retire("account-a");
-		root.unmount();
-		container.remove();
-		return result;
-	},
-	async exerciseRuntimeImportAcceptanceRetirementRaces() {
-		globalThis.__runtimeImportLifecycleCalls = [];
-		const results = [];
-		for (const action of ["signOut", "removeAccount", "wipe"] as const) {
-			runtimeImportParking.retire("account-a");
-			runtimeImportParking.retire("account-b");
-			const container = document.createElement("div");
-			document.body.append(container);
-			const root: Root = createRoot(container);
-			switchAccount("account-a");
-			globalThis.__runtimeImportParse = async () =>
-				preview([`Account A ${action} target`]);
-			let resolveCreate: (value: unknown) => void = () => {
-				throw new Error("create did not start");
-			};
-			globalThis.__runtimeImportCreateVault = () =>
-				new Promise((resolve) => {
-					resolveCreate = resolve;
-				});
-			flushSync(() => root.render(<Probe />));
-			await new Promise<void>((resolve) =>
-				requestAnimationFrame(() => resolve()),
-			);
-			await currentHook().parseFile(
-				new File([action], `${action}.csv`),
-				"chrome",
-			);
-			await new Promise<void>((resolve) =>
-				requestAnimationFrame(() => resolve()),
-			);
-			const executing = currentHook().executeImport();
-			parkDraft({
+		globalThis.__importVaults = [
+			{
+				vaultId: "existing",
 				accountId: "account-b",
+				name: "Existing",
+				role: "owner",
+			},
+		];
+		globalThis.__importClient = {
+			operations: () => store,
+			async createVault() {
+				const operationId = `vault-${++sequence}`;
+				receipts.push({
+					operationId,
+					kind: "createVault",
+					resolution: "applied",
+					importedCount: null,
+				});
+				return { vaultId: operationId, operationId };
+			},
+			async importItems(input: {
+				accountId: string;
+				vaultId: string;
+				items: Array<{
+					draft: { category: string; data: { title: string } };
+					favorite: boolean;
+				}>;
+			}) {
+				calls.push({
+					accountId: input.accountId,
+					items: input.items.length,
+					categories: input.items.map((item) => item.draft.category),
+					favorites: input.items.map((item) => item.favorite),
+					drafts: structuredClone(input.items.map((item) => item.draft)),
+				});
+				// Imported archive parser output may omit required fields. Exercise the actual
+				// generated request validator, without allowing presentation to manufacture them.
+				if (
+					scenario.startsWith("sparse-") &&
+					!validateRuntimeRequest({ type: "importItems", ...input })
+				)
+					throw new RuntimeRequestError(
+						"INVARIANT_VIOLATION",
+						"Runtime refused sparse Import data",
+					);
+				if (
+					scenario === "size" &&
+					input.items.some((item) => item.draft.data.title === "oversized")
+				)
+					throw new RuntimeRequestError("SIZE_REJECTED", "fixture byte bound");
+				const operationId = `import-${++sequence}`;
+				receipts.push({
+					operationId,
+					kind: "importItems",
+					resolution: "pending",
+					importedCount: null,
+				});
+				setTimeout(
+					() => {
+						const operation = receipts.find(
+							(entry) => entry.operationId === operationId,
+						);
+						if (!operation) throw new Error("Missing accepted Operation");
+						operation.resolution =
+							scenario === "later-rejection" && calls.length > 1
+								? "rejected"
+								: "applied";
+						operation.importedCount =
+							operation.resolution === "applied" ? input.items.length : null;
+						notify();
+					},
+					["detach", "switch"].includes(scenario) ? 80 : 5,
+				);
+				return {
+					operationId,
+					itemIds: input.items.map((_, index) => `${operationId}-${index}`),
+				};
+			},
+		};
+		const count = scenario.startsWith("sparse-")
+			? 1
+			: scenario === "later-rejection"
+				? 201
+				: 5;
+		const categories = [
+			"login",
+			"secure-note",
+			"credit-card",
+			"identity",
+			"totp",
+		] as const;
+		const preview: ImportPreview = {
+			providerId: "chrome",
+			sourceVaults: [
+				{ id: "source", name: "Imported", itemCount: count, skippedCount: 0 },
+				{ id: "empty", name: "Empty", itemCount: 0, skippedCount: 0 },
+			],
+			sourceItems: Array.from({ length: count }, (_, index) => ({
 				providerId: "chrome",
-				preview: preview(["Account B retained"]),
-				mappings: {},
-				progress: {
-					stage: "awaiting-runtime-import",
-					totalItems: 1,
-					processedItems: 0,
-					totalVaults: 1,
-					processedVaults: 0,
+				id: String(index),
+				sourceVaultId: "source",
+				title: "Item",
+				category:
+					scenario === "sparse-note"
+						? "secure-note"
+						: scenario === "sparse-totp"
+							? "totp"
+							: (categories[index % 5] ?? "login"),
+				favorite: index === 0,
+				data: {
+					title:
+						scenario === "size" && index === 2 ? "oversized" : `Item ${index}`,
 				},
-				skippedEmptyVaultCount: 0,
-				parkedRuntimeTargets: {},
-			});
-
-			if (action === "wipe") await webRuntimeClient.wipe();
-			else await webRuntimeClient[action]("account-a");
-			resolveCreate({
-				operationId: `accepted-${action}`,
-				vaultId: `accepted-vault-${action}`,
-				replicaRevision: 1,
-			});
-			const outcome = await executing;
-			await new Promise<void>((resolve) =>
-				requestAnimationFrame(() => resolve()),
-			);
-			results.push({
-				action,
-				outcome,
-				stage: currentHook().progress.stage,
-				summary: currentHook().summary,
-				error: currentHook().error?.code ?? null,
-				accountADraft: runtimeImportParking.read("account-a"),
-				accountBDraft:
-					runtimeImportParking.read("account-b")?.accountId ?? null,
-				acceptedVaultId: `accepted-vault-${action}`,
-			});
-			root.unmount();
-			container.remove();
+			})),
+			warnings: [],
+			errors: [],
+			summary: {
+				vaultCount: 2,
+				itemCount: count,
+				skippedCount: 0,
+				warningCount: 0,
+				errorCount: 0,
+			},
+		};
+		globalThis.__importParse = async () => preview;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		flushSync(() => root.render(<Probe />));
+		await hook.parseFile(new File(["fixture"], "fixture.csv"), "chrome");
+		await frame();
+		await frame();
+		const filteredEmptyVaults = hook.skippedEmptyVaultCount;
+		if (scenario === "existing") {
+			flushSync(() => hook.setMappingTargetVaultId("source", "existing"));
 		}
+		const running = hook.executeImport();
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		const beforeApplied = hook.summary;
+		if (scenario === "detach") {
+			root.unmount();
+		} else if (scenario === "switch") {
+			globalThis.__importAccount = "account-c";
+			flushSync(() => {
+				for (const listener of globalThis.__importAccountListeners) listener();
+			});
+			if (hook.preview !== null || hook.summary !== null)
+				throw new Error("Previous Account plaintext remained visible");
+		}
+		const summary = await running;
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		if (scenario !== "detach") root.unmount();
+		container.remove();
 		return {
-			results,
-			lifecycleCalls: globalThis.__runtimeImportLifecycleCalls,
+			summary,
+			calls,
+			filteredEmptyVaults,
+			beforeApplied,
+			subscriptions,
+			applied: receipts.filter(
+				(entry) =>
+					entry.kind === "importItems" && entry.resolution === "applied",
+			).length,
 		};
 	},
 });

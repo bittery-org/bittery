@@ -9,7 +9,10 @@ import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
+import { ReplicaRecoveryProvider } from "./components/replica-recovery-provider";
+import { StorageAvailabilityBoundary } from "./components/storage-availability-boundary";
 import { getServerUrl } from "./lib/auth-server";
+import { recoveryFiles } from "./lib/crypto";
 import {
 	initializeStorage,
 	lockRejectedAccountSession,
@@ -174,11 +177,18 @@ export const getRouter = () => {
 				<QueryClientProvider client={queryClient}>
 					<ApiProvider apiClient={apiClient}>
 						<RuntimeProvider client={runtimeClient}>
-							<AccountRuntimeProvider queryClient={queryClient}>
-								<TransitionalSyncProvider queryClient={queryClient}>
-									<WebPlatformProvider>{children}</WebPlatformProvider>
-								</TransitionalSyncProvider>
-							</AccountRuntimeProvider>
+							<ReplicaRecoveryProvider
+								client={runtimeClient}
+								files={recoveryFiles}
+							>
+								<StorageAvailabilityBoundary>
+									<AccountRuntimeProvider queryClient={queryClient}>
+										<TransitionalSyncProvider queryClient={queryClient}>
+											<WebPlatformProvider>{children}</WebPlatformProvider>
+										</TransitionalSyncProvider>
+									</AccountRuntimeProvider>
+								</StorageAvailabilityBoundary>
+							</ReplicaRecoveryProvider>
 						</RuntimeProvider>
 					</ApiProvider>
 				</QueryClientProvider>

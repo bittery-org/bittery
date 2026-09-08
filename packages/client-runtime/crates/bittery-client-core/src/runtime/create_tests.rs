@@ -2276,6 +2276,176 @@ fn assert_remaining_projection(case: RemainingKindCase, projection: &ItemsProjec
 }
 
 #[tokio::test]
+async fn login_password_update_retains_previous_password_in_encrypted_history_after_restart() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let mut next = draft();
+    let ItemDraft::Login(login) = &mut next else {
+        unreachable!()
+    };
+    login.password = Some("replacement-password".into());
+    runtime
+        .request(
+            RuntimeRequest::UpdateItem {
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+                draft: next,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let projected = visible(&runtime, &account_id);
+    let ItemDraft::Login(login) = &projected.items[0].data else {
+        unreachable!()
+    };
+    assert_eq!(login.password.as_deref(), Some("replacement-password"));
+    assert_eq!(login.password_history.len(), 1);
+    assert_eq!(login.password_history[0].password, PASSWORD);
+    assert_eq!(
+        login.password_history[0].changed_at,
+        projected.items[0].updated_at
+    );
+    for request in executor.recorded() {
+        assert!(!request.contains(PASSWORD));
+        assert!(!request.contains("replacement-password"));
+    }
+    drop(runtime);
+    let (restarted, account_id) = unlocked_runtime(executor).await;
+    assert_eq!(
+        visible(&restarted, &account_id).items[0].data,
+        projected.items[0].data
+    );
+}
+
+#[tokio::test]
+async fn login_password_history_preserves_restore_normalization_and_ten_entry_limit() {
+    let history = serde_json::json!([
+        { "password": "restored", "changedAt": "2026-01-01" },
+        { "password": "older", "changedAt": "2025-01-01" },
+        { "password": "older", "changedAt": "duplicate" },
+        { "password": "", "changedAt": "empty password" },
+        { "password": "invalid-date", "changedAt": "" }
+    ]);
+    for (previous, next, expected) in [
+        ("current", "restored", vec!["current", "older"]),
+        ("current", "current", vec!["restored", "older"]),
+        ("", "replacement", vec!["restored", "older"]),
+        ("current", "", vec!["current", "restored", "older"]),
+    ] {
+        let original = serde_json::json!({
+            "title": "History", "password": previous, "passwordHistory": history,
+            "urls": ["https://preserved.example.test"],
+            "totpSecret": "JBSWY3DPEHPK3PXP"
+        });
+        let executor =
+            RecordingExecutor::seeded_share_item(AuthorityItemCategory::Login, original.clone());
+        let (runtime, account_id) = unlocked_runtime(executor).await;
+        let mut update = original;
+        update["password"] = next.into();
+        let draft =
+            serde_json::from_value(serde_json::json!({ "category": "login", "data": update }))
+                .unwrap();
+        runtime
+            .request(
+                RuntimeRequest::UpdateItem {
+                    account_id: account_id.clone(),
+                    item_id: "item-existing".into(),
+                    draft,
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let projection = visible(&runtime, &account_id);
+        let ItemDraft::Login(login) = &projection.items[0].data else {
+            unreachable!()
+        };
+        assert_eq!(
+            login
+                .password_history
+                .iter()
+                .map(|entry| entry.password.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(login.urls, ["https://preserved.example.test"]);
+        assert_eq!(login.totp_secret.as_deref(), Some("JBSWY3DPEHPK3PXP"));
+    }
+
+    let history: Vec<_> = (0..12)
+        .map(|index| {
+            serde_json::json!({
+                "password": format!("past-{index}"), "changedAt": "2025-01-01"
+            })
+        })
+        .collect();
+    let original = serde_json::json!({ "title": "History", "password": "current", "passwordHistory": history });
+    let executor =
+        RecordingExecutor::seeded_share_item(AuthorityItemCategory::Login, original.clone());
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let mut update = original;
+    update["password"] = "replacement".into();
+    runtime
+        .request(
+            RuntimeRequest::UpdateItem {
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+                draft: serde_json::from_value(
+                    serde_json::json!({ "category": "login", "data": update }),
+                )
+                .unwrap(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let projection = visible(&runtime, &account_id);
+    let ItemDraft::Login(login) = &projection.items[0].data else {
+        unreachable!()
+    };
+    assert_eq!(
+        login
+            .password_history
+            .iter()
+            .map(|entry| entry.password.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "current", "past-0", "past-1", "past-2", "past-3", "past-4", "past-5", "past-6",
+            "past-7", "past-8"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn failed_password_history_acceptance_preserves_prior_authority() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let before = visible(&runtime, &account_id);
+    let mut update = draft();
+    let ItemDraft::Login(login) = &mut update else {
+        unreachable!()
+    };
+    login.password = Some("not-accepted".into());
+    executor.fail_commits.store(true, Ordering::SeqCst);
+    assert!(runtime
+        .request(
+            RuntimeRequest::UpdateItem {
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+                draft: update,
+            },
+            RequestCancellation::new()
+        )
+        .await
+        .is_err());
+    assert_eq!(visible(&runtime, &account_id), before);
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.items.is_empty());
+}
+
+#[tokio::test]
 async fn remaining_item_kinds_are_durably_accepted_under_explicit_account_scope() {
     let cases = [
         RemainingKindCase::Update,
@@ -2494,7 +2664,7 @@ async fn attachment_move_restart_rejects_reordered_durable_progress() {
         .store(true, Ordering::SeqCst);
     let restarted = Runtime::with_serialized_replica_executor(executor);
     let error = restarted.replica().load(&account_id).await.unwrap_err();
-    assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(error.code, RuntimeErrorCode::StorageUnavailable);
 }
 
 fn prepared_attachment() -> PreparedMoveAttachment {
@@ -2636,7 +2806,7 @@ async fn attachment_move_checkpoints_reset_and_promote_without_rewriting_intent(
         .load(&account_id)
         .await
         .unwrap_err();
-    assert_eq!(invalid_id.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(invalid_id.code, RuntimeErrorCode::StorageUnavailable);
 
     drop(runtime);
     let restarted = Runtime::with_serialized_replica_executor(executor.clone());

@@ -1395,7 +1395,7 @@ async fn a_wedged_device_is_still_wipeable_after_open_fails() {
         serde_json::to_string(&catalog).unwrap(),
     );
     let wedged = harness.runtime.open().await.unwrap_err();
-    assert_eq!(wedged.code, RuntimeErrorCode::InvariantViolation);
+    assert_eq!(wedged.code, RuntimeErrorCode::StorageUnavailable);
 
     let response = harness
         .runtime

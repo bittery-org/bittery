@@ -8,10 +8,14 @@ use super::{
 };
 use crate::{AccountId, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::{path::Path, sync::Mutex};
 
-const SCHEMA: &str = r#"
+// Physical engine versions are independent of Rust's logical Replica/contract versions.
+const APPLICATION_ID: i32 = 0x4254_5259; // BTRY
+const PHYSICAL_VERSION: i32 = 1;
+const MIGRATION_1: &[&str] = &[
+    r#"
 CREATE TABLE IF NOT EXISTS replica_heads (
     account_id TEXT PRIMARY KEY NOT NULL,
     user_id TEXT NOT NULL,
@@ -19,7 +23,8 @@ CREATE TABLE IF NOT EXISTS replica_heads (
     replica_revision TEXT NOT NULL,
     lock_epoch TEXT NOT NULL,
     failure_json TEXT
-);
+);"#,
+    r#"
 CREATE TABLE IF NOT EXISTS replica_rows (
     account_id TEXT NOT NULL,
     store INTEGER NOT NULL,
@@ -27,8 +32,137 @@ CREATE TABLE IF NOT EXISTS replica_rows (
     payload_json TEXT NOT NULL,
     PRIMARY KEY (account_id, store, record_id),
     FOREIGN KEY (account_id) REFERENCES replica_heads(account_id) ON DELETE CASCADE
-);
-"#;
+);"#,
+];
+
+fn migrate(connection: &mut Connection, fail_after: Option<usize>) -> Result<(), RuntimeError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(sqlite_error)?;
+    let identity: i32 = transaction
+        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .map_err(sqlite_error)?;
+    let version: i32 = transaction
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if identity != 0 && identity != APPLICATION_ID {
+        return Err(storage_error(
+            "This database belongs to another application",
+        ));
+    }
+    if !(0..=PHYSICAL_VERSION).contains(&version) || (identity == 0 && version != 0) {
+        return Err(storage_error(
+            "This Replica requires a different application version",
+        ));
+    }
+    if version == 0 {
+        let tables: Vec<String> = transaction
+            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+            .map_err(sqlite_error)?
+            .query_map([], |row| row.get(0))
+            .map_err(sqlite_error)?
+            .collect::<Result<_, _>>()
+            .map_err(sqlite_error)?;
+        // Only an empty file or the known unversioned Replica schema can be adopted.
+        if !tables.is_empty() {
+            if tables != ["replica_heads", "replica_rows"] {
+                return Err(storage_error("This database is not a supported Replica"));
+            }
+            validate_schema(&transaction)?;
+        }
+    }
+    let mut boundary = 0;
+    for next_version in (version + 1)..=PHYSICAL_VERSION {
+        let statements = match next_version {
+            1 => MIGRATION_1,
+            _ => return Err(storage_error("Replica migration is unavailable")),
+        };
+        for statement in statements {
+            transaction.execute_batch(statement).map_err(sqlite_error)?;
+            migration_boundary(&mut boundary, fail_after)?;
+        }
+        transaction
+            .pragma_update(None, "application_id", APPLICATION_ID)
+            .map_err(sqlite_error)?;
+        migration_boundary(&mut boundary, fail_after)?;
+        transaction
+            .pragma_update(None, "user_version", next_version)
+            .map_err(sqlite_error)?;
+        migration_boundary(&mut boundary, fail_after)?;
+    }
+    validate_schema(&transaction)?;
+    transaction.commit().map_err(sqlite_error)
+}
+
+fn migration_boundary(boundary: &mut usize, fail_after: Option<usize>) -> Result<(), RuntimeError> {
+    *boundary += 1;
+    if fail_after == Some(*boundary) {
+        return Err(storage_error("Replica schema upgrade failed"));
+    }
+    Ok(())
+}
+
+fn validate_schema(transaction: &Transaction<'_>) -> Result<(), RuntimeError> {
+    for (table, expected) in [
+        (
+            "replica_heads",
+            vec![
+                ("account_id", "TEXT", 1, 1),
+                ("user_id", "TEXT", 1, 0),
+                ("incarnation", "TEXT", 1, 0),
+                ("replica_revision", "TEXT", 1, 0),
+                ("lock_epoch", "TEXT", 1, 0),
+                ("failure_json", "TEXT", 0, 0),
+            ],
+        ),
+        (
+            "replica_rows",
+            vec![
+                ("account_id", "TEXT", 1, 1),
+                ("store", "INTEGER", 1, 2),
+                ("record_id", "TEXT", 1, 3),
+                ("payload_json", "TEXT", 1, 0),
+            ],
+        ),
+    ] {
+        let columns: Vec<(String, String, i32, i32)> = transaction
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .map_err(sqlite_error)?
+            .query_map([], |row| {
+                Ok((row.get(1)?, row.get(2)?, row.get(3)?, row.get(5)?))
+            })
+            .map_err(sqlite_error)?
+            .collect::<Result<_, _>>()
+            .map_err(sqlite_error)?;
+        let expected: Vec<_> = expected
+            .into_iter()
+            .map(|(name, kind, required, key)| (name.to_owned(), kind.to_owned(), required, key))
+            .collect();
+        if columns != expected {
+            return Err(storage_error("Replica schema is not supported"));
+        }
+    }
+    let foreign_keys: Vec<(String, String, String, String)> = transaction
+        .prepare("PRAGMA foreign_key_list(replica_rows)")
+        .map_err(sqlite_error)?
+        .query_map([], |row| {
+            Ok((row.get(2)?, row.get(3)?, row.get(4)?, row.get(6)?))
+        })
+        .map_err(sqlite_error)?
+        .collect::<Result<_, _>>()
+        .map_err(sqlite_error)?;
+    if foreign_keys
+        != [(
+            "replica_heads".into(),
+            "account_id".into(),
+            "account_id".into(),
+            "CASCADE".into(),
+        )]
+    {
+        return Err(storage_error("Replica Account scope is not supported"));
+    }
+    Ok(())
+}
 
 /// Native durable implementation of the Rust-owned Replica persistence contract.
 ///
@@ -48,11 +182,11 @@ impl SqliteReplica {
         path: impl AsRef<Path>,
         fail_after_write: Option<usize>,
     ) -> Result<Self, RuntimeError> {
-        let connection = Connection::open(path).map_err(sqlite_error)?;
+        let mut connection = Connection::open(path).map_err(sqlite_error)?;
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(sqlite_error)?;
-        connection.execute_batch(SCHEMA).map_err(sqlite_error)?;
+        migrate(&mut connection, None)?;
         #[cfg(not(test))]
         let _ = fail_after_write;
         Ok(Self {
@@ -68,6 +202,17 @@ impl SqliteReplica {
         write_count: usize,
     ) -> Result<Self, RuntimeError> {
         Self::open_with_failure(path, Some(write_count))
+    }
+
+    #[cfg(test)]
+    pub(super) fn open_failing_migration_after(
+        path: impl AsRef<Path>,
+        write_count: usize,
+    ) -> Result<Self, RuntimeError> {
+        let mut connection = Connection::open(&path).map_err(sqlite_error)?;
+        migrate(&mut connection, Some(write_count))?;
+        drop(connection);
+        Self::open(path)
     }
 
     fn invoke_sync(
@@ -464,7 +609,11 @@ fn parse_u64(value: &str) -> Result<u64, RuntimeError> {
 fn sqlite_error(_error: impl std::fmt::Display) -> RuntimeError {
     // SQLite may include SQL, table names, or the application-owned path in its diagnostics.
     // Those implementation details stay behind the adapter together with the schema.
-    replica_error("SQLite Replica persistence failed")
+    storage_error("SQLite Replica storage is unavailable")
+}
+
+fn storage_error(message: impl Into<String>) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::StorageUnavailable, message)
 }
 
 fn replica_error(message: impl Into<String>) -> RuntimeError {

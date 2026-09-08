@@ -26,7 +26,7 @@ import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
 import { ItemListState } from "@/components/vault/item-list-state";
-import { useAcceptLoginItem } from "@/hooks/use-accept-login-item";
+import { useAcceptItem } from "@/hooks/use-accept-item";
 import {
 	useDeleteItem,
 	useUpdateItem,
@@ -52,7 +52,7 @@ function AllItemsPage() {
 
 	const { items, accountId, vaults, state: itemsState } = useRuntimeItems();
 	const availableTags = useAvailableTags(items);
-	const acceptLoginItem = useAcceptLoginItem();
+	const acceptItem = useAcceptItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
 
@@ -87,7 +87,7 @@ function AllItemsPage() {
 		vaultId: string,
 		category: ItemCategory,
 	) => {
-		const accepted = await acceptLoginItem.accept({
+		const accepted = await acceptItem.accept({
 			accountId,
 			vaultId,
 			category,

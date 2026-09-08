@@ -42,6 +42,7 @@ import { useTheme } from "next-themes";
 import { useReducer, useState } from "react";
 import { VaultExportDialog } from "@/components/export/vault-export-dialog";
 import { VaultImportDialog } from "@/components/import/vault-import-dialog";
+import { RecoveryEntryButton } from "@/components/recovery-entry";
 import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
@@ -91,6 +92,9 @@ function SettingsPage() {
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
+			<div className="flex justify-end">
+				<RecoveryEntryButton />
+			</div>
 			{/* Header */}
 			<div className="flex items-center gap-3">
 				<div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">

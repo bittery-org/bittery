@@ -821,6 +821,26 @@ impl FakeServer {
         }
     }
 
+    fn handle_complete_item_authority(&self, request: &RecordedRequest) -> Value {
+        let mut item_request = request.clone();
+        item_request.url = request.url.strip_suffix("/authority").unwrap().into();
+        let response = self.handle_item(&item_request);
+        if response["status"] != 200 {
+            return response;
+        }
+        let bytes: Vec<u8> = serde_json::from_value(response["body"].clone()).unwrap();
+        let mut item: Value = serde_json::from_slice(&bytes).unwrap();
+        item["attachments"] = json!(self
+            .attachments
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|attachment| attachment["itemId"] == item["id"])
+            .cloned()
+            .collect::<Vec<_>>());
+        completed(200, serde_json::to_vec(&item).unwrap())
+    }
+
     pub(super) fn handle_attachments(&self, request: &RecordedRequest) -> Value {
         if !self.authorized(request) {
             return completed(401, b"{}".to_vec());
@@ -1034,6 +1054,8 @@ impl crate::http_transport::SerializedHttpExecutor for FakeServer {
             completed(204, Vec::new())
         } else if request.method == "GET" && request.url.contains("/api/v1/operations/") {
             self.handle_outcome_lookup(&request)
+        } else if request.method == "GET" && request.url.ends_with("/authority") {
+            self.handle_complete_item_authority(&request)
         } else if request.method == "GET" && request.url.contains("/attachments?") {
             self.handle_attachments(&request)
         } else if request.method == "GET" && request.url.contains("/api/v1/items/") {

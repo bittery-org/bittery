@@ -35,7 +35,7 @@ where
     Ok(AccountId::from(value))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ReplicaStore {
@@ -1057,24 +1057,24 @@ pub(super) fn replica_invariant(message: impl Into<String>) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
 }
 
-const BOOTSTRAP_METADATA_ID: &str = "bootstrap";
+pub(super) const BOOTSTRAP_METADATA_ID: &str = "bootstrap";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BootstrapMetadataRecord {
-    state: ReplicaState,
+pub(super) struct BootstrapMetadataRecord {
+    pub(super) state: ReplicaState,
     #[serde(deserialize_with = "required_option::deserialize")]
-    active_generation: Option<BootstrapGenerationId>,
-    active_cursor: SyncCursor,
+    pub(super) active_generation: Option<BootstrapGenerationId>,
+    pub(super) active_cursor: SyncCursor,
     #[serde(deserialize_with = "required_option::deserialize")]
-    staging_generation: Option<BootstrapGenerationId>,
+    pub(super) staging_generation: Option<BootstrapGenerationId>,
 }
 
-fn composite_record_id(left: &str, right: &str) -> String {
+pub(super) fn composite_record_id(left: &str, right: &str) -> String {
     format!("{left}/{right}")
 }
 
-fn split_composite_record_id(value: &str) -> Result<(String, String), RuntimeError> {
+pub(super) fn split_composite_record_id(value: &str) -> Result<(String, String), RuntimeError> {
     let Some((left, right)) = value.split_once('/') else {
         return Err(replica_invariant("Replica composite row key is invalid"));
     };

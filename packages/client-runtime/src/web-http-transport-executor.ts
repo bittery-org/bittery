@@ -1,10 +1,14 @@
 import type {
 	HttpRequest,
 	HttpResponse,
+	HttpStreamCommand,
+	HttpStreamResponse,
 } from "../generated/http-transport/contract";
 import {
 	validateHttpRequestJson,
 	validateHttpResponseJson,
+	validateHttpStreamCommandJson,
+	validateHttpStreamResponseJson,
 } from "../generated/http-transport/validator.js";
 
 type Fetch = (
@@ -12,9 +16,17 @@ type Fetch = (
 	init?: RequestInit,
 ) => Promise<Response>;
 
+interface StreamState {
+	controller: AbortController;
+	reader?: ReadableStreamDefaultReader<Uint8Array>;
+	reading: boolean;
+	maxChunkBytes: number;
+}
+
 /** Browser adapter for the closed, Rust-owned HTTP dispatch contract. */
 export class WebHttpTransportExecutor {
 	readonly #active = new Map<string, AbortController>();
+	readonly #streams = new Map<string, StreamState>();
 
 	constructor(
 		private readonly fetch: Fetch = globalThis.fetch.bind(globalThis),
@@ -22,46 +34,37 @@ export class WebHttpTransportExecutor {
 
 	async invoke(requestJson: string): Promise<string> {
 		const request = parseRequest(requestJson);
+		if ("type" in request) {
+			return serializeStream(
+				request.type === "openStream"
+					? await this.#openStream(request.request)
+					: await this.#readStream(request.dispatchId),
+			);
+		}
 		if (this.#active.has(request.dispatchId)) {
 			throw new HttpTransportInvocationError();
 		}
-		assertBodySupported(request);
-		assertUniqueHeaderNames(request.headers);
-		const browserHeaders = await browserOwnedHeaders(request);
-
 		const controller = new AbortController();
-		let browserRequest: Request;
-		try {
-			browserRequest = new Request(request.url, {
-				method: request.method,
-				headers: browserHeaders.map(({ name, value }): [string, string] => [
-					name,
-					value,
-				]),
-				body:
-					request.body.length === 0 ? undefined : Uint8Array.from(request.body),
-				signal: controller.signal,
-				redirect: "manual",
-				credentials: "omit",
-				cache: "no-store",
-				referrerPolicy: "no-referrer",
-				mode: "cors",
-			});
-			assertHeadersPreserved(browserHeaders, browserRequest.headers);
-		} catch {
-			throw new HttpTransportInvocationError();
-		}
-
 		this.#active.set(request.dispatchId, controller);
 		let result: HttpResponse;
 		try {
+			assertBodySupported(request);
+			assertUniqueHeaderNames(request.headers);
+			const browserHeaders = await browserOwnedHeaders(request);
+			const browserRequest = prepareRequest(
+				request,
+				browserHeaders,
+				controller.signal,
+			);
+			if (controller.signal.aborted) return serialize({ type: "cancelled" });
 			const response = await this.fetch(browserRequest);
 			result = await readResponse(
 				response,
 				request.maxResponseBytes,
 				controller.signal,
 			);
-		} catch {
+		} catch (error) {
+			if (error instanceof HttpTransportInvocationError) throw error;
 			result = {
 				type: controller.signal.aborted ? "cancelled" : "networkFailure",
 			};
@@ -73,11 +76,127 @@ export class WebHttpTransportExecutor {
 		return serialize(result);
 	}
 
+	async #openStream(request: HttpRequest): Promise<HttpStreamResponse> {
+		if (
+			this.#active.has(request.dispatchId) ||
+			request.maxResponseBytes === 0
+		) {
+			throw new HttpTransportInvocationError();
+		}
+		const state: StreamState = {
+			controller: new AbortController(),
+			reading: true,
+			maxChunkBytes: request.maxResponseBytes,
+		};
+		this.#active.set(request.dispatchId, state.controller);
+		this.#streams.set(request.dispatchId, state);
+		try {
+			assertBodySupported(request);
+			assertUniqueHeaderNames(request.headers);
+			const browserHeaders = await browserOwnedHeaders(request);
+			const requestObject = prepareRequest(
+				request,
+				browserHeaders,
+				state.controller.signal,
+			);
+			if (state.controller.signal.aborted) return { type: "cancelled" };
+			const response = await this.fetch(requestObject);
+			if (state.controller.signal.aborted) {
+				void response.body?.cancel().catch(() => undefined);
+				return { type: "cancelled" };
+			}
+			state.reader = response.body?.getReader();
+			state.reading = false;
+			return {
+				type: "opened",
+				status: response.status,
+				headers: [...response.headers.entries()].map(([name, value]) => ({
+					name,
+					value,
+				})),
+			};
+		} catch (error) {
+			const cancelled = state.controller.signal.aborted;
+			this.#retireStream(request.dispatchId, state);
+			if (error instanceof HttpTransportInvocationError) throw error;
+			return { type: cancelled ? "cancelled" : "networkFailure" };
+		}
+	}
+
+	async #readStream(dispatchId: string): Promise<HttpStreamResponse> {
+		const state = this.#streams.get(dispatchId);
+		if (!state || state.controller.signal.aborted) return { type: "cancelled" };
+		if (state.reading) throw new HttpTransportInvocationError();
+		state.reading = true;
+		try {
+			// Pull once at a time; no queued chunks, SSE parsing, or reconnect policy.
+			const chunk = await state.reader?.read();
+			if (state.controller.signal.aborted) return { type: "cancelled" };
+			if (!chunk || chunk.done) {
+				this.#retireStream(dispatchId, state);
+				return { type: "ended" };
+			}
+			if (
+				chunk.value.byteLength === 0 ||
+				chunk.value.byteLength > state.maxChunkBytes
+			) {
+				this.#retireStream(dispatchId, state);
+				return { type: "responseTooLarge" };
+			}
+			// The byte-length guard above proves the generated nonempty wire shape.
+			return {
+				type: "chunk",
+				bytes: [...chunk.value] as [number, ...number[]],
+			};
+		} catch {
+			const cancelled = state.controller.signal.aborted;
+			this.#retireStream(dispatchId, state);
+			return { type: cancelled ? "cancelled" : "networkFailure" };
+		} finally {
+			state.reading = false;
+		}
+	}
+
+	#retireStream(dispatchId: string, state: StreamState): void {
+		if (this.#streams.get(dispatchId) === state) this.cancel(dispatchId);
+	}
+
 	cancel(dispatchId: string): void {
 		const controller = this.#active.get(dispatchId);
 		if (controller === undefined) return;
 		this.#active.delete(dispatchId);
+		const stream = this.#streams.get(dispatchId);
+		this.#streams.delete(dispatchId);
 		controller.abort();
+		void stream?.reader?.cancel().catch(() => undefined);
+	}
+}
+
+function prepareRequest(
+	request: HttpRequest,
+	browserHeaders: HttpRequest["headers"],
+	signal: AbortSignal,
+): Request {
+	try {
+		const browserRequest = new Request(request.url, {
+			method: request.method,
+			headers: browserHeaders.map(({ name, value }): [string, string] => [
+				name,
+				value,
+			]),
+			body:
+				request.body.length === 0 ? undefined : Uint8Array.from(request.body),
+			signal,
+			redirect: "manual",
+			credentials: "omit",
+			cache: "no-store",
+			referrerPolicy: "no-referrer",
+			mode: "cors",
+		});
+		assertHeadersPreserved(browserHeaders, browserRequest.headers);
+		return browserRequest;
+	} catch {
+		throw new HttpTransportInvocationError();
 	}
 }
 
@@ -213,17 +332,26 @@ async function readResponse(
 	};
 }
 
-function parseRequest(requestJson: unknown): HttpRequest {
+function parseRequest(requestJson: unknown): HttpRequest | HttpStreamCommand {
 	let value: unknown;
 	try {
 		value = JSON.parse(String(requestJson));
 	} catch {
 		throw new HttpTransportInvocationError();
 	}
-	if (!validateHttpRequestJson(value)) {
+	if (
+		!validateHttpRequestJson(value) &&
+		!validateHttpStreamCommandJson(value)
+	) {
 		throw new HttpTransportInvocationError();
 	}
 	return value;
+}
+
+function serializeStream(response: HttpStreamResponse): string {
+	if (!validateHttpStreamResponseJson(response))
+		throw new HttpTransportInvocationError();
+	return JSON.stringify(response);
 }
 
 function serialize(response: HttpResponse): string {

@@ -12,18 +12,20 @@ import {
 	validateReplicaPersistenceRequest,
 	validateReplicaPersistenceResponse,
 } from "../generated/persistence/validator.js";
+import {
+	openIndexedDatabase,
+	IndexedDbStorageError as StorageUnavailableError,
+} from "./indexeddb-lifecycle";
 
 const DATABASE_NAME = "bittery_replica";
-/** Schema versions are additive: an upgrade may add stores, but never rebuild durable work. */
-const DATABASE_VERSION = 7;
-const ACCOUNT_INDEX = "by_account";
-const MAX_U64 = 18_446_744_073_709_551_615n;
-const STORE_NAMES = [
+/** Physical versions are independent of the Rust logical Replica/serialized contract. */
+const DATABASE_VERSION = 8;
+// v5 (c463ab3a) and v6 (2059ed62) are the supported legacy physical layouts.
+// Earlier logical formats require a separate migration, never missing-field defaults.
+const VERSION_FIVE_STORES = [
 	"heads",
 	"optimistic_items",
 	"operations",
-	"attachment_move_preparations",
-	"share_capabilities",
 	"operation_receipts",
 	"replica_metadata",
 	"bootstrap_generations",
@@ -31,26 +33,49 @@ const STORE_NAMES = [
 	"authority_vaults",
 	"authority_items",
 ] as const;
+const ACCOUNT_INDEX = "by_account";
+const MAX_U64 = 18_446_744_073_709_551_615n;
+export const REPLICA_STORE_MAP = {
+	optimisticItems: "optimistic_items",
+	operations: "operations",
+	attachmentMovePreparations: "attachment_move_preparations",
+	shareCapabilities: "share_capabilities",
+	operationReceipts: "operation_receipts",
+	replicaMetadata: "replica_metadata",
+	bootstrapGenerations: "bootstrap_generations",
+	bootstrapPages: "bootstrap_pages",
+	authorityVaults: "authority_vaults",
+	authorityItems: "authority_items",
+} as const satisfies Record<ReplicaStore, string>;
+const STORE_NAMES = ["heads", ...Object.values(REPLICA_STORE_MAP)] as const;
+export const RECOVERY_INPUT_STORE = "recovery_input";
+const PHYSICAL_STORES = [...STORE_NAMES, RECOVERY_INPUT_STORE];
 
 type DatabaseStore = (typeof STORE_NAMES)[number];
 
 export type IndexedDbReplicaExecutorTestOptions = {
 	databaseName?: string;
 	failAfterWrite?: number;
+	failAfterMigrationWrite?: number;
 };
 
 export class ConfigurableIndexedDbReplicaExecutor {
 	readonly #databaseName: string;
 	readonly #failAfterWrite: number | undefined;
+	readonly #failAfterMigrationWrite: number | undefined;
 
 	constructor(options: IndexedDbReplicaExecutorTestOptions = {}) {
 		this.#databaseName = options.databaseName ?? DATABASE_NAME;
 		this.#failAfterWrite = options.failAfterWrite;
+		this.#failAfterMigrationWrite = options.failAfterMigrationWrite;
 	}
 
 	async invoke(requestJson: string): Promise<string> {
 		const request = parseRequest(requestJson);
-		const database = await openDatabase(this.#databaseName);
+		const database = await openReplicaDatabase(
+			this.#databaseName,
+			this.#failAfterMigrationWrite,
+		);
 		const failure = new WriteFailureInjection(this.#failAfterWrite);
 		try {
 			const response =
@@ -92,23 +117,58 @@ function parseRequest(requestJson: string): ReplicaPersistenceRequest {
 	return value;
 }
 
-async function openDatabase(databaseName: string): Promise<IDBDatabase> {
-	if (typeof globalThis.indexedDB === "undefined") {
-		throw new Error("IndexedDB is unavailable");
-	}
-	const request = globalThis.indexedDB.open(databaseName, DATABASE_VERSION);
-	request.onupgradeneeded = () => {
-		const database = request.result;
-		createSchema(database);
-	};
-	const database = await requestResult(request);
-	assertSchema(database);
-	return database;
+export async function openReplicaDatabase(
+	databaseName = DATABASE_NAME,
+	failAfterMigrationWrite?: number,
+): Promise<IDBDatabase> {
+	return openIndexedDatabase({
+		name: databaseName,
+		version: DATABASE_VERSION,
+		upgrade(database, transaction, oldVersion) {
+			if (oldVersion !== 0)
+				assertLegacySchema(database, transaction, oldVersion);
+			createSchema(
+				database,
+				new WriteFailureInjection(failAfterMigrationWrite),
+			);
+		},
+		validate: assertSchema,
+	});
 }
 
-function createSchema(database: IDBDatabase): void {
+function assertLegacySchema(
+	database: IDBDatabase,
+	transaction: IDBTransaction | null,
+	version: number,
+): void {
+	if (
+		(version !== 5 && version !== 6 && version !== 7) ||
+		transaction === null
+	) {
+		throw new StorageUnavailableError("unsupported_version");
+	}
+	const expected =
+		version === 5
+			? [...VERSION_FIVE_STORES]
+			: version === 6
+				? [...VERSION_FIVE_STORES, "attachment_move_preparations"]
+				: [...STORE_NAMES];
+	if (
+		JSON.stringify([...database.objectStoreNames].sort()) !==
+		JSON.stringify(expected.sort())
+	) {
+		throw new StorageUnavailableError("unsupported_version");
+	}
+	assertStoreLayouts(transaction, expected);
+}
+
+function createSchema(
+	database: IDBDatabase,
+	failure: WriteFailureInjection,
+): void {
 	if (!database.objectStoreNames.contains("heads")) {
 		database.createObjectStore("heads", { keyPath: "accountId" });
+		failure.afterWrite();
 	}
 	for (const storeName of STORE_NAMES.filter((name) => name !== "heads")) {
 		if (database.objectStoreNames.contains(storeName)) {
@@ -117,15 +177,81 @@ function createSchema(database: IDBDatabase): void {
 		const store = database.createObjectStore(storeName, {
 			keyPath: ["accountId", "recordId"],
 		});
+		failure.afterWrite();
 		store.createIndex(ACCOUNT_INDEX, "accountId");
+		failure.afterWrite();
+	}
+	if (!database.objectStoreNames.contains(RECOVERY_INPUT_STORE)) {
+		const store = database.createObjectStore(RECOVERY_INPUT_STORE, {
+			keyPath: [
+				"accountId",
+				"recoveryId",
+				"kind",
+				"store",
+				"recordId",
+				"chunkIndex",
+			],
+		});
+		failure.afterWrite();
+		store.createIndex(ACCOUNT_INDEX, "accountId");
+		failure.afterWrite();
 	}
 }
 
-function assertSchema(database: IDBDatabase): void {
+function assertSchema(database: IDBDatabase, upgrade?: IDBTransaction): void {
+	if (
+		JSON.stringify([...database.objectStoreNames].sort()) !==
+		JSON.stringify([...PHYSICAL_STORES].sort())
+	)
+		throw new StorageUnavailableError("unsupported_version");
 	for (const storeName of STORE_NAMES) {
 		if (!database.objectStoreNames.contains(storeName)) {
 			database.close();
 			throw new Error(`IndexedDB schema is missing ${storeName}`);
+		}
+	}
+	const transaction =
+		upgrade ?? database.transaction(PHYSICAL_STORES, "readonly");
+	assertStoreLayouts(transaction, STORE_NAMES);
+	const input = transaction.objectStore(RECOVERY_INPUT_STORE);
+	if (
+		JSON.stringify(input.keyPath) !==
+			JSON.stringify([
+				"accountId",
+				"recoveryId",
+				"kind",
+				"store",
+				"recordId",
+				"chunkIndex",
+			]) ||
+		input.autoIncrement ||
+		JSON.stringify([...input.indexNames]) !== JSON.stringify([ACCOUNT_INDEX]) ||
+		input.index(ACCOUNT_INDEX).keyPath !== "accountId" ||
+		input.index(ACCOUNT_INDEX).unique ||
+		input.index(ACCOUNT_INDEX).multiEntry
+	)
+		throw new StorageUnavailableError("unsupported_version");
+}
+
+function assertStoreLayouts(
+	transaction: IDBTransaction,
+	stores: readonly string[],
+): void {
+	for (const storeName of stores) {
+		const store = transaction.objectStore(storeName);
+		const expectedKeyPath =
+			storeName === "heads" ? "accountId" : ["accountId", "recordId"];
+		if (
+			JSON.stringify(store.keyPath) !== JSON.stringify(expectedKeyPath) ||
+			store.autoIncrement
+		) {
+			throw new StorageUnavailableError("unavailable");
+		}
+		if (storeName !== "heads") {
+			const index = store.index(ACCOUNT_INDEX);
+			if (index.keyPath !== "accountId" || index.unique || index.multiEntry) {
+				throw new StorageUnavailableError("unavailable");
+			}
 		}
 	}
 }
@@ -152,18 +278,7 @@ async function load(
 		await completed;
 		const head =
 			headValue === undefined ? null : parseStoredHead(headValue, accountId);
-		const stores: ReplicaStore[] = [
-			"optimisticItems",
-			"operations",
-			"attachmentMovePreparations",
-			"shareCapabilities",
-			"operationReceipts",
-			"replicaMetadata",
-			"bootstrapGenerations",
-			"bootstrapPages",
-			"authorityVaults",
-			"authorityItems",
-		];
+		const stores = Object.keys(REPLICA_STORE_MAP) as ReplicaStore[];
 		const rows = stores.flatMap((store, index) =>
 			(storeValues[index] as unknown[]).map((value) =>
 				parseStoredRow(value, store, accountId),
@@ -343,10 +458,12 @@ async function deleteAccount(
 	failure: WriteFailureInjection,
 ): Promise<ReplicaPersistenceResponse> {
 	assertIdentifier(accountId, "delete Account");
-	const transaction = database.transaction(STORE_NAMES, "readwrite");
+	const transaction = database.transaction(PHYSICAL_STORES, "readwrite");
 	const completed = transactionDone(transaction);
 	try {
-		for (const storeName of STORE_NAMES.filter((name) => name !== "heads")) {
+		for (const storeName of PHYSICAL_STORES.filter(
+			(name) => name !== "heads",
+		)) {
 			const store = transaction.objectStore(storeName);
 			const keys = await requestResult(
 				store.index(ACCOUNT_INDEX).getAllKeys(accountId),
@@ -369,10 +486,10 @@ async function wipeDevice(
 	database: IDBDatabase,
 	failure: WriteFailureInjection,
 ): Promise<ReplicaPersistenceResponse> {
-	const transaction = database.transaction(STORE_NAMES, "readwrite");
+	const transaction = database.transaction(PHYSICAL_STORES, "readwrite");
 	const completed = transactionDone(transaction);
 	try {
-		for (const storeName of STORE_NAMES) {
+		for (const storeName of PHYSICAL_STORES) {
 			transaction.objectStore(storeName).clear();
 			failure.afterWrite();
 		}
@@ -557,28 +674,7 @@ function parseStoredRow(
 }
 
 function mapStore(store: ReplicaStore): DatabaseStore {
-	switch (store) {
-		case "optimisticItems":
-			return "optimistic_items";
-		case "operations":
-			return "operations";
-		case "attachmentMovePreparations":
-			return "attachment_move_preparations";
-		case "shareCapabilities":
-			return "share_capabilities";
-		case "operationReceipts":
-			return "operation_receipts";
-		case "replicaMetadata":
-			return "replica_metadata";
-		case "bootstrapGenerations":
-			return "bootstrap_generations";
-		case "bootstrapPages":
-			return "bootstrap_pages";
-		case "authorityVaults":
-			return "authority_vaults";
-		case "authorityItems":
-			return "authority_items";
-	}
+	return REPLICA_STORE_MAP[store];
 }
 
 function assertIdentifier(value: string, context: string): void {

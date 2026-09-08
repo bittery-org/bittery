@@ -605,7 +605,16 @@ async fn open_fails_atomically_for_missing_third_or_metadata_mismatched_heads() 
         }
         let runtime = production_runtime(replica, platform);
 
-        assert!(runtime.open().await.is_err(), "scenario {scenario}");
+        let error = runtime.open().await.unwrap_err();
+        assert_eq!(
+            error.code,
+            if scenario == "missing" {
+                RuntimeErrorCode::StorageUnavailable
+            } else {
+                RuntimeErrorCode::InvariantViolation
+            },
+            "scenario {scenario}"
+        );
         assert!(runtime.replica.snapshots().is_empty());
         assert!(runtime
             .observe(
@@ -613,6 +622,30 @@ async fn open_fails_atomically_for_missing_third_or_metadata_mismatched_heads() 
                 Arc::new(Sink::default()),
             )
             .is_err());
+    }
+}
+
+#[tokio::test]
+async fn surviving_active_catalog_without_replica_reports_storage_loss_without_mutation() {
+    for catalog_account in [
+        active("account", "old"),
+        pending("account", Some("old"), "new"),
+    ] {
+        let replica = Arc::new(MemoryReplicaExecutor::default());
+        let platform = Arc::new(MemoryPlatformExecutor::default());
+        seed_catalog(&platform, vec![catalog_account]);
+        seed_metadata(&platform, "account", "old", "user");
+        let before = platform.values.lock().unwrap().clone();
+        let runtime = production_runtime(replica.clone(), platform.clone());
+
+        let error = runtime.open().await.unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::StorageUnavailable);
+        assert!(!runtime.ready.load(Ordering::SeqCst));
+        assert!(runtime.replica.snapshots().is_empty());
+        assert!(runtime.account_access.lock().unwrap().is_empty());
+        assert_eq!(*platform.values.lock().unwrap(), before);
+        assert!(platform.deletes.lock().unwrap().is_empty());
+        assert!(replica.state.snapshot(&account("account")).is_none());
     }
 }
 
@@ -773,4 +806,101 @@ async fn open_restores_an_account_whose_quick_unlock_material_is_unusable_as_sig
         runtime.account_access_state(&account("account-1")),
         Some(AccountAccessState::SignedOut)
     );
+}
+
+struct CorruptAuthorityReplica {
+    inner: Arc<MemoryReplicaExecutor>,
+}
+#[async_trait]
+impl SerializedReplicaExecutor for CorruptAuthorityReplica {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        let request: ReplicaPersistenceRequest = serde_json::from_str(&request_json).unwrap();
+        let ReplicaPersistenceRequest::Load { account_id } = &request else {
+            panic!("failed startup must not mutate the stored Replica");
+        };
+        let mut response: Value =
+            serde_json::from_str(&self.inner.invoke(request_json).await?).unwrap();
+        response["rows"].as_array_mut().unwrap().push(json!({
+            "store": "authorityVaults",
+            "key": { "accountId": account_id, "recordId": "generation/vault" },
+            "payloadJson": "{malformed-derived-authority"
+        }));
+        Ok(response.to_string())
+    }
+}
+
+#[tokio::test]
+async fn corrupt_stored_authority_is_a_storage_failure_before_authentication_or_mutation() {
+    let replica = Arc::new(MemoryReplicaExecutor::default());
+    replica
+        .state
+        .install(
+            account("account-1"),
+            "user-1".into(),
+            incarnation("generation-1"),
+        )
+        .unwrap();
+    let platform = Arc::new(MemoryPlatformExecutor::default());
+    seed_catalog(&platform, vec![active("account-1", "generation-1")]);
+    seed_metadata(&platform, "account-1", "generation-1", "user-1");
+    seed_quick_unlock_material(&platform, "account-1", "generation-1");
+    let original_platform = platform.values.lock().unwrap().clone();
+    let corrupted = Arc::new(CorruptAuthorityReplica { inner: replica });
+    let request = serde_json::to_string(&ReplicaPersistenceRequest::Load {
+        account_id: account("account-1"),
+    })
+    .unwrap();
+    let original_replica = corrupted.invoke(request.clone()).await.unwrap();
+    let runtime = Runtime::with_serialized_executors(
+        corrupted.clone(),
+        platform.clone(),
+        Arc::new(UnusedHttpExecutor),
+    );
+
+    let error = runtime.open().await.unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::StorageUnavailable);
+    assert!(error.recovery_bound.is_none());
+    assert!(!runtime.ready.load(Ordering::SeqCst));
+    assert!(runtime.account_access.lock().unwrap().is_empty());
+    assert!(runtime.replica.snapshots().is_empty());
+    assert!(runtime.live_master_unlock_keys.lock().unwrap().is_empty());
+    assert_eq!(corrupted.invoke(request).await.unwrap(), original_replica);
+    assert_eq!(*platform.values.lock().unwrap(), original_platform);
+    assert!(platform.deletes.lock().unwrap().is_empty());
+}
+
+struct FailedReplicaRead(RuntimeErrorCode);
+#[async_trait]
+impl SerializedReplicaExecutor for FailedReplicaRead {
+    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        assert!(matches!(
+            serde_json::from_str::<ReplicaPersistenceRequest>(&request_json).unwrap(),
+            ReplicaPersistenceRequest::Load { .. }
+        ));
+        Err(RuntimeError::new(self.0, "unchanged executor failure"))
+    }
+}
+
+#[tokio::test]
+async fn startup_preserves_executor_authentication_transport_and_protocol_failure_codes() {
+    for code in [
+        RuntimeErrorCode::AuthenticationRequired,
+        RuntimeErrorCode::AuthenticationUnavailable,
+        RuntimeErrorCode::StorageUnavailable,
+        RuntimeErrorCode::RetryableTransport,
+        RuntimeErrorCode::InvariantViolation,
+    ] {
+        let platform = Arc::new(MemoryPlatformExecutor::default());
+        seed_catalog(&platform, vec![active("account-1", "generation-1")]);
+        let runtime = Runtime::with_serialized_executors(
+            Arc::new(FailedReplicaRead(code)),
+            platform.clone(),
+            Arc::new(UnusedHttpExecutor),
+        );
+        let error = runtime.open().await.unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.message, "unchanged executor failure");
+        assert!(!runtime.ready.load(Ordering::SeqCst));
+        assert!(platform.deletes.lock().unwrap().is_empty());
+    }
 }

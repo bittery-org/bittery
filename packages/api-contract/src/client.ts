@@ -61,9 +61,7 @@ import type {
 	ResendTeamInvitationResponse,
 	ResetPasswordInput,
 	ResetPasswordResponse,
-	RotationPlanSet,
 	RotationPlanSetFinalizeInput,
-	RotationPlanSetFinalizeResponse,
 	RotationPreparationPage,
 	RotationStageInput,
 	SecretKeyRotationInput,
@@ -251,16 +249,24 @@ export interface ApiClient {
 			startRemovalRotation(
 				vaultId: string,
 				userId: string,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSet>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"create_vault_member_removal_rotation_plans">
+				>
+			>;
 			finalizeRemovalRotation(
 				vaultId: string,
 				userId: string,
 				input: RotationPlanSetFinalizeInput,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"finalize_vault_member_removal_rotation_plans">
+				>
+			>;
 			list(vaultId: string): Promise<ApiResult<readonly VaultMember[]>>;
 			add(
 				vaultId: string,
@@ -357,15 +363,19 @@ export interface ApiClient {
 	readonly teams: {
 		startLeaveRotation(
 			teamId: string,
-			options: ApiWriteOptions,
+			options: Final.RotationOperationWriteOptions,
 			signal?: AbortSignal,
-		): Promise<ApiResult<RotationPlanSet>>;
+		): Promise<
+			ApiResult<Final.RotationOutcome<"create_team_leave_rotation_plans">>
+		>;
 		finalizeLeaveRotation(
 			teamId: string,
 			input: RotationPlanSetFinalizeInput,
-			options: ApiWriteOptions,
+			options: Final.RotationOperationWriteOptions,
 			signal?: AbortSignal,
-		): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
+		): Promise<
+			ApiResult<Final.RotationOutcome<"finalize_team_leave_rotation_plans">>
+		>;
 		create(
 			input: CreateTeamInput,
 			options?: ApiWriteOptions,
@@ -424,16 +434,24 @@ export interface ApiClient {
 			startRemovalRotation(
 				teamId: string,
 				userId: string,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSet>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"create_team_member_removal_rotation_plans">
+				>
+			>;
 			finalizeRemovalRotation(
 				teamId: string,
 				userId: string,
 				input: RotationPlanSetFinalizeInput,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"finalize_team_member_removal_rotation_plans">
+				>
+			>;
 			list(teamId: string): Promise<ApiResult<readonly TeamMember[]>>;
 			access(
 				teamId: string,
@@ -783,6 +801,20 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		};
 	}
 
+	async function rotationOperationCall<
+		Kind extends Final.RotationOperationOutcome["kind"],
+	>(
+		kind: Kind,
+		operationId: string,
+		response: Promise<ApiResult<OperationOutcome>>,
+	): Promise<ApiResult<Final.RotationOutcome<Kind>>> {
+		const result = await response;
+		if (result.data.kind !== kind || result.data.operationId !== operationId) {
+			throw new TypeError("Rotation returned another Operation identity.");
+		}
+		return { ...result, data: result.data as Final.RotationOutcome<Kind> };
+	}
+
 	async function itemOperationCall(
 		response: Promise<ApiResult<OperationOutcome>>,
 	): Promise<ApiResult<ItemOperationOutcome>> {
@@ -799,6 +831,12 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			case "create_share":
 			case "create_vault":
 			case "import_items":
+			case "create_vault_member_removal_rotation_plans":
+			case "finalize_vault_member_removal_rotation_plans":
+			case "create_team_leave_rotation_plans":
+			case "finalize_team_leave_rotation_plans":
+			case "create_team_member_removal_rotation_plans":
+			case "finalize_team_member_removal_rotation_plans":
 				throw new TypeError(
 					"An Item mutation returned a non-Item Operation outcome.",
 				);
@@ -1117,25 +1155,39 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			members: {
 				startRemovalRotation: (vaultId, userId, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans",
-						{
-							params: { path: { vaultId, userId } },
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"create_vault_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans",
+							{
+								params: {
+									path: { vaultId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				finalizeRemovalRotation: (vaultId, userId, input, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize",
-						{
-							params: { path: { vaultId, userId } },
-							body: input,
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"finalize_vault_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize",
+							{
+								params: {
+									path: { vaultId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								body: input,
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				list: (vaultId) =>
 					drainPages("/api/v1/vaults/{vaultId}/members", {
@@ -1265,18 +1317,32 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		},
 		teams: {
 			startLeaveRotation: (teamId, write, signal) =>
-				call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans", {
-					params: { path: { teamId } },
-					headers: writeHeaders(write),
-					signal,
-				}),
+				rotationOperationCall(
+					"create_team_leave_rotation_plans",
+					write.idempotencyKey,
+					call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans", {
+						params: {
+							path: { teamId },
+							header: { "Idempotency-Key": write.idempotencyKey },
+						},
+						headers: writeHeaders(write),
+						signal,
+					}),
+				),
 			finalizeLeaveRotation: (teamId, input, write, signal) =>
-				call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans/finalize", {
-					params: { path: { teamId } },
-					body: input,
-					headers: writeHeaders(write),
-					signal,
-				}),
+				rotationOperationCall(
+					"finalize_team_leave_rotation_plans",
+					write.idempotencyKey,
+					call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans/finalize", {
+						params: {
+							path: { teamId },
+							header: { "Idempotency-Key": write.idempotencyKey },
+						},
+						body: input,
+						headers: writeHeaders(write),
+						signal,
+					}),
+				),
 			create: (input, write) =>
 				call("POST", "/api/v1/teams", {
 					body: input,
@@ -1364,25 +1430,39 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			},
 			members: {
 				startRemovalRotation: (teamId, userId, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans",
-						{
-							params: { path: { teamId, userId } },
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"create_team_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans",
+							{
+								params: {
+									path: { teamId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				finalizeRemovalRotation: (teamId, userId, input, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize",
-						{
-							params: { path: { teamId, userId } },
-							body: input,
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"finalize_team_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize",
+							{
+								params: {
+									path: { teamId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								body: input,
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				list: (teamId) =>
 					drainPages("/api/v1/teams/{teamId}/members", {

@@ -420,6 +420,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/items/{itemId}/authority": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["getItemAuthority"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/items/{itemId}/favorite": {
         readonly parameters: {
             readonly query?: never;
@@ -1888,6 +1904,28 @@ export interface components {
             /** @enum {string} */
             readonly status: "rejected";
         };
+        /** @enum {string} */
+        readonly CreateTeamLeaveRotationPlansRejectionCode: "team_member_not_found" | "personal_team_departure_forbidden" | "team_owner_leave_forbidden";
+        readonly CreateTeamLeaveRotationPlansResult: {
+            readonly plans: readonly components["schemas"]["RotationPlanSnapshot"][];
+            /** @enum {string} */
+            readonly status: "applied";
+        } | {
+            readonly code: components["schemas"]["CreateTeamLeaveRotationPlansRejectionCode"];
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
+        /** @enum {string} */
+        readonly CreateTeamMemberRemovalRotationPlansRejectionCode: "team_member_not_found" | "personal_team_departure_forbidden" | "self_removal_forbidden" | "team_management_denied" | "team_owner_protected" | "team_management_entitlement_denied" | "vault_management_incomplete";
+        readonly CreateTeamMemberRemovalRotationPlansResult: {
+            readonly plans: readonly components["schemas"]["RotationPlanSnapshot"][];
+            /** @enum {string} */
+            readonly status: "applied";
+        } | {
+            readonly code: components["schemas"]["CreateTeamMemberRemovalRotationPlansRejectionCode"];
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
         readonly CreateTeamRequest: {
             readonly name: string;
             readonly teamType?: null | components["schemas"]["TeamType"];
@@ -1898,6 +1936,17 @@ export interface components {
             readonly imageKey?: string | null;
             readonly name: string;
             readonly vaultType: components["schemas"]["VaultType"];
+        };
+        /** @enum {string} */
+        readonly CreateVaultMemberRemovalRotationPlansRejectionCode: "vault_access_denied" | "vault_member_not_found" | "self_removal_forbidden" | "vault_owner_protected" | "vault_admin_peer_protected" | "shared_vault_required" | "vault_sharing_entitlement_denied";
+        readonly CreateVaultMemberRemovalRotationPlansResult: {
+            readonly plans: readonly components["schemas"]["RotationPlanSnapshot"][];
+            /** @enum {string} */
+            readonly status: "applied";
+        } | {
+            readonly code: components["schemas"]["CreateVaultMemberRemovalRotationPlansRejectionCode"];
+            /** @enum {string} */
+            readonly status: "rejected";
         };
         /** @enum {string} */
         readonly CreateVaultOperationRejectionCode: "vault_id_conflict" | "team_membership_required" | "vault_sharing_entitlement_denied" | "shared_vault_limit_reached";
@@ -2199,7 +2248,7 @@ export interface components {
          * @description A stable, machine-readable Bittery error code.
          * @enum {string}
          */
-        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "ACCOUNT_DELETION_CONFIRMATION_MISMATCH" | "ACCOUNT_DELETION_BLOCKED" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE" | "INVALID_OPERATION_ID" | "OPERATION_ID_REUSED" | "OPERATION_OUTCOME_NOT_FOUND" | "ATTACHMENT_STAGING_INCOMPLETE" | "ATTACHMENT_STAGING_MISMATCH" | "ATTACHMENT_STAGING_BUSY" | "ATTACHMENT_AUTHORITY_STALE" | "ATTACHMENT_QUOTA_EXCEEDED" | "ROTATION_STALE_VAULT_VERSION" | "ROTATION_STALE_MEMBER_SET" | "ROTATION_STALE_ITEM_STATE" | "ROTATION_STALE_ATTACHMENT_STATE";
+        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "ACCOUNT_DELETION_CONFIRMATION_MISMATCH" | "ACCOUNT_DELETION_BLOCKED" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_NOT_ALLOWED" | "INVALID_OPERATION_ID" | "OPERATION_ID_REUSED" | "OPERATION_OUTCOME_NOT_FOUND" | "ATTACHMENT_STAGING_INCOMPLETE" | "ATTACHMENT_STAGING_MISMATCH" | "ATTACHMENT_STAGING_BUSY" | "ATTACHMENT_AUTHORITY_STALE" | "ATTACHMENT_QUOTA_EXCEEDED" | "ROTATION_STALE_VAULT_VERSION" | "ROTATION_STALE_MEMBER_SET" | "ROTATION_STALE_ITEM_STATE" | "ROTATION_STALE_ATTACHMENT_STATE";
         /** @enum {string} */
         readonly EventSource: "audit_log" | "share_access_log";
         readonly FavoriteBody: {
@@ -2208,16 +2257,43 @@ export interface components {
         readonly FinalizePlanSetRequest: {
             readonly planIds: readonly string[];
         };
-        readonly FinalizePlanSetResponse: {
-            readonly personalTeamId?: string | null;
-            readonly rotations: readonly components["schemas"]["FinalizeResponse"][];
+        /** @enum {string} */
+        readonly FinalizeTeamLeaveRotationPlansRejectionCode: "team_membership_changed" | "personal_team_departure_forbidden" | "team_owner_leave_forbidden" | "rotation_plan_unavailable" | "rotation_plan_mismatch" | "rotation_plan_incomplete" | "rotation_plan_stale" | "rotation_plan_set_mismatch";
+        readonly FinalizeTeamLeaveRotationPlansResult: {
+            readonly personalTeamId: string;
+            readonly rotations: readonly components["schemas"]["RotationResult"][];
+            /** @enum {string} */
+            readonly status: "applied";
+        } | {
+            readonly code: components["schemas"]["FinalizeTeamLeaveRotationPlansRejectionCode"];
+            readonly details?: null | components["schemas"]["RotationStaleDetails"];
+            /** @enum {string} */
+            readonly status: "rejected";
         };
-        readonly FinalizeResponse: {
-            /** Format: int32 */
-            readonly keyVersion: number;
-            readonly planId: string;
-            readonly rotationId: string;
-            readonly vaultId: string;
+        /** @enum {string} */
+        readonly FinalizeTeamMemberRemovalRotationPlansRejectionCode: "team_membership_changed" | "personal_team_departure_forbidden" | "self_removal_forbidden" | "team_management_denied" | "team_owner_protected" | "team_management_entitlement_denied" | "vault_management_incomplete" | "rotation_plan_unavailable" | "rotation_plan_mismatch" | "rotation_plan_incomplete" | "rotation_plan_stale" | "rotation_plan_set_mismatch";
+        readonly FinalizeTeamMemberRemovalRotationPlansResult: {
+            readonly personalTeamId: string;
+            readonly rotations: readonly components["schemas"]["RotationResult"][];
+            /** @enum {string} */
+            readonly status: "applied";
+        } | {
+            readonly code: components["schemas"]["FinalizeTeamMemberRemovalRotationPlansRejectionCode"];
+            readonly details?: null | components["schemas"]["RotationStaleDetails"];
+            /** @enum {string} */
+            readonly status: "rejected";
+        };
+        /** @enum {string} */
+        readonly FinalizeVaultMemberRemovalRotationPlansRejectionCode: "vault_access_denied" | "vault_membership_changed" | "self_removal_forbidden" | "vault_owner_protected" | "vault_admin_peer_protected" | "shared_vault_required" | "vault_sharing_entitlement_denied" | "rotation_plan_unavailable" | "rotation_plan_mismatch" | "rotation_plan_incomplete" | "rotation_plan_stale";
+        readonly FinalizeVaultMemberRemovalRotationPlansResult: {
+            readonly rotations: readonly components["schemas"]["RotationResult"][];
+            /** @enum {string} */
+            readonly status: "applied";
+        } | {
+            readonly code: components["schemas"]["FinalizeVaultMemberRemovalRotationPlansRejectionCode"];
+            readonly details?: null | components["schemas"]["RotationStaleDetails"];
+            /** @enum {string} */
+            readonly status: "rejected";
         };
         readonly FinishLoginRequest: {
             readonly clientProof: string;
@@ -2256,6 +2332,8 @@ export interface components {
             /** @enum {string} */
             readonly status: "rejected";
         };
+        /** @enum {string} */
+        readonly InitialRotationPlanState: "preparing";
         readonly InvitationDetailsResponse: {
             readonly createdAt: string;
             readonly email: string;
@@ -2506,6 +2584,36 @@ export interface components {
             readonly kind: "import_items";
             readonly operationId: string;
             readonly result: components["schemas"]["ImportItemsOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "create_vault_member_removal_rotation_plans";
+            readonly operationId: string;
+            readonly result: components["schemas"]["CreateVaultMemberRemovalRotationPlansResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "finalize_vault_member_removal_rotation_plans";
+            readonly operationId: string;
+            readonly result: components["schemas"]["FinalizeVaultMemberRemovalRotationPlansResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "create_team_leave_rotation_plans";
+            readonly operationId: string;
+            readonly result: components["schemas"]["CreateTeamLeaveRotationPlansResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "finalize_team_leave_rotation_plans";
+            readonly operationId: string;
+            readonly result: components["schemas"]["FinalizeTeamLeaveRotationPlansResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "create_team_member_removal_rotation_plans";
+            readonly operationId: string;
+            readonly result: components["schemas"]["CreateTeamMemberRemovalRotationPlansResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "finalize_team_member_removal_rotation_plans";
+            readonly operationId: string;
+            readonly result: components["schemas"]["FinalizeTeamMemberRemovalRotationPlansResult"];
         };
         /**
          * @description The Item-only rejection vocabulary. Its OpenAPI name stays stable because Client Runtime has
@@ -2540,9 +2648,6 @@ export interface components {
         readonly PendingVaultKeyRequest: {
             readonly encryptedVaultKey: string;
             readonly vaultId: string;
-        };
-        readonly PlanSetResponse: {
-            readonly plans: readonly components["schemas"]["RotationPlanSummary"][];
         };
         readonly PortalSessionResponse: {
             readonly url: string;
@@ -2664,7 +2769,7 @@ export interface components {
             readonly token: string;
             readonly userId: string;
         };
-        readonly RotationPlanSummary: {
+        readonly RotationPlanSnapshot: {
             /** Format: date-time */
             readonly absoluteExpiresAt: string;
             /** Format: int32 */
@@ -2673,8 +2778,19 @@ export interface components {
             /** Format: date-time */
             readonly idleExpiresAt: string;
             readonly initiatorUserId: string;
-            readonly state: components["schemas"]["VaultKeyRotationPlanState"];
+            readonly state: components["schemas"]["InitialRotationPlanState"];
             readonly vaultId: string;
+        };
+        readonly RotationResult: {
+            /** Format: int32 */
+            readonly keyVersion: number;
+            readonly planId: string;
+            readonly rotationId: string;
+            readonly vaultId: string;
+        };
+        readonly RotationStaleDetails: {
+            readonly planId: string;
+            readonly reason: components["schemas"]["VaultKeyRotationStaleReason"];
         };
         readonly SecretKeyRotationRequest: {
             readonly encryptedPrivateKey: string;
@@ -3069,7 +3185,7 @@ export interface components {
             readonly version: number;
         };
         /** @enum {string} */
-        readonly VaultKeyRotationPlanState: "preparing" | "ready" | "completed" | "stale" | "failed" | "abandoned" | "expired";
+        readonly VaultKeyRotationStaleReason: "vault_version" | "member_set" | "item_state" | "attachment_state";
         readonly VaultListEntryResponse: {
             readonly createdById: string;
             readonly encryptedVaultKey: string;
@@ -5562,6 +5678,82 @@ export interface operations {
                 headers: {
                     /** @description Seconds before retrying */
                     readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    readonly getItemAuthority: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly itemId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Complete Item authority using Bootstrap visibility, within the Bootstrap Item byte budget */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["BootstrapItemResponse"];
+                };
+            };
+            /** @description Invalid Item identity */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Item access denied */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Item not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Complete Item exceeds the response byte budget */
+            readonly 413: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error */
+            readonly 500: {
+                headers: {
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9067,8 +9259,8 @@ export interface operations {
     readonly createTeamLeaveRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly teamId: string;
@@ -9079,12 +9271,10 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["PlanSetResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */
@@ -9123,7 +9313,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9150,7 +9340,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9168,24 +9358,13 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     readonly finalizeTeamLeaveRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly teamId: string;
@@ -9200,12 +9379,10 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["FinalizePlanSetResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */
@@ -9244,7 +9421,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9271,7 +9448,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9283,17 +9460,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9499,8 +9665,8 @@ export interface operations {
     readonly createTeamMemberRemovalRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly teamId: string;
@@ -9512,12 +9678,10 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["PlanSetResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */
@@ -9556,7 +9720,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9583,7 +9747,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9601,24 +9765,13 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     readonly finalizeTeamMemberRemovalRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly teamId: string;
@@ -9634,12 +9787,10 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["FinalizePlanSetResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */
@@ -9678,7 +9829,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9705,7 +9856,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -9717,17 +9868,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -10802,7 +10942,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -10829,7 +10969,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -10841,17 +10981,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -10919,7 +11048,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -10946,7 +11075,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -10958,17 +11087,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -11035,7 +11153,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -11062,7 +11180,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -11074,17 +11192,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -13209,8 +13316,8 @@ export interface operations {
     readonly createVaultMemberRemovalRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly vaultId: string;
@@ -13222,12 +13329,10 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["PlanSetResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */
@@ -13266,7 +13371,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -13293,7 +13398,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -13311,24 +13416,13 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     readonly finalizeVaultMemberRemovalRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: {
-                readonly "Idempotency-Key"?: string | null;
+            readonly header: {
+                readonly "Idempotency-Key": string;
             };
             readonly path: {
                 readonly vaultId: string;
@@ -13344,12 +13438,10 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
-                    /** @description true when this is a stored replay */
-                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["FinalizePlanSetResponse"];
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
                 };
             };
             /** @description Bad request */
@@ -13388,7 +13480,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Rotation plan is stale or conflicts with current state */
+            /** @description Operation ID reused or concurrent update requires retry */
             readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -13415,7 +13507,7 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency key was reused with a different request */
+            /** @description JSON body does not match the request schema */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -13427,17 +13519,6 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {

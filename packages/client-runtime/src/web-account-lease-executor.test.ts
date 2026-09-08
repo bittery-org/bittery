@@ -1,7 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { WebAccountLeaseExecutor } from "./web-account-lease-executor";
 
 describe("Web Account lease executor", () => {
+	let originalLocks: PropertyDescriptor | undefined;
+	beforeEach(() => {
+		originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+	});
+	afterEach(() => {
+		if (originalLocks) Object.defineProperty(navigator, "locks", originalLocks);
+		else Reflect.deleteProperty(navigator, "locks");
+	});
+
 	test("exposes only Account acquisition and returns the closed denied result", async () => {
 		const requests: Array<{
 			name: string;

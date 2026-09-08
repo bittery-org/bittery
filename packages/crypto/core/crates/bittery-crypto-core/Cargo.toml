@@ -10,7 +10,7 @@ attachment-move-test-vectors = []
 
 [dependencies]
 # Crypto (RustCrypto - audited)
-aes-gcm.workspace = true
+aes-gcm = { workspace = true, features = ["zeroize"] }
 aes.workspace = true
 ghash.workspace = true
 pbkdf2.workspace = true

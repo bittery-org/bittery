@@ -41,6 +41,7 @@ export class WebClientRuntime {
     byte_length: bigint,
   ): Promise<string>;
   request_json(request_id: string, request_json: string): Promise<string>;
+  setRecoveryExecutor(invoke: Function, cancel: Function): void;
   unobserve(observation_id: string): void;
   static withConfiguredAttachmentMovePreparation(
     replica_invoke: Function,
@@ -2663,6 +2664,11 @@ export interface InitOutput {
     d: number,
     e: number,
   ) => any;
+  readonly webclientruntime_setRecoveryExecutor: (
+    a: number,
+    b: any,
+    c: any,
+  ) => [number, number];
   readonly webclientruntime_unobserve: (
     a: number,
     b: number,

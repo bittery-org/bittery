@@ -20,6 +20,11 @@ import {
 	WebAttachmentUploadSourceRegistry,
 } from "../web-attachment-upload-source";
 import {
+	isRecoveryCancelHostRequest,
+	isRecoveryTransferHostRequest,
+	RecoveryFileRegistry,
+} from "../web-recovery-files";
+import {
 	isVaultImageSourceHostRequest,
 	type VaultImageSourceGrant,
 } from "../web-vault-image-source";
@@ -71,6 +76,16 @@ export interface WebClientRuntimeDeps {
 }
 
 export interface WebClientRuntime {
+	recoveryFiles: Pick<
+		RecoveryFileRegistry,
+		| "grantSource"
+		| "grantSink"
+		| "discardGrant"
+		| "listRetained"
+		| "prepared"
+		| "downloadRequested"
+		| "release"
+	>;
 	runtime: WorkerRuntime;
 	/** Shared Rust identity normalization, executed by the existing Runtime Worker WASM. */
 	normalizeAccountEmail(value: string): Promise<string>;
@@ -106,6 +121,7 @@ export function createWebClientRuntime(
 	deps: WebClientRuntimeDeps,
 ): WebClientRuntime {
 	const platformStorage = new WebPlatformStorageHost();
+	const recoveryFiles = new RecoveryFileRegistry();
 	const attachmentDownloads = new WebAttachmentDownloadSinkRegistry();
 	const attachmentDownloadSinks: AttachmentDownloadSinkGrants = {
 		grant: (sink) => attachmentDownloads.grant(sink),
@@ -126,6 +142,19 @@ export function createWebClientRuntime(
 	const workerOwner = createSharedWorkerOwner({
 		createWorker: deps.createWorker,
 		handleHostRequest: (payload, signal) => {
+			if (isRecoveryRuntimeScope(payload)) {
+				recoveryFiles.prepare(payload.runtimeIncarnation);
+				return Promise.resolve();
+			}
+			if (isRecoveryCancelHostRequest(payload)) {
+				recoveryFiles.cancel(payload);
+				return Promise.resolve();
+			}
+			if (isRecoveryTransferHostRequest(payload)) {
+				if (signal.aborted)
+					return Promise.reject(new Error("Recovery transfer cancelled"));
+				return recoveryFiles.invoke(payload);
+			}
 			if (isAttachmentDownloadSinkRuntimeScopeRequest(payload)) {
 				return Promise.all([
 					transitionAttachmentRuntimeIncarnation(
@@ -167,6 +196,16 @@ export function createWebClientRuntime(
 			return fallbackHostRequest(payload, signal);
 		},
 		handleClosingHostRequest: (payload, signal) => {
+			if (isRecoveryCancelHostRequest(payload)) {
+				recoveryFiles.cancel(payload);
+				return Promise.resolve();
+			}
+			if (isRecoveryTransferHostRequest(payload)) {
+				const control = JSON.parse(payload.controlRequestJson);
+				if (control.type === "sourceClose" || control.type === "sinkDiscard")
+					return recoveryFiles.invoke(payload);
+				return Promise.reject(new Error("Recovery transfer fenced by close"));
+			}
 			if (isAttachmentDownloadSinkRuntimeScopeRequest(payload)) {
 				return transitionAttachmentRuntimeIncarnation(
 					payload.phase,
@@ -201,8 +240,10 @@ export function createWebClientRuntime(
 				attachmentDownloads.drainClose(),
 				attachmentUploads.drainClose(),
 				vaultImages.drainClose(),
-			]).then(() => undefined),
+			]).then(() => recoveryFiles.retire()),
 		preserveHostRequestDuringClose: (payload) =>
+			isRecoveryTransferHostRequest(payload) ||
+			isRecoveryCancelHostRequest(payload) ||
 			isAttachmentDownloadSinkHostRequest(payload) ||
 			isAttachmentDownloadSinkRuntimeScopeRequest(payload) ||
 			isAttachmentUploadSourceHostRequest(payload) ||
@@ -236,6 +277,15 @@ export function createWebClientRuntime(
 	};
 	const runtime = createWorkerRuntime(workerOwner.channel("runtime"), close);
 	return {
+		recoveryFiles: {
+			grantSource: recoveryFiles.grantSource.bind(recoveryFiles),
+			grantSink: recoveryFiles.grantSink.bind(recoveryFiles),
+			discardGrant: recoveryFiles.discardGrant.bind(recoveryFiles),
+			listRetained: recoveryFiles.listRetained.bind(recoveryFiles),
+			prepared: recoveryFiles.prepared.bind(recoveryFiles),
+			downloadRequested: recoveryFiles.downloadRequested.bind(recoveryFiles),
+			release: recoveryFiles.release.bind(recoveryFiles),
+		},
 		workerOwner,
 		attachmentDownloadSinks,
 		attachmentUploadSources,
@@ -245,4 +295,16 @@ export function createWebClientRuntime(
 		normalizeAccountEmail: runtime.normalizeAccountEmail,
 		close,
 	};
+}
+
+function isRecoveryRuntimeScope(
+	value: unknown,
+): value is { type: "recoveryRuntimeScope"; runtimeIncarnation: string } {
+	if (typeof value !== "object" || value === null) return false;
+	const row = value as Record<string, unknown>;
+	return (
+		Object.keys(row).sort().join(",") === "runtimeIncarnation,type" &&
+		row.type === "recoveryRuntimeScope" &&
+		typeof row.runtimeIncarnation === "string"
+	);
 }

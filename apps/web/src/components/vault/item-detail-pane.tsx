@@ -1,12 +1,9 @@
 import type { ItemProjectionStatus } from "@bittery/client-runtime/protocol";
-import { useRuntimeClient } from "@bittery/client-runtime/react";
 import {
-	useQueryInvalidator,
-} from "@bittery/core/hooks";
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
+	useRuntimeClient,
+	useRuntimePendingShareResults,
+} from "@bittery/client-runtime/react";
 import { detectCardBrand } from "@bittery/shared/credit-card";
-import type { DecryptedItemData } from "@bittery/shared/types";
 import {
 	Button,
 	cn,
@@ -35,24 +32,24 @@ import {
 	IconTrash as Trash,
 	IconTriangleAlert as TriangleAlert,
 } from "@bittery/ui/icons";
-import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { MoveItemDialog } from "@/components/vault/move-item-dialog";
-import {
-	useCreateShare,
-	usePendingShareResults,
-} from "@/hooks/use-create-share";
-import {
-	useToggleFavorite,
-	useUpdateItem,
-} from "@/hooks/use-runtime-item-mutations";
+import { useAccountPresentationState } from "@/hooks/use-account-presentation-state";
+import { useCreateShare } from "@/hooks/use-create-share";
 import {
 	getRuntimeAttachmentUploadErrorCode,
 	useRuntimeItemAttachments,
 } from "@/hooks/use-runtime-item-attachments";
+import {
+	useMoveItem,
+	useToggleFavorite,
+	useUpdateItem,
+} from "@/hooks/use-runtime-item-mutations";
+import { useRuntimeShareHistory } from "@/hooks/use-runtime-share-history";
+import type { RuntimeListItem, RuntimeVaultOption } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
-import type { RuntimeListItem } from "@/lib/runtime-items";
 
 export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
 	const blob = new Blob([bytes as unknown as BlobPart]);
@@ -110,17 +107,24 @@ export function ItemDetailPane({
 	const { m } = useI18n();
 	const toggleFavorite = useToggleFavorite();
 	const updateItem = useUpdateItem();
+	const moveItem = useMoveItem();
+	const navigate = useNavigate();
 	const createShare = useCreateShare();
 	const runtimeClient = useRuntimeClient();
-	const api = useApiClient();
-	const invalidator = useQueryInvalidator();
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
+	const [historyItem, setHistoryItem] = useAccountPresentationState<string>(
+		selectedItem?.accountId ?? null,
+	);
+	const isShareHistoryOpen = Boolean(
+		selectedItem && historyItem === selectedItem.id,
+	);
+	const setIsShareHistoryOpen = (open: boolean) =>
+		setHistoryItem(open ? (selectedItem?.id ?? null) : null);
 	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
 	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 	const shareAccountId = selectedItem?.accountId ?? null;
-	const pendingShares = usePendingShareResults(shareAccountId);
+	const pendingShares = useRuntimePendingShareResults(shareAccountId);
 	const resumableShare =
 		pendingShares.state === "ready" && selectedItem
 			? (() => {
@@ -142,11 +146,11 @@ export function ItemDetailPane({
 		[runtimeClient],
 	);
 	const itemAttachments = useRuntimeItemAttachments(selectedItem);
-	const shareLinks = useQuery({
-		...apiQueries.shares.list(api, selectedItem?.id ?? ""),
-		enabled: Boolean(selectedItem) && isShareHistoryOpen,
-		staleTime: 0,
-	});
+	const shareLinks = useRuntimeShareHistory(
+		shareAccountId,
+		selectedItem?.id ?? null,
+		isShareHistoryOpen,
+	);
 
 	const handleTagsChange = useCallback(
 		(newTags: string[]) => {
@@ -154,17 +158,12 @@ export function ItemDetailPane({
 
 			setIsUpdatingTags(true);
 
-			const updatedData: DecryptedItemData = {
-				...(selectedItem as DecryptedItemData),
-				tags: newTags.length > 0 ? newTags : undefined,
-			};
-
 			updateItem.mutate(
 				{
 					itemId: selectedItem.id,
 					vaultId: selectedItem.vaultId,
 					accountId: selectedItem.accountId,
-					data: updatedData,
+					data: { tags: newTags },
 				},
 				{
 					onSettled: () => {
@@ -195,6 +194,34 @@ export function ItemDetailPane({
 					? error.message
 					: m.vaults_detail_items_password_history_dialog_toast_restore_error();
 			toast.error(errorMessage);
+		}
+	};
+
+	// A moved projection can remove the selected Item before acceptance returns. This
+	// pane survives that transition; the dialog does not own the request's lifetime.
+	const handleMove = async (target: RuntimeVaultOption) => {
+		if (!selectedItem) return;
+		try {
+			await moveItem.mutateAsync({
+				accountId: selectedItem.accountId,
+				itemId: selectedItem.id,
+				targetAccountId: target.accountId,
+				targetVaultId: target.id,
+			});
+			toast.success(m.vaults_detail_items_move_dialog_toast_success());
+			setIsMoveDialogOpen(false);
+			navigate({
+				to: "/vaults/$vaultId",
+				params: { vaultId: target.id },
+				search: { itemId: selectedItem.id },
+			});
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") return;
+			toast.error(
+				error instanceof Error
+					? error.message
+					: m.vaults_detail_items_move_dialog_toast_error(),
+			);
 		}
 	};
 
@@ -385,19 +412,19 @@ export function ItemDetailPane({
 						onOpenChange={setIsShareDialogOpen}
 					/>
 					<ShareHistoryDialog
-						links={shareLinks.data?.links ?? []}
+						key={`${shareAccountId}:${selectedItem.id}:${isShareHistoryOpen}`}
+						links={shareLinks.links}
 						isLoading={shareLinks.isLoading}
-						onRevoke={async (linkId) => {
-							await api.share.remove(linkId);
-							await invalidator.invalidateShare(selectedItem.id);
-						}}
-						onLoadAccessLogs={async (linkId) =>
-							(await api.share.accessLogs(linkId)).data
-						}
+						onRevoke={shareLinks.revoke}
+						onLoadAccessLogs={shareLinks.loadAccessLogs}
+						failed={shareLinks.failed}
+						onRetry={shareLinks.retry}
 						open={isShareHistoryOpen}
 						onOpenChange={setIsShareHistoryOpen}
 					/>
 					<MoveItemDialog
+						isMoving={moveItem.isPending}
+						onMove={handleMove}
 						open={isMoveDialogOpen}
 						onOpenChange={setIsMoveDialogOpen}
 						item={selectedItem}

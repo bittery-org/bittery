@@ -64,13 +64,13 @@ fn production_create_vault_staging_exhaustively_maps_closed_wire_values() {
         sha256: "0".repeat(64),
     };
     let body =
-        dispatch::ProductionCreateVaultPort::staging_body(&binding).expect("closed MIME must bind");
+        dispatch::ProductionOperationPort::staging_body(&binding).expect("closed MIME must bind");
     assert_eq!(
         serde_json::to_value(body.content_type).unwrap(),
         json!("image/avif")
     );
 
-    let status = |response| dispatch::ProductionCreateVaultPort::status(response, &binding);
+    let status = |response| dispatch::ProductionOperationPort::status(response, &binding);
     assert_eq!(
         status(VaultImageStagingStatusResponse::Absent {}).unwrap(),
         super::create_vault_staging::CreateVaultStagingStatus::Missing
@@ -102,7 +102,7 @@ fn production_create_vault_staging_exhaustively_maps_closed_wire_values() {
 
     let mut invalid = binding;
     invalid.content_type = "image/svg+xml".into();
-    assert!(dispatch::ProductionCreateVaultPort::staging_body(&invalid).is_err());
+    assert!(dispatch::ProductionOperationPort::staging_body(&invalid).is_err());
 }
 
 struct DispatchImageSource(Option<Vec<u8>>);
@@ -1689,4 +1689,339 @@ async fn rescheduling_can_never_move_an_accepted_operations_bytes() {
     assert!(harness
         .operation()
         .is_some_and(|operation| operation.operation_id == operation_id));
+}
+
+/// A fresh browser source broker has no acceptance release from the previous Worker.
+struct RestartImageSourcePort {
+    end_calls: AtomicUsize,
+}
+
+#[async_trait]
+impl crate::VaultImageSourcePort for RestartImageSourcePort {
+    async fn claim(
+        &self,
+        _: &crate::VaultImageSourceGrant,
+    ) -> Result<Box<dyn crate::VaultImageSource>, crate::VaultImageSourceError> {
+        panic!("restored bytes must not require a new source grant")
+    }
+    async fn begin_acceptance(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &str,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        panic!("accepted work must not be accepted again")
+    }
+    async fn end_acceptance(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &str,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        self.end_calls.fetch_add(1, Ordering::SeqCst);
+        Err(crate::VaultImageSourceError::Source)
+    }
+    async fn retire_account(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_account_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn retire_runtime(&self, _: &str) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+}
+
+struct CheckpointReplica {
+    inner: Arc<PlainReplica>,
+    checkpoints: Mutex<Vec<crate::replica::CreateVaultCheckpoint>>,
+}
+#[async_trait]
+impl crate::replica::SerializedReplicaExecutor for CheckpointReplica {
+    async fn invoke(&self, request: String) -> Result<String, RuntimeError> {
+        use crate::replica::persistence_contract::{
+            PreparedReplicaWrite, ReplicaPersistenceRequest, ReplicaPersistenceResponse,
+            ReplicaStore,
+        };
+        let command: ReplicaPersistenceRequest = serde_json::from_str(&request).unwrap();
+        let checkpoints: Vec<_> = match &command {
+            ReplicaPersistenceRequest::Commit { prepared } => prepared
+                .writes
+                .iter()
+                .filter_map(|write| {
+                    let PreparedReplicaWrite::Put { row } = write else {
+                        return None;
+                    };
+                    if row.store != ReplicaStore::Operations {
+                        return None;
+                    }
+                    let operation: crate::replica::OperationRecord =
+                        serde_json::from_str(&row.payload_json).unwrap();
+                    operation.create_vault.map(|intent| intent.checkpoint)
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let response = self.inner.invoke(request).await?;
+        if matches!(
+            serde_json::from_str::<ReplicaPersistenceResponse>(&response).unwrap(),
+            ReplicaPersistenceResponse::Committed {
+                result: crate::replica::PlanResult::Applied { .. }
+            }
+        ) {
+            self.checkpoints.lock().unwrap().extend(checkpoints);
+        }
+        Ok(response)
+    }
+}
+
+#[tokio::test]
+async fn repaired_artifact_ready_vault_reaches_frozen_exact_put_in_a_fresh_runtime() {
+    use crate::replica::{
+        persistence_contract::{
+            ExpectedReplicaInstall, PreparedReplicaInstall, PreparedReplicaWrite,
+            ReplicaInstallResult, ReplicaPersistenceRequest, ReplicaPersistenceResponse,
+        },
+        ReplicaPersistence,
+    };
+    let harness = seeded(false).await;
+    let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
+    harness.runtime.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "before-repair",
+            Arc::new(DispatchImageSourcePort),
+            artifacts.clone(),
+        )
+        .unwrap(),
+    );
+    let accepted = harness
+        .runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: harness.account_id.clone(),
+                name: "Repaired Image Vault".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "image".into(),
+                image_source: Some(VaultImageSourceInput {
+                    capability_id: "image-before-repair".into(),
+                    byte_length: 11,
+                    content_type: "image/png".into(),
+                }),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let RuntimeResponse::VaultCreationAccepted {
+        operation_id,
+        vault_id,
+        ..
+    } = accepted
+    else {
+        panic!("expected accepted image Vault");
+    };
+    use sha2::Digest;
+    let image_scope =
+        crate::VaultImageArtifactScope::new(harness.account_id.clone(), operation_id.clone())
+            .unwrap();
+    let image_metadata = crate::VaultImageArtifactMetadata::new(
+        image_scope,
+        vault_id.clone(),
+        11,
+        "image/png",
+        format!("{:x}", sha2::Sha256::digest(b"image-bytes")),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::VaultImageArtifactPort::read_chunk(artifacts.as_ref(), &image_metadata, 0)
+            .await
+            .unwrap()
+            .unwrap(),
+        b"image-bytes"
+    );
+    harness.runtime.close().await;
+    let ReplicaPersistenceResponse::Loaded {
+        head: Some(head),
+        rows,
+    } = harness
+        .replica
+        .state
+        .invoke(ReplicaPersistenceRequest::Load {
+            account_id: harness.account_id.clone(),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("expected retained Replica");
+    };
+    let original = rows
+        .iter()
+        .find(|row| row.key.record_id == operation_id)
+        .unwrap()
+        .payload_json
+        .clone();
+    let operation: crate::replica::OperationRecord = serde_json::from_str(&original).unwrap();
+    assert_eq!(
+        operation.create_vault.as_ref().unwrap().checkpoint,
+        crate::replica::CreateVaultCheckpoint::ArtifactReady
+    );
+
+    // Reproduce repair's guarded publication result without replacing its separately tested archive
+    // policy: exact rows/current incarnation retained, only the two current counters advance.
+    let mut repaired_head = head.clone();
+    repaired_head.replica_revision += 1;
+    repaired_head.lock_epoch += 1;
+    let response = harness
+        .replica
+        .state
+        .invoke(ReplicaPersistenceRequest::Install {
+            prepared: PreparedReplicaInstall {
+                expected: ExpectedReplicaInstall::Present {
+                    account_id: head.account_id,
+                    user_id: head.user_id,
+                    incarnation: head.incarnation,
+                    replica_revision: head.replica_revision,
+                    lock_epoch: head.lock_epoch,
+                },
+                next_head: repaired_head.clone(),
+                writes: rows
+                    .into_iter()
+                    .map(|row| PreparedReplicaWrite::Put { row })
+                    .collect(),
+            },
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        response,
+        ReplicaPersistenceResponse::Installed {
+            result: ReplicaInstallResult::Applied
+        }
+    ));
+    let ReplicaPersistenceResponse::Loaded {
+        head: Some(after),
+        rows,
+    } = harness
+        .replica
+        .state
+        .invoke(ReplicaPersistenceRequest::Load {
+            account_id: harness.account_id.clone(),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("expected repaired Replica");
+    };
+    assert_eq!(after, repaired_head);
+    assert_eq!(
+        rows.iter()
+            .find(|row| row.key.record_id == operation_id)
+            .unwrap()
+            .payload_json,
+        original
+    );
+    let recording = Arc::new(CheckpointReplica {
+        inner: harness.replica.clone(),
+        checkpoints: Mutex::new(Vec::new()),
+    });
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    let restarted = Runtime::with_test_dispatch_environment(
+        recording.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    let sources = Arc::new(RestartImageSourcePort {
+        end_calls: AtomicUsize::new(0),
+    });
+    restarted.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new("after-repair", sources.clone(), artifacts.clone())
+            .unwrap(),
+    );
+    restarted
+        .platform_storage
+        .store_device_catalog(
+            &DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
+                account_id: harness.account_id.clone(),
+                active_incarnation: Some(repaired_head.incarnation.clone()),
+                pending_install: None,
+            }])
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    // The deterministic dispatch constructor starts ready; exercise normal startup here.
+    restarted.ready.store(false, Ordering::SeqCst);
+    restarted.open().await.unwrap();
+    store_session(&restarted, &harness.account_id, SECOND_TOKEN).await;
+    restarted
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let checkpoints = recording.checkpoints.lock().unwrap().clone();
+    assert_eq!(
+        checkpoints.iter().take(2).copied().collect::<Vec<_>>(),
+        vec![
+            crate::replica::CreateVaultCheckpoint::RemoteUploadConfirmed,
+            crate::replica::CreateVaultCheckpoint::FinalRequestFrozen
+        ]
+    );
+    let final_snapshot = restarted.replica().snapshot(&harness.account_id).unwrap();
+    assert!(final_snapshot.failure.is_none());
+    let pending = final_snapshot
+        .operations
+        .iter()
+        .find(|operation| operation.operation_id == operation_id)
+        .unwrap();
+    assert_eq!(
+        pending.create_vault.as_ref().unwrap().checkpoint,
+        crate::replica::CreateVaultCheckpoint::FinalRequestFrozen
+    );
+    assert_eq!(pending.request_fingerprint, operation.request_fingerprint);
+    assert_eq!(
+        pending.request.body,
+        crate::replica::canonical_create_vault_request(
+            &vault_id,
+            operation.create_vault.as_ref().unwrap()
+        )
+        .unwrap()
+        .body
+    );
+    let routes: Vec<_> = server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(method, url)| (method.clone(), url.rsplit('/').next().unwrap().to_owned()))
+        .collect();
+    assert_eq!(
+        routes,
+        vec![
+            ("POST".into(), "status".into()),
+            ("POST".into(), "grants".into()),
+            ("PUT".into(), "staged-image".into()),
+            ("POST".into(), "confirmations".into()),
+            ("GET".into(), operation_id),
+            ("PUT".into(), vault_id)
+        ]
+    );
+    assert_eq!(sources.end_calls.load(Ordering::SeqCst), 0);
+    restarted.close().await;
+    assert_eq!(
+        crate::VaultImageArtifactPort::read_chunk(artifacts.as_ref(), &image_metadata, 0)
+            .await
+            .unwrap()
+            .unwrap(),
+        b"image-bytes"
+    );
 }

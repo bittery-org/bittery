@@ -27,6 +27,124 @@ use crate::{
     AppState,
 };
 
+#[tokio::test]
+async fn item_authority_preserves_bootstrap_visibility_and_paid_attachment_policy() {
+    with_sync_test_app("item_authority_visibility", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        crate::test_support::seed_team(&app.pool, "team_sync_authority", "Authority", &fixture.owner_user_id, "family", "free", "active").await;
+        crate::test_support::assign_user_to_team(&app.pool, &fixture.owner_user_id, "team_sync_authority", "owner").await;
+        for (plan, status, attachment_count) in [("free", "active", 0), ("family", "active", 1), ("family", "canceled", 0)] {
+            query("UPDATE team SET billing_plan = $1::billing_plan, billing_status = $2::billing_status WHERE id = 'team_sync_authority'")
+                .bind(plan).bind(status).execute(&app.pool).await.unwrap();
+            let authority = app.api_json(Method::GET, &format!("/api/v1/items/{}/authority", fixture.primary_item_id), None, headers.clone()).await;
+            assert_eq!(authority.status, StatusCode::OK, "{plan}/{status}: {}", authority.body);
+            let bootstrap = app.api_json(Method::GET, "/api/v1/sync/bootstrap?phase=items", None, headers.clone()).await;
+            assert_eq!(bootstrap.status, StatusCode::OK);
+            let expected = bootstrap.body["items"].as_array().unwrap().iter().find(|item| item["id"] == fixture.primary_item_id).unwrap();
+            assert_eq!(&authority.body, expected, "complete Item authority must use the Bootstrap visibility contract");
+            assert_eq!(authority.body["attachments"].as_array().unwrap().len(), attachment_count);
+            assert!(authority.body.get("vault").is_none());
+            let paid_list = app.api_json(Method::GET, &format!("/api/v1/items/{}/attachments", fixture.primary_item_id), None, headers.clone()).await;
+            assert_eq!(paid_list.status, if attachment_count == 0 { StatusCode::FORBIDDEN } else { StatusCode::OK });
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn item_authority_requires_authentication_and_exact_item_access() {
+    with_sync_test_app("item_authority_access", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let path = format!("/api/v1/items/{}/authority", fixture.primary_item_id);
+        let anonymous = app
+            .api_json(Method::GET, &path, None, HeaderMap::new())
+            .await;
+        assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+        let outsider = app.issue_session(&fixture._outsider_user_id).await;
+        let denied = app
+            .api_json(
+                Method::GET,
+                &path,
+                None,
+                authenticated_json_headers(&outsider.token),
+            )
+            .await;
+        assert_eq!(denied.status, StatusCode::FORBIDDEN);
+        assert!(denied.body.get("encryptedData").is_none());
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let missing = app
+            .api_json(
+                Method::GET,
+                "/api/v1/items/item_missing_authority/authority",
+                None,
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(missing.status, StatusCode::NOT_FOUND);
+        let empty = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/items/{}/authority", fixture.secondary_item_id),
+                None,
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(empty.status, StatusCode::OK);
+        assert_eq!(empty.body["id"], fixture.secondary_item_id);
+        assert_eq!(empty.body["attachments"], json!([]));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn item_authority_self_hosted_is_complete_and_refuses_oversized_answers() {
+    with_self_hosted_sync_test_app("item_authority_bound", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        let path = format!("/api/v1/items/{}/authority", fixture.primary_item_id);
+        let authority = app
+            .api_json(Method::GET, &path, None, headers.clone())
+            .await;
+        assert_eq!(authority.status, StatusCode::OK);
+        assert_eq!(authority.body["attachments"][0]["id"], "attachment_sync_01");
+        query("UPDATE item SET deleted_at = NOW() WHERE id = $1")
+            .bind(&fixture.primary_item_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let trashed = app
+            .api_json(Method::GET, &path, None, headers.clone())
+            .await;
+        assert_eq!(trashed.status, StatusCode::OK);
+        assert!(trashed.body["deletedAt"].is_string());
+        // Keep ciphertext within the per-Item limit; escaped Attachment metadata alone can
+        // overflow the complete wire answer and must never become a truncated Attachment list.
+        query("UPDATE item_attachment SET encrypted_name = $1 WHERE item_id = $2")
+            .bind("\"".repeat(2_100_000))
+            .bind(&fixture.primary_item_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let oversized = app
+            .api_json(Method::GET, &path, None, headers.clone())
+            .await;
+        assert_eq!(oversized.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(oversized.body.get("attachments").is_none());
+        query("UPDATE item_attachment SET encrypted_name = $1 WHERE item_id = $2")
+            .bind("x".repeat(4_200_000))
+            .bind(&fixture.primary_item_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let prebounded = app.api_json(Method::GET, &path, None, headers).await;
+        assert_eq!(prebounded.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(prebounded.body_bytes < crate::http::pagination::RESPONSE_PAGE_BYTES);
+    })
+    .await;
+}
+
 #[test]
 fn sync_notification_session_revoked_serializes_correctly() {
     use crate::domains::sync::pubsub::SyncNotification;

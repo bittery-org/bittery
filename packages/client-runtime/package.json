@@ -71,9 +71,9 @@
 		"check:runtime-protocol-contract": "node ./scripts/generate-runtime-protocol-contract.mjs --check",
 		"check:replica-conformance": "cargo run --quiet --manifest-path ./Cargo.toml -p bittery-client-core --features replica-conformance --bin generate-replica-conformance-corpus -- --check",
 		"check:rust": "cargo fmt --all --check --manifest-path ./Cargo.toml && cargo clippy --manifest-path ./Cargo.toml --workspace --all-targets -- -D warnings && cargo test --manifest-path ./Cargo.toml --workspace",
-		"check:generated": "pnpm run check:server-contract && pnpm run check:persistence-contract && pnpm run check:platform-storage-contract && pnpm run check:http-transport-contract && pnpm run check:artifact-control-contract && pnpm run check:transfer-control-contract && pnpm run check:vault-image-control-contract && pnpm run check:runtime-protocol-contract && pnpm run check:replica-conformance && pnpm run check:bindings:native && pnpm run check:bindings:web",
+		"check:generated": "pnpm run check:server-contract && pnpm run check:persistence-contract && pnpm run check:platform-storage-contract && pnpm run check:http-transport-contract && pnpm run check:artifact-control-contract && pnpm run check:transfer-control-contract && pnpm run check:vault-image-control-contract && pnpm run check:recovery-control && pnpm run check:runtime-protocol-contract && pnpm run check:replica-conformance && pnpm run check:bindings:native && pnpm run check:bindings:web",
 		"check": "pnpm run check:rust && pnpm run test:generator && pnpm run check:generated",
-		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs ./scripts/generate-http-transport-contract.test.mjs ./scripts/generate-artifact-control-contract.test.mjs ./scripts/generate-transfer-control-contract.test.mjs ./scripts/generate-vault-image-control-contract.test.mjs ./scripts/generate-runtime-protocol-contract.test.mjs ./scripts/generated-validator-esm.test.mjs ./scripts/harden-native-secret-bindings.test.mjs",
+		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs ./scripts/generate-http-transport-contract.test.mjs ./scripts/generate-artifact-control-contract.test.mjs ./scripts/generate-transfer-control-contract.test.mjs ./scripts/generate-vault-image-control-contract.test.mjs ./scripts/generate-runtime-protocol-contract.test.mjs ./scripts/generate-recovery-control-contract.test.mjs ./scripts/generated-validator-esm.test.mjs ./scripts/harden-native-secret-bindings.test.mjs",
 		"test:bindings:web": "./scripts/test-web-binding-harness.sh",
 		"test:chromium": "node ./scripts/test-chromium.mjs",
 		"test:binary-transfer:chromium": "node ./scripts/test-chromium.mjs binary-transfer",
@@ -82,7 +82,9 @@
 		"test:vault-image-http:chromium": "node ./scripts/test-chromium.mjs vault-image-http",
 		"test:create-vault:chromium": "node ./scripts/test-chromium.mjs create-vault",
 		"check-types": "tsc --noEmit",
-		"test": "bun test src"
+		"test": "bun test src",
+		"generate:recovery-control": "node scripts/generate-recovery-control-contract.mjs",
+		"check:recovery-control": "node scripts/generate-recovery-control-contract.mjs --check"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",

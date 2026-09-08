@@ -25,6 +25,7 @@ type RejectionCode =
 type ServerState = {
 	mode: Mode;
 	routes: string[];
+	sync: { opened: number; cancelled: number; changes: number };
 	completed: boolean;
 	rejected: boolean;
 	cleanupCount: number;
@@ -37,12 +38,25 @@ type ServerState = {
 	encryptedVaultKey?: string;
 	outcome?: Record<string, unknown>;
 	uploaded: boolean;
+	importedItems?: Array<Record<string, unknown>>;
+	importOutcome?: Record<string, unknown>;
+	importDecisions?: Record<
+		string,
+		{ body: string; outcome: Record<string, unknown> }
+	>;
+	importRejectAfter?: number;
+	importRequestIds?: string[];
+	importUsers?: string[];
+	importAttempts?: number;
+	importEffects?: number;
+	importBodies?: string[];
 };
 
 function freshState(mode: Mode): ServerState {
 	return {
 		mode,
 		routes: [],
+		sync: { opened: 0, cancelled: 0, changes: 0 },
 		completed: false,
 		rejected: false,
 		cleanupCount: 0,
@@ -54,8 +68,111 @@ function freshState(mode: Mode): ServerState {
 	};
 }
 
+// These histories seed authority directly and exercise foreground Operations. Background
+// Sync stays connected with no remote changes; it is tracked separately from ceremony effects.
+function joinedSyncResponse(
+	request: Request,
+	state: ServerState,
+): Response | undefined {
+	if (request.method !== "GET") return undefined;
+	const path = new URL(request.url).pathname;
+	const headers = { "access-control-allow-origin": "*" };
+	if (path === "/api/v1/sync/changes") {
+		state.sync.changes += 1;
+		return Response.json(
+			{ events: [], cursor: null, hasMore: false, requiresFullRefresh: false },
+			{ headers },
+		);
+	}
+	if (path !== "/api/v1/sync/events") return undefined;
+	state.sync.opened += 1;
+	let retire = () => {};
+	const body = new ReadableStream<Uint8Array>({
+		start(controller) {
+			let active = true;
+			const abort = () => {
+				retire();
+				controller.close();
+			};
+			retire = () => {
+				if (!active) return;
+				active = false;
+				state.sync.cancelled += 1;
+				request.signal.removeEventListener("abort", abort);
+			};
+			controller.enqueue(
+				new TextEncoder().encode("event: connected\ndata: {}\n\n"),
+			);
+			request.signal.addEventListener("abort", abort, { once: true });
+			if (request.signal.aborted) abort();
+		},
+		cancel() {
+			retire();
+		},
+	});
+	return new Response(body, {
+		headers: { ...headers, "content-type": "text/event-stream" },
+	});
+}
+
+test("joined Sync fixture holds its stream until cancellation and serves only explicit routes", async () => {
+	for (const cancellation of ["reader", "request"] as const) {
+		const state = freshState("success");
+		const abort = new AbortController();
+		const response = joinedSyncResponse(
+			new Request("http://joined.test/api/v1/sync/events", {
+				signal: abort.signal,
+			}),
+			state,
+		);
+		expect(response?.headers.get("content-type")).toBe("text/event-stream");
+		const reader = response?.body?.getReader();
+		if (!reader) throw new Error("fixture must supply a streaming body");
+		expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+			"event: connected\ndata: {}\n\n",
+		);
+		let settled = false;
+		const pending = reader.read().then((value) => {
+			settled = true;
+			return value;
+		});
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		if (cancellation === "reader") await reader.cancel();
+		else abort.abort();
+		expect((await pending).done).toBe(true);
+		await reader.cancel();
+		abort.abort();
+		expect(state.sync).toEqual({ opened: 1, cancelled: 1, changes: 0 });
+		const changes = joinedSyncResponse(
+			new Request("http://joined.test/api/v1/sync/changes?sinceId=seed"),
+			state,
+		);
+		expect(await changes?.json()).toEqual({
+			events: [],
+			cursor: null,
+			hasMore: false,
+			requiresFullRefresh: false,
+		});
+		expect(state.sync.changes).toBe(1);
+		for (const [path, method] of [
+			["events", "POST"],
+			["changes", "POST"],
+			["unexpected", "GET"],
+		]) {
+			expect(
+				joinedSyncResponse(
+					new Request(`http://joined.test/api/v1/sync/${path}`, { method }),
+					state,
+				),
+			).toBeUndefined();
+		}
+		expect(state.routes).toEqual([]);
+	}
+});
+
 describe("create-Vault joined production path in actual Chromium", () => {
-	test("covers creation, loss, every staging restart, retry, rejection, and teardown histories", async () => {
+	test("covers Vault lifecycle and real-Core Import mapping, replay, and independent batch outcomes", async () => {
 		const [harnessBuild, workerBuild, importHarnessBuild] = await Promise.all([
 			Bun.build({
 				entrypoints: [
@@ -160,8 +277,15 @@ describe("create-Vault joined production path in actual Chromium", () => {
 		};
 		const server = Bun.serve({
 			port: 0,
+			// The intentional held SSE response ends through Runtime cancellation or teardown.
+			idleTimeout: 0,
 			async fetch(request) {
 				const url = new URL(request.url);
+				const userId =
+					request.headers.get("authorization") ===
+					"Bearer joined-second-session-token"
+						? "user-2"
+						: "user-1";
 				const cors = {
 					"access-control-allow-origin": "*",
 					"access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
@@ -190,6 +314,8 @@ describe("create-Vault joined production path in actual Chromium", () => {
 						headers: { "content-type": "application/wasm" },
 					});
 				if (url.pathname === "/create-vault-observation") return json(state);
+				const syncResponse = joinedSyncResponse(request, state);
+				if (syncResponse) return syncResponse;
 
 				const staging = url.pathname.match(
 					/^\/api\/v1\/operations\/([^/]+)\/vault-image-staging(?:\/([^/]+))?$/,
@@ -258,12 +384,110 @@ describe("create-Vault joined production path in actual Chromium", () => {
 					return new Response(null, { status: 200, headers: cors });
 				}
 
+				const importMatch = url.pathname.match(
+					/^\/api\/v1\/vaults\/([^/]+)\/item-imports$/,
+				);
+				if (importMatch && request.method === "POST") {
+					state.routes.push("import");
+					state.importAttempts = (state.importAttempts ?? 0) + 1;
+					const bytes = await request.text();
+					state.importBodies ??= [];
+					state.importBodies.push(bytes);
+					const operationId = request.headers.get("idempotency-key") ?? "";
+					state.importRequestIds ??= [];
+					state.importRequestIds.push(operationId);
+					state.importUsers ??= [];
+					state.importUsers.push(userId);
+					state.importDecisions ??= {};
+					const retained = state.importDecisions[operationId];
+					if (retained)
+						return retained.body === bytes
+							? json(retained.outcome)
+							: json(
+									{ error: { code: "OPERATION_ID_REUSED" } },
+									{ status: 409 },
+								);
+					if (
+						state.importRejectAfter !== undefined &&
+						(state.importEffects ?? 0) >= state.importRejectAfter
+					) {
+						// Model permission loss between independently accepted batches. Retain
+						// this decision without adding any of the rejected batch's Items.
+						const outcome = {
+							kind: "import_items",
+							operationId,
+							result: { status: "rejected", code: "vault_read_only" },
+						};
+						state.importDecisions[operationId] = { body: bytes, outcome };
+						return json(outcome);
+					}
+					state.importEffects = (state.importEffects ?? 0) + 1;
+					const body = JSON.parse(bytes) as {
+						items: Array<Record<string, unknown>>;
+					};
+					state.importedItems = [
+						...(state.importedItems ?? []),
+						...body.items.map(({ itemId, ...item }) => ({
+							...item,
+							id: itemId,
+							vaultId: importMatch[1],
+							version: 1,
+							encryptedByUserId: userId,
+							lastModifiedBy: userId,
+							encryptionVersion: 1,
+							createdAt: "2026-09-01T00:00:00Z",
+							updatedAt: "2026-09-01T00:00:00Z",
+							deletedAt: null,
+						})),
+					];
+					state.importOutcome = {
+						kind: "import_items",
+						operationId: request.headers.get("idempotency-key"),
+						result: {
+							status: "applied",
+							vaultId: importMatch[1],
+							importedCount: body.items.length,
+						},
+					};
+					state.importDecisions[operationId] = {
+						body: bytes,
+						outcome: state.importOutcome,
+					};
+					// Drop the applied reply. Runtime must learn the durable outcome without another effect.
+					return networkFailure();
+				}
+				if (
+					/^\/api\/v1\/vaults\/[^/]+\/item-authority-pages$/.test(url.pathname)
+				) {
+					state.routes.push("item-authority");
+					// Match the real Server's JSON extractor; accepting an untyped body here
+					// hid a production 415 loop after an otherwise successful Import.
+					if (request.headers.get("content-type") !== "application/json")
+						return new Response(null, { status: 415, headers: cors });
+					const body = (await request.json()) as {
+						itemIds: string[];
+						cursor: string | null;
+					};
+					const rows = (state.importedItems ?? []).filter((item) =>
+						body.itemIds.includes(String(item.id)),
+					);
+					const start = body.cursor === null ? 0 : Number(body.cursor);
+					return json(rows.slice(start, start + 2), {
+						headers:
+							start + 2 < rows.length
+								? { "Bittery-Next-Cursor": String(start + 2) }
+								: {},
+					});
+				}
+
 				const operation = url.pathname.match(
 					/^\/api\/v1\/operations\/([^/]+)$/,
 				);
 				if (operation && request.method === "GET") {
 					state.routes.push("lookup");
-					return state.outcome === undefined
+					if (state.importDecisions?.[operation[1]])
+						return json(state.importDecisions[operation[1]].outcome);
+					return state.outcome?.operationId !== operation[1]
 						? json({}, { status: 404 })
 						: json(state.outcome);
 				}
@@ -526,27 +750,149 @@ describe("create-Vault joined production path in actual Chromium", () => {
 			);
 			const acceptedTarget = imported.beforeRemount.targetVaultId;
 			expect(acceptedTarget).toMatch(/^[0-9a-f-]{36}$/);
-			expect(imported).toEqual({
-				beforeRemount: {
-					stage: "awaiting-runtime-import",
-					error: "runtime-import-pending",
-					summary: null,
-					targetVaultId: acceptedTarget,
-				},
-				afterRemount: {
-					stage: "awaiting-runtime-import",
-					error: "runtime-import-pending",
-					summary: null,
-					targetVaultId: acceptedTarget,
-				},
-				legacyCalls: 0,
+			expect(imported.beforeRemount.stage).toBe("completed");
+			expect(imported.beforeRemount.error).toBeNull();
+			expect(imported.beforeRemount.summary).toMatchObject({
+				importedCount: 5,
+				skippedCount: 0,
+				createdVaultCount: 1,
+				failedVaultCount: 0,
 			});
+			expect(imported.afterRemount).toEqual({
+				stage: "idle",
+				error: null,
+				summary: null,
+				targetVaultId: null,
+			});
+			expect(imported.legacyCalls).toBe(0);
+			expect(imported.items).toHaveLength(5);
+			expect(
+				imported.items
+					.map((item: { data: { category: string } }) => item.data.category)
+					.sort(),
+			).toEqual([
+				"authenticator",
+				"credit-card",
+				"identity",
+				"login",
+				"secure-note",
+			]);
+			expect(
+				imported.items.filter((item: { favorite: boolean }) => item.favorite),
+			).toHaveLength(1);
+
 			const importObservation = await waitForServerState(
 				server.port,
 				(value) => value.completed,
 			);
 			expect(importObservation.vault?.id).toBe(acceptedTarget);
 			expect(importObservation.routes).toContain("put");
+			expect(importObservation.importAttempts).toBe(2);
+			expect(importObservation.importEffects).toBe(1);
+			expect(importObservation.importBodies?.[1]).toBe(
+				importObservation.importBodies?.[0],
+			);
+			expect(importObservation.networkFailures).toBe(1);
+			expect(
+				importObservation.routes.filter((route) => route === "item-authority"),
+			).toHaveLength(3);
+
+			await importPage.close();
+			for (const scenario of [
+				"existing",
+				"later-rejection",
+				"multi-account",
+			] as const) {
+				state = freshState("success");
+				if (scenario === "later-rejection") state.importRejectAfter = 1;
+				const scenarioPage = await browser.newPage();
+				await scenarioPage.goto(
+					`http://127.0.0.1:${server.port}/import${scenario === "multi-account" ? "?secondAccount=1" : ""}`,
+				);
+				await scenarioPage.waitForFunction(
+					() => "exerciseJoinedRuntimeImportDefault" in globalThis,
+				);
+				const result = (await scenarioPage.evaluate(
+					(selected) => globalThis.exerciseJoinedRuntimeImportDefault(selected),
+					scenario,
+				)) as typeof imported;
+				const expectedCount = scenario === "later-rejection" ? 200 : 5;
+				expect(result.beforeRemount.stage).toBe("completed");
+				expect(result.beforeRemount.error).toBeNull();
+				expect(result.beforeRemount.summary).toMatchObject({
+					importedCount: expectedCount,
+					skippedCount: scenario === "later-rejection" ? 1 : 0,
+					createdVaultCount: scenario === "later-rejection" ? 1 : 0,
+					failedVaultCount: scenario === "later-rejection" ? 1 : 0,
+				});
+				expect(result.items).toHaveLength(expectedCount);
+				expect(
+					new Set(
+						result.items.map(
+							(item: { data: { category: string } }) => item.data.category,
+						),
+					).size,
+				).toBe(5);
+				expect(
+					result.items.filter((item: { favorite: boolean }) => item.favorite),
+				).toHaveLength(1);
+				expect(result.legacyCalls).toBe(0);
+				expect(state.putEffects).toBe(1);
+				expect(state.importEffects).toBe(1);
+				expect(state.importedItems).toHaveLength(expectedCount);
+				const decisions = Object.values(state.importDecisions ?? {});
+				expect(decisions).toHaveLength(scenario === "later-rejection" ? 2 : 1);
+				if (scenario !== "later-rejection")
+					expect(result.beforeRemount.targetVaultId).toBe(
+						result.existingVaultId,
+					);
+				else {
+					expect(result.beforeRemount.summary?.failedVaults).toMatchObject([
+						{ itemCount: 1 },
+					]);
+					expect(
+						decisions.map(({ body }) => JSON.parse(body).items.length),
+					).toEqual([200, 1]);
+					expect(decisions[1].outcome).toMatchObject({
+						result: { status: "rejected", code: "vault_read_only" },
+					});
+					expect(result.operations.state).toBe("ready");
+					expect(
+						result.operations.value.operations
+							.filter(
+								(operation: { kind: string }) =>
+									operation.kind === "importItems",
+							)
+							.map(
+								(operation: {
+									resolution: string;
+									importedCount: number | null;
+								}) => ({
+									resolution: operation.resolution,
+									importedCount: operation.importedCount,
+								}),
+							)
+							.sort(
+								(left: { resolution: string }, right: { resolution: string }) =>
+									left.resolution.localeCompare(right.resolution),
+							),
+					).toEqual([
+						{ resolution: "applied", importedCount: 200 },
+						{ resolution: "rejected", importedCount: null },
+					]);
+				}
+				if (scenario === "multi-account") {
+					expect(new Set(state.importUsers)).toEqual(new Set(["user-2"]));
+					expect(
+						result.items.every(
+							(item: { accountId: string }) => item.accountId === "account-2",
+						),
+					).toBe(true);
+					expect(result.activeAccountId).toBe("account-1");
+					expect(result.activeAccountUnchanged).toBe(true);
+				}
+				await scenarioPage.close();
+			}
 		} finally {
 			await browser.close();
 		}
@@ -560,12 +906,13 @@ function joinedImportModule(path: string): string {
 				const forward = (property) => (...args) => globalThis.__joinedRuntimeClient[property](...args);
 				export const runtimeClient = Object.fromEntries([
 					"signIn", "quickUnlock", "lock", "signOut", "removeAccount",
-					"deleteServerAccount", "wipe", "createVault", "createItem",
+					"deleteServerAccount", "wipe", "createVault", "createItem", "importItems", "operations",
 					"updateItem", "setItemFavorite", "trashItem", "restoreItem",
 					"moveItem", "permanentlyDeleteItem", "renameAttachment",
 					"deleteAttachment", "downloadAttachment", "uploadAttachment",
 					"createShare", "acknowledgeShareResult", "items",
 					"pendingShareResults", "writableVaults", "status", "session",
+					"selectAccount",
 				].map((property) => [property, forward(property)]));
 			`;
 		case "core-hooks":
@@ -587,6 +934,7 @@ function joinedImportModule(path: string): string {
 				export const getImportProvider = (id) => id === "chrome" ? ({
 					id: "chrome", title: "Chrome", canParse: () => true,
 					parse: (file) => globalThis.__runtimeImportParse(file),
+					toDecryptedItemData: item => item,
 				}) : null;
 			`;
 		case "storage":

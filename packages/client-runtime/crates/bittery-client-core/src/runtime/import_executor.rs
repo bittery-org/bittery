@@ -1,10 +1,5 @@
 //! Sending one accepted Import batch and reconciling its authoritative answer.
 //!
-//! This is the half Ticket 57 still gates. The scheduling loop skips `OperationKind::ImportItems`
-//! until the atomic Server/Web cutover replaces the legacy route, so nothing in production drives
-//! a cycle yet and the module carries `#[allow(dead_code)]`. Acceptance is already live; only
-//! transport waits.
-//!
 //! One cycle asks what the Server already decided, replays the identical bytes, reads the answer
 //! through the crate's one semantic-answer policy, fetches the complete authority within its
 //! Item, byte, page, and cursor bounds, and installs it under one guarded commit. Only an
@@ -38,6 +33,7 @@ pub(crate) enum ImportExecutorError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ImportExecutorPass {
     RetryScheduled,
+    ParkedFenced,
     ReauthenticationRequired,
     Completed,
 }
@@ -115,15 +111,23 @@ impl Runtime {
     ) -> Result<ImportExecutorPass, RuntimeError> {
         let execution_lock = self.account_execution_lock(account_id)?;
         let _guard = execution_lock.lock().await;
-        let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
-            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
-        })?;
-        let operation = snapshot
+        if self.is_closed() || self.account_teardown_is_pending(account_id) {
+            return Ok(ImportExecutorPass::ParkedFenced);
+        }
+        let Some(snapshot) = self.replica.snapshot(account_id) else {
+            return Ok(ImportExecutorPass::ParkedFenced);
+        };
+        if snapshot.failure.is_some() {
+            return Ok(ImportExecutorPass::ParkedFenced);
+        }
+        let Some(operation) = snapshot
             .operations
             .iter()
             .find(|candidate| candidate.operation_id == operation_id)
             .cloned()
-            .ok_or_else(|| invalid("Import Operation is missing"))?;
+        else {
+            return Ok(ImportExecutorPass::ParkedFenced);
+        };
         let accepted = super::import::decode_import_request(&operation)?;
         let mut renewed = false;
         let hint = match exchange(&mut renewed, port, || port.lookup(&operation)).await {
@@ -194,6 +198,9 @@ impl Runtime {
                             self.mark_reauthentication_required(account_id);
                             return Ok(ImportExecutorPass::ReauthenticationRequired);
                         }
+                        Err(error) if error.code == RuntimeErrorCode::InvariantViolation => {
+                            return Err(error)
+                        }
                         Err(_) => {
                             return self.schedule_import_retry(snapshot, operation).await;
                         }
@@ -232,7 +239,7 @@ impl Runtime {
                 Ok(ImportExecutorPass::Completed)
             }
             RecomputedPlanResult::Fenced { .. } | RecomputedPlanResult::Missing => {
-                Ok(ImportExecutorPass::RetryScheduled)
+                Ok(ImportExecutorPass::ParkedFenced)
             }
         }
     }
@@ -348,8 +355,11 @@ impl Runtime {
         snapshot: crate::replica::ReplicaSnapshot,
         operation: OperationRecord,
     ) -> Result<ImportExecutorPass, RuntimeError> {
-        self.persist_backoff(&snapshot, &operation).await;
-        Ok(ImportExecutorPass::RetryScheduled)
+        Ok(if self.persist_backoff(&snapshot, &operation).await {
+            ImportExecutorPass::RetryScheduled
+        } else {
+            ImportExecutorPass::ParkedFenced
+        })
     }
 }
 
@@ -382,7 +392,7 @@ fn validate_authority(
         };
         if actual.id != expected.item_id
             || actual.vault_id != vault_id
-            || actual.category != category(expected.category.clone())
+            || actual.category != expected.category.clone().into()
             || actual.favorite != expected.favorite
             || actual.encrypted_data != expected.encrypted_data
             || actual.encryption_iv != expected.encryption_iv
@@ -397,22 +407,6 @@ fn validate_authority(
         }
     }
     Ok(())
-}
-
-fn category(value: crate::server_contract::ItemCategory) -> crate::replica::AuthorityItemCategory {
-    match value {
-        crate::server_contract::ItemCategory::Login => crate::replica::AuthorityItemCategory::Login,
-        crate::server_contract::ItemCategory::SecureNote => {
-            crate::replica::AuthorityItemCategory::SecureNote
-        }
-        crate::server_contract::ItemCategory::CreditCard => {
-            crate::replica::AuthorityItemCategory::CreditCard
-        }
-        crate::server_contract::ItemCategory::Identity => {
-            crate::replica::AuthorityItemCategory::Identity
-        }
-        crate::server_contract::ItemCategory::Totp => crate::replica::AuthorityItemCategory::Totp,
-    }
 }
 
 fn invalid(message: &str) -> RuntimeError {

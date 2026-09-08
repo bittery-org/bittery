@@ -195,6 +195,18 @@ function matches(
 	projection: RuntimeProjection,
 ): boolean {
 	if (request.type !== projection.type) return false;
+	if (projection.type === "operations") {
+		return (
+			request.type === "operations" &&
+			request.accountId === projection.value.accountId
+		);
+	}
+	if (projection.type === "pendingShareResults") {
+		return (
+			request.type === "pendingShareResults" &&
+			request.accountId === projection.value.accountId
+		);
+	}
 	if (projection.type === "items") {
 		return (
 			request.type === "items" &&

@@ -1,7 +1,4 @@
-import {
-	useAvailableTags,
-	useConvertVaultType,
-} from "@bittery/core/hooks";
+import { useAvailableTags, useConvertVaultType } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
@@ -46,7 +43,7 @@ import { ItemList } from "@/components/vault/item-list";
 import { ItemListState } from "@/components/vault/item-list-state";
 import { AddMemberDialog } from "@/components/vaults/add-member-dialog";
 import { VaultMemberList } from "@/components/vaults/vault-member-list";
-import { useAcceptLoginItem } from "@/hooks/use-accept-login-item";
+import { useAcceptItem } from "@/hooks/use-accept-item";
 import {
 	useDeleteItem,
 	useUpdateItem,
@@ -101,7 +98,7 @@ function VaultDetailPage() {
 		selectedItemId === null
 			? null
 			: (decryptedItems.find((item) => item.id === selectedItemId) ?? null);
-	const acceptLoginItem = useAcceptLoginItem();
+	const acceptItem = useAcceptItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
 	const convertVaultType = useConvertVaultType();
@@ -152,7 +149,7 @@ function VaultDetailPage() {
 		if (targetVaultId !== vaultId) {
 			throw new Error("Vault account is unavailable");
 		}
-		const result = await acceptLoginItem.accept({
+		const result = await acceptItem.accept({
 			accountId,
 			vaultId: targetVaultId,
 			category,
@@ -254,14 +251,15 @@ function VaultDetailPage() {
 		);
 	}
 
-	// The first Runtime create slice seals a Login Item into a writable personal Vault, so
-	// this Vault is offered only when it is one. Offering it otherwise offers a refusal.
+	// Item forms offer the Vault when the Runtime membership permits writing.
 	const itemFormVaults = creatableVaults([vault]);
 
 	return (
 		<>
 			{/* Middle pane: vault header + item list */}
 			<div
+				data-testid="vault-detail-list"
+				data-vault-id={vaultId}
 				className={cn(
 					"flex w-full shrink-0 flex-col border-r md:w-78",
 					selectedItemId && "hidden md:flex",

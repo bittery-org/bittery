@@ -28,6 +28,12 @@ struct RegistryState {
     global_fences: usize,
 }
 
+impl RegistryState {
+    fn is_retiring(&self, account_id: &AccountId) -> bool {
+        self.global_fences > 0 || self.account_fences.get(account_id).copied().unwrap_or(0) > 0
+    }
+}
+
 #[derive(Default)]
 struct ForegroundAttachmentScope {
     state: Mutex<ScopeState>,
@@ -69,6 +75,16 @@ pub(super) struct DeviceForegroundRetirement<'a> {
 }
 
 impl ForegroundAttachmentRegistry {
+    /// Background admission must also observe the fence while lifecycle is draining current work,
+    /// before the later Account access/teardown state has been published.
+    pub(super) fn is_retiring(&self, account_id: &AccountId) -> bool {
+        let registry = self
+            .state
+            .lock()
+            .expect("foreground Attachment registry lock poisoned");
+        registry.is_retiring(account_id)
+    }
+
     pub(super) fn register(
         &self,
         account_id: &AccountId,
@@ -79,14 +95,7 @@ impl ForegroundAttachmentRegistry {
             .state
             .lock()
             .expect("foreground Attachment registry lock poisoned");
-        if registry.global_fences > 0
-            || registry
-                .account_fences
-                .get(account_id)
-                .copied()
-                .unwrap_or(0)
-                > 0
-        {
+        if registry.is_retiring(account_id) {
             return Err(cancelled());
         }
         self.register_scope(
@@ -109,14 +118,7 @@ impl ForegroundAttachmentRegistry {
             .state
             .lock()
             .expect("foreground Attachment registry lock poisoned");
-        if registry.global_fences > 0
-            || registry
-                .account_fences
-                .get(account_id)
-                .copied()
-                .unwrap_or(0)
-                > 0
-        {
+        if registry.is_retiring(account_id) {
             return Err(cancelled());
         }
         self.register_scope(account_id, None, cancellation, &mut registry)

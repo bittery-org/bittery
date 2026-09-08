@@ -3,16 +3,15 @@ import type {
 	RuntimeSnapshot,
 } from "@bittery/client-runtime/client";
 import type {
+	ItemDraft,
 	ItemProjectionStatus,
 	ItemsProjection,
-	LoginItemDraft,
 	RuntimeErrorCode,
 } from "@bittery/client-runtime/protocol";
 import type { UnifiedItem } from "@bittery/core/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import type { VaultRole } from "@bittery/shared/vault-mapping";
-import type { VaultOption } from "@bittery/ui";
-import type { AttachmentItem } from "@bittery/ui";
+import type { AttachmentItem, VaultOption } from "@bittery/ui";
 
 /**
  * A list Item plus what the Runtime says about it.
@@ -69,7 +68,10 @@ export type RuntimeItemsState =
 	| "unavailable";
 
 export interface RuntimeItemsView {
+	/** Active Items for ordinary lists, counts, tags and security views. */
 	readonly items: RuntimeListItem[];
+	/** Deleted Items remain available only to the Trash presentation. */
+	readonly trashedItems: RuntimeListItem[];
 	/** The Account these Items belong to, as the Runtime itself names it. */
 	readonly accountId: string | null;
 	/**
@@ -97,6 +99,7 @@ export function deriveRuntimeItemsView(
 	if (session.state !== "unlocked") {
 		return {
 			items: NO_ITEMS,
+			trashedItems: NO_ITEMS,
 			accountId: null,
 			vaults: NO_VAULTS,
 			state: session.state === "loading" ? "loading" : session.state,
@@ -104,8 +107,10 @@ export function deriveRuntimeItemsView(
 		};
 	}
 	if (items.state === "ready") {
+		const mapped = mapRuntimeItemsProjection(items.value);
 		return {
-			items: mapRuntimeItemsProjection(items.value),
+			items: mapped.filter((item) => item.deletedAt == null),
+			trashedItems: mapped.filter((item) => item.deletedAt != null),
 			accountId: items.value.accountId,
 			vaults: mapRuntimeVaults(items.value),
 			state: "ready",
@@ -115,6 +120,7 @@ export function deriveRuntimeItemsView(
 	if (items.state === "failed") {
 		return {
 			items: NO_ITEMS,
+			trashedItems: NO_ITEMS,
 			accountId: null,
 			vaults: NO_VAULTS,
 			state:
@@ -124,6 +130,7 @@ export function deriveRuntimeItemsView(
 	}
 	return {
 		items: NO_ITEMS,
+		trashedItems: NO_ITEMS,
 		accountId: null,
 		vaults: NO_VAULTS,
 		state: "loading",
@@ -149,16 +156,11 @@ export function mapRuntimeItemsProjection(
 		id: item.itemId,
 		accountId: item.accountId,
 		vaultId: item.vaultId,
-		title: item.title,
-		url: item.url ?? undefined,
-		urls: item.urls ?? [],
-		username: item.username ?? undefined,
-		password: item.password ?? undefined,
-		notes: item.notes ?? undefined,
-		note: item.note ?? undefined,
-		customFields: item.customFields ?? undefined,
-		tags: item.tags ?? [],
-		category: "login",
+		...toHostItemData(item.data.data),
+		urls: "urls" in item.data.data ? (item.data.data.urls ?? []) : [],
+		tags: item.data.data.tags ?? [],
+		category:
+			item.data.category === "authenticator" ? "totp" : item.data.category,
 		favorite: item.favorite === true,
 		createdAt: item.createdAt,
 		updatedAt: item.updatedAt,
@@ -199,6 +201,23 @@ export function mapRuntimeItemsProjection(
 			imageUrl: vaults.get(item.vaultId)?.imageUrl ?? null,
 		},
 	}));
+}
+
+/** The generated protocol uses null for absent optional fields; host forms use undefined. */
+function toHostItemData(
+	data: ItemsProjection["items"][number]["data"]["data"],
+): DecryptedItemData {
+	function optionalFields(value: unknown): unknown {
+		if (Array.isArray(value)) return value.map(optionalFields);
+		if (value !== null && typeof value === "object")
+			return Object.fromEntries(
+				Object.entries(value)
+					.filter(([, entry]) => entry !== null)
+					.map(([key, entry]) => [key, optionalFields(entry)]),
+			);
+		return value;
+	}
+	return optionalFields(data) as DecryptedItemData;
 }
 
 /** The Vaults of one projection, in the shape the existing item form reads. */
@@ -242,16 +261,11 @@ export function vaultNavEntries(
 	}));
 }
 
-/**
- * The Vaults a create may be offered for.
- *
- * The Runtime's first create slice writes one Login Item into a writable personal Vault and
- * refuses anything else, so offering more would be offering a refusal.
- */
+/** Writable Runtime Vaults offered by the Item forms. */
 export function creatableVaults(
 	vaults: readonly RuntimeVaultOption[],
 ): RuntimeVaultOption[] {
-	return vaults.filter((vault) => vault.writable && vault.type === "personal");
+	return vaults.filter((vault) => vault.writable);
 }
 
 /** Whether this Device may write the Items of one Vault. An unknown Vault may not. */
@@ -262,82 +276,17 @@ export function canWriteVault(
 	return vaults.some((vault) => vault.id === vaultId && vault.writable);
 }
 
-/**
- * Everything a Login form can collect that the Runtime's Login draft does not model yet.
- *
- * Named rather than dropped: silently discarding a TOTP secret the user just typed is data
- * loss, and the create path refuses instead.
- */
-const UNSUPPORTED_DRAFT_FIELDS = [
-	"passwordHistory",
-	"passkeys",
-	"cardholderName",
-	"cardNumber",
-	"cvv",
-	"expiryDate",
-	"billingAddress",
-	"firstName",
-	"middleName",
-	"lastName",
-	"email",
-	"addresses",
-	"phoneNumbers",
-	"ssn",
-	"passportNumber",
-	"driversLicense",
-	"dateOfBirth",
-	"totpSecret",
-	"totpIssuer",
-	"totpAccountName",
-	"totpAlgorithm",
-	"totpDigits",
-	"totpPeriod",
-	"linkedItemId",
-] as const satisfies readonly (keyof DecryptedItemData)[];
-
-export function unsupportedDraftFields(data: DecryptedItemData): string[] {
-	return UNSUPPORTED_DRAFT_FIELDS.filter((field) => {
-		const value = data[field];
-		if (value == null || value === "") return false;
-		return !Array.isArray(value) || value.length > 0;
-	});
-}
-
-/** The Login draft the Runtime seals, and nothing else the form happens to carry. */
-export function toLoginItemDraft(data: DecryptedItemData): LoginItemDraft {
-	return {
-		title: data.title,
-		url: data.url,
-		urls: data.urls,
-		username: data.username,
-		password: data.password,
-		notes: data.notes,
-		note: data.note,
-		customFields: data.customFields,
-		tags: data.tags,
-	};
-}
-
-/**
- * Why the Runtime cannot accept this create, or `null` when it can.
- *
- * The first create slice seals one Login draft into a personal Vault. Everything outside that
- * is refused here, in front of the user, rather than dropped on the way to the Runtime or
- * written to a transitional repository the vault pages no longer read.
- */
-export type CreateRefusal =
-	| { readonly reason: "category" }
-	| { readonly reason: "unsupportedFields"; readonly fields: string[] }
-	| { readonly reason: "noAccount" };
-
-export function refuseCreate(input: {
-	readonly accountId: string | null;
-	readonly category: ItemCategory;
-	readonly data: DecryptedItemData;
-}): CreateRefusal | null {
-	if (input.category !== "login") return { reason: "category" };
-	const fields = unsupportedDraftFields(input.data);
-	if (fields.length > 0) return { reason: "unsupportedFields", fields };
-	if (input.accountId === null) return { reason: "noAccount" };
-	return null;
+/** Preserve category data at the generated Runtime boundary. */
+export function toRuntimeItemDraft(
+	category: ItemCategory,
+	data: DecryptedItemData,
+): ItemDraft {
+	if (category === "secure-note")
+		return { category, data: { ...data, note: data.note ?? "" } };
+	if (category === "totp")
+		return {
+			category: "authenticator",
+			data: { ...data, totpSecret: data.totpSecret ?? "" },
+		};
+	return { category, data } as ItemDraft;
 }

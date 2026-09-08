@@ -1,3 +1,4 @@
+import { validateRuntimeRequest } from "../generated/runtime-protocol/validator";
 import { takeFullOwnedUint8ArrayIntrinsic } from "./binary-intrinsics";
 import type { ForegroundUploadOutcome } from "./web-binary-transfer-executor";
 import type { WorkerRpcChannel } from "./worker/owner";
@@ -14,8 +15,20 @@ export interface HttpExecutor {
 	invoke(requestJson: string): Promise<string>;
 	cancel(dispatchId: string): void;
 }
+export interface RecoveryExecutor {
+	cancel(recoveryId: string): void;
+	invoke(
+		controlJson: string,
+		binaryChunk?: Uint8Array,
+	): Promise<{ controlResponseJson: string; binaryChunk?: Uint8Array }>;
+	close(): Promise<void>;
+}
 
 interface WebClientRuntimeLike {
+	setRecoveryExecutor?(
+		invoke: RecoveryExecutor["invoke"],
+		cancel: RecoveryExecutor["cancel"],
+	): void;
 	cancel(requestId: string): void;
 	close(): Promise<void>;
 	open(): Promise<void>;
@@ -31,6 +44,7 @@ interface WebClientRuntimeLike {
 interface RuntimeIncarnation {
 	runtime: WebClientRuntimeLike;
 	failed: boolean;
+	recoveryOnly?: boolean;
 	/** Present only when `open()` rejected. See `WedgedRuntime`. */
 	wedged?: WedgedRuntime;
 }
@@ -167,6 +181,15 @@ export interface RuntimeWorkerService {
 }
 
 export interface RuntimeWorkerServiceDeps {
+	recoveryExecutorFactory?: (runtimeIncarnation: string) => RecoveryExecutor;
+	prepareRecoveryRuntimeIncarnation?: (
+		runtimeIncarnation: string,
+	) => Promise<void>;
+	/** One physical database-family owner; close follows every drained Runtime callback. */
+	storageFamily?: {
+		open(signal?: AbortSignal): Promise<void>;
+		close(): Promise<void>;
+	};
 	executor: ReplicaExecutor;
 	platformStorageExecutor: PlatformStorageExecutor;
 	httpExecutor: HttpExecutor;
@@ -287,6 +310,21 @@ function isDeviceWipe(command: RuntimeCommand): boolean {
 	const request = parsed as Record<string, unknown>;
 	return request.type === "wipe" && hasExactKeys(request, ["type"]);
 }
+function isRecoveryRequest(command: RuntimeCommand): boolean {
+	if (command.type !== "request") return false;
+	try {
+		const request: unknown = JSON.parse(command.requestJson);
+		return (
+			validateRuntimeRequest(request) &&
+			(request.type === "rebootstrapAccountRecovery" ||
+				request.type === "inspectRecovery" ||
+				request.type === "exportAccountRecovery" ||
+				request.type === "repairAccountRecovery")
+		);
+	} catch {
+		return false;
+	}
+}
 
 function parseCommand(value: unknown): RuntimeCommand {
 	if (typeof value !== "object" || value === null) {
@@ -404,12 +442,15 @@ export function createRuntimeWorkerService(
 			const httpCancel = deps.httpExecutor.cancel.bind(deps.httpExecutor);
 			let created: WebClientRuntimeLike;
 			let binaryTransferExecutor: BinaryTransferExecutor | undefined;
+			let recoveryExecutor: RecoveryExecutor | undefined;
 			let attachmentDownloadRuntimeIncarnation: string | undefined;
 			let closeCreatedTask: Promise<void> | undefined;
 			const closeCreated = (): Promise<void> => {
 				closeCreatedTask ??= Promise.resolve()
 					.then(() => created.close())
-					.then(() => binaryTransferExecutor?.close());
+					.then(() => recoveryExecutor?.close())
+					.then(() => binaryTransferExecutor?.close())
+					.then(() => deps.storageFamily?.close());
 				return closeCreatedTask;
 			};
 			let lifecycleFailed = false;
@@ -567,6 +608,23 @@ export function createRuntimeWorkerService(
 			runtimeClosers.set(created, closeCreated);
 			if (lifecycleFailed) return await rejectLifecycleFailure();
 			try {
+				if (deps.recoveryExecutorFactory !== undefined) {
+					if (
+						created.setRecoveryExecutor === undefined ||
+						deps.prepareRecoveryRuntimeIncarnation === undefined
+					)
+						throw new Error("Recovery executor is unavailable");
+					const recoveryIncarnation =
+						attachmentDownloadRuntimeIncarnation ??
+						globalThis.crypto.randomUUID();
+					recoveryExecutor = deps.recoveryExecutorFactory(recoveryIncarnation);
+					await deps.prepareRecoveryRuntimeIncarnation(recoveryIncarnation);
+					created.setRecoveryExecutor(
+						recoveryExecutor.invoke.bind(recoveryExecutor),
+						recoveryExecutor.cancel.bind(recoveryExecutor),
+					);
+				}
+				await deps.storageFamily?.open(startup.signal);
 				await created.open();
 			} catch (error) {
 				if (lifecycleFailed) {
@@ -665,7 +723,8 @@ export function createRuntimeWorkerService(
 			}
 			// A wipe can only hold the Runtime after `runtime()` resumes it. Claim its interest here,
 			// before the first `await`, where no other request's continuation can run.
-			let counted = isDeviceWipe(command);
+			const recoveryRequest = isRecoveryRequest(command);
+			let counted = isDeviceWipe(command) || recoveryRequest;
 			if (counted) wipesPending += 1;
 			const uncount = () => {
 				if (!counted) return;
@@ -673,17 +732,37 @@ export function createRuntimeWorkerService(
 				wipesPending -= 1;
 			};
 			try {
-				const incarnation = await runtime();
+				let incarnation = await runtime();
 				if (incarnation.failed) return await rejectLifecycleFailure();
+				if (incarnation.recoveryOnly && !recoveryRequest) {
+					if (!isDeviceWipe(command)) {
+						if (command.type === "unobserve") return undefined;
+						throw closed();
+					}
+					if (restartBarrier === undefined) {
+						let barrier!: Promise<void>;
+						barrier = closeRuntime(incarnation.runtime).then(() => {
+							if (restartBarrier === barrier) restartBarrier = undefined;
+						});
+						restartBarrier = barrier;
+						runtimeTask = undefined;
+					}
+					await restartBarrier;
+					incarnation = await runtime();
+				}
 				const wedged = incarnation.wedged;
 				// `counted` still carries `isDeviceWipe(command)` here: nothing has called `uncount`
 				// yet, and the command cannot change. Reuse it rather than parse the request again.
 				if (wedged !== undefined && !counted) {
-					await wedged.retire();
+					// Recovery must use this failed-open object. A startup status observation
+					// reports the opening failure without attempting destructive retirement.
+					// Explicit shutdown and Wipe still own their existing drained close barrier.
+					if (deps.recoveryExecutorFactory === undefined) await wedged.retire();
 					if (terminalFailure !== undefined) throw terminalFailure;
 					throw wedged.error;
 				}
 				const ready = incarnation.runtime;
+				if (recoveryRequest) incarnation.recoveryOnly = true;
 				if (closing) throw closed();
 				if (command.type === "observe") {
 					if (signal.aborted) return undefined;
@@ -733,7 +812,7 @@ export function createRuntimeWorkerService(
 						// A retire that sets `terminalFailure` does not take the wipe's answer away. The
 						// wipe finished; only the worker is spent. Later requests carry that failure, so
 						// this stays deliberately asymmetric with the non-wipe path above, which throws it.
-						await wedged.retire();
+						if (!recoveryRequest) await wedged.retire();
 					}
 				}
 			} finally {

@@ -10,6 +10,7 @@ use crate::{
     },
 };
 
+pub(crate) const VAULT_NAME_MIN_CHARS: usize = 2;
 pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
 pub(crate) const VAULT_ICON_MAX_CHARS: usize = 128;
 

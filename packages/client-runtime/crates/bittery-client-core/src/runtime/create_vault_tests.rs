@@ -1903,7 +1903,10 @@ async fn committed_image_acceptance_is_published_when_end_cleanup_fails_and_clea
         operation_id
     );
 
-    runtime.retry_pending_vault_image_acceptance_cleanup().await;
+    runtime
+        .sweep_vault_images_for_snapshot(&runtime.replica().snapshot(&account_id).unwrap())
+        .await
+        .unwrap();
     assert_eq!(
         runtime
             .replica()
@@ -3894,4 +3897,258 @@ async fn cleanup_checkpoint_commit_failure_reloads_and_repeats_the_physical_dele
             .unwrap()
             .local_artifact_pending
     );
+}
+
+struct LifecyclePngSource {
+    bytes: Vec<u8>,
+    account_retirements: AtomicUsize,
+    runtime_retirements: AtomicUsize,
+}
+#[async_trait]
+impl crate::VaultImageSourcePort for LifecyclePngSource {
+    async fn claim(
+        &self,
+        _: &crate::VaultImageSourceGrant,
+    ) -> Result<Box<dyn crate::VaultImageSource>, crate::VaultImageSourceError> {
+        Ok(Box::new(OneImageSource {
+            bytes: Some(self.bytes.clone()),
+        }))
+    }
+    async fn retire_account(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        self.account_retirements.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+    async fn complete_account_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn begin_acceptance(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &str,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn end_acceptance(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &str,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn retire_runtime(&self, _: &str) -> Result<(), crate::VaultImageSourceError> {
+        self.runtime_retirements.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+struct BusyImageRecovery;
+#[async_trait]
+impl crate::SerializedRecoveryExecutor for BusyImageRecovery {
+    async fn invoke(
+        &self,
+        request: String,
+        _: Option<Vec<u8>>,
+    ) -> Result<(String, Option<Vec<u8>>), RuntimeError> {
+        use crate::recovery::control::{
+            RecoveryControlRequest as Request, RecoveryControlResponse as Response,
+            RecoveryUnavailableReason,
+        };
+        let response = match serde_json::from_str::<Request>(&request).unwrap() {
+            Request::EnterMaintenance { .. } => Response::Unavailable {
+                reason: RecoveryUnavailableReason::Busy,
+            },
+            Request::LeaveMaintenance { .. } => Response::MaintenanceLeft,
+            _ => panic!("busy recovery cannot access storage"),
+        };
+        Ok((serde_json::to_string(&response).unwrap(), None))
+    }
+}
+#[derive(Clone, Copy)]
+enum PreserveImageRetirement {
+    Close,
+    Lock,
+    SignOut,
+    BusyRecovery,
+}
+async fn accepted_png_survives_retirement(action: PreserveImageRetirement) {
+    use base64::Engine;
+    const PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9kAAAAASUVORK5CYII=";
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(PNG_BASE64)
+        .unwrap();
+    let persistence = Arc::new(InMemoryReplica::default());
+    let runtime = Runtime::with_persistence(
+        persistence.clone(),
+        Arc::new(PlatformStorage::new(
+            operation_fixtures::MemoryPlatform::new(),
+        )),
+        Arc::new(HttpTransport::unavailable()),
+        None,
+        None,
+        false,
+        Arc::new(SystemClock),
+        Arc::new(SystemDeviceTimer),
+        Some(persistence.clone()),
+    );
+    runtime
+        .set_recovery_executor(Arc::new(BusyImageRecovery))
+        .unwrap();
+    runtime.open().await.unwrap();
+    let account_id = AccountId::from("account-1");
+    let incarnation = Incarnation::from("incarnation-1");
+    let installed = runtime
+        .replica()
+        .install_or_replace(account_id.clone(), "user-1".into(), incarnation.clone())
+        .await
+        .unwrap();
+    runtime.replica().cache(installed);
+    runtime.seed_live_master_unlock_key(&account_id, &incarnation);
+    runtime.seed_unlocked_preparation_account(&account_id);
+    let sources = Arc::new(LifecyclePngSource {
+        bytes: bytes.clone(),
+        account_retirements: AtomicUsize::new(0),
+        runtime_retirements: AtomicUsize::new(0),
+    });
+    let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
+    runtime.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new("runtime-1", sources.clone(), artifacts.clone())
+            .unwrap(),
+    );
+    let response = runtime
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: account_id.clone(),
+                name: "Retained PNG".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: Some(VaultImageSourceInput {
+                    capability_id: "opaque-image-source".into(),
+                    byte_length: bytes.len() as u64,
+                    content_type: "image/png".into(),
+                }),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        response,
+        RuntimeResponse::VaultCreationAccepted { .. }
+    ));
+    let before = persistence.snapshot(&account_id).unwrap();
+    let operation = &before.operations[0];
+    let exact_operation = serde_json::to_string(operation).unwrap();
+    let image = operation
+        .create_vault
+        .as_ref()
+        .unwrap()
+        .image
+        .as_ref()
+        .unwrap();
+    let metadata = crate::VaultImageArtifactMetadata::new(
+        crate::VaultImageArtifactScope::new(account_id.clone(), &operation.operation_id).unwrap(),
+        operation.vault_id(),
+        image.byte_length,
+        &image.content_type,
+        &image.sha256,
+    )
+    .unwrap();
+    assert_eq!(
+        artifacts.read_all(&metadata).await.unwrap().as_slice(),
+        bytes.as_slice()
+    );
+    match action {
+        PreserveImageRetirement::Close => runtime.close().await,
+        PreserveImageRetirement::Lock => {
+            runtime
+                .request(
+                    RuntimeRequest::Lock {
+                        account_id: account_id.clone(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+        }
+        PreserveImageRetirement::SignOut => {
+            runtime
+                .request(
+                    RuntimeRequest::SignOut {
+                        account_id: account_id.clone(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+        }
+        PreserveImageRetirement::BusyRecovery => {
+            let response = runtime
+                .request(
+                    RuntimeRequest::InspectRecovery {
+                        account_id: Some(account_id.clone()),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                response,
+                RuntimeResponse::RecoveryDiagnosed {
+                    diagnostics: crate::StorageRecoveryDiagnostics {
+                        maintenance: crate::RecoveryMaintenanceStatus::Busy,
+                        ..
+                    }
+                }
+            ));
+        }
+    }
+    let retained = persistence.snapshot(&account_id).unwrap();
+    assert_eq!(retained.operations.len(), 1);
+    assert_eq!(
+        serde_json::to_string(&retained.operations[0]).unwrap(),
+        exact_operation
+    );
+    assert_eq!(
+        artifacts
+            .read_all(&metadata)
+            .await
+            .expect("ordinary source retirement must retain accepted PNG bytes")
+            .as_slice(),
+        bytes.as_slice()
+    );
+    assert!(
+        sources.account_retirements.load(Ordering::SeqCst)
+            + sources.runtime_retirements.load(Ordering::SeqCst)
+            > 0
+    );
+    runtime.close().await;
+    assert_eq!(
+        artifacts.read_all(&metadata).await.unwrap().as_slice(),
+        bytes.as_slice()
+    );
+}
+#[tokio::test]
+async fn accepted_png_survives_normal_close() {
+    accepted_png_survives_retirement(PreserveImageRetirement::Close).await;
+}
+#[tokio::test]
+async fn accepted_png_survives_lock() {
+    accepted_png_survives_retirement(PreserveImageRetirement::Lock).await;
+}
+#[tokio::test]
+async fn accepted_png_survives_sign_out() {
+    accepted_png_survives_retirement(PreserveImageRetirement::SignOut).await;
+}
+#[tokio::test]
+async fn accepted_png_survives_busy_recovery_admission() {
+    accepted_png_survives_retirement(PreserveImageRetirement::BusyRecovery).await;
 }

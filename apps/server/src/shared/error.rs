@@ -138,6 +138,7 @@ impl AppError {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn rotation_stale(reason: crate::db::enums::VaultKeyRotationStaleReason) -> Self {
         use crate::db::enums::VaultKeyRotationStaleReason::*;
         Self {

@@ -11,13 +11,14 @@
  * silently outgrown: a transitional symbol the table does not classify fails the audit, so a
  * new consumer cannot slip in the way `useItems` did.
  *
- * Ticket 28 tightens it by moving `item-write` into {@link FORBIDDEN_KINDS} and deleting the
- * holdouts it retires. Nothing else about this file has to change.
+ * Ticket 58 also forbids every Item writer after the remaining consumers reach the shared
+ * Runtime client. Later Vault update/delete/type-conversion owners stay explicitly classified.
  */
 
 import {
 	buildWebImportGraph,
 	type ExternalImport,
+	TRANSITIONAL_MODULE_PREFIXES,
 	type WebImportGraph,
 } from "./web-import-graph";
 
@@ -56,11 +57,12 @@ export type TransitionalKind =
 	/** Pure derivation over data it is handed. Reaches no owner. */
 	| "derivation";
 
-/** The kinds no Web path may reach after ticket 22. */
+/** The kinds no Web path may reach after the final Web Item cutover. */
 export const FORBIDDEN_KINDS: ReadonlySet<TransitionalKind> = new Set([
 	"item-read",
 	"vault-read",
 	"item-create",
+	"item-write",
 	"sync-loop",
 	"share-write",
 	"vault-create",
@@ -83,12 +85,7 @@ export interface TransitionalEntry {
 }
 
 /** Module prefixes the audit classifies. Everything else on Web is not transitional. */
-export const TRANSITIONAL_MODULE_PREFIXES = [
-	"@bittery/core/hooks",
-	"@bittery/core/services/",
-	"@bittery/storage",
-	"@bittery/sync",
-] as const;
+export { TRANSITIONAL_MODULE_PREFIXES } from "./web-import-graph";
 
 export function isTransitionalModule(module: string): boolean {
 	return TRANSITIONAL_MODULE_PREFIXES.some((prefix) =>

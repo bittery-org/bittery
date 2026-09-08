@@ -13,7 +13,7 @@ use crate::{
     platform_storage::CurrentSessionDocument,
     replica::{
         AuthorityAttachmentRecord, AuthorityItemRecord, CursorAdvance, ObservedOutcome,
-        OperationKind, OperationOutcomeResult, OperationRejectionCode, ReplicaSnapshot, SyncCursor,
+        OperationKind, OperationOutcomeResult, OperationRejectionCode,
     },
     server_contract::{
         CreateShareOperationRejectionCode as WireShareRejectionCode,
@@ -368,7 +368,7 @@ impl Runtime {
                                 .await;
                         };
                         let attachments = match self
-                            .fetch_move_attachments(
+                            .fetch_authoritative_attachments(
                                 account_id,
                                 entity_id,
                                 authority,
@@ -481,7 +481,7 @@ impl Runtime {
                     if operation.kind == OperationKind::MoveItem {
                         if let Some(authority) = item.as_mut() {
                             let attachments = match self
-                                .fetch_move_attachments(
+                                .fetch_authoritative_attachments(
                                     account_id,
                                     operation.item_id(),
                                     authority,
@@ -528,7 +528,7 @@ impl Runtime {
     }
 
     /// Fetches the authoritative encrypted Item, renewing one expired Session on the way.
-    async fn fetch_authoritative_item(
+    pub(super) async fn fetch_authoritative_item(
         &self,
         account_id: &AccountId,
         item_id: &str,
@@ -579,7 +579,7 @@ impl Runtime {
         clippy::too_many_arguments,
         reason = "bounded authority validation keeps Account, Item, Vault, fence, and authentication scope explicit"
     )]
-    async fn fetch_move_attachments(
+    pub(super) async fn fetch_authoritative_attachments(
         &self,
         account_id: &AccountId,
         expected_item_id: &str,
@@ -902,17 +902,13 @@ impl Runtime {
         &self,
         account_id: &AccountId,
         operation_ids: Vec<String>,
-        next_cursor: Option<SyncCursor>,
+        cursor: CursorAdvance,
     ) -> CompletionResult {
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return CompletionResult::Retry;
         };
-        let cursor = Self::cursor_advance(&snapshot, next_cursor);
-        let Some(cursor) = cursor else {
-            return CompletionResult::Completed;
-        };
-        if cursor.expected == cursor.next {
-            return CompletionResult::Completed;
+        if snapshot.bootstrap.active_cursor != cursor.expected || cursor.expected == cursor.next {
+            return CompletionResult::Retry;
         }
         match self
             .replica
@@ -940,19 +936,6 @@ impl Runtime {
             | Ok(RecomputedPlanResult::Missing)
             | Err(_) => CompletionResult::Retry,
         }
-    }
-
-    /// Builds exact guarded progress to one terminal Sync page Cursor.
-    ///
-    /// Bootstrap calls this only after every event in that page has completed locally.
-    pub(super) fn cursor_advance(
-        snapshot: &ReplicaSnapshot,
-        next: Option<SyncCursor>,
-    ) -> Option<CursorAdvance> {
-        next.map(|next| CursorAdvance {
-            expected: snapshot.bootstrap.active_cursor.clone(),
-            next,
-        })
     }
 }
 
@@ -1011,6 +994,17 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
         };
     }
     let (operation_id, expected_kind, result) = match outcome {
+        // Rotation is still a separate ceremony. Its retained Server outcomes are known wire
+        // kinds, but cannot resolve any Operation this Runtime has durably accepted.
+        WireOperationOutcome::CreateVaultMemberRemovalRotationPlans { .. }
+        | WireOperationOutcome::FinalizeVaultMemberRemovalRotationPlans { .. }
+        | WireOperationOutcome::CreateTeamLeaveRotationPlans { .. }
+        | WireOperationOutcome::FinalizeTeamLeaveRotationPlans { .. }
+        | WireOperationOutcome::CreateTeamMemberRemovalRotationPlans { .. }
+        | WireOperationOutcome::FinalizeTeamMemberRemovalRotationPlans { .. } => {
+            return SemanticAnswer::IdentityReused;
+        }
+
         WireOperationOutcome::CreateItem {
             operation_id,
             result,

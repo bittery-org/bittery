@@ -1,5 +1,7 @@
 //! Wire spellings shared by every serialized Client Runtime contract.
 
+pub(crate) mod import;
+
 /// Carries a `u64` as a canonical decimal string, because JSON numbers lose precision above 2^53
 /// and every revision on the wire is compared for equality.
 pub(crate) mod decimal_u64 {

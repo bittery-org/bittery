@@ -918,6 +918,22 @@
             },
             "type": {
               "type": "string",
+              "const": "operations"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
               "const": "pendingShareResults"
             }
           },
@@ -945,6 +961,103 @@
             "accountId"
           ]
         }
+      ]
+    },
+    "OperationProjection": {
+      "type": "object",
+      "properties": {
+        "attemptCount": {
+          "description": "Terminal receipts do not retain historical scheduling diagnostics.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "importedCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 200,
+          "minimum": 0
+        },
+        "kind": {
+          "$ref": "#/$defs/OperationProjectionKind"
+        },
+        "nextAttemptAtMs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "rejectionCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolution": {
+          "$ref": "#/$defs/OperationResolution"
+        }
+      },
+      "required": [
+        "operationId",
+        "kind",
+        "attemptCount",
+        "nextAttemptAtMs",
+        "resolution",
+        "importedCount",
+        "rejectionCode"
+      ]
+    },
+    "OperationProjectionKind": {
+      "type": "string",
+      "enum": [
+        "createVault",
+        "createItem",
+        "updateItem",
+        "setItemFavorite",
+        "trashItem",
+        "restoreItem",
+        "moveItem",
+        "permanentlyDeleteItem",
+        "createShare",
+        "importItems"
+      ]
+    },
+    "OperationResolution": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "applied",
+        "rejected"
+      ]
+    },
+    "OperationsProjection": {
+      "description": "Non-secret progress from accepted Operations and their durable terminal receipts.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperationProjection"
+          }
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        }
+      },
+      "required": [
+        "accountId",
+        "replicaRevision",
+        "operations"
       ]
     },
     "Passkey": {
@@ -1144,6 +1257,63 @@
         "number"
       ]
     },
+    "RecoveryBound": {
+      "description": "Closed recovery implementation guards; these are not Account capacity limits.",
+      "type": "string",
+      "enum": [
+        "recordBytes",
+        "archiveBytes",
+        "recordCount",
+        "artifactCount",
+        "reportBytes",
+        "summaryBytes",
+        "controlBytes",
+        "cursorBytes",
+        "chunkBytes"
+      ]
+    },
+    "RecoveryClassification": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial"
+      ]
+    },
+    "RecoveryDeviceStatus": {
+      "type": "string",
+      "enum": [
+        "freshOrUnknown",
+        "knownAccounts",
+        "storageUnavailable"
+      ]
+    },
+    "RecoveryMaintenanceStatus": {
+      "type": "string",
+      "enum": [
+        "available",
+        "unsupported",
+        "busy",
+        "unavailable"
+      ]
+    },
+    "RecoverySchemaStatus": {
+      "type": "string",
+      "enum": [
+        "supported",
+        "unsupported",
+        "unknown"
+      ]
+    },
+    "RecoveryStorageState": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "corrupt",
+        "missing",
+        "unknown",
+        "unreadable"
+      ]
+    },
     "RuntimeError": {
       "type": "object",
       "properties": {
@@ -1152,6 +1322,16 @@
         },
         "message": {
           "type": "string"
+        },
+        "recoveryBound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryBound"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1169,6 +1349,7 @@
         "ACCOUNT_FAILED",
         "AUTHENTICATION_REQUIRED",
         "AUTHENTICATION_UNAVAILABLE",
+        "STORAGE_UNAVAILABLE",
         "RETRYABLE_TRANSPORT",
         "AUTHORITY_MISSING",
         "ACCESS_DENIED",
@@ -1256,6 +1437,22 @@
           "properties": {
             "type": {
               "type": "string",
+              "const": "operations"
+            },
+            "value": {
+              "$ref": "#/$defs/OperationsProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
               "const": "pendingShareResults"
             },
             "value": {
@@ -1287,6 +1484,92 @@
     },
     "RuntimeRequest": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rebootstrapAccountRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "inspectRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "sinkCapabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "exportAccountRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "password",
+            "sinkCapabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "sourceCapabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "repairAccountRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "password",
+            "sourceCapabilityId"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -1720,6 +2003,69 @@
             "accountId": {
               "type": "string"
             },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listItemShareLinks"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listShareAccessLogs"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "revokeShareLink"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
             "attachmentId": {
               "type": "string"
             },
@@ -1837,6 +2183,71 @@
     },
     "RuntimeResponse": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "diagnostics": {
+              "$ref": "#/$defs/StorageRecoveryDiagnostics"
+            },
+            "type": {
+              "type": "string",
+              "const": "recoveryDiagnosed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "diagnostics"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "byteLength": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "classification": {
+              "$ref": "#/$defs/RecoveryClassification"
+            },
+            "type": {
+              "type": "string",
+              "const": "recoveryExported"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "classification",
+            "byteLength"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "recoveryRepaired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "replicaRevision"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -2010,6 +2421,87 @@
             "type",
             "accountId",
             "operationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "baseShareUrl": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "links": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ShareLinkSummary"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "itemShareLinks"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "links",
+            "baseShareUrl"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "logs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ShareAccessLog"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "shareAccessLogs"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId",
+            "logs"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "shareLinkRevoked"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId"
           ]
         },
         {
@@ -2199,11 +2691,75 @@
         "blocked"
       ]
     },
+    "ShareAccessLog": {
+      "type": "object",
+      "properties": {
+        "accessedAt": {
+          "type": "string"
+        },
+        "accessedByEmail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failureReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "ipAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "userAgent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "accessedByEmail",
+        "ipAddress",
+        "userAgent",
+        "success",
+        "failureReason",
+        "accessedAt"
+      ]
+    },
     "ShareAccessMode": {
       "type": "string",
       "enum": [
         "anyone",
         "email-restricted"
+      ]
+    },
+    "ShareAllowedEmail": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "email",
+        "verified"
       ]
     },
     "ShareExpiration": {
@@ -2214,6 +2770,190 @@
         "7days",
         "14days",
         "30days"
+      ]
+    },
+    "ShareLinkStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "expired",
+        "exhausted",
+        "revoked"
+      ]
+    },
+    "ShareLinkSummary": {
+      "type": "object",
+      "properties": {
+        "accessCount": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "accessMode": {
+          "$ref": "#/$defs/ShareAccessMode"
+        },
+        "allowedEmails": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShareAllowedEmail"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isOneTimeUse": {
+          "type": "boolean"
+        },
+        "lastAccessedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxAccessCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "status": {
+          "$ref": "#/$defs/ShareLinkStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "accessMode",
+        "isOneTimeUse",
+        "accessCount",
+        "maxAccessCount",
+        "allowedEmails",
+        "expiresAt",
+        "createdAt",
+        "lastAccessedAt"
+      ]
+    },
+    "StorageRecoveryAccount": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "canExport": {
+          "type": "boolean"
+        },
+        "canRebootstrap": {
+          "type": "boolean"
+        },
+        "canRepair": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "missingArtifacts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "operationCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "receiptCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "serverUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/RecoveryStorageState"
+        },
+        "userId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "email",
+        "serverUrl",
+        "userId",
+        "canRebootstrap",
+        "accountId",
+        "state",
+        "operationCount",
+        "receiptCount",
+        "missingArtifacts",
+        "canExport",
+        "canRepair"
+      ]
+    },
+    "StorageRecoveryDiagnostics": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StorageRecoveryAccount"
+          }
+        },
+        "device": {
+          "$ref": "#/$defs/RecoveryDeviceStatus"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maintenance": {
+          "$ref": "#/$defs/RecoveryMaintenanceStatus"
+        },
+        "schema": {
+          "$ref": "#/$defs/RecoverySchemaStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "failure",
+        "maintenance",
+        "schema",
+        "device",
+        "accounts"
       ]
     },
     "TeardownPhase": {

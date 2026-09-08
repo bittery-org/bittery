@@ -28,6 +28,7 @@ mod authentication_installation;
 // Ticket 21 slice B needs a wall clock the Runtime can wait on, not only read.
 mod device_timer;
 mod protocol;
+mod recovery;
 mod replica;
 mod runtime;
 mod vault_image;
@@ -76,12 +77,16 @@ pub use protocol::{
     Address, AttachmentProjection, AuthenticatorItemData, CreateShareDraft, CreateVaultType,
     CreditCardItemData, CustomField, CustomFieldKind, IdentityItemData, ImportItemDraft,
     Incarnation, ItemCategory, ItemDraft, ItemProjection, ItemProjectionStatus, ItemsProjection,
-    LoginItemData, ObservationRequest, ObservationSink, Passkey, PasskeyStatus,
+    LoginItemData, ObservationRequest, ObservationSink, OperationProjection,
+    OperationProjectionKind, OperationResolution, OperationsProjection, Passkey, PasskeyStatus,
     PasskeyStatusReason, PasswordHistoryEntry, PendingShareResult, PendingShareResultsProjection,
-    PhoneNumber, RequestCancellation, RuntimeError, RuntimeErrorCode, RuntimeOutcome,
-    RuntimeProjection, RuntimeRequest, RuntimeResponse, RuntimeStatusProjection,
-    SecureNoteItemData, ServerAccountDeletionOutcome, ShareAccessMode, ShareExpiration,
-    TeardownPhase, TeardownScope, TeardownStatus, TotpAlgorithm, TotpDigits, VaultImageSourceInput,
+    PhoneNumber, RecoveryBound, RecoveryClassification, RecoveryDeviceStatus,
+    RecoveryMaintenanceStatus, RecoverySchemaStatus, RecoveryStorageState, RequestCancellation,
+    RuntimeError, RuntimeErrorCode, RuntimeOutcome, RuntimeProjection, RuntimeRequest,
+    RuntimeResponse, RuntimeStatusProjection, SecureNoteItemData, ServerAccountDeletionOutcome,
+    ShareAccessLog, ShareAccessMode, ShareAllowedEmail, ShareExpiration, ShareLinkStatus,
+    ShareLinkSummary, StorageRecoveryAccount, StorageRecoveryDiagnostics, TeardownPhase,
+    TeardownScope, TeardownStatus, TotpAlgorithm, TotpDigits, VaultImageSourceInput,
     VaultProjection, VaultProjectionRole, VaultProjectionType, WritableVaultCatalogProjection,
     WritableVaultProjection,
 };
@@ -118,6 +123,9 @@ pub use vault_image::{
     VaultImageSourceGrant, VaultImageSourcePort, VAULT_IMAGE_CHUNK_BYTES, VAULT_IMAGE_MAX_BYTES,
 };
 
+#[doc(hidden)]
+pub use recovery::control::SerializedRecoveryExecutor;
+
 #[cfg(test)]
 mod account_email_tests {
     use super::normalize_account_email;
@@ -143,3 +151,7 @@ mod account_email_tests {
         assert!(normalize_account_email(" \t\n ").is_err());
     }
 }
+
+#[cfg(feature = "recovery-contract-schema")]
+#[doc(hidden)]
+pub use recovery::control::recovery_contract_schema;

@@ -585,6 +585,46 @@ pub(crate) struct ShareAppliedResultRecord {
     pub expires_at: String,
 }
 
+pub(super) fn share_capability_binding_matches(
+    result: Option<&ShareAppliedResultRecord>,
+    operation_kind: Option<OperationKind>,
+    receipt: Option<&OperationReceiptRecord>,
+) -> bool {
+    match result {
+        None => operation_kind == Some(OperationKind::CreateShare),
+        Some(result) => {
+            !result.share_link_id.is_empty()
+                && !result.base_share_url.is_empty()
+                && !result.expires_at.is_empty()
+                && receipt.is_some_and(|receipt| {
+                    receipt.kind == OperationKind::CreateShare
+                        && matches!(&receipt.result, OperationOutcomeResult::ShareApplied {
+                    share_link_id, base_share_url, expires_at,
+                } if share_link_id == &result.share_link_id
+                    && base_share_url == &result.base_share_url
+                    && expires_at == &result.expires_at)
+                })
+        }
+    }
+}
+
+pub(super) fn validate_share_capability_fields(
+    capability: &ProtectedShareCapabilityRecord,
+    account_id: &AccountId,
+) -> Result<(), RuntimeError> {
+    if capability.account_id != *account_id
+        || capability.operation_id.is_empty()
+        || capability.ciphertext.is_empty()
+        || capability.iv.is_empty()
+        || capability.algorithm != "AES-GCM-AAD-V1"
+    {
+        return Err(replica_invariant(
+            "protected Share capability payload is invalid",
+        ));
+    }
+    Ok(())
+}
+
 /// One accepted Attachment-bearing Move before its final HTTP request can exist.
 ///
 /// This lives outside `operations`, so the ordinary dispatcher cannot observe incomplete work.
@@ -1021,6 +1061,19 @@ pub(crate) enum AuthorityItemCategory {
     Totp,
 }
 
+impl From<crate::server_contract::ItemCategory> for AuthorityItemCategory {
+    fn from(category: crate::server_contract::ItemCategory) -> Self {
+        use crate::server_contract::ItemCategory;
+        match category {
+            ItemCategory::Login => Self::Login,
+            ItemCategory::SecureNote => Self::SecureNote,
+            ItemCategory::CreditCard => Self::CreditCard,
+            ItemCategory::Identity => Self::Identity,
+            ItemCategory::Totp => Self::Totp,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[allow(
@@ -1334,6 +1387,19 @@ pub(super) fn apply_plan(
     Ok(next.snapshot())
 }
 
+impl ReplicaSnapshot {
+    pub(crate) fn item_has_optimistic_owner(&self, item_id: &str) -> bool {
+        self.operations
+            .iter()
+            .any(|operation| operation.target.item_id() == Some(item_id))
+            || self
+                .attachment_move_preparations
+                .iter()
+                .any(|preparation| preparation.item_id == item_id)
+            || self.items.iter().any(|overlay| overlay.item_id == item_id)
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct AccountReplica {
     pub(super) account_id: AccountId,
@@ -1426,36 +1492,14 @@ impl AccountReplica {
         for capability in self.share_capabilities.values() {
             let matching_operation = self.operations.get(&capability.operation_id);
             let matching_receipt = self.receipts.get(&capability.operation_id);
-            let accepted = capability.result.is_none()
-                && matching_operation.is_some_and(|operation| {
-                    operation.kind == OperationKind::CreateShare
-                        && operation.operation_id == capability.operation_id
-                });
-            let pending = capability.result.as_ref().is_some_and(|result| {
-                !result.share_link_id.is_empty()
-                    && !result.base_share_url.is_empty()
-                    && !result.expires_at.is_empty()
-                    && matching_receipt.is_some_and(|receipt| {
-                        receipt.kind == OperationKind::CreateShare
-                            && matches!(
-                                &receipt.result,
-                                OperationOutcomeResult::ShareApplied {
-                                    share_link_id,
-                                    base_share_url,
-                                    expires_at,
-                                } if share_link_id == &result.share_link_id
-                                    && base_share_url == &result.base_share_url
-                                    && expires_at == &result.expires_at
-                            )
-                    })
-            });
-            if capability.account_id != self.account_id
-                || capability.operation_id.is_empty()
-                || capability.ciphertext.is_empty()
-                || capability.iv.is_empty()
-                || capability.algorithm != "AES-GCM-AAD-V1"
-                || (!accepted && !pending)
-            {
+            validate_share_capability_fields(capability, &self.account_id)?;
+            if !share_capability_binding_matches(
+                capability.result.as_ref(),
+                matching_operation
+                    .filter(|operation| operation.operation_id == capability.operation_id)
+                    .map(|operation| operation.kind),
+                matching_receipt,
+            ) {
                 return Err(replica_invariant(
                     "protected Share capability is not bound to one active CreateShare Operation",
                 ));
@@ -1854,6 +1898,39 @@ impl AccountReplica {
             .insert((generation_id, item.id.clone()), item);
         self.bootstrap.active_cursor = next_cursor;
         self.bootstrap.validate()?;
+        self.revision = next_revision;
+        Ok(PlanResult::Applied {
+            replica_revision: self.revision,
+        })
+    }
+
+    /// A Sync response may only change the authority revision it was requested against.
+    /// In particular, delayed absence cannot delete authority another executor just installed.
+    pub(super) fn apply_sync_item_authority(
+        &mut self,
+        guard: &BootstrapGuard,
+        expected_cursor: &SyncCursor,
+        item_id: &str,
+        item: Option<AuthorityItemRecord>,
+    ) -> Result<PlanResult, RuntimeError> {
+        if let Some(result) = self.guard_result(guard) {
+            return Ok(result);
+        }
+        if self.bootstrap.state != ReplicaState::Ready
+            || self.bootstrap.active_cursor != *expected_cursor
+        {
+            return Ok(PlanResult::Stale {
+                actual_revision: self.revision,
+            });
+        }
+        if let Some(item) = item {
+            if item.id != item_id {
+                return Err(replica_invariant("Sync authority answered another Item"));
+            }
+            return self.apply_authoritative_item(expected_cursor, expected_cursor.clone(), item);
+        }
+        let next_revision = increment_revision(self.revision)?;
+        self.remove_authoritative_item(item_id)?;
         self.revision = next_revision;
         Ok(PlanResult::Applied {
             replica_revision: self.revision,
@@ -3123,6 +3200,50 @@ fn move_operation(
     Ok(operation)
 }
 
+/// Covers the route identity and the exact body bytes, and deliberately not the Operation ID.
+///
+/// Fingerprint and identity have to be able to disagree: slice C reads the same ID arriving with
+/// another fingerprint as identity reuse, which is only detectable while the two are independent.
+pub(crate) fn create_item_fingerprint(
+    vault_id: &str,
+    item_id: &str,
+    body: &[u8],
+) -> Sha256Fingerprint {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [
+        b"bittery.operation.v1".as_slice(),
+        b"create_item".as_slice(),
+        b"PUT /api/v1/vaults/{vaultId}/items/{itemId}".as_slice(),
+        vault_id.as_bytes(),
+        item_id.as_bytes(),
+        body,
+        // The Server hashes normalized concurrency preconditions here. A create has none.
+        b"" as &[u8],
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    Sha256Fingerprint(hasher.finalize().into())
+}
+
+pub(crate) fn share_operation_fingerprint(item_id: &str, body: &[u8]) -> Sha256Fingerprint {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [
+        b"bittery.operation.v1".as_slice(),
+        b"create_share".as_slice(),
+        b"POST /api/v1/items/{itemId}/share-links".as_slice(),
+        item_id.as_bytes(),
+        body,
+        b"" as &[u8],
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    Sha256Fingerprint(hasher.finalize().into())
+}
+
 pub(crate) fn item_operation_fingerprint(
     kind: OperationKind,
     route: &str,
@@ -3229,36 +3350,6 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
     Ok(())
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PersistedImportBody {
-    items: Vec<PersistedImportItem>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PersistedImportItem {
-    item_id: String,
-    /// The generated wire enum, never a hand-written list of its spellings. Deserializing the
-    /// closed set is the drift guard: a new category reaches this boundary by regenerating the
-    /// contract under ADR 0012, and an unknown one fails to deserialize.
-    #[allow(
-        dead_code,
-        reason = "the closed category is enforced by its type, never re-read here"
-    )]
-    category: crate::server_contract::ItemCategory,
-    /// Declared so `deny_unknown_fields` accepts the persisted Favorite and rejects a body that
-    /// drops it. Nothing here re-derives the value.
-    #[allow(
-        dead_code,
-        reason = "the persisted Favorite is bound by being declared, never read again"
-    )]
-    favorite: bool,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-}
-
 fn validate_import_operation(operation: &OperationRecord) -> Result<(), RuntimeError> {
     let path = import_items_path(operation.vault_id());
     if operation.request.method != HttpMethod::Post
@@ -3271,8 +3362,9 @@ fn validate_import_operation(operation: &OperationRecord) -> Result<(), RuntimeE
     {
         return Err(replica_invariant("Import request route or headers changed"));
     }
-    let body: PersistedImportBody = serde_json::from_slice(&operation.request.body)
-        .map_err(|_| replica_invariant("Import request body is malformed"))?;
+    let body: crate::wire::import::ImportRequestBody =
+        serde_json::from_slice(&operation.request.body)
+            .map_err(|_| replica_invariant("Import request body is malformed"))?;
     if body.items.len() > MAX_IMPORT_ITEMS {
         return Err(replica_invariant("Import request exceeds its Item bound"));
     }
@@ -3952,7 +4044,7 @@ fn validate_continuation(continuation: &BootstrapContinuation) -> Result<(), Run
 }
 
 #[allow(dead_code, reason = "the persistence wire invokes this model next")]
-fn validate_authority_page(
+pub(super) fn validate_authority_page(
     vaults: &[AuthorityVaultRecord],
     items: &[AuthorityItemRecord],
 ) -> Result<(), RuntimeError> {

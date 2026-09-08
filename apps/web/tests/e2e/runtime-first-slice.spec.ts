@@ -3,6 +3,7 @@ import type { Page, Route } from "@playwright/test";
 import { nanoid } from "nanoid";
 import { expect, generateTestUser, signUp, test } from "../fixtures/auth";
 import { runE2eSql, sqlString } from "../fixtures/e2e-database";
+import { uiText } from "../fixtures/messages";
 import {
 	createItem,
 	itemRow,
@@ -120,7 +121,7 @@ test("the Rust Runtime durably reconciles an offline create after restart and re
 	let putAttempts = 0;
 	let refreshes = 0;
 	let successfulResponseLost = false;
-	let hiddenOutcomeOnce = false;
+	let outcomeHiddenBeforeReplay = false;
 
 	page.on("console", (message) => consoleMessages.push(message.text()));
 
@@ -160,11 +161,13 @@ test("the Rust Runtime durably reconciles an offline create after restart and re
 
 			if (
 				request.method() === "GET" &&
-				pathname.startsWith("/api/v1/operations/") &&
+				pathname === `/api/v1/operations/${observedOperationIds[0]}` &&
 				successfulResponseLost &&
-				!hiddenOutcomeOnce
+				putAttempts < TRANSIENT_FAILURES + 3
 			) {
-				hiddenOutcomeOnce = true;
+				// Live Sync and dispatch may both look up this outcome. Keep the
+				// ambiguity until the required exact replay reaches the transport.
+				outcomeHiddenBeforeReplay = true;
 				await route.fulfill({ status: 404, body: "" });
 				return;
 			}
@@ -240,8 +243,7 @@ test("the Rust Runtime durably reconciles an offline create after restart and re
 		const acceptedOperationRow = onlyStoredRow(acceptedReplica, "operations");
 		const acceptedOperation = JSON.parse(acceptedOperationRow.payloadJson) as {
 			operationId: string;
-			itemId: string;
-			vaultId: string;
+			target: { type: "item"; itemId: string; vaultId: string };
 			requestFingerprint: string;
 			request: {
 				method: string;
@@ -251,14 +253,14 @@ test("the Rust Runtime durably reconciles an offline create after restart and re
 			};
 		};
 		expect(acceptedOperation).toMatchObject({
-			itemId,
-			vaultId,
+			target: { type: "item", itemId, vaultId },
 			request: {
 				method: "PUT",
 				path: `/api/v1/vaults/${vaultId}/items/${itemId}`,
 				headers: [{ name: "Content-Type", value: "application/json" }],
 			},
 		});
+		expect(acceptedOperation.target).toEqual({ type: "item", itemId, vaultId });
 		expect(acceptedOperation.requestFingerprint).toMatch(/^[0-9a-f]{64}$/);
 		expect(acceptedOperationRow.recordId).toBe(acceptedOperation.operationId);
 		const durableRequestBody = new TextDecoder().decode(
@@ -324,10 +326,21 @@ test("the Rust Runtime durably reconciles an offline create after restart and re
 			.click();
 		await page.waitForURL("**/home", { timeout: VAULT_READY_TIMEOUT_MS });
 
-		// Leaving the vault removes the initiating Items subscription. Dispatch belongs
-		// to the Runtime process and must continue without that UI observer.
-		expect(new URL(page.url()).pathname).toBe("/home");
+		// Team has no route Items consumer. Leave Home's dashboard projections as well
+		// as the initiating Vault view before letting the Runtime dispatch continue.
+		await page.getByRole("link", { name: "Team", exact: true }).first().click();
+		await page.waitForURL("**/team");
+		await expect(
+			page
+				.getByRole("tab", {
+					name: uiText("team_page_tab_members"),
+					exact: true,
+				})
+				.or(page.getByText(uiText("team_page_empty_no_team"), { exact: true })),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		expect(new URL(page.url()).pathname).toBe("/team");
 		await expect(page.getByTestId("item-row")).toHaveCount(0);
+		await expect(page.getByTestId("item-detail-pane")).toHaveCount(0);
 		dispatchReleased = true;
 		for (const resolveHeldDispatch of heldDispatchResolvers.splice(0)) {
 			resolveHeldDispatch("proceed");
@@ -337,7 +350,7 @@ test("the Rust Runtime durably reconciles an offline create after restart and re
 			.toBeGreaterThanOrEqual(TRANSIENT_FAILURES + 3);
 		expect(refreshes).toBeGreaterThanOrEqual(1);
 		expect(successfulResponseLost).toBe(true);
-		expect(hiddenOutcomeOnce).toBe(true);
+		expect(outcomeHiddenBeforeReplay).toBe(true);
 		expect(observedOperationIds).toHaveLength(requestBodies.length);
 		expect(observedOperationIds).toHaveLength(preparedRequests.length);
 		expect(new Set(requestBodies).size).toBe(1);
@@ -387,19 +400,17 @@ test("the Rust Runtime durably reconciles an offline create after restart and re
 		expect(Object.keys(receipt).sort()).toEqual(
 			[
 				"completedAtRevision",
-				"itemId",
 				"kind",
 				"operationId",
 				"requestFingerprint",
 				"result",
-				"vaultId",
+				"target",
 			].sort(),
 		);
 		expect(receipt).toEqual({
 			operationId: operation,
 			kind: "create_item",
-			itemId,
-			vaultId,
+			target: { type: "item", itemId, vaultId },
 			requestFingerprint: acceptedOperation.requestFingerprint,
 			result: { type: "applied", entityId: itemId, version: 1 },
 			completedAtRevision: (reconciledReplica.heads as StoredHead[])[0]

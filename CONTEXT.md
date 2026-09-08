@@ -266,6 +266,12 @@ the Sync cursor that makes those values one coherent commit history. A Replica i
 disposable Item cache, and its invariants do not belong to a UI or platform adapter.
 _Avoid_: cache, local database, offline store, client state
 
+**Replica recovery export**:
+A copy of one Account's recoverable local state, including accepted Operations and their required
+stored data, protected by a separate password. It is labeled complete or partial; a partial export
+preserves evidence without claiming the Account can be repaired.
+_Avoid_: Recovery key, Emergency Kit, Item export
+
 **Operation**:
 One immutable Account-scoped request accepted durably by the Client Runtime under a stable Operation
 ID. Acceptance commits the request and its optimistic Replica effect together. Losing a caller,

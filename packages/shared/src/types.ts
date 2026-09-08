@@ -215,10 +215,10 @@ export interface SecureNoteDisplayData {
 
 export interface CreditCardDisplayData {
 	title: string;
-	cardholderName: string;
-	cardNumber: string;
-	cvv: string;
-	expiryDate: string;
+	cardholderName?: string;
+	cardNumber?: string;
+	cvv?: string;
+	expiryDate?: string;
 	billingAddress?: string;
 	notes?: string;
 	tags?: string[];

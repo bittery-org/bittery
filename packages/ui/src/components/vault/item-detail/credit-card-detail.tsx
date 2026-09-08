@@ -28,17 +28,16 @@ export function CreditCardDetail({
 	isUpdatingTags,
 }: CategoryDetailProps<CreditCardDisplayData>) {
 	const { m } = useI18n();
-	const cardBrand = detectCardBrand(data.cardNumber);
-	const formattedExpiry = formatExpiryDate(data.expiryDate);
-	const maskedCardNumber = maskCardNumber(data.cardNumber);
+	const subtitle = data.cardNumber
+		? `${getCardBrandDisplayName(detectCardBrand(data.cardNumber))} • ${maskCardNumber(data.cardNumber)}`
+		: undefined;
+	const formattedExpiry = data.expiryDate
+		? formatExpiryDate(data.expiryDate)
+		: undefined;
 
 	return (
 		<div className="space-y-4">
-			<DetailHeader
-				icon={icon}
-				title={data.title}
-				subtitle={`${getCardBrandDisplayName(cardBrand)} • ${maskedCardNumber}`}
-			/>
+			<DetailHeader icon={icon} title={data.title} subtitle={subtitle} />
 
 			<div className="flex gap-2">
 				{onEdit && (

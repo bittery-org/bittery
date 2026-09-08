@@ -44,6 +44,7 @@ import {
 import { getTeardownAreaLabel } from "@/lib/teardown-areas";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
+import { RecoveryEntryButton } from "./recovery-entry";
 
 /** Retiring the Session, or the browser-only escape. Never the same thing. */
 type RetirementAction = "retire" | "forgetBrowserSession";
@@ -187,6 +188,9 @@ export default function SignInForm({
 					onSwitchToSignUp={onSwitchToSignUp}
 					redirectTo={redirectTo}
 				/>
+				<div className="mt-4 flex justify-center">
+					<RecoveryEntryButton />
+				</div>
 			</div>
 		</div>
 	);

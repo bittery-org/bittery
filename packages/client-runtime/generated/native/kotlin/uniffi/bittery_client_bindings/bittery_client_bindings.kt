@@ -2276,6 +2276,33 @@ private class JavaLangRefCleanable(
 /**
  * @suppress
  */
+public object FfiConverterUShort: FfiConverter<UShort, Short> {
+    override fun lift(value: Short): UShort {
+        return value.toUShort()
+    }
+
+    fun lift(value: Int): UShort {
+        return value.toUShort()
+    }
+
+    override fun read(buf: ByteBuffer): UShort {
+        return lift(buf.getShort())
+    }
+
+    override fun lower(value: UShort): Short {
+        return value.toShort()
+    }
+
+    override fun allocationSize(value: UShort) = 2UL
+
+    override fun write(value: UShort, buf: ByteBuffer) {
+        buf.putShort(value.toShort())
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterUInt: FfiConverter<UInt, Int> {
     override fun lift(value: Int): UInt {
         return value.toUInt()
@@ -10285,6 +10312,112 @@ public object FfiConverterTypeItemsProjection: FfiConverterRustBuffer<ItemsProje
 
 
 
+data class OperationProjection (
+    var `operationId`: kotlin.String
+    ,
+    var `kind`: OperationProjectionKind
+    ,
+    var `attemptCount`: kotlin.String?
+    ,
+    var `nextAttemptAtMs`: kotlin.String?
+    ,
+    var `resolution`: OperationResolution
+    ,
+    var `importedCount`: kotlin.UShort?
+    ,
+    var `rejectionCode`: kotlin.String?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeOperationProjection: FfiConverterRustBuffer<OperationProjection> {
+    override fun read(buf: ByteBuffer): OperationProjection {
+        return OperationProjection(
+            FfiConverterString.read(buf),
+            FfiConverterTypeOperationProjectionKind.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterTypeOperationResolution.read(buf),
+            FfiConverterOptionalUShort.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: OperationProjection) = (
+            FfiConverterString.allocationSize(value.`operationId`) +
+            FfiConverterTypeOperationProjectionKind.allocationSize(value.`kind`) +
+            FfiConverterOptionalString.allocationSize(value.`attemptCount`) +
+            FfiConverterOptionalString.allocationSize(value.`nextAttemptAtMs`) +
+            FfiConverterTypeOperationResolution.allocationSize(value.`resolution`) +
+            FfiConverterOptionalUShort.allocationSize(value.`importedCount`) +
+            FfiConverterOptionalString.allocationSize(value.`rejectionCode`)
+    )
+
+    override fun write(value: OperationProjection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`operationId`, buf)
+            FfiConverterTypeOperationProjectionKind.write(value.`kind`, buf)
+            FfiConverterOptionalString.write(value.`attemptCount`, buf)
+            FfiConverterOptionalString.write(value.`nextAttemptAtMs`, buf)
+            FfiConverterTypeOperationResolution.write(value.`resolution`, buf)
+            FfiConverterOptionalUShort.write(value.`importedCount`, buf)
+            FfiConverterOptionalString.write(value.`rejectionCode`, buf)
+    }
+}
+
+
+
+data class OperationsProjection (
+    var `accountId`: kotlin.String
+    ,
+    var `replicaRevision`: kotlin.ULong
+    ,
+    var `operations`: List<OperationProjection>
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeOperationsProjection: FfiConverterRustBuffer<OperationsProjection> {
+    override fun read(buf: ByteBuffer): OperationsProjection {
+        return OperationsProjection(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceTypeOperationProjection.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: OperationsProjection) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterULong.allocationSize(value.`replicaRevision`) +
+            FfiConverterSequenceTypeOperationProjection.allocationSize(value.`operations`)
+    )
+
+    override fun write(value: OperationsProjection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterULong.write(value.`replicaRevision`, buf)
+            FfiConverterSequenceTypeOperationProjection.write(value.`operations`, buf)
+    }
+}
+
+
+
 data class PendingShareResultsProjection (
     var `accountId`: kotlin.String
     ,
@@ -10439,6 +10572,321 @@ public object FfiConverterTypeRuntimeStatusProjection: FfiConverterRustBuffer<Ru
             FfiConverterULong.write(value.`revision`, buf)
             FfiConverterSequenceTypeAccountStatus.write(value.`accounts`, buf)
             FfiConverterBoolean.write(value.`closed`, buf)
+    }
+}
+
+
+
+data class ShareAccessLog (
+    var `id`: kotlin.String
+    ,
+    var `accessedByEmail`: kotlin.String?
+    ,
+    var `ipAddress`: kotlin.String?
+    ,
+    var `userAgent`: kotlin.String?
+    ,
+    var `success`: kotlin.Boolean
+    ,
+    var `failureReason`: kotlin.String?
+    ,
+    var `accessedAt`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShareAccessLog: FfiConverterRustBuffer<ShareAccessLog> {
+    override fun read(buf: ByteBuffer): ShareAccessLog {
+        return ShareAccessLog(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ShareAccessLog) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterOptionalString.allocationSize(value.`accessedByEmail`) +
+            FfiConverterOptionalString.allocationSize(value.`ipAddress`) +
+            FfiConverterOptionalString.allocationSize(value.`userAgent`) +
+            FfiConverterBoolean.allocationSize(value.`success`) +
+            FfiConverterOptionalString.allocationSize(value.`failureReason`) +
+            FfiConverterString.allocationSize(value.`accessedAt`)
+    )
+
+    override fun write(value: ShareAccessLog, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterOptionalString.write(value.`accessedByEmail`, buf)
+            FfiConverterOptionalString.write(value.`ipAddress`, buf)
+            FfiConverterOptionalString.write(value.`userAgent`, buf)
+            FfiConverterBoolean.write(value.`success`, buf)
+            FfiConverterOptionalString.write(value.`failureReason`, buf)
+            FfiConverterString.write(value.`accessedAt`, buf)
+    }
+}
+
+
+
+data class ShareAllowedEmail (
+    var `email`: kotlin.String
+    ,
+    var `verified`: kotlin.Boolean
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShareAllowedEmail: FfiConverterRustBuffer<ShareAllowedEmail> {
+    override fun read(buf: ByteBuffer): ShareAllowedEmail {
+        return ShareAllowedEmail(
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ShareAllowedEmail) = (
+            FfiConverterString.allocationSize(value.`email`) +
+            FfiConverterBoolean.allocationSize(value.`verified`)
+    )
+
+    override fun write(value: ShareAllowedEmail, buf: ByteBuffer) {
+            FfiConverterString.write(value.`email`, buf)
+            FfiConverterBoolean.write(value.`verified`, buf)
+    }
+}
+
+
+
+data class ShareLinkSummary (
+    var `id`: kotlin.String
+    ,
+    var `status`: ShareLinkStatus
+    ,
+    var `accessMode`: ShareAccessMode
+    ,
+    var `isOneTimeUse`: kotlin.Boolean
+    ,
+    var `accessCount`: kotlin.Int
+    ,
+    var `maxAccessCount`: kotlin.Int?
+    ,
+    var `allowedEmails`: List<ShareAllowedEmail>
+    ,
+    var `expiresAt`: kotlin.String
+    ,
+    var `createdAt`: kotlin.String
+    ,
+    var `lastAccessedAt`: kotlin.String?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShareLinkSummary: FfiConverterRustBuffer<ShareLinkSummary> {
+    override fun read(buf: ByteBuffer): ShareLinkSummary {
+        return ShareLinkSummary(
+            FfiConverterString.read(buf),
+            FfiConverterTypeShareLinkStatus.read(buf),
+            FfiConverterTypeShareAccessMode.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterOptionalInt.read(buf),
+            FfiConverterSequenceTypeShareAllowedEmail.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ShareLinkSummary) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterTypeShareLinkStatus.allocationSize(value.`status`) +
+            FfiConverterTypeShareAccessMode.allocationSize(value.`accessMode`) +
+            FfiConverterBoolean.allocationSize(value.`isOneTimeUse`) +
+            FfiConverterInt.allocationSize(value.`accessCount`) +
+            FfiConverterOptionalInt.allocationSize(value.`maxAccessCount`) +
+            FfiConverterSequenceTypeShareAllowedEmail.allocationSize(value.`allowedEmails`) +
+            FfiConverterString.allocationSize(value.`expiresAt`) +
+            FfiConverterString.allocationSize(value.`createdAt`) +
+            FfiConverterOptionalString.allocationSize(value.`lastAccessedAt`)
+    )
+
+    override fun write(value: ShareLinkSummary, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterTypeShareLinkStatus.write(value.`status`, buf)
+            FfiConverterTypeShareAccessMode.write(value.`accessMode`, buf)
+            FfiConverterBoolean.write(value.`isOneTimeUse`, buf)
+            FfiConverterInt.write(value.`accessCount`, buf)
+            FfiConverterOptionalInt.write(value.`maxAccessCount`, buf)
+            FfiConverterSequenceTypeShareAllowedEmail.write(value.`allowedEmails`, buf)
+            FfiConverterString.write(value.`expiresAt`, buf)
+            FfiConverterString.write(value.`createdAt`, buf)
+            FfiConverterOptionalString.write(value.`lastAccessedAt`, buf)
+    }
+}
+
+
+
+data class StorageRecoveryAccount (
+    var `email`: kotlin.String?
+    ,
+    var `serverUrl`: kotlin.String?
+    ,
+    var `userId`: kotlin.String?
+    ,
+    var `canRebootstrap`: kotlin.Boolean
+    ,
+    var `accountId`: kotlin.String
+    ,
+    var `state`: RecoveryStorageState
+    ,
+    var `operationCount`: kotlin.UInt?
+    ,
+    var `receiptCount`: kotlin.UInt?
+    ,
+    var `missingArtifacts`: kotlin.UInt?
+    ,
+    var `canExport`: kotlin.Boolean
+    ,
+    var `canRepair`: kotlin.Boolean
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStorageRecoveryAccount: FfiConverterRustBuffer<StorageRecoveryAccount> {
+    override fun read(buf: ByteBuffer): StorageRecoveryAccount {
+        return StorageRecoveryAccount(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeRecoveryStorageState.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: StorageRecoveryAccount) = (
+            FfiConverterOptionalString.allocationSize(value.`email`) +
+            FfiConverterOptionalString.allocationSize(value.`serverUrl`) +
+            FfiConverterOptionalString.allocationSize(value.`userId`) +
+            FfiConverterBoolean.allocationSize(value.`canRebootstrap`) +
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterTypeRecoveryStorageState.allocationSize(value.`state`) +
+            FfiConverterOptionalUInt.allocationSize(value.`operationCount`) +
+            FfiConverterOptionalUInt.allocationSize(value.`receiptCount`) +
+            FfiConverterOptionalUInt.allocationSize(value.`missingArtifacts`) +
+            FfiConverterBoolean.allocationSize(value.`canExport`) +
+            FfiConverterBoolean.allocationSize(value.`canRepair`)
+    )
+
+    override fun write(value: StorageRecoveryAccount, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`email`, buf)
+            FfiConverterOptionalString.write(value.`serverUrl`, buf)
+            FfiConverterOptionalString.write(value.`userId`, buf)
+            FfiConverterBoolean.write(value.`canRebootstrap`, buf)
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterTypeRecoveryStorageState.write(value.`state`, buf)
+            FfiConverterOptionalUInt.write(value.`operationCount`, buf)
+            FfiConverterOptionalUInt.write(value.`receiptCount`, buf)
+            FfiConverterOptionalUInt.write(value.`missingArtifacts`, buf)
+            FfiConverterBoolean.write(value.`canExport`, buf)
+            FfiConverterBoolean.write(value.`canRepair`, buf)
+    }
+}
+
+
+
+data class StorageRecoveryDiagnostics (
+    var `failure`: RuntimeErrorCode?
+    ,
+    var `maintenance`: RecoveryMaintenanceStatus
+    ,
+    var `schema`: RecoverySchemaStatus
+    ,
+    var `device`: RecoveryDeviceStatus
+    ,
+    var `accounts`: List<StorageRecoveryAccount>
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStorageRecoveryDiagnostics: FfiConverterRustBuffer<StorageRecoveryDiagnostics> {
+    override fun read(buf: ByteBuffer): StorageRecoveryDiagnostics {
+        return StorageRecoveryDiagnostics(
+            FfiConverterOptionalTypeRuntimeErrorCode.read(buf),
+            FfiConverterTypeRecoveryMaintenanceStatus.read(buf),
+            FfiConverterTypeRecoverySchemaStatus.read(buf),
+            FfiConverterTypeRecoveryDeviceStatus.read(buf),
+            FfiConverterSequenceTypeStorageRecoveryAccount.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: StorageRecoveryDiagnostics) = (
+            FfiConverterOptionalTypeRuntimeErrorCode.allocationSize(value.`failure`) +
+            FfiConverterTypeRecoveryMaintenanceStatus.allocationSize(value.`maintenance`) +
+            FfiConverterTypeRecoverySchemaStatus.allocationSize(value.`schema`) +
+            FfiConverterTypeRecoveryDeviceStatus.allocationSize(value.`device`) +
+            FfiConverterSequenceTypeStorageRecoveryAccount.allocationSize(value.`accounts`)
+    )
+
+    override fun write(value: StorageRecoveryDiagnostics, buf: ByteBuffer) {
+            FfiConverterOptionalTypeRuntimeErrorCode.write(value.`failure`, buf)
+            FfiConverterTypeRecoveryMaintenanceStatus.write(value.`maintenance`, buf)
+            FfiConverterTypeRecoverySchemaStatus.write(value.`schema`, buf)
+            FfiConverterTypeRecoveryDeviceStatus.write(value.`device`, buf)
+            FfiConverterSequenceTypeStorageRecoveryAccount.write(value.`accounts`, buf)
     }
 }
 
@@ -10791,10 +11239,12 @@ sealed class BindingException: kotlin.Exception() {
 
         val `code`: RuntimeErrorCode,
 
-        val `message`: kotlin.String
+        val `message`: kotlin.String,
+
+        val `recoveryBound`: RecoveryBound?
         ) : BindingException() {
         override val message
-            get() = "code=${ `code` }, message=${ `message` }"
+            get() = "code=${ `code` }, message=${ `message` }, recoveryBound=${ `recoveryBound` }"
     }
 
 
@@ -10819,6 +11269,7 @@ public object FfiConverterTypeBindingError : FfiConverterRustBuffer<BindingExcep
             1 -> BindingException.Runtime(
                 FfiConverterTypeRuntimeErrorCode.read(buf),
                 FfiConverterString.read(buf),
+                FfiConverterOptionalTypeRecoveryBound.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
@@ -10831,6 +11282,7 @@ public object FfiConverterTypeBindingError : FfiConverterRustBuffer<BindingExcep
                 4UL
                 + FfiConverterTypeRuntimeErrorCode.allocationSize(value.`code`)
                 + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterOptionalTypeRecoveryBound.allocationSize(value.`recoveryBound`)
             )
         }
     }
@@ -10841,6 +11293,7 @@ public object FfiConverterTypeBindingError : FfiConverterRustBuffer<BindingExcep
                 buf.putInt(1)
                 FfiConverterTypeRuntimeErrorCode.write(value.`code`, buf)
                 FfiConverterString.write(value.`message`, buf)
+                FfiConverterOptionalTypeRecoveryBound.write(value.`recoveryBound`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -11174,6 +11627,15 @@ sealed class ObservationRequest {
         companion object
     }
 
+    data class Operations(
+        val `accountId`: kotlin.String) : ObservationRequest()
+
+    {
+
+
+        companion object
+    }
+
     data class RuntimeStatus(
         val `accountId`: kotlin.String?) : ObservationRequest()
 
@@ -11206,7 +11668,10 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
             3 -> ObservationRequest.PendingShareResults(
                 FfiConverterString.read(buf),
                 )
-            4 -> ObservationRequest.RuntimeStatus(
+            4 -> ObservationRequest.Operations(
+                FfiConverterString.read(buf),
+                )
+            5 -> ObservationRequest.RuntimeStatus(
                 FfiConverterOptionalString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -11228,6 +11693,13 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
             )
         }
         is ObservationRequest.PendingShareResults -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is ObservationRequest.Operations -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
                 4UL
@@ -11259,12 +11731,94 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
-            is ObservationRequest.RuntimeStatus -> {
+            is ObservationRequest.Operations -> {
                 buf.putInt(4)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is ObservationRequest.RuntimeStatus -> {
+                buf.putInt(5)
                 FfiConverterOptionalString.write(value.`accountId`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class OperationProjectionKind {
+
+    CREATE_VAULT,
+    CREATE_ITEM,
+    UPDATE_ITEM,
+    SET_ITEM_FAVORITE,
+    TRASH_ITEM,
+    RESTORE_ITEM,
+    MOVE_ITEM,
+    PERMANENTLY_DELETE_ITEM,
+    CREATE_SHARE,
+    IMPORT_ITEMS;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeOperationProjectionKind: FfiConverterRustBuffer<OperationProjectionKind> {
+    override fun read(buf: ByteBuffer) = try {
+        OperationProjectionKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: OperationProjectionKind) = 4UL
+
+    override fun write(value: OperationProjectionKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class OperationResolution {
+
+    PENDING,
+    APPLIED,
+    REJECTED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeOperationResolution: FfiConverterRustBuffer<OperationResolution> {
+    override fun read(buf: ByteBuffer) = try {
+        OperationResolution.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: OperationResolution) = 4UL
+
+    override fun write(value: OperationResolution, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 
@@ -11343,6 +11897,224 @@ public object FfiConverterTypePasskeyStatusReason: FfiConverterRustBuffer<Passke
 
 
 
+enum class RecoveryBound {
+
+    RECORD_BYTES,
+    ARCHIVE_BYTES,
+    RECORD_COUNT,
+    ARTIFACT_COUNT,
+    REPORT_BYTES,
+    SUMMARY_BYTES,
+    CONTROL_BYTES,
+    CURSOR_BYTES,
+    CHUNK_BYTES;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoveryBound: FfiConverterRustBuffer<RecoveryBound> {
+    override fun read(buf: ByteBuffer) = try {
+        RecoveryBound.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RecoveryBound) = 4UL
+
+    override fun write(value: RecoveryBound, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class RecoveryClassification {
+
+    COMPLETE,
+    PARTIAL;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoveryClassification: FfiConverterRustBuffer<RecoveryClassification> {
+    override fun read(buf: ByteBuffer) = try {
+        RecoveryClassification.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RecoveryClassification) = 4UL
+
+    override fun write(value: RecoveryClassification, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class RecoveryDeviceStatus {
+
+    FRESH_OR_UNKNOWN,
+    KNOWN_ACCOUNTS,
+    STORAGE_UNAVAILABLE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoveryDeviceStatus: FfiConverterRustBuffer<RecoveryDeviceStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        RecoveryDeviceStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RecoveryDeviceStatus) = 4UL
+
+    override fun write(value: RecoveryDeviceStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class RecoveryMaintenanceStatus {
+
+    AVAILABLE,
+    UNSUPPORTED,
+    BUSY,
+    UNAVAILABLE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoveryMaintenanceStatus: FfiConverterRustBuffer<RecoveryMaintenanceStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        RecoveryMaintenanceStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RecoveryMaintenanceStatus) = 4UL
+
+    override fun write(value: RecoveryMaintenanceStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class RecoverySchemaStatus {
+
+    SUPPORTED,
+    UNSUPPORTED,
+    UNKNOWN;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoverySchemaStatus: FfiConverterRustBuffer<RecoverySchemaStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        RecoverySchemaStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RecoverySchemaStatus) = 4UL
+
+    override fun write(value: RecoverySchemaStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class RecoveryStorageState {
+
+    READY,
+    CORRUPT,
+    MISSING,
+    UNKNOWN,
+    UNREADABLE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoveryStorageState: FfiConverterRustBuffer<RecoveryStorageState> {
+    override fun read(buf: ByteBuffer) = try {
+        RecoveryStorageState.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RecoveryStorageState) = 4UL
+
+    override fun write(value: RecoveryStorageState, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 enum class RuntimeErrorCode {
 
     RUNTIME_CLOSED,
@@ -11352,6 +12124,7 @@ enum class RuntimeErrorCode {
     ACCOUNT_FAILED,
     AUTHENTICATION_REQUIRED,
     AUTHENTICATION_UNAVAILABLE,
+    STORAGE_UNAVAILABLE,
     RETRYABLE_TRANSPORT,
     AUTHORITY_MISSING,
     ACCESS_DENIED,
@@ -11410,6 +12183,15 @@ sealed class RuntimeProjection: Disposable  {
         companion object
     }
 
+    data class Operations(
+        val `value`: uniffi.bittery_client_bindings.OperationsProjection) : RuntimeProjection()
+
+    {
+
+
+        companion object
+    }
+
     data class PendingShareResults(
         val `value`: uniffi.bittery_client_bindings.PendingShareResultsProjection) : RuntimeProjection()
 
@@ -11441,6 +12223,13 @@ sealed class RuntimeProjection: Disposable  {
 
             }
             is RuntimeProjection.Items -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is RuntimeProjection.Operations -> {
 
     Disposable.destroy(
         this.`value`
@@ -11484,10 +12273,13 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
             2 -> RuntimeProjection.Items(
                 FfiConverterTypeItemsProjection.read(buf),
                 )
-            3 -> RuntimeProjection.PendingShareResults(
+            3 -> RuntimeProjection.Operations(
+                FfiConverterTypeOperationsProjection.read(buf),
+                )
+            4 -> RuntimeProjection.PendingShareResults(
                 FfiConverterTypePendingShareResultsProjection.read(buf),
                 )
-            4 -> RuntimeProjection.RuntimeStatus(
+            5 -> RuntimeProjection.RuntimeStatus(
                 FfiConverterTypeRuntimeStatusProjection.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -11507,6 +12299,13 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
             (
                 4UL
                 + FfiConverterTypeItemsProjection.allocationSize(value.`value`)
+            )
+        }
+        is RuntimeProjection.Operations -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeOperationsProjection.allocationSize(value.`value`)
             )
         }
         is RuntimeProjection.PendingShareResults -> {
@@ -11537,13 +12336,18 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
                 FfiConverterTypeItemsProjection.write(value.`value`, buf)
                 Unit
             }
-            is RuntimeProjection.PendingShareResults -> {
+            is RuntimeProjection.Operations -> {
                 buf.putInt(3)
+                FfiConverterTypeOperationsProjection.write(value.`value`, buf)
+                Unit
+            }
+            is RuntimeProjection.PendingShareResults -> {
+                buf.putInt(4)
                 FfiConverterTypePendingShareResultsProjection.write(value.`value`, buf)
                 Unit
             }
             is RuntimeProjection.RuntimeStatus -> {
-                buf.putInt(4)
+                buf.putInt(5)
                 FfiConverterTypeRuntimeStatusProjection.write(value.`value`, buf)
                 Unit
             }
@@ -11556,6 +12360,46 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
 
 
 sealed class RuntimeRequest: Disposable  {
+
+    data class RebootstrapAccountRecovery(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class InspectRecovery(
+        val `accountId`: kotlin.String?) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ExportAccountRecovery(
+        val `accountId`: kotlin.String,
+        val `password`: uniffi.bittery_client_bindings.SecretString,
+        val `sinkCapabilityId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class RepairAccountRecovery(
+        val `accountId`: kotlin.String,
+        val `password`: uniffi.bittery_client_bindings.SecretString,
+        val `sourceCapabilityId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
 
     data class SignIn(
         val `serverUrl`: kotlin.String,
@@ -11740,6 +12584,36 @@ sealed class RuntimeRequest: Disposable  {
         companion object
     }
 
+    data class ListItemShareLinks(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ListShareAccessLogs(
+        val `accountId`: kotlin.String,
+        val `linkId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class RevokeShareLink(
+        val `accountId`: kotlin.String,
+        val `linkId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
     data class RenameAttachment(
         val `accountId`: kotlin.String,
         val `attachmentId`: kotlin.String,
@@ -11790,6 +12664,38 @@ sealed class RuntimeRequest: Disposable  {
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
     override fun destroy() {
         when(this) {
+            is RuntimeRequest.RebootstrapAccountRecovery -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.InspectRecovery -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.ExportAccountRecovery -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`password`,
+        this.`sinkCapabilityId`
+    )
+
+            }
+            is RuntimeRequest.RepairAccountRecovery -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`password`,
+        this.`sourceCapabilityId`
+    )
+
+            }
             is RuntimeRequest.SignIn -> {
 
     Disposable.destroy(
@@ -11938,6 +12844,30 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.ListItemShareLinks -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`
+    )
+
+            }
+            is RuntimeRequest.ListShareAccessLogs -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`linkId`
+    )
+
+            }
+            is RuntimeRequest.RevokeShareLink -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`linkId`
+    )
+
+            }
             is RuntimeRequest.RenameAttachment -> {
 
     Disposable.destroy(
@@ -11992,100 +12922,128 @@ sealed class RuntimeRequest: Disposable  {
 public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeRequest>{
     override fun read(buf: ByteBuffer): RuntimeRequest {
         return when(buf.getInt()) {
-            1 -> RuntimeRequest.SignIn(
+            1 -> RuntimeRequest.RebootstrapAccountRecovery(
+                FfiConverterString.read(buf),
+                )
+            2 -> RuntimeRequest.InspectRecovery(
+                FfiConverterOptionalString.read(buf),
+                )
+            3 -> RuntimeRequest.ExportAccountRecovery(
+                FfiConverterString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            4 -> RuntimeRequest.RepairAccountRecovery(
+                FfiConverterString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            5 -> RuntimeRequest.SignIn(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            2 -> RuntimeRequest.QuickUnlock(
+            6 -> RuntimeRequest.QuickUnlock(
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 )
-            3 -> RuntimeRequest.Lock(
+            7 -> RuntimeRequest.Lock(
                 FfiConverterString.read(buf),
                 )
-            4 -> RuntimeRequest.SignOut(
+            8 -> RuntimeRequest.SignOut(
                 FfiConverterString.read(buf),
                 )
-            5 -> RuntimeRequest.RemoveAccount(
+            9 -> RuntimeRequest.RemoveAccount(
                 FfiConverterString.read(buf),
                 )
-            6 -> RuntimeRequest.DeleteServerAccount(
+            10 -> RuntimeRequest.DeleteServerAccount(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            7 -> RuntimeRequest.Wipe
-            8 -> RuntimeRequest.CreateVault(
+            11 -> RuntimeRequest.Wipe
+            12 -> RuntimeRequest.CreateVault(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeCreateVaultType.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterOptionalTypeVaultImageSourceInput.read(buf),
                 )
-            9 -> RuntimeRequest.CreateItem(
+            13 -> RuntimeRequest.CreateItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeItemDraft.read(buf),
                 )
-            10 -> RuntimeRequest.ImportItems(
+            14 -> RuntimeRequest.ImportItems(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterSequenceTypeImportItemDraft.read(buf),
                 )
-            11 -> RuntimeRequest.UpdateItem(
+            15 -> RuntimeRequest.UpdateItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeItemDraft.read(buf),
                 )
-            12 -> RuntimeRequest.SetItemFavorite(
+            16 -> RuntimeRequest.SetItemFavorite(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            13 -> RuntimeRequest.TrashItem(
+            17 -> RuntimeRequest.TrashItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            14 -> RuntimeRequest.RestoreItem(
+            18 -> RuntimeRequest.RestoreItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            15 -> RuntimeRequest.MoveItem(
+            19 -> RuntimeRequest.MoveItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            16 -> RuntimeRequest.PermanentlyDeleteItem(
+            20 -> RuntimeRequest.PermanentlyDeleteItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            17 -> RuntimeRequest.CreateShare(
+            21 -> RuntimeRequest.CreateShare(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeCreateShareDraft.read(buf),
                 )
-            18 -> RuntimeRequest.AcknowledgeShareResult(
+            22 -> RuntimeRequest.AcknowledgeShareResult(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            19 -> RuntimeRequest.RenameAttachment(
+            23 -> RuntimeRequest.ListItemShareLinks(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            24 -> RuntimeRequest.ListShareAccessLogs(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            25 -> RuntimeRequest.RevokeShareLink(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            26 -> RuntimeRequest.RenameAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeAttachmentName.read(buf),
                 )
-            20 -> RuntimeRequest.DeleteAttachment(
+            27 -> RuntimeRequest.DeleteAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            21 -> RuntimeRequest.DownloadAttachment(
+            28 -> RuntimeRequest.DownloadAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            22 -> RuntimeRequest.UploadAttachment(
+            29 -> RuntimeRequest.UploadAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeAttachmentUploadMetadata.read(buf),
@@ -12097,6 +13055,38 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
     }
 
     override fun allocationSize(value: RuntimeRequest) = when(value) {
+        is RuntimeRequest.RebootstrapAccountRecovery -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.InspectRecovery -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterOptionalString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.ExportAccountRecovery -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeSecretString.allocationSize(value.`password`)
+                + FfiConverterString.allocationSize(value.`sinkCapabilityId`)
+            )
+        }
+        is RuntimeRequest.RepairAccountRecovery -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeSecretString.allocationSize(value.`password`)
+                + FfiConverterString.allocationSize(value.`sourceCapabilityId`)
+            )
+        }
         is RuntimeRequest.SignIn -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -12249,6 +13239,30 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterString.allocationSize(value.`operationId`)
             )
         }
+        is RuntimeRequest.ListItemShareLinks -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+            )
+        }
+        is RuntimeRequest.ListShareAccessLogs -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`linkId`)
+            )
+        }
+        is RuntimeRequest.RevokeShareLink -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`linkId`)
+            )
+        }
         is RuntimeRequest.RenameAttachment -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -12290,8 +13304,32 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
 
     override fun write(value: RuntimeRequest, buf: ByteBuffer) {
         when(value) {
-            is RuntimeRequest.SignIn -> {
+            is RuntimeRequest.RebootstrapAccountRecovery -> {
                 buf.putInt(1)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.InspectRecovery -> {
+                buf.putInt(2)
+                FfiConverterOptionalString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ExportAccountRecovery -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeSecretString.write(value.`password`, buf)
+                FfiConverterString.write(value.`sinkCapabilityId`, buf)
+                Unit
+            }
+            is RuntimeRequest.RepairAccountRecovery -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeSecretString.write(value.`password`, buf)
+                FfiConverterString.write(value.`sourceCapabilityId`, buf)
+                Unit
+            }
+            is RuntimeRequest.SignIn -> {
+                buf.putInt(5)
                 FfiConverterString.write(value.`serverUrl`, buf)
                 FfiConverterString.write(value.`email`, buf)
                 FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
@@ -12300,39 +13338,39 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 Unit
             }
             is RuntimeRequest.QuickUnlock -> {
-                buf.putInt(2)
+                buf.putInt(6)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
                 Unit
             }
             is RuntimeRequest.Lock -> {
-                buf.putInt(3)
+                buf.putInt(7)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.SignOut -> {
-                buf.putInt(4)
+                buf.putInt(8)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.RemoveAccount -> {
-                buf.putInt(5)
+                buf.putInt(9)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.DeleteServerAccount -> {
-                buf.putInt(6)
+                buf.putInt(10)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`confirmEmail`, buf)
                 FfiConverterString.write(value.`requestId`, buf)
                 Unit
             }
             is RuntimeRequest.Wipe -> {
-                buf.putInt(7)
+                buf.putInt(11)
                 Unit
             }
             is RuntimeRequest.CreateVault -> {
-                buf.putInt(8)
+                buf.putInt(12)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`name`, buf)
                 FfiConverterTypeCreateVaultType.write(value.`vaultType`, buf)
@@ -12341,93 +13379,111 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 Unit
             }
             is RuntimeRequest.CreateItem -> {
-                buf.putInt(9)
+                buf.putInt(13)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterTypeItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.ImportItems -> {
-                buf.putInt(10)
+                buf.putInt(14)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterSequenceTypeImportItemDraft.write(value.`items`, buf)
                 Unit
             }
             is RuntimeRequest.UpdateItem -> {
-                buf.putInt(11)
+                buf.putInt(15)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.SetItemFavorite -> {
-                buf.putInt(12)
+                buf.putInt(16)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterBoolean.write(value.`favorite`, buf)
                 Unit
             }
             is RuntimeRequest.TrashItem -> {
-                buf.putInt(13)
+                buf.putInt(17)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.RestoreItem -> {
-                buf.putInt(14)
+                buf.putInt(18)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.MoveItem -> {
-                buf.putInt(15)
+                buf.putInt(19)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`targetVaultId`, buf)
                 Unit
             }
             is RuntimeRequest.PermanentlyDeleteItem -> {
-                buf.putInt(16)
+                buf.putInt(20)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.CreateShare -> {
-                buf.putInt(17)
+                buf.putInt(21)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeCreateShareDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.AcknowledgeShareResult -> {
-                buf.putInt(18)
+                buf.putInt(22)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
+            is RuntimeRequest.ListItemShareLinks -> {
+                buf.putInt(23)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ListShareAccessLogs -> {
+                buf.putInt(24)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`linkId`, buf)
+                Unit
+            }
+            is RuntimeRequest.RevokeShareLink -> {
+                buf.putInt(25)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`linkId`, buf)
+                Unit
+            }
             is RuntimeRequest.RenameAttachment -> {
-                buf.putInt(19)
+                buf.putInt(26)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterTypeAttachmentName.write(value.`name`, buf)
                 Unit
             }
             is RuntimeRequest.DeleteAttachment -> {
-                buf.putInt(20)
+                buf.putInt(27)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeRequest.DownloadAttachment -> {
-                buf.putInt(21)
+                buf.putInt(28)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterString.write(value.`sinkCapabilityId`, buf)
                 Unit
             }
             is RuntimeRequest.UploadAttachment -> {
-                buf.putInt(22)
+                buf.putInt(29)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeAttachmentUploadMetadata.write(value.`metadata`, buf)
@@ -12444,6 +13500,36 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
 
 
 sealed class RuntimeResponse {
+
+    data class RecoveryDiagnosed(
+        val `diagnostics`: uniffi.bittery_client_bindings.StorageRecoveryDiagnostics) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RecoveryExported(
+        val `accountId`: kotlin.String,
+        val `classification`: uniffi.bittery_client_bindings.RecoveryClassification,
+        val `byteLength`: kotlin.ULong) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RecoveryRepaired(
+        val `accountId`: kotlin.String,
+        val `replicaRevision`: kotlin.ULong) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
 
     data class SignedIn(
         val `accountId`: kotlin.String,
@@ -12520,6 +13606,39 @@ sealed class RuntimeResponse {
         companion object
     }
 
+    data class ItemShareLinks(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
+        val `links`: List<uniffi.bittery_client_bindings.ShareLinkSummary>,
+        val `baseShareUrl`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class ShareAccessLogs(
+        val `accountId`: kotlin.String,
+        val `linkId`: kotlin.String,
+        val `logs`: List<uniffi.bittery_client_bindings.ShareAccessLog>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class ShareLinkRevoked(
+        val `accountId`: kotlin.String,
+        val `linkId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
     data class AttachmentRenamed(
         val `accountId`: kotlin.String,
         val `attachmentId`: kotlin.String) : RuntimeResponse()
@@ -12587,56 +13706,83 @@ sealed class RuntimeResponse {
 public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeResponse>{
     override fun read(buf: ByteBuffer): RuntimeResponse {
         return when(buf.getInt()) {
-            1 -> RuntimeResponse.SignedIn(
+            1 -> RuntimeResponse.RecoveryDiagnosed(
+                FfiConverterTypeStorageRecoveryDiagnostics.read(buf),
+                )
+            2 -> RuntimeResponse.RecoveryExported(
+                FfiConverterString.read(buf),
+                FfiConverterTypeRecoveryClassification.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            3 -> RuntimeResponse.RecoveryRepaired(
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            4 -> RuntimeResponse.SignedIn(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            2 -> RuntimeResponse.AccessChanged(
+            5 -> RuntimeResponse.AccessChanged(
                 FfiConverterString.read(buf),
                 FfiConverterTypeAccountAccessState.read(buf),
                 )
-            3 -> RuntimeResponse.ServerAccountDeletion(
+            6 -> RuntimeResponse.ServerAccountDeletion(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeServerAccountDeletionOutcome.read(buf),
                 )
-            4 -> RuntimeResponse.Accepted(
+            7 -> RuntimeResponse.Accepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            5 -> RuntimeResponse.VaultCreationAccepted(
+            8 -> RuntimeResponse.VaultCreationAccepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            6 -> RuntimeResponse.ImportBatchAccepted(
+            9 -> RuntimeResponse.ImportBatchAccepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterSequenceString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            7 -> RuntimeResponse.ShareResultAcknowledged(
+            10 -> RuntimeResponse.ShareResultAcknowledged(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            8 -> RuntimeResponse.AttachmentRenamed(
+            11 -> RuntimeResponse.ItemShareLinks(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterSequenceTypeShareLinkSummary.read(buf),
+                FfiConverterString.read(buf),
+                )
+            12 -> RuntimeResponse.ShareAccessLogs(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterSequenceTypeShareAccessLog.read(buf),
+                )
+            13 -> RuntimeResponse.ShareLinkRevoked(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            9 -> RuntimeResponse.AttachmentDeleted(
+            14 -> RuntimeResponse.AttachmentRenamed(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            10 -> RuntimeResponse.AttachmentDownloaded(
+            15 -> RuntimeResponse.AttachmentDeleted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            11 -> RuntimeResponse.AttachmentUploaded(
+            16 -> RuntimeResponse.AttachmentDownloaded(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            17 -> RuntimeResponse.AttachmentUploaded(
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            12 -> RuntimeResponse.Teardown(
+            18 -> RuntimeResponse.Teardown(
                 FfiConverterTypeTeardownScope.read(buf),
                 FfiConverterTypeTeardownStatus.read(buf),
                 FfiConverterSequenceTypeTeardownPhase.read(buf),
@@ -12646,6 +13792,30 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
     }
 
     override fun allocationSize(value: RuntimeResponse) = when(value) {
+        is RuntimeResponse.RecoveryDiagnosed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeStorageRecoveryDiagnostics.allocationSize(value.`diagnostics`)
+            )
+        }
+        is RuntimeResponse.RecoveryExported -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeRecoveryClassification.allocationSize(value.`classification`)
+                + FfiConverterULong.allocationSize(value.`byteLength`)
+            )
+        }
+        is RuntimeResponse.RecoveryRepaired -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterULong.allocationSize(value.`replicaRevision`)
+            )
+        }
         is RuntimeResponse.SignedIn -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -12707,6 +13877,33 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 + FfiConverterString.allocationSize(value.`operationId`)
             )
         }
+        is RuntimeResponse.ItemShareLinks -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterSequenceTypeShareLinkSummary.allocationSize(value.`links`)
+                + FfiConverterString.allocationSize(value.`baseShareUrl`)
+            )
+        }
+        is RuntimeResponse.ShareAccessLogs -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`linkId`)
+                + FfiConverterSequenceTypeShareAccessLog.allocationSize(value.`logs`)
+            )
+        }
+        is RuntimeResponse.ShareLinkRevoked -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`linkId`)
+            )
+        }
         is RuntimeResponse.AttachmentRenamed -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -12752,41 +13949,59 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
 
     override fun write(value: RuntimeResponse, buf: ByteBuffer) {
         when(value) {
-            is RuntimeResponse.SignedIn -> {
+            is RuntimeResponse.RecoveryDiagnosed -> {
                 buf.putInt(1)
+                FfiConverterTypeStorageRecoveryDiagnostics.write(value.`diagnostics`, buf)
+                Unit
+            }
+            is RuntimeResponse.RecoveryExported -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeRecoveryClassification.write(value.`classification`, buf)
+                FfiConverterULong.write(value.`byteLength`, buf)
+                Unit
+            }
+            is RuntimeResponse.RecoveryRepaired -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterULong.write(value.`replicaRevision`, buf)
+                Unit
+            }
+            is RuntimeResponse.SignedIn -> {
+                buf.putInt(4)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`userId`, buf)
                 Unit
             }
             is RuntimeResponse.AccessChanged -> {
-                buf.putInt(2)
+                buf.putInt(5)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterTypeAccountAccessState.write(value.`access`, buf)
                 Unit
             }
             is RuntimeResponse.ServerAccountDeletion -> {
-                buf.putInt(3)
+                buf.putInt(6)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`requestId`, buf)
                 FfiConverterTypeServerAccountDeletionOutcome.write(value.`outcome`, buf)
                 Unit
             }
             is RuntimeResponse.Accepted -> {
-                buf.putInt(4)
+                buf.putInt(7)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
             is RuntimeResponse.VaultCreationAccepted -> {
-                buf.putInt(5)
+                buf.putInt(8)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
             is RuntimeResponse.ImportBatchAccepted -> {
-                buf.putInt(6)
+                buf.putInt(9)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterSequenceString.write(value.`itemIds`, buf)
@@ -12794,37 +14009,58 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 Unit
             }
             is RuntimeResponse.ShareResultAcknowledged -> {
-                buf.putInt(7)
+                buf.putInt(10)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
+            is RuntimeResponse.ItemShareLinks -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterSequenceTypeShareLinkSummary.write(value.`links`, buf)
+                FfiConverterString.write(value.`baseShareUrl`, buf)
+                Unit
+            }
+            is RuntimeResponse.ShareAccessLogs -> {
+                buf.putInt(12)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`linkId`, buf)
+                FfiConverterSequenceTypeShareAccessLog.write(value.`logs`, buf)
+                Unit
+            }
+            is RuntimeResponse.ShareLinkRevoked -> {
+                buf.putInt(13)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`linkId`, buf)
+                Unit
+            }
             is RuntimeResponse.AttachmentRenamed -> {
-                buf.putInt(8)
+                buf.putInt(14)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentDeleted -> {
-                buf.putInt(9)
+                buf.putInt(15)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentDownloaded -> {
-                buf.putInt(10)
+                buf.putInt(16)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentUploaded -> {
-                buf.putInt(11)
+                buf.putInt(17)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
             is RuntimeResponse.Teardown -> {
-                buf.putInt(12)
+                buf.putInt(18)
                 FfiConverterTypeTeardownScope.write(value.`scope`, buf)
                 FfiConverterTypeTeardownStatus.write(value.`status`, buf)
                 FfiConverterSequenceTypeTeardownPhase.write(value.`failures`, buf)
@@ -12936,6 +14172,42 @@ public object FfiConverterTypeShareExpiration: FfiConverterRustBuffer<ShareExpir
     override fun allocationSize(value: ShareExpiration) = 4UL
 
     override fun write(value: ShareExpiration, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class ShareLinkStatus {
+
+    ACTIVE,
+    EXPIRED,
+    EXHAUSTED,
+    REVOKED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShareLinkStatus: FfiConverterRustBuffer<ShareLinkStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        ShareLinkStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ShareLinkStatus) = 4UL
+
+    override fun write(value: ShareLinkStatus, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -13234,6 +14506,38 @@ public object FfiConverterTypeVaultProjectionType: FfiConverterRustBuffer<VaultP
 /**
  * @suppress
  */
+public object FfiConverterOptionalUShort: FfiConverterRustBuffer<kotlin.UShort?> {
+    override fun read(buf: ByteBuffer): kotlin.UShort? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUShort.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UShort?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUShort.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UShort?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUShort.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
     override fun read(buf: ByteBuffer): kotlin.UInt? {
         if (buf.get().toInt() == 0) {
@@ -13256,6 +14560,38 @@ public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
         } else {
             buf.put(1)
             FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalInt: FfiConverterRustBuffer<kotlin.Int?> {
+    override fun read(buf: ByteBuffer): kotlin.Int? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Int?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Int?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterInt.write(value, buf)
         }
     }
 }
@@ -13448,6 +14784,38 @@ public object FfiConverterOptionalTypePasskeyStatusReason: FfiConverterRustBuffe
         } else {
             buf.put(1)
             FfiConverterTypePasskeyStatusReason.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeRecoveryBound: FfiConverterRustBuffer<RecoveryBound?> {
+    override fun read(buf: ByteBuffer): RecoveryBound? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRecoveryBound.read(buf)
+    }
+
+    override fun allocationSize(value: RecoveryBound?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRecoveryBound.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RecoveryBound?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRecoveryBound.write(value, buf)
         }
     }
 }
@@ -13852,6 +15220,146 @@ public object FfiConverterSequenceTypeImportItemDraft: FfiConverterRustBuffer<Li
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeImportItemDraft.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeOperationProjection: FfiConverterRustBuffer<List<OperationProjection>> {
+    override fun read(buf: ByteBuffer): List<OperationProjection> {
+        val len = buf.getInt()
+        return List<OperationProjection>(len) {
+            FfiConverterTypeOperationProjection.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<OperationProjection>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeOperationProjection.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<OperationProjection>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeOperationProjection.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeShareAccessLog: FfiConverterRustBuffer<List<ShareAccessLog>> {
+    override fun read(buf: ByteBuffer): List<ShareAccessLog> {
+        val len = buf.getInt()
+        return List<ShareAccessLog>(len) {
+            FfiConverterTypeShareAccessLog.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ShareAccessLog>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeShareAccessLog.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ShareAccessLog>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeShareAccessLog.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeShareAllowedEmail: FfiConverterRustBuffer<List<ShareAllowedEmail>> {
+    override fun read(buf: ByteBuffer): List<ShareAllowedEmail> {
+        val len = buf.getInt()
+        return List<ShareAllowedEmail>(len) {
+            FfiConverterTypeShareAllowedEmail.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ShareAllowedEmail>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeShareAllowedEmail.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ShareAllowedEmail>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeShareAllowedEmail.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeShareLinkSummary: FfiConverterRustBuffer<List<ShareLinkSummary>> {
+    override fun read(buf: ByteBuffer): List<ShareLinkSummary> {
+        val len = buf.getInt()
+        return List<ShareLinkSummary>(len) {
+            FfiConverterTypeShareLinkSummary.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ShareLinkSummary>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeShareLinkSummary.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ShareLinkSummary>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeShareLinkSummary.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeStorageRecoveryAccount: FfiConverterRustBuffer<List<StorageRecoveryAccount>> {
+    override fun read(buf: ByteBuffer): List<StorageRecoveryAccount> {
+        val len = buf.getInt()
+        return List<StorageRecoveryAccount>(len) {
+            FfiConverterTypeStorageRecoveryAccount.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<StorageRecoveryAccount>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeStorageRecoveryAccount.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<StorageRecoveryAccount>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeStorageRecoveryAccount.write(it, buf)
         }
     }
 }

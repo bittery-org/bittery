@@ -49,6 +49,9 @@ mod import_executor;
 #[cfg(test)]
 mod import_tests;
 mod install;
+mod live_sync;
+#[cfg(test)]
+mod live_sync_tests;
 mod lock;
 mod open;
 #[cfg(test)]
@@ -56,7 +59,11 @@ mod operation_fixtures;
 mod outcome;
 #[cfg(test)]
 mod outcome_tests;
+mod recovery;
 mod server_account_deletion;
+mod share_management;
+#[cfg(test)]
+mod share_management_tests;
 #[cfg(test)]
 mod share_outcome_tests;
 mod teardown;
@@ -517,6 +524,7 @@ pub struct Runtime {
     next_observer_id: AtomicU64,
     device_revision: AtomicU64,
     closed: AtomicBool,
+    storage_recovery: recovery::StorageRecovery,
     ready: AtomicBool,
     close_complete: AtomicBool,
     close_state_cleaned: AtomicBool,
@@ -553,6 +561,8 @@ pub struct Runtime {
     /// Wakes the dispatcher when something that can change eligibility happened: work was
     /// accepted, a Session arrived, or the Runtime is closing.
     dispatch_wake: tokio::sync::Notify,
+    live_sync_wake: tokio::sync::Notify,
+    live_sync_active: AtomicBool,
     dispatch_leases: Arc<DispatchLeases>,
     attachment_move_scheduler: Mutex<Option<Arc<AttachmentMovePreparationScheduler>>>,
     attachment_move_lifecycle: Mutex<Option<Arc<AttachmentMoveLifecycle>>>,
@@ -917,6 +927,7 @@ impl Runtime {
             next_observer_id: AtomicU64::new(1),
             device_revision: AtomicU64::new(0),
             closed: AtomicBool::new(false),
+            storage_recovery: recovery::StorageRecovery::default(),
             ready: AtomicBool::new(ready),
             close_complete: AtomicBool::new(false),
             close_state_cleaned: AtomicBool::new(false),
@@ -951,6 +962,8 @@ impl Runtime {
             clock,
             device_timer,
             dispatch_wake: tokio::sync::Notify::new(),
+            live_sync_wake: tokio::sync::Notify::new(),
+            live_sync_active: AtomicBool::new(false),
             dispatch_leases: Arc::new(DispatchLeases::default()),
             attachment_move_scheduler: Mutex::new(None),
             attachment_move_lifecycle: Mutex::new(None),
@@ -1128,21 +1141,6 @@ impl Runtime {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) async fn retry_pending_vault_image_acceptance_cleanup(&self) {
-        let pending: Vec<_> = self
-            .pending_vault_image_acceptance_cleanup
-            .lock()
-            .expect("Vault image acceptance cleanup lock poisoned")
-            .iter()
-            .cloned()
-            .collect();
-        for (account_id, operation_id) in pending {
-            self.finish_vault_image_acceptance_cleanup(&account_id, &operation_id)
-                .await;
-        }
-    }
-
     async fn sweep_vault_images_for_snapshot(
         &self,
         snapshot: &crate::replica::ReplicaSnapshot,
@@ -1159,14 +1157,20 @@ impl Runtime {
                 .as_ref()
                 .is_some_and(|intent| intent.image.is_some())
         }) {
-            // The accepted Operation is the durable discovery record for a response-lost
-            // end-acceptance cleanup. Restart can therefore repeat the idempotent release without
-            // inventing a second local obligation or accepting the request again.
-            self.finish_vault_image_acceptance_cleanup(
-                &snapshot.account_id,
-                &operation.operation_id,
-            )
-            .await;
+            // Acceptance release belongs to this Runtime's source grant. A restored durable
+            // Operation has no handshake in the new owner, even though its image stays live.
+            let pending = self
+                .pending_vault_image_acceptance_cleanup
+                .lock()
+                .expect("Vault image acceptance cleanup lock poisoned")
+                .contains(&(snapshot.account_id.clone(), operation.operation_id.clone()));
+            if pending {
+                self.finish_vault_image_acceptance_cleanup(
+                    &snapshot.account_id,
+                    &operation.operation_id,
+                )
+                .await;
+            }
         }
         let referenced_operations = snapshot
             .operations
@@ -1469,6 +1473,15 @@ impl Runtime {
         before_acceptance: impl FnOnce(),
         accepted: impl FnOnce(),
     ) -> Result<RuntimeResponse, RuntimeError> {
+        if matches!(
+            &request,
+            RuntimeRequest::RebootstrapAccountRecovery { .. }
+                | RuntimeRequest::InspectRecovery { .. }
+                | RuntimeRequest::ExportAccountRecovery { .. }
+                | RuntimeRequest::RepairAccountRecovery { .. }
+        ) {
+            return self.request_storage_recovery(request, cancellation).await;
+        }
         match &request {
             RuntimeRequest::RemoveAccount { account_id } => {
                 return self.remove_account(account_id.clone()).await;
@@ -1495,6 +1508,18 @@ impl Runtime {
                     });
             }
             _ => {}
+        }
+        if matches!(
+            &request,
+            RuntimeRequest::ListItemShareLinks { .. }
+                | RuntimeRequest::ListShareAccessLogs { .. }
+                | RuntimeRequest::RevokeShareLink { .. }
+        ) {
+            let teardown_admission = self.teardown_admission.read().await;
+            self.reject_request_during_pending_teardown(&request)?;
+            return self
+                .manage_share(request, cancellation, teardown_admission)
+                .await;
         }
         if let RuntimeRequest::RenameAttachment {
             account_id,
@@ -1578,6 +1603,13 @@ impl Runtime {
         let _admission = self.teardown_admission.read().await;
         self.reject_request_during_pending_teardown(&request)?;
         match request {
+            RuntimeRequest::RebootstrapAccountRecovery { .. }
+            | RuntimeRequest::InspectRecovery { .. }
+            | RuntimeRequest::ExportAccountRecovery { .. }
+            | RuntimeRequest::RepairAccountRecovery { .. } => Err(RuntimeError::new(
+                RuntimeErrorCode::StorageUnavailable,
+                "Recovery executor is not installed",
+            )),
             RuntimeRequest::SignIn {
                 server_url,
                 email,
@@ -1917,6 +1949,11 @@ impl Runtime {
                 self.acknowledge_share_result(account_id, operation_id, cancellation)
                     .await
             }
+            RuntimeRequest::ListItemShareLinks { .. }
+            | RuntimeRequest::ListShareAccessLogs { .. }
+            | RuntimeRequest::RevokeShareLink { .. } => {
+                unreachable!("Share management is handled before ordinary admission")
+            }
             RuntimeRequest::RenameAttachment { .. } => unreachable!(
                 "Rename is handled before ordinary admission so callback delivery can release it"
             ),
@@ -2023,6 +2060,7 @@ impl Runtime {
     }
 
     pub(crate) fn publish_all(&self) {
+        self.live_sync_wake.notify_waiters();
         let subscriptions: Vec<_> = self
             .observers
             .lock()
@@ -2063,6 +2101,10 @@ impl Runtime {
     }
 
     pub async fn close(&self) {
+        self.close_with_recovery().await;
+    }
+
+    async fn close_normal_owner(&self) {
         if self.closed.swap(true, Ordering::SeqCst) {
             self.wake_dispatch();
             let reentrant_delivery = ActiveRuntimeDelivery::is_active(self.identity());
@@ -2325,6 +2367,17 @@ impl Runtime {
         server_url: String,
         mode: String,
     ) -> Result<String, RuntimeError> {
+        self.seed_attachment_upload_binding_test_account(server_url, mode, false)
+            .await
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    async fn seed_attachment_upload_binding_test_account(
+        &self,
+        server_url: String,
+        mode: String,
+        second_account: bool,
+    ) -> Result<String, RuntimeError> {
         use crate::{
             platform_storage::{AccountMetadataDocument, CurrentSessionDocument},
             replica::{AuthorityItemCategory, AuthorityItemRecord},
@@ -2340,9 +2393,17 @@ impl Runtime {
                 "binding Upload seed mode is invalid",
             ));
         }
-        let account_id = AccountId::from("account-1");
-        let incarnation = crate::Incarnation::from("joined-upload-incarnation");
-        let user_id = "user-1".to_owned();
+        let account_id = AccountId::from(if second_account {
+            "account-2"
+        } else {
+            "account-1"
+        });
+        let incarnation = crate::Incarnation::from(if second_account {
+            "joined-import-second-incarnation"
+        } else {
+            "joined-upload-incarnation"
+        });
+        let user_id = if second_account { "user-2" } else { "user-1" }.to_owned();
         let item_id = "item-existing";
         let draft = crate::LoginItemData {
             title: "Joined Upload Item".into(),
@@ -2447,7 +2508,12 @@ impl Runtime {
                 account_id.clone(),
                 incarnation.clone(),
                 user_id.clone(),
-                "joined@example.test".into(),
+                if second_account {
+                    "joined-second@example.test"
+                } else {
+                    "joined@example.test"
+                }
+                .into(),
                 "Joined Upload".into(),
                 server_url,
                 None,
@@ -2465,7 +2531,12 @@ impl Runtime {
             .store_current_session(&CurrentSessionDocument::new(
                 account_id.clone(),
                 incarnation.clone(),
-                "joined-session-token".into(),
+                if second_account {
+                    "joined-second-session-token"
+                } else {
+                    "joined-session-token"
+                }
+                .into(),
                 Some("joined-session".into()),
                 4_102_444_800_000,
                 Some(4_102_444_800_000),
@@ -2487,8 +2558,11 @@ impl Runtime {
         self.account_lock_epochs
             .lock()
             .expect("Account lock epoch lock poisoned")
-            .insert(account_id, snapshot.lock_epoch);
-        self.decrypt_visible_items(&AccountId::from("account-1"))?;
+            .insert(account_id.clone(), snapshot.lock_epoch);
+        self.decrypt_visible_items(&account_id)?;
+        if second_account {
+            self.note_session_available(&account_id);
+        }
         serde_json::to_string(&serde_json::json!({
             "id": item_id,
             "vaultId": TEST_VAULT_ID,
@@ -2500,7 +2574,7 @@ impl Runtime {
             "encryptionVersion": 1,
             "version": 1,
             "encryptedByUserId": user_id,
-            "lastModifiedBy": "user-1",
+            "lastModifiedBy": user_id,
             "createdAt": "2026-08-30T00:00:00Z",
             "updatedAt": "2026-08-30T00:00:00Z",
             "deletedAt": null,
@@ -2522,12 +2596,14 @@ impl Runtime {
         &self,
         server_url: String,
         pause_checkpoint: Option<String>,
+        second_account: bool,
     ) -> Result<(), RuntimeError> {
         use crate::{
             platform_storage::{AccountMetadataDocument, CurrentSessionDocument},
             test_fixtures::TEST_MASTER_UNLOCK_KEY,
         };
 
+        let server_url_for_second_account = server_url.clone();
         let pause_checkpoint = match pause_checkpoint.as_deref() {
             None => None,
             Some("artifactReady") => Some(crate::replica::CreateVaultCheckpoint::ArtifactReady),
@@ -2612,6 +2688,14 @@ impl Runtime {
             .expect("Account lock epoch lock poisoned")
             .insert(account_id, snapshot.lock_epoch);
         self.note_session_available(&AccountId::from("account-1"));
+        if second_account {
+            self.seed_attachment_upload_binding_test_account(
+                server_url_for_second_account,
+                "writable".into(),
+                true,
+            )
+            .await?;
+        }
         Ok(())
     }
 
@@ -2674,6 +2758,79 @@ impl Runtime {
                             vaults,
                         },
                     ),
+                    generation: None,
+                    token: None,
+                })
+            }
+            ObservationRequest::Operations { account_id } => {
+                let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
+                    RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+                })?;
+                let mut operations = snapshot
+                    .operations
+                    .iter()
+                    .map(|operation| crate::OperationProjection {
+                        operation_id: operation.operation_id.clone(),
+                        kind: operation.kind.into(),
+                        attempt_count: Some(operation.scheduling.attempt_count.to_string()),
+                        next_attempt_at_ms: Some(operation.scheduling.not_before_ms.to_string()),
+                        resolution: crate::OperationResolution::Pending,
+                        imported_count: None,
+                        rejection_code: None,
+                    })
+                    .collect::<Vec<_>>();
+                operations.extend(snapshot.receipts.iter().map(|receipt| {
+                    use crate::replica::OperationOutcomeResult;
+                    let (resolution, imported_count, rejection_code) = match &receipt.result {
+                        OperationOutcomeResult::ImportApplied { imported_count, .. } => (
+                            crate::OperationResolution::Applied,
+                            Some(*imported_count),
+                            None,
+                        ),
+                        OperationOutcomeResult::Rejected { code } => (
+                            crate::OperationResolution::Rejected,
+                            None,
+                            serde_json::to_value(code)
+                                .ok()
+                                .and_then(|v| v.as_str().map(str::to_owned)),
+                        ),
+                        OperationOutcomeResult::VaultRejected { code } => (
+                            crate::OperationResolution::Rejected,
+                            None,
+                            serde_json::to_value(code)
+                                .ok()
+                                .and_then(|v| v.as_str().map(str::to_owned)),
+                        ),
+                        OperationOutcomeResult::ImportRejected { code } => (
+                            crate::OperationResolution::Rejected,
+                            None,
+                            serde_json::to_value(code)
+                                .ok()
+                                .and_then(|v| v.as_str().map(str::to_owned)),
+                        ),
+                        OperationOutcomeResult::Applied { .. }
+                        | OperationOutcomeResult::ShareApplied { .. }
+                        | OperationOutcomeResult::VaultApplied { .. } => {
+                            (crate::OperationResolution::Applied, None, None)
+                        }
+                    };
+                    crate::OperationProjection {
+                        operation_id: receipt.operation_id.clone(),
+                        kind: receipt.kind.into(),
+                        attempt_count: None,
+                        next_attempt_at_ms: None,
+                        resolution,
+                        imported_count,
+                        rejection_code,
+                    }
+                }));
+                operations.sort_by(|left, right| left.operation_id.cmp(&right.operation_id));
+                Ok(ProjectedDelivery {
+                    projection: RuntimeProjection::Operations(crate::OperationsProjection {
+                        account_id: account_id.clone(),
+                        replica_revision: snapshot.revision,
+                        operations,
+                    }),
                     generation: None,
                     token: None,
                 })
@@ -3003,6 +3160,12 @@ fn reconcile_catalog_account(
     ),
     RuntimeError,
 > {
+    if snapshot.is_none() && account.active_incarnation.is_some() {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::StorageUnavailable,
+            "active Account catalog survives but its durable Replica is missing",
+        ));
+    }
     let Some(pending) = &account.pending_install else {
         let active = account
             .active_incarnation

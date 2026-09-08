@@ -43,6 +43,9 @@ class FocusedDownloadRuntime {
 		this.#binary = binary;
 	}
 
+	// This focused double exercises Download; production composition still installs recovery.
+	setRecoveryExecutor(): void {}
+
 	async open(): Promise<void> {
 		if (
 			timerMode === "open-once" &&

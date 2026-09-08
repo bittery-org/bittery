@@ -1042,7 +1042,7 @@ impl Runtime {
             ));
         }
         let (_item, vault) = item_and_vault(&snapshot, &item_id)?;
-        if item_has_optimistic_owner(&snapshot, &item_id) {
+        if snapshot.item_has_optimistic_owner(&item_id) {
             return Err(retryable(
                 "an optimistic Item owner must reconcile before Attachment Upload",
             ));
@@ -1280,7 +1280,7 @@ impl Runtime {
         if current_item_id != item_id || current_vault_id != vault_id {
             return Err(retryable("Attachment authority changed before Delete"));
         }
-        if item_has_optimistic_owner(&snapshot, &item_id) {
+        if snapshot.item_has_optimistic_owner(&item_id) {
             return Err(retryable(
                 "an optimistic Item owner must reconcile before Attachment Delete",
             ));
@@ -1475,7 +1475,7 @@ impl Runtime {
         if current_item_id != item_id {
             return Err(retryable("Attachment authority changed before Rename"));
         }
-        if item_has_optimistic_owner(&snapshot, &item_id) {
+        if snapshot.item_has_optimistic_owner(&item_id) {
             return Err(retryable(
                 "an optimistic Item owner must reconcile before Attachment Rename",
             ));
@@ -1686,21 +1686,6 @@ pub(super) fn is_canonical_sink_capability_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'~' | b'-'))
-}
-
-fn item_has_optimistic_owner(snapshot: &crate::replica::ReplicaSnapshot, item_id: &str) -> bool {
-    snapshot
-        .operations
-        .iter()
-        .any(|operation| operation.target.item_id() == Some(item_id))
-        || snapshot
-            .attachment_move_preparations
-            .iter()
-            .any(|preparation| preparation.item_id == item_id)
-        || snapshot
-            .items
-            .iter()
-            .any(|overlay| overlay.item_id == item_id)
 }
 
 fn validate_upload_input(

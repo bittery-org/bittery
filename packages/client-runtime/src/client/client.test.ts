@@ -3,6 +3,68 @@ import { createFakeRuntimeTransport } from "../testing";
 import { createRuntimeClient, RuntimeRequestError } from "./index";
 
 describe("Runtime client requests", () => {
+	test("Share management uses only closed Account-scoped requests and returns foreground results", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const history = client.listItemShareLinks({
+			accountId: "account-2",
+			itemId: "item-1",
+		});
+		const logs = client.listShareAccessLogs({
+			accountId: "account-2",
+			linkId: "link-1",
+		});
+		const revoked = client.revokeShareLink({
+			accountId: "account-2",
+			linkId: "link-1",
+		});
+		await transport.settled();
+		expect(transport.pendingRequests().map(({ request }) => request)).toEqual([
+			{ type: "listItemShareLinks", accountId: "account-2", itemId: "item-1" },
+			{ type: "listShareAccessLogs", accountId: "account-2", linkId: "link-1" },
+			{ type: "revokeShareLink", accountId: "account-2", linkId: "link-1" },
+		]);
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "itemShareLinks",
+				accountId: "account-2",
+				itemId: "item-1",
+				links: [],
+				baseShareUrl: "https://example.test/share",
+			},
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "shareAccessLogs",
+				accountId: "account-2",
+				linkId: "link-1",
+				logs: [],
+			},
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "shareLinkRevoked",
+				accountId: "account-2",
+				linkId: "link-1",
+			},
+		});
+		expect(await history).toEqual({
+			accountId: "account-2",
+			itemId: "item-1",
+			links: [],
+			baseShareUrl: "https://example.test/share",
+		});
+		expect(await logs).toEqual({
+			accountId: "account-2",
+			linkId: "link-1",
+			logs: [],
+		});
+		expect(await revoked).toEqual({ accountId: "account-2", linkId: "link-1" });
+	});
+
 	test("routes every closed Item category through the neutral client facade", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });
@@ -291,6 +353,32 @@ describe("Runtime client requests", () => {
 		expect(failure.code).toBe("AUTHENTICATION_REQUIRED");
 		expect(failure.message).not.toContain("srp verifier mismatch");
 		expect(failure.detail).toBe("srp verifier mismatch at replica.rs:214");
+	});
+
+	test("recovery resource failure preserves its typed bound without exposing diagnostic text", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const exporting = client.exportAccountRecovery({
+			accountId: "account-1",
+			password: "separate",
+			sinkCapabilityId: "sink",
+		});
+		await transport.settled();
+		transport.answer({
+			type: "failed",
+			value: {
+				code: "SIZE_REJECTED",
+				recoveryBound: "archiveBytes",
+				message: "private raw detail",
+			},
+		});
+		const failure = (await exporting.catch(
+			(error: unknown) => error,
+		)) as RuntimeRequestError;
+		expect(failure.code).toBe("SIZE_REJECTED");
+		expect(failure.recoveryBound).toBe("archiveBytes");
+		expect(failure.message).not.toContain("private raw detail");
+		await client.close();
 	});
 
 	test("rejects a response of the wrong variant instead of returning it", async () => {

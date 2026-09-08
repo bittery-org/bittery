@@ -230,3 +230,26 @@ test("Vault image staging generates closed MIME and correlated status enums", as
 		);
 	}
 });
+
+test("Share history uses the existing named closed schemas and rejects page item drift", async () => {
+	const source = await readFile(
+		new URL("../../api-contract/openapi.v1.json", import.meta.url),
+	);
+	const document = JSON.parse(source);
+	const generated = generateServerContract(document, source);
+	assert.match(
+		generated,
+		/pub struct CursorPageShareAccessLogResponse \{[\s\S]*?pub items: Vec<ShareAccessLogResponse>/,
+	);
+	const summary = generated.slice(
+		generated.indexOf("pub struct ShareLinkListEntryResponse"),
+		generated.indexOf("pub struct StartLoginRequest"),
+	);
+	assert.doesNotMatch(summary, /token|share_key|encrypted/i);
+	document.components.schemas.CursorPage_ShareAccessLogResponse.properties.items.items.properties.extra =
+		{ type: "string" };
+	assert.throws(
+		() => generateServerContract(document, source),
+		/page item differs/,
+	);
+});

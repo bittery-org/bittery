@@ -253,9 +253,10 @@ export class WebVaultImageSourceRegistry {
 		if (request.type === "endAcceptance") {
 			const acceptance = acceptanceKey(request.accountId, request.operationId);
 			const release = this.#acceptanceReleases.get(acceptance);
-			if (release === undefined) return { type: "sourceFailure" };
+			// A completed release may be replayed after its acknowledgment was lost.
+			// The Runtime incarnation and phase fences above still apply.
 			this.#acceptanceReleases.delete(acceptance);
-			release();
+			release?.();
 			return { type: "acceptanceEnded" };
 		}
 		const capabilityId = request.capabilityId;

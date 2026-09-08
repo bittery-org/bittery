@@ -1,5 +1,5 @@
 use axum::{
-    extract::{FromRequestParts, State},
+    extract::{FromRequestParts, Path, State},
     http::request::Parts,
     response::Response,
     Extension, Json,
@@ -404,11 +404,55 @@ async fn events(State(state): State<AppState>, auth: AuthenticatedRequest) -> Re
     sync_sse::sync_events(State(state), Some(Extension(auth.session))).await
 }
 
+#[utoipa::path(
+    get,
+    path = "/items/{itemId}/authority",
+    operation_id = "getItemAuthority",
+    tag = "sync",
+    params(("itemId" = String, Path)),
+    responses(
+        (status = 200, description = "Complete Item authority using Bootstrap visibility, within the Bootstrap Item byte budget", body = BootstrapItemResponse),
+        (status = 400, description = "Invalid Item identity", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Authentication required", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Item access denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "Item not found", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Complete Item exceeds the response byte budget", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Internal error", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn item_authority(
+    State(state): State<AppState>,
+    auth: AuthenticatedRequest,
+    Path(item_id): Path<String>,
+) -> Result<Json<BootstrapItemResponse>, ApiError> {
+    let response: BootstrapItemResponse = sync::item_authority(
+        &state.db_pool,
+        state.config.server.mode,
+        &auth.session.user_id,
+        &item_id,
+    )
+    .await?
+    .into();
+    // One complete authority record cannot be truncated. The query bounds materialization;
+    // this exact wire check also accounts for JSON escaping before any response is published.
+    if serde_json::to_vec(&response)
+        .map_err(|_| ApiError::internal())?
+        .len()
+        > RESPONSE_PAGE_ITEMS_BYTES
+    {
+        return Err(ApiError::payload_too_large(
+            "The complete Item exceeds the response byte budget.",
+        ));
+    }
+    Ok(Json(response))
+}
+
 pub(crate) fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(bootstrap))
         .routes(routes!(changes))
         .routes(routes!(events))
+        .routes(routes!(item_authority))
 }
 
 #[cfg(test)]
@@ -688,10 +732,14 @@ mod tests {
     }
 
     #[test]
-    fn router_registers_only_bootstrap_changes_and_sse() {
+    fn router_registers_bootstrap_changes_sse_and_complete_item_authority() {
         let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
         let rendered = openapi.to_string();
-        assert_eq!(rendered.matches("operationId").count(), 3);
+        assert_eq!(rendered.matches("operationId").count(), 4);
+        assert_eq!(
+            openapi["paths"]["/items/{itemId}/authority"]["get"]["operationId"],
+            "getItemAuthority"
+        );
         for unused in [
             "checkConflict",
             "acknowledgeEvents",

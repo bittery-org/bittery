@@ -430,6 +430,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
+    typealias FfiType = UInt16
+    typealias SwiftType = UInt16
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -5143,6 +5159,138 @@ public func FfiConverterTypeItemsProjection_lower(_ value: ItemsProjection) -> R
 }
 
 
+public struct OperationProjection: Equatable, Hashable {
+    public var operationId: String
+    public var kind: OperationProjectionKind
+    public var attemptCount: String?
+    public var nextAttemptAtMs: String?
+    public var resolution: OperationResolution
+    public var importedCount: UInt16?
+    public var rejectionCode: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(operationId: String, kind: OperationProjectionKind, attemptCount: String?, nextAttemptAtMs: String?, resolution: OperationResolution, importedCount: UInt16?, rejectionCode: String?) {
+        self.operationId = operationId
+        self.kind = kind
+        self.attemptCount = attemptCount
+        self.nextAttemptAtMs = nextAttemptAtMs
+        self.resolution = resolution
+        self.importedCount = importedCount
+        self.rejectionCode = rejectionCode
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OperationProjection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOperationProjection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OperationProjection {
+        return
+            try OperationProjection(
+                operationId: FfiConverterString.read(from: &buf),
+                kind: FfiConverterTypeOperationProjectionKind.read(from: &buf),
+                attemptCount: FfiConverterOptionString.read(from: &buf),
+                nextAttemptAtMs: FfiConverterOptionString.read(from: &buf),
+                resolution: FfiConverterTypeOperationResolution.read(from: &buf),
+                importedCount: FfiConverterOptionUInt16.read(from: &buf),
+                rejectionCode: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OperationProjection, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.operationId, into: &buf)
+        FfiConverterTypeOperationProjectionKind.write(value.kind, into: &buf)
+        FfiConverterOptionString.write(value.attemptCount, into: &buf)
+        FfiConverterOptionString.write(value.nextAttemptAtMs, into: &buf)
+        FfiConverterTypeOperationResolution.write(value.resolution, into: &buf)
+        FfiConverterOptionUInt16.write(value.importedCount, into: &buf)
+        FfiConverterOptionString.write(value.rejectionCode, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationProjection_lift(_ buf: RustBuffer) throws -> OperationProjection {
+    return try FfiConverterTypeOperationProjection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationProjection_lower(_ value: OperationProjection) -> RustBuffer {
+    return FfiConverterTypeOperationProjection.lower(value)
+}
+
+
+public struct OperationsProjection: Equatable, Hashable {
+    public var accountId: String
+    public var replicaRevision: UInt64
+    public var operations: [OperationProjection]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accountId: String, replicaRevision: UInt64, operations: [OperationProjection]) {
+        self.accountId = accountId
+        self.replicaRevision = replicaRevision
+        self.operations = operations
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OperationsProjection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOperationsProjection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OperationsProjection {
+        return
+            try OperationsProjection(
+                accountId: FfiConverterString.read(from: &buf),
+                replicaRevision: FfiConverterUInt64.read(from: &buf),
+                operations: FfiConverterSequenceTypeOperationProjection.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OperationsProjection, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.accountId, into: &buf)
+        FfiConverterUInt64.write(value.replicaRevision, into: &buf)
+        FfiConverterSequenceTypeOperationProjection.write(value.operations, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationsProjection_lift(_ buf: RustBuffer) throws -> OperationsProjection {
+    return try FfiConverterTypeOperationsProjection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationsProjection_lower(_ value: OperationsProjection) -> RustBuffer {
+    return FfiConverterTypeOperationsProjection.lower(value)
+}
+
+
 public struct PendingShareResultsProjection {
     public var accountId: String
     public var replicaRevision: UInt64
@@ -5330,6 +5478,376 @@ public func FfiConverterTypeRuntimeStatusProjection_lift(_ buf: RustBuffer) thro
 #endif
 public func FfiConverterTypeRuntimeStatusProjection_lower(_ value: RuntimeStatusProjection) -> RustBuffer {
     return FfiConverterTypeRuntimeStatusProjection.lower(value)
+}
+
+
+public struct ShareAccessLog: Equatable, Hashable {
+    public var id: String
+    public var accessedByEmail: String?
+    public var ipAddress: String?
+    public var userAgent: String?
+    public var success: Bool
+    public var failureReason: String?
+    public var accessedAt: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, accessedByEmail: String?, ipAddress: String?, userAgent: String?, success: Bool, failureReason: String?, accessedAt: String) {
+        self.id = id
+        self.accessedByEmail = accessedByEmail
+        self.ipAddress = ipAddress
+        self.userAgent = userAgent
+        self.success = success
+        self.failureReason = failureReason
+        self.accessedAt = accessedAt
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ShareAccessLog: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeShareAccessLog: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareAccessLog {
+        return
+            try ShareAccessLog(
+                id: FfiConverterString.read(from: &buf),
+                accessedByEmail: FfiConverterOptionString.read(from: &buf),
+                ipAddress: FfiConverterOptionString.read(from: &buf),
+                userAgent: FfiConverterOptionString.read(from: &buf),
+                success: FfiConverterBool.read(from: &buf),
+                failureReason: FfiConverterOptionString.read(from: &buf),
+                accessedAt: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ShareAccessLog, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterOptionString.write(value.accessedByEmail, into: &buf)
+        FfiConverterOptionString.write(value.ipAddress, into: &buf)
+        FfiConverterOptionString.write(value.userAgent, into: &buf)
+        FfiConverterBool.write(value.success, into: &buf)
+        FfiConverterOptionString.write(value.failureReason, into: &buf)
+        FfiConverterString.write(value.accessedAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareAccessLog_lift(_ buf: RustBuffer) throws -> ShareAccessLog {
+    return try FfiConverterTypeShareAccessLog.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareAccessLog_lower(_ value: ShareAccessLog) -> RustBuffer {
+    return FfiConverterTypeShareAccessLog.lower(value)
+}
+
+
+public struct ShareAllowedEmail: Equatable, Hashable {
+    public var email: String
+    public var verified: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(email: String, verified: Bool) {
+        self.email = email
+        self.verified = verified
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ShareAllowedEmail: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeShareAllowedEmail: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareAllowedEmail {
+        return
+            try ShareAllowedEmail(
+                email: FfiConverterString.read(from: &buf),
+                verified: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ShareAllowedEmail, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.email, into: &buf)
+        FfiConverterBool.write(value.verified, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareAllowedEmail_lift(_ buf: RustBuffer) throws -> ShareAllowedEmail {
+    return try FfiConverterTypeShareAllowedEmail.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareAllowedEmail_lower(_ value: ShareAllowedEmail) -> RustBuffer {
+    return FfiConverterTypeShareAllowedEmail.lower(value)
+}
+
+
+public struct ShareLinkSummary: Equatable, Hashable {
+    public var id: String
+    public var status: ShareLinkStatus
+    public var accessMode: ShareAccessMode
+    public var isOneTimeUse: Bool
+    public var accessCount: Int32
+    public var maxAccessCount: Int32?
+    public var allowedEmails: [ShareAllowedEmail]
+    public var expiresAt: String
+    public var createdAt: String
+    public var lastAccessedAt: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, status: ShareLinkStatus, accessMode: ShareAccessMode, isOneTimeUse: Bool, accessCount: Int32, maxAccessCount: Int32?, allowedEmails: [ShareAllowedEmail], expiresAt: String, createdAt: String, lastAccessedAt: String?) {
+        self.id = id
+        self.status = status
+        self.accessMode = accessMode
+        self.isOneTimeUse = isOneTimeUse
+        self.accessCount = accessCount
+        self.maxAccessCount = maxAccessCount
+        self.allowedEmails = allowedEmails
+        self.expiresAt = expiresAt
+        self.createdAt = createdAt
+        self.lastAccessedAt = lastAccessedAt
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ShareLinkSummary: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeShareLinkSummary: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareLinkSummary {
+        return
+            try ShareLinkSummary(
+                id: FfiConverterString.read(from: &buf),
+                status: FfiConverterTypeShareLinkStatus.read(from: &buf),
+                accessMode: FfiConverterTypeShareAccessMode.read(from: &buf),
+                isOneTimeUse: FfiConverterBool.read(from: &buf),
+                accessCount: FfiConverterInt32.read(from: &buf),
+                maxAccessCount: FfiConverterOptionInt32.read(from: &buf),
+                allowedEmails: FfiConverterSequenceTypeShareAllowedEmail.read(from: &buf),
+                expiresAt: FfiConverterString.read(from: &buf),
+                createdAt: FfiConverterString.read(from: &buf),
+                lastAccessedAt: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ShareLinkSummary, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterTypeShareLinkStatus.write(value.status, into: &buf)
+        FfiConverterTypeShareAccessMode.write(value.accessMode, into: &buf)
+        FfiConverterBool.write(value.isOneTimeUse, into: &buf)
+        FfiConverterInt32.write(value.accessCount, into: &buf)
+        FfiConverterOptionInt32.write(value.maxAccessCount, into: &buf)
+        FfiConverterSequenceTypeShareAllowedEmail.write(value.allowedEmails, into: &buf)
+        FfiConverterString.write(value.expiresAt, into: &buf)
+        FfiConverterString.write(value.createdAt, into: &buf)
+        FfiConverterOptionString.write(value.lastAccessedAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareLinkSummary_lift(_ buf: RustBuffer) throws -> ShareLinkSummary {
+    return try FfiConverterTypeShareLinkSummary.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareLinkSummary_lower(_ value: ShareLinkSummary) -> RustBuffer {
+    return FfiConverterTypeShareLinkSummary.lower(value)
+}
+
+
+public struct StorageRecoveryAccount: Equatable, Hashable {
+    public var email: String?
+    public var serverUrl: String?
+    public var userId: String?
+    public var canRebootstrap: Bool
+    public var accountId: String
+    public var state: RecoveryStorageState
+    public var operationCount: UInt32?
+    public var receiptCount: UInt32?
+    public var missingArtifacts: UInt32?
+    public var canExport: Bool
+    public var canRepair: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(email: String?, serverUrl: String?, userId: String?, canRebootstrap: Bool, accountId: String, state: RecoveryStorageState, operationCount: UInt32?, receiptCount: UInt32?, missingArtifacts: UInt32?, canExport: Bool, canRepair: Bool) {
+        self.email = email
+        self.serverUrl = serverUrl
+        self.userId = userId
+        self.canRebootstrap = canRebootstrap
+        self.accountId = accountId
+        self.state = state
+        self.operationCount = operationCount
+        self.receiptCount = receiptCount
+        self.missingArtifacts = missingArtifacts
+        self.canExport = canExport
+        self.canRepair = canRepair
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension StorageRecoveryAccount: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStorageRecoveryAccount: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StorageRecoveryAccount {
+        return
+            try StorageRecoveryAccount(
+                email: FfiConverterOptionString.read(from: &buf),
+                serverUrl: FfiConverterOptionString.read(from: &buf),
+                userId: FfiConverterOptionString.read(from: &buf),
+                canRebootstrap: FfiConverterBool.read(from: &buf),
+                accountId: FfiConverterString.read(from: &buf),
+                state: FfiConverterTypeRecoveryStorageState.read(from: &buf),
+                operationCount: FfiConverterOptionUInt32.read(from: &buf),
+                receiptCount: FfiConverterOptionUInt32.read(from: &buf),
+                missingArtifacts: FfiConverterOptionUInt32.read(from: &buf),
+                canExport: FfiConverterBool.read(from: &buf),
+                canRepair: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: StorageRecoveryAccount, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.email, into: &buf)
+        FfiConverterOptionString.write(value.serverUrl, into: &buf)
+        FfiConverterOptionString.write(value.userId, into: &buf)
+        FfiConverterBool.write(value.canRebootstrap, into: &buf)
+        FfiConverterString.write(value.accountId, into: &buf)
+        FfiConverterTypeRecoveryStorageState.write(value.state, into: &buf)
+        FfiConverterOptionUInt32.write(value.operationCount, into: &buf)
+        FfiConverterOptionUInt32.write(value.receiptCount, into: &buf)
+        FfiConverterOptionUInt32.write(value.missingArtifacts, into: &buf)
+        FfiConverterBool.write(value.canExport, into: &buf)
+        FfiConverterBool.write(value.canRepair, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStorageRecoveryAccount_lift(_ buf: RustBuffer) throws -> StorageRecoveryAccount {
+    return try FfiConverterTypeStorageRecoveryAccount.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStorageRecoveryAccount_lower(_ value: StorageRecoveryAccount) -> RustBuffer {
+    return FfiConverterTypeStorageRecoveryAccount.lower(value)
+}
+
+
+public struct StorageRecoveryDiagnostics: Equatable, Hashable {
+    public var failure: RuntimeErrorCode?
+    public var maintenance: RecoveryMaintenanceStatus
+    public var schema: RecoverySchemaStatus
+    public var device: RecoveryDeviceStatus
+    public var accounts: [StorageRecoveryAccount]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(failure: RuntimeErrorCode?, maintenance: RecoveryMaintenanceStatus, schema: RecoverySchemaStatus, device: RecoveryDeviceStatus, accounts: [StorageRecoveryAccount]) {
+        self.failure = failure
+        self.maintenance = maintenance
+        self.schema = schema
+        self.device = device
+        self.accounts = accounts
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension StorageRecoveryDiagnostics: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStorageRecoveryDiagnostics: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StorageRecoveryDiagnostics {
+        return
+            try StorageRecoveryDiagnostics(
+                failure: FfiConverterOptionTypeRuntimeErrorCode.read(from: &buf),
+                maintenance: FfiConverterTypeRecoveryMaintenanceStatus.read(from: &buf),
+                schema: FfiConverterTypeRecoverySchemaStatus.read(from: &buf),
+                device: FfiConverterTypeRecoveryDeviceStatus.read(from: &buf),
+                accounts: FfiConverterSequenceTypeStorageRecoveryAccount.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: StorageRecoveryDiagnostics, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRuntimeErrorCode.write(value.failure, into: &buf)
+        FfiConverterTypeRecoveryMaintenanceStatus.write(value.maintenance, into: &buf)
+        FfiConverterTypeRecoverySchemaStatus.write(value.schema, into: &buf)
+        FfiConverterTypeRecoveryDeviceStatus.write(value.device, into: &buf)
+        FfiConverterSequenceTypeStorageRecoveryAccount.write(value.accounts, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStorageRecoveryDiagnostics_lift(_ buf: RustBuffer) throws -> StorageRecoveryDiagnostics {
+    return try FfiConverterTypeStorageRecoveryDiagnostics.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStorageRecoveryDiagnostics_lower(_ value: StorageRecoveryDiagnostics) -> RustBuffer {
+    return FfiConverterTypeStorageRecoveryDiagnostics.lower(value)
 }
 
 
@@ -5810,7 +6328,7 @@ public enum BindingError: Swift.Error, Equatable, Hashable, Foundation.Localized
 
 
 
-    case Runtime(code: RuntimeErrorCode, message: String
+    case Runtime(code: RuntimeErrorCode, message: String, recoveryBound: RecoveryBound?
     )
 
 
@@ -5843,7 +6361,8 @@ public struct FfiConverterTypeBindingError: FfiConverterRustBuffer {
 
         case 1: return .Runtime(
             code: try FfiConverterTypeRuntimeErrorCode.read(from: &buf),
-            message: try FfiConverterString.read(from: &buf)
+            message: try FfiConverterString.read(from: &buf),
+            recoveryBound: try FfiConverterOptionTypeRecoveryBound.read(from: &buf)
             )
 
          default: throw UniffiInternalError.unexpectedEnumCase
@@ -5857,10 +6376,11 @@ public struct FfiConverterTypeBindingError: FfiConverterRustBuffer {
 
 
 
-        case let .Runtime(code,message):
+        case let .Runtime(code,message,recoveryBound):
             writeInt(&buf, Int32(1))
             FfiConverterTypeRuntimeErrorCode.write(code, into: &buf)
             FfiConverterString.write(message, into: &buf)
+            FfiConverterOptionTypeRecoveryBound.write(recoveryBound, into: &buf)
 
         }
     }
@@ -6216,6 +6736,8 @@ public enum ObservationRequest: Equatable, Hashable {
     )
     case pendingShareResults(accountId: String
     )
+    case operations(accountId: String
+    )
     case runtimeStatus(accountId: String?
     )
 
@@ -6247,7 +6769,10 @@ public struct FfiConverterTypeObservationRequest: FfiConverterRustBuffer {
         case 3: return .pendingShareResults(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 4: return .runtimeStatus(accountId: try FfiConverterOptionString.read(from: &buf)
+        case 4: return .operations(accountId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 5: return .runtimeStatus(accountId: try FfiConverterOptionString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -6272,8 +6797,13 @@ public struct FfiConverterTypeObservationRequest: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
 
 
-        case let .runtimeStatus(accountId):
+        case let .operations(accountId):
             writeInt(&buf, Int32(4))
+            FfiConverterString.write(accountId, into: &buf)
+
+
+        case let .runtimeStatus(accountId):
+            writeInt(&buf, Int32(5))
             FfiConverterOptionString.write(accountId, into: &buf)
 
         }
@@ -6293,6 +6823,203 @@ public func FfiConverterTypeObservationRequest_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeObservationRequest_lower(_ value: ObservationRequest) -> RustBuffer {
     return FfiConverterTypeObservationRequest.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum OperationProjectionKind: Equatable, Hashable {
+
+    case createVault
+    case createItem
+    case updateItem
+    case setItemFavorite
+    case trashItem
+    case restoreItem
+    case moveItem
+    case permanentlyDeleteItem
+    case createShare
+    case importItems
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OperationProjectionKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOperationProjectionKind: FfiConverterRustBuffer {
+    typealias SwiftType = OperationProjectionKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OperationProjectionKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .createVault
+
+        case 2: return .createItem
+
+        case 3: return .updateItem
+
+        case 4: return .setItemFavorite
+
+        case 5: return .trashItem
+
+        case 6: return .restoreItem
+
+        case 7: return .moveItem
+
+        case 8: return .permanentlyDeleteItem
+
+        case 9: return .createShare
+
+        case 10: return .importItems
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: OperationProjectionKind, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .createVault:
+            writeInt(&buf, Int32(1))
+
+
+        case .createItem:
+            writeInt(&buf, Int32(2))
+
+
+        case .updateItem:
+            writeInt(&buf, Int32(3))
+
+
+        case .setItemFavorite:
+            writeInt(&buf, Int32(4))
+
+
+        case .trashItem:
+            writeInt(&buf, Int32(5))
+
+
+        case .restoreItem:
+            writeInt(&buf, Int32(6))
+
+
+        case .moveItem:
+            writeInt(&buf, Int32(7))
+
+
+        case .permanentlyDeleteItem:
+            writeInt(&buf, Int32(8))
+
+
+        case .createShare:
+            writeInt(&buf, Int32(9))
+
+
+        case .importItems:
+            writeInt(&buf, Int32(10))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationProjectionKind_lift(_ buf: RustBuffer) throws -> OperationProjectionKind {
+    return try FfiConverterTypeOperationProjectionKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationProjectionKind_lower(_ value: OperationProjectionKind) -> RustBuffer {
+    return FfiConverterTypeOperationProjectionKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum OperationResolution: Equatable, Hashable {
+
+    case pending
+    case applied
+    case rejected
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OperationResolution: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOperationResolution: FfiConverterRustBuffer {
+    typealias SwiftType = OperationResolution
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OperationResolution {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .pending
+
+        case 2: return .applied
+
+        case 3: return .rejected
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: OperationResolution, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .pending:
+            writeInt(&buf, Int32(1))
+
+
+        case .applied:
+            writeInt(&buf, Int32(2))
+
+
+        case .rejected:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationResolution_lift(_ buf: RustBuffer) throws -> OperationResolution {
+    return try FfiConverterTypeOperationResolution.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOperationResolution_lower(_ value: OperationResolution) -> RustBuffer {
+    return FfiConverterTypeOperationResolution.lower(value)
 }
 
 
@@ -6447,6 +7174,506 @@ public func FfiConverterTypePasskeyStatusReason_lower(_ value: PasskeyStatusReas
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum RecoveryBound: Equatable, Hashable {
+
+    case recordBytes
+    case archiveBytes
+    case recordCount
+    case artifactCount
+    case reportBytes
+    case summaryBytes
+    case controlBytes
+    case cursorBytes
+    case chunkBytes
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RecoveryBound: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoveryBound: FfiConverterRustBuffer {
+    typealias SwiftType = RecoveryBound
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveryBound {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .recordBytes
+
+        case 2: return .archiveBytes
+
+        case 3: return .recordCount
+
+        case 4: return .artifactCount
+
+        case 5: return .reportBytes
+
+        case 6: return .summaryBytes
+
+        case 7: return .controlBytes
+
+        case 8: return .cursorBytes
+
+        case 9: return .chunkBytes
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RecoveryBound, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .recordBytes:
+            writeInt(&buf, Int32(1))
+
+
+        case .archiveBytes:
+            writeInt(&buf, Int32(2))
+
+
+        case .recordCount:
+            writeInt(&buf, Int32(3))
+
+
+        case .artifactCount:
+            writeInt(&buf, Int32(4))
+
+
+        case .reportBytes:
+            writeInt(&buf, Int32(5))
+
+
+        case .summaryBytes:
+            writeInt(&buf, Int32(6))
+
+
+        case .controlBytes:
+            writeInt(&buf, Int32(7))
+
+
+        case .cursorBytes:
+            writeInt(&buf, Int32(8))
+
+
+        case .chunkBytes:
+            writeInt(&buf, Int32(9))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryBound_lift(_ buf: RustBuffer) throws -> RecoveryBound {
+    return try FfiConverterTypeRecoveryBound.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryBound_lower(_ value: RecoveryBound) -> RustBuffer {
+    return FfiConverterTypeRecoveryBound.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RecoveryClassification: Equatable, Hashable {
+
+    case complete
+    case partial
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RecoveryClassification: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoveryClassification: FfiConverterRustBuffer {
+    typealias SwiftType = RecoveryClassification
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveryClassification {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .complete
+
+        case 2: return .partial
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RecoveryClassification, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .complete:
+            writeInt(&buf, Int32(1))
+
+
+        case .partial:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryClassification_lift(_ buf: RustBuffer) throws -> RecoveryClassification {
+    return try FfiConverterTypeRecoveryClassification.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryClassification_lower(_ value: RecoveryClassification) -> RustBuffer {
+    return FfiConverterTypeRecoveryClassification.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RecoveryDeviceStatus: Equatable, Hashable {
+
+    case freshOrUnknown
+    case knownAccounts
+    case storageUnavailable
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RecoveryDeviceStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoveryDeviceStatus: FfiConverterRustBuffer {
+    typealias SwiftType = RecoveryDeviceStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveryDeviceStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .freshOrUnknown
+
+        case 2: return .knownAccounts
+
+        case 3: return .storageUnavailable
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RecoveryDeviceStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .freshOrUnknown:
+            writeInt(&buf, Int32(1))
+
+
+        case .knownAccounts:
+            writeInt(&buf, Int32(2))
+
+
+        case .storageUnavailable:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryDeviceStatus_lift(_ buf: RustBuffer) throws -> RecoveryDeviceStatus {
+    return try FfiConverterTypeRecoveryDeviceStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryDeviceStatus_lower(_ value: RecoveryDeviceStatus) -> RustBuffer {
+    return FfiConverterTypeRecoveryDeviceStatus.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RecoveryMaintenanceStatus: Equatable, Hashable {
+
+    case available
+    case unsupported
+    case busy
+    case unavailable
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RecoveryMaintenanceStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoveryMaintenanceStatus: FfiConverterRustBuffer {
+    typealias SwiftType = RecoveryMaintenanceStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveryMaintenanceStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .available
+
+        case 2: return .unsupported
+
+        case 3: return .busy
+
+        case 4: return .unavailable
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RecoveryMaintenanceStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .available:
+            writeInt(&buf, Int32(1))
+
+
+        case .unsupported:
+            writeInt(&buf, Int32(2))
+
+
+        case .busy:
+            writeInt(&buf, Int32(3))
+
+
+        case .unavailable:
+            writeInt(&buf, Int32(4))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryMaintenanceStatus_lift(_ buf: RustBuffer) throws -> RecoveryMaintenanceStatus {
+    return try FfiConverterTypeRecoveryMaintenanceStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryMaintenanceStatus_lower(_ value: RecoveryMaintenanceStatus) -> RustBuffer {
+    return FfiConverterTypeRecoveryMaintenanceStatus.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RecoverySchemaStatus: Equatable, Hashable {
+
+    case supported
+    case unsupported
+    case unknown
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RecoverySchemaStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoverySchemaStatus: FfiConverterRustBuffer {
+    typealias SwiftType = RecoverySchemaStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoverySchemaStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .supported
+
+        case 2: return .unsupported
+
+        case 3: return .unknown
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RecoverySchemaStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .supported:
+            writeInt(&buf, Int32(1))
+
+
+        case .unsupported:
+            writeInt(&buf, Int32(2))
+
+
+        case .unknown:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoverySchemaStatus_lift(_ buf: RustBuffer) throws -> RecoverySchemaStatus {
+    return try FfiConverterTypeRecoverySchemaStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoverySchemaStatus_lower(_ value: RecoverySchemaStatus) -> RustBuffer {
+    return FfiConverterTypeRecoverySchemaStatus.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RecoveryStorageState: Equatable, Hashable {
+
+    case ready
+    case corrupt
+    case missing
+    case unknown
+    case unreadable
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RecoveryStorageState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoveryStorageState: FfiConverterRustBuffer {
+    typealias SwiftType = RecoveryStorageState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveryStorageState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .ready
+
+        case 2: return .corrupt
+
+        case 3: return .missing
+
+        case 4: return .unknown
+
+        case 5: return .unreadable
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RecoveryStorageState, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .ready:
+            writeInt(&buf, Int32(1))
+
+
+        case .corrupt:
+            writeInt(&buf, Int32(2))
+
+
+        case .missing:
+            writeInt(&buf, Int32(3))
+
+
+        case .unknown:
+            writeInt(&buf, Int32(4))
+
+
+        case .unreadable:
+            writeInt(&buf, Int32(5))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryStorageState_lift(_ buf: RustBuffer) throws -> RecoveryStorageState {
+    return try FfiConverterTypeRecoveryStorageState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryStorageState_lower(_ value: RecoveryStorageState) -> RustBuffer {
+    return FfiConverterTypeRecoveryStorageState.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum RuntimeErrorCode: Equatable, Hashable {
 
     case runtimeClosed
@@ -6456,6 +7683,7 @@ public enum RuntimeErrorCode: Equatable, Hashable {
     case accountFailed
     case authenticationRequired
     case authenticationUnavailable
+    case storageUnavailable
     case retryableTransport
     case authorityMissing
     case accessDenied
@@ -6500,23 +7728,25 @@ public struct FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer {
 
         case 7: return .authenticationUnavailable
 
-        case 8: return .retryableTransport
+        case 8: return .storageUnavailable
 
-        case 9: return .authorityMissing
+        case 9: return .retryableTransport
 
-        case 10: return .accessDenied
+        case 10: return .authorityMissing
 
-        case 11: return .readOnly
+        case 11: return .accessDenied
 
-        case 12: return .quotaExceeded
+        case 12: return .readOnly
 
-        case 13: return .sizeRejected
+        case 13: return .quotaExceeded
 
-        case 14: return .sourceFailure
+        case 14: return .sizeRejected
 
-        case 15: return .sinkFailure
+        case 15: return .sourceFailure
 
-        case 16: return .invariantViolation
+        case 16: return .sinkFailure
+
+        case 17: return .invariantViolation
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -6554,40 +7784,44 @@ public struct FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
 
 
-        case .retryableTransport:
+        case .storageUnavailable:
             writeInt(&buf, Int32(8))
 
 
-        case .authorityMissing:
+        case .retryableTransport:
             writeInt(&buf, Int32(9))
 
 
-        case .accessDenied:
+        case .authorityMissing:
             writeInt(&buf, Int32(10))
 
 
-        case .readOnly:
+        case .accessDenied:
             writeInt(&buf, Int32(11))
 
 
-        case .quotaExceeded:
+        case .readOnly:
             writeInt(&buf, Int32(12))
 
 
-        case .sizeRejected:
+        case .quotaExceeded:
             writeInt(&buf, Int32(13))
 
 
-        case .sourceFailure:
+        case .sizeRejected:
             writeInt(&buf, Int32(14))
 
 
-        case .sinkFailure:
+        case .sourceFailure:
             writeInt(&buf, Int32(15))
 
 
-        case .invariantViolation:
+        case .sinkFailure:
             writeInt(&buf, Int32(16))
+
+
+        case .invariantViolation:
+            writeInt(&buf, Int32(17))
 
         }
     }
@@ -6617,6 +7851,8 @@ public enum RuntimeProjection {
     case writableVaultCatalog(value: WritableVaultCatalogProjection
     )
     case items(value: ItemsProjection
+    )
+    case operations(value: OperationsProjection
     )
     case pendingShareResults(value: PendingShareResultsProjection
     )
@@ -6649,10 +7885,13 @@ public struct FfiConverterTypeRuntimeProjection: FfiConverterRustBuffer {
         case 2: return .items(value: try FfiConverterTypeItemsProjection.read(from: &buf)
         )
 
-        case 3: return .pendingShareResults(value: try FfiConverterTypePendingShareResultsProjection.read(from: &buf)
+        case 3: return .operations(value: try FfiConverterTypeOperationsProjection.read(from: &buf)
         )
 
-        case 4: return .runtimeStatus(value: try FfiConverterTypeRuntimeStatusProjection.read(from: &buf)
+        case 4: return .pendingShareResults(value: try FfiConverterTypePendingShareResultsProjection.read(from: &buf)
+        )
+
+        case 5: return .runtimeStatus(value: try FfiConverterTypeRuntimeStatusProjection.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -6673,13 +7912,18 @@ public struct FfiConverterTypeRuntimeProjection: FfiConverterRustBuffer {
             FfiConverterTypeItemsProjection.write(value, into: &buf)
 
 
-        case let .pendingShareResults(value):
+        case let .operations(value):
             writeInt(&buf, Int32(3))
+            FfiConverterTypeOperationsProjection.write(value, into: &buf)
+
+
+        case let .pendingShareResults(value):
+            writeInt(&buf, Int32(4))
             FfiConverterTypePendingShareResultsProjection.write(value, into: &buf)
 
 
         case let .runtimeStatus(value):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(5))
             FfiConverterTypeRuntimeStatusProjection.write(value, into: &buf)
 
         }
@@ -6707,6 +7951,14 @@ public func FfiConverterTypeRuntimeProjection_lower(_ value: RuntimeProjection) 
 
 public enum RuntimeRequest {
 
+    case rebootstrapAccountRecovery(accountId: String
+    )
+    case inspectRecovery(accountId: String?
+    )
+    case exportAccountRecovery(accountId: String, password: SecretString, sinkCapabilityId: String
+    )
+    case repairAccountRecovery(accountId: String, password: SecretString, sourceCapabilityId: String
+    )
     case signIn(serverUrl: String, email: String, masterPassword: SecretString, secretKey: SecretString, insecureTransportConfirmed: Bool
     )
     case quickUnlock(accountId: String, masterPassword: SecretString
@@ -6742,6 +7994,12 @@ public enum RuntimeRequest {
     )
     case acknowledgeShareResult(accountId: String, operationId: String
     )
+    case listItemShareLinks(accountId: String, itemId: String
+    )
+    case listShareAccessLogs(accountId: String, linkId: String
+    )
+    case revokeShareLink(accountId: String, linkId: String
+    )
     case renameAttachment(accountId: String, attachmentId: String, name: AttachmentName
     )
     case deleteAttachment(accountId: String, attachmentId: String
@@ -6771,69 +8029,90 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        case 1: return .signIn(serverUrl: try FfiConverterString.read(from: &buf), email: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf), secretKey: try FfiConverterTypeSecretString.read(from: &buf), insecureTransportConfirmed: try FfiConverterBool.read(from: &buf)
+        case 1: return .rebootstrapAccountRecovery(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 2: return .quickUnlock(accountId: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf)
+        case 2: return .inspectRecovery(accountId: try FfiConverterOptionString.read(from: &buf)
         )
 
-        case 3: return .lock(accountId: try FfiConverterString.read(from: &buf)
+        case 3: return .exportAccountRecovery(accountId: try FfiConverterString.read(from: &buf), password: try FfiConverterTypeSecretString.read(from: &buf), sinkCapabilityId: try FfiConverterString.read(from: &buf)
         )
 
-        case 4: return .signOut(accountId: try FfiConverterString.read(from: &buf)
+        case 4: return .repairAccountRecovery(accountId: try FfiConverterString.read(from: &buf), password: try FfiConverterTypeSecretString.read(from: &buf), sourceCapabilityId: try FfiConverterString.read(from: &buf)
         )
 
-        case 5: return .removeAccount(accountId: try FfiConverterString.read(from: &buf)
+        case 5: return .signIn(serverUrl: try FfiConverterString.read(from: &buf), email: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf), secretKey: try FfiConverterTypeSecretString.read(from: &buf), insecureTransportConfirmed: try FfiConverterBool.read(from: &buf)
         )
 
-        case 6: return .deleteServerAccount(accountId: try FfiConverterString.read(from: &buf), confirmEmail: try FfiConverterString.read(from: &buf), requestId: try FfiConverterString.read(from: &buf)
+        case 6: return .quickUnlock(accountId: try FfiConverterString.read(from: &buf), masterPassword: try FfiConverterTypeSecretString.read(from: &buf)
         )
 
-        case 7: return .wipe
-
-        case 8: return .createVault(accountId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), vaultType: try FfiConverterTypeCreateVaultType.read(from: &buf), icon: try FfiConverterString.read(from: &buf), imageSource: try FfiConverterOptionTypeVaultImageSourceInput.read(from: &buf)
+        case 7: return .lock(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 9: return .createItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
+        case 8: return .signOut(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 10: return .importItems(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), items: try FfiConverterSequenceTypeImportItemDraft.read(from: &buf)
+        case 9: return .removeAccount(accountId: try FfiConverterString.read(from: &buf)
         )
 
-        case 11: return .updateItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
+        case 10: return .deleteServerAccount(accountId: try FfiConverterString.read(from: &buf), confirmEmail: try FfiConverterString.read(from: &buf), requestId: try FfiConverterString.read(from: &buf)
         )
 
-        case 12: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
+        case 11: return .wipe
+
+        case 12: return .createVault(accountId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), vaultType: try FfiConverterTypeCreateVaultType.read(from: &buf), icon: try FfiConverterString.read(from: &buf), imageSource: try FfiConverterOptionTypeVaultImageSourceInput.read(from: &buf)
         )
 
-        case 13: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 13: return .createItem(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
         )
 
-        case 14: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 14: return .importItems(accountId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), items: try FfiConverterSequenceTypeImportItemDraft.read(from: &buf)
         )
 
-        case 15: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
+        case 15: return .updateItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeItemDraft.read(from: &buf)
         )
 
-        case 16: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        case 16: return .setItemFavorite(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), favorite: try FfiConverterBool.read(from: &buf)
         )
 
-        case 17: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
+        case 17: return .trashItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 18: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        case 18: return .restoreItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 19: return .renameAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), name: try FfiConverterTypeAttachmentName.read(from: &buf)
+        case 19: return .moveItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), targetVaultId: try FfiConverterString.read(from: &buf)
         )
 
-        case 20: return .deleteAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 20: return .permanentlyDeleteItem(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
         )
 
-        case 21: return .downloadAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), sinkCapabilityId: try FfiConverterString.read(from: &buf)
+        case 21: return .createShare(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), draft: try FfiConverterTypeCreateShareDraft.read(from: &buf)
         )
 
-        case 22: return .uploadAttachment(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), metadata: try FfiConverterTypeAttachmentUploadMetadata.read(from: &buf), fileSize: try FfiConverterUInt64.read(from: &buf), sourceCapabilityId: try FfiConverterString.read(from: &buf)
+        case 22: return .acknowledgeShareResult(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 23: return .listItemShareLinks(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 24: return .listShareAccessLogs(accountId: try FfiConverterString.read(from: &buf), linkId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 25: return .revokeShareLink(accountId: try FfiConverterString.read(from: &buf), linkId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 26: return .renameAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), name: try FfiConverterTypeAttachmentName.read(from: &buf)
+        )
+
+        case 27: return .deleteAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 28: return .downloadAttachment(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf), sinkCapabilityId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 29: return .uploadAttachment(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), metadata: try FfiConverterTypeAttachmentUploadMetadata.read(from: &buf), fileSize: try FfiConverterUInt64.read(from: &buf), sourceCapabilityId: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -6844,8 +8123,32 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
         switch value {
 
 
-        case let .signIn(serverUrl,email,masterPassword,secretKey,insecureTransportConfirmed):
+        case let .rebootstrapAccountRecovery(accountId):
             writeInt(&buf, Int32(1))
+            FfiConverterString.write(accountId, into: &buf)
+
+
+        case let .inspectRecovery(accountId):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionString.write(accountId, into: &buf)
+
+
+        case let .exportAccountRecovery(accountId,password,sinkCapabilityId):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterTypeSecretString.write(password, into: &buf)
+            FfiConverterString.write(sinkCapabilityId, into: &buf)
+
+
+        case let .repairAccountRecovery(accountId,password,sourceCapabilityId):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterTypeSecretString.write(password, into: &buf)
+            FfiConverterString.write(sourceCapabilityId, into: &buf)
+
+
+        case let .signIn(serverUrl,email,masterPassword,secretKey,insecureTransportConfirmed):
+            writeInt(&buf, Int32(5))
             FfiConverterString.write(serverUrl, into: &buf)
             FfiConverterString.write(email, into: &buf)
             FfiConverterTypeSecretString.write(masterPassword, into: &buf)
@@ -6854,39 +8157,39 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
 
 
         case let .quickUnlock(accountId,masterPassword):
-            writeInt(&buf, Int32(2))
+            writeInt(&buf, Int32(6))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterTypeSecretString.write(masterPassword, into: &buf)
 
 
         case let .lock(accountId):
-            writeInt(&buf, Int32(3))
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(accountId, into: &buf)
 
 
         case let .signOut(accountId):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(accountId, into: &buf)
 
 
         case let .removeAccount(accountId):
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(accountId, into: &buf)
 
 
         case let .deleteServerAccount(accountId,confirmEmail,requestId):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(confirmEmail, into: &buf)
             FfiConverterString.write(requestId, into: &buf)
 
 
         case .wipe:
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(11))
 
 
         case let .createVault(accountId,name,vaultType,icon,imageSource):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterTypeCreateVaultType.write(vaultType, into: &buf)
@@ -6895,93 +8198,111 @@ public struct FfiConverterTypeRuntimeRequest: FfiConverterRustBuffer {
 
 
         case let .createItem(accountId,vaultId,draft):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterTypeItemDraft.write(draft, into: &buf)
 
 
         case let .importItems(accountId,vaultId,items):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterSequenceTypeImportItemDraft.write(items, into: &buf)
 
 
         case let .updateItem(accountId,itemId,draft):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(15))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeItemDraft.write(draft, into: &buf)
 
 
         case let .setItemFavorite(accountId,itemId,favorite):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(16))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterBool.write(favorite, into: &buf)
 
 
         case let .trashItem(accountId,itemId):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(17))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .restoreItem(accountId,itemId):
-            writeInt(&buf, Int32(14))
+            writeInt(&buf, Int32(18))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .moveItem(accountId,itemId,targetVaultId):
-            writeInt(&buf, Int32(15))
+            writeInt(&buf, Int32(19))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterString.write(targetVaultId, into: &buf)
 
 
         case let .permanentlyDeleteItem(accountId,itemId):
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(20))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
 
 
         case let .createShare(accountId,itemId,draft):
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(21))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeCreateShareDraft.write(draft, into: &buf)
 
 
         case let .acknowledgeShareResult(accountId,operationId):
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(22))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
 
+        case let .listItemShareLinks(accountId,itemId):
+            writeInt(&buf, Int32(23))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+
+
+        case let .listShareAccessLogs(accountId,linkId):
+            writeInt(&buf, Int32(24))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(linkId, into: &buf)
+
+
+        case let .revokeShareLink(accountId,linkId):
+            writeInt(&buf, Int32(25))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(linkId, into: &buf)
+
+
         case let .renameAttachment(accountId,attachmentId,name):
-            writeInt(&buf, Int32(19))
+            writeInt(&buf, Int32(26))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
             FfiConverterTypeAttachmentName.write(name, into: &buf)
 
 
         case let .deleteAttachment(accountId,attachmentId):
-            writeInt(&buf, Int32(20))
+            writeInt(&buf, Int32(27))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
 
         case let .downloadAttachment(accountId,attachmentId,sinkCapabilityId):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(28))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
             FfiConverterString.write(sinkCapabilityId, into: &buf)
 
 
         case let .uploadAttachment(accountId,itemId,metadata,fileSize,sourceCapabilityId):
-            writeInt(&buf, Int32(22))
+            writeInt(&buf, Int32(29))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterTypeAttachmentUploadMetadata.write(metadata, into: &buf)
@@ -7013,6 +8334,12 @@ public func FfiConverterTypeRuntimeRequest_lower(_ value: RuntimeRequest) -> Rus
 
 public enum RuntimeResponse: Equatable, Hashable {
 
+    case recoveryDiagnosed(diagnostics: StorageRecoveryDiagnostics
+    )
+    case recoveryExported(accountId: String, classification: RecoveryClassification, byteLength: UInt64
+    )
+    case recoveryRepaired(accountId: String, replicaRevision: UInt64
+    )
     case signedIn(accountId: String, userId: String
     )
     case accessChanged(accountId: String, access: AccountAccessState
@@ -7026,6 +8353,12 @@ public enum RuntimeResponse: Equatable, Hashable {
     case importBatchAccepted(operationId: String, vaultId: String, itemIds: [String], replicaRevision: UInt64
     )
     case shareResultAcknowledged(accountId: String, operationId: String
+    )
+    case itemShareLinks(accountId: String, itemId: String, links: [ShareLinkSummary], baseShareUrl: String
+    )
+    case shareAccessLogs(accountId: String, linkId: String, logs: [ShareAccessLog]
+    )
+    case shareLinkRevoked(accountId: String, linkId: String
     )
     case attachmentRenamed(accountId: String, attachmentId: String
     )
@@ -7058,40 +8391,58 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        case 1: return .signedIn(accountId: try FfiConverterString.read(from: &buf), userId: try FfiConverterString.read(from: &buf)
+        case 1: return .recoveryDiagnosed(diagnostics: try FfiConverterTypeStorageRecoveryDiagnostics.read(from: &buf)
         )
 
-        case 2: return .accessChanged(accountId: try FfiConverterString.read(from: &buf), access: try FfiConverterTypeAccountAccessState.read(from: &buf)
+        case 2: return .recoveryExported(accountId: try FfiConverterString.read(from: &buf), classification: try FfiConverterTypeRecoveryClassification.read(from: &buf), byteLength: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 3: return .serverAccountDeletion(accountId: try FfiConverterString.read(from: &buf), requestId: try FfiConverterString.read(from: &buf), outcome: try FfiConverterTypeServerAccountDeletionOutcome.read(from: &buf)
+        case 3: return .recoveryRepaired(accountId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 4: return .accepted(operationId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        case 4: return .signedIn(accountId: try FfiConverterString.read(from: &buf), userId: try FfiConverterString.read(from: &buf)
         )
 
-        case 5: return .vaultCreationAccepted(operationId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        case 5: return .accessChanged(accountId: try FfiConverterString.read(from: &buf), access: try FfiConverterTypeAccountAccessState.read(from: &buf)
         )
 
-        case 6: return .importBatchAccepted(operationId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), itemIds: try FfiConverterSequenceString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        case 6: return .serverAccountDeletion(accountId: try FfiConverterString.read(from: &buf), requestId: try FfiConverterString.read(from: &buf), outcome: try FfiConverterTypeServerAccountDeletionOutcome.read(from: &buf)
         )
 
-        case 7: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
+        case 7: return .accepted(operationId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 8: return .attachmentRenamed(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 8: return .vaultCreationAccepted(operationId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 9: return .attachmentDeleted(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 9: return .importBatchAccepted(operationId: try FfiConverterString.read(from: &buf), vaultId: try FfiConverterString.read(from: &buf), itemIds: try FfiConverterSequenceString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 10: return .attachmentDownloaded(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        case 10: return .shareResultAcknowledged(accountId: try FfiConverterString.read(from: &buf), operationId: try FfiConverterString.read(from: &buf)
         )
 
-        case 11: return .attachmentUploaded(attachmentId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        case 11: return .itemShareLinks(accountId: try FfiConverterString.read(from: &buf), itemId: try FfiConverterString.read(from: &buf), links: try FfiConverterSequenceTypeShareLinkSummary.read(from: &buf), baseShareUrl: try FfiConverterString.read(from: &buf)
         )
 
-        case 12: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
+        case 12: return .shareAccessLogs(accountId: try FfiConverterString.read(from: &buf), linkId: try FfiConverterString.read(from: &buf), logs: try FfiConverterSequenceTypeShareAccessLog.read(from: &buf)
+        )
+
+        case 13: return .shareLinkRevoked(accountId: try FfiConverterString.read(from: &buf), linkId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 14: return .attachmentRenamed(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 15: return .attachmentDeleted(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 16: return .attachmentDownloaded(accountId: try FfiConverterString.read(from: &buf), attachmentId: try FfiConverterString.read(from: &buf)
+        )
+
+        case 17: return .attachmentUploaded(attachmentId: try FfiConverterString.read(from: &buf), replicaRevision: try FfiConverterUInt64.read(from: &buf)
+        )
+
+        case 18: return .teardown(scope: try FfiConverterTypeTeardownScope.read(from: &buf), status: try FfiConverterTypeTeardownStatus.read(from: &buf), failures: try FfiConverterSequenceTypeTeardownPhase.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -7102,41 +8453,59 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
         switch value {
 
 
-        case let .signedIn(accountId,userId):
+        case let .recoveryDiagnosed(diagnostics):
             writeInt(&buf, Int32(1))
+            FfiConverterTypeStorageRecoveryDiagnostics.write(diagnostics, into: &buf)
+
+
+        case let .recoveryExported(accountId,classification,byteLength):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterTypeRecoveryClassification.write(classification, into: &buf)
+            FfiConverterUInt64.write(byteLength, into: &buf)
+
+
+        case let .recoveryRepaired(accountId,replicaRevision):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterUInt64.write(replicaRevision, into: &buf)
+
+
+        case let .signedIn(accountId,userId):
+            writeInt(&buf, Int32(4))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(userId, into: &buf)
 
 
         case let .accessChanged(accountId,access):
-            writeInt(&buf, Int32(2))
+            writeInt(&buf, Int32(5))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterTypeAccountAccessState.write(access, into: &buf)
 
 
         case let .serverAccountDeletion(accountId,requestId,outcome):
-            writeInt(&buf, Int32(3))
+            writeInt(&buf, Int32(6))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(requestId, into: &buf)
             FfiConverterTypeServerAccountDeletionOutcome.write(outcome, into: &buf)
 
 
         case let .accepted(operationId,itemId,replicaRevision):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(operationId, into: &buf)
             FfiConverterString.write(itemId, into: &buf)
             FfiConverterUInt64.write(replicaRevision, into: &buf)
 
 
         case let .vaultCreationAccepted(operationId,vaultId,replicaRevision):
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(operationId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterUInt64.write(replicaRevision, into: &buf)
 
 
         case let .importBatchAccepted(operationId,vaultId,itemIds,replicaRevision):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(operationId, into: &buf)
             FfiConverterString.write(vaultId, into: &buf)
             FfiConverterSequenceString.write(itemIds, into: &buf)
@@ -7144,37 +8513,58 @@ public struct FfiConverterTypeRuntimeResponse: FfiConverterRustBuffer {
 
 
         case let .shareResultAcknowledged(accountId,operationId):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(operationId, into: &buf)
 
 
+        case let .itemShareLinks(accountId,itemId,links,baseShareUrl):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(itemId, into: &buf)
+            FfiConverterSequenceTypeShareLinkSummary.write(links, into: &buf)
+            FfiConverterString.write(baseShareUrl, into: &buf)
+
+
+        case let .shareAccessLogs(accountId,linkId,logs):
+            writeInt(&buf, Int32(12))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(linkId, into: &buf)
+            FfiConverterSequenceTypeShareAccessLog.write(logs, into: &buf)
+
+
+        case let .shareLinkRevoked(accountId,linkId):
+            writeInt(&buf, Int32(13))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(linkId, into: &buf)
+
+
         case let .attachmentRenamed(accountId,attachmentId):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
 
         case let .attachmentDeleted(accountId,attachmentId):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(15))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
 
         case let .attachmentDownloaded(accountId,attachmentId):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(16))
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(attachmentId, into: &buf)
 
 
         case let .attachmentUploaded(attachmentId,replicaRevision):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(17))
             FfiConverterString.write(attachmentId, into: &buf)
             FfiConverterUInt64.write(replicaRevision, into: &buf)
 
 
         case let .teardown(scope,status,failures):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(18))
             FfiConverterTypeTeardownScope.write(scope, into: &buf)
             FfiConverterTypeTeardownStatus.write(status, into: &buf)
             FfiConverterSequenceTypeTeardownPhase.write(failures, into: &buf)
@@ -7425,6 +8815,87 @@ public func FfiConverterTypeShareExpiration_lift(_ buf: RustBuffer) throws -> Sh
 #endif
 public func FfiConverterTypeShareExpiration_lower(_ value: ShareExpiration) -> RustBuffer {
     return FfiConverterTypeShareExpiration.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ShareLinkStatus: Equatable, Hashable {
+
+    case active
+    case expired
+    case exhausted
+    case revoked
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ShareLinkStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeShareLinkStatus: FfiConverterRustBuffer {
+    typealias SwiftType = ShareLinkStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareLinkStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .active
+
+        case 2: return .expired
+
+        case 3: return .exhausted
+
+        case 4: return .revoked
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ShareLinkStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .active:
+            writeInt(&buf, Int32(1))
+
+
+        case .expired:
+            writeInt(&buf, Int32(2))
+
+
+        case .exhausted:
+            writeInt(&buf, Int32(3))
+
+
+        case .revoked:
+            writeInt(&buf, Int32(4))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareLinkStatus_lift(_ buf: RustBuffer) throws -> ShareLinkStatus {
+    return try FfiConverterTypeShareLinkStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareLinkStatus_lower(_ value: ShareLinkStatus) -> RustBuffer {
+    return FfiConverterTypeShareLinkStatus.lower(value)
 }
 
 
@@ -7948,6 +9419,30 @@ public func FfiConverterTypeVaultProjectionType_lower(_ value: VaultProjectionTy
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt16: FfiConverterRustBuffer {
+    typealias SwiftType = UInt16?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt16.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt16.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
     typealias SwiftType = UInt32?
 
@@ -7964,6 +9459,30 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionInt32: FfiConverterRustBuffer {
+    typealias SwiftType = Int32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterInt32.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8108,6 +9627,30 @@ fileprivate struct FfiConverterOptionTypePasskeyStatusReason: FfiConverterRustBu
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypePasskeyStatusReason.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRecoveryBound: FfiConverterRustBuffer {
+    typealias SwiftType = RecoveryBound?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRecoveryBound.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRecoveryBound.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8455,6 +9998,131 @@ fileprivate struct FfiConverterSequenceTypeImportItemDraft: FfiConverterRustBuff
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeImportItemDraft.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeOperationProjection: FfiConverterRustBuffer {
+    typealias SwiftType = [OperationProjection]
+
+    public static func write(_ value: [OperationProjection], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeOperationProjection.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [OperationProjection] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [OperationProjection]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeOperationProjection.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeShareAccessLog: FfiConverterRustBuffer {
+    typealias SwiftType = [ShareAccessLog]
+
+    public static func write(_ value: [ShareAccessLog], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeShareAccessLog.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ShareAccessLog] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ShareAccessLog]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeShareAccessLog.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeShareAllowedEmail: FfiConverterRustBuffer {
+    typealias SwiftType = [ShareAllowedEmail]
+
+    public static func write(_ value: [ShareAllowedEmail], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeShareAllowedEmail.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ShareAllowedEmail] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ShareAllowedEmail]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeShareAllowedEmail.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeShareLinkSummary: FfiConverterRustBuffer {
+    typealias SwiftType = [ShareLinkSummary]
+
+    public static func write(_ value: [ShareLinkSummary], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeShareLinkSummary.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ShareLinkSummary] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ShareLinkSummary]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeShareLinkSummary.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeStorageRecoveryAccount: FfiConverterRustBuffer {
+    typealias SwiftType = [StorageRecoveryAccount]
+
+    public static func write(_ value: [StorageRecoveryAccount], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeStorageRecoveryAccount.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [StorageRecoveryAccount] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [StorageRecoveryAccount]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeStorageRecoveryAccount.read(from: &buf))
         }
         return seq
     }

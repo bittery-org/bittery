@@ -837,6 +837,7 @@ struct AttachmentServer {
     discard_next_patch: AtomicBool,
     unauthorized_patches: AtomicUsize,
     patch_calls: AtomicUsize,
+    applied_patches: AtomicUsize,
     delete_calls: AtomicUsize,
     download_grant_calls: AtomicUsize,
     unauthorized_download_grants: AtomicUsize,
@@ -1050,6 +1051,7 @@ impl SerializedHttpExecutor for AttachmentServer {
             }
             let body: UpdateAttachmentBody = serde_json::from_slice(&request.body).unwrap();
             if !self.discard_next_patch.swap(false, Ordering::SeqCst) {
+                self.applied_patches.fetch_add(1, Ordering::SeqCst);
                 let mut attachment = self.attachment.lock().unwrap();
                 attachment.encrypted_name = body.encrypted_name;
                 attachment.encryption_iv = body.encryption_iv;
@@ -1137,7 +1139,9 @@ impl SerializedHttpExecutor for AttachmentServer {
                 5 => return Ok(completed(404, b"{}".to_vec()).to_string()),
                 _ => {}
             }
-            completed(200, item_body(&self.item))
+            let mut item = self.item.clone();
+            item.version += self.applied_patches.load(Ordering::SeqCst) as i32;
+            completed(200, item_body(&item))
         } else {
             panic!(
                 "unexpected Attachment test request {} {}",
@@ -2077,6 +2081,7 @@ async fn seeded_attachment_for_category(
         discard_next_patch: AtomicBool::new(false),
         unauthorized_patches: AtomicUsize::new(0),
         patch_calls: AtomicUsize::new(0),
+        applied_patches: AtomicUsize::new(0),
         delete_calls: AtomicUsize::new(0),
         download_grant_calls: AtomicUsize::new(0),
         unauthorized_download_grants: AtomicUsize::new(0),
@@ -6645,6 +6650,89 @@ async fn account_remove_and_device_wipe_cancel_hung_rename_before_deleting_autho
 }
 
 #[tokio::test]
+async fn matching_sync_authority_completes_rename_without_resubmission() {
+    let harness = seeded_attachment().await;
+    harness
+        .server
+        .hold_attachment_get
+        .store(true, Ordering::SeqCst);
+    let rename_runtime = Arc::clone(&harness.runtime);
+    let rename_account = harness.account_id.clone();
+    let rename = tokio::spawn(async move {
+        rename_runtime
+            .request(
+                RuntimeRequest::RenameAttachment {
+                    account_id: rename_account,
+                    attachment_id: ATTACHMENT_ID.into(),
+                    name: "foreground.txt".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+    });
+    until("Rename pauses while fetching Attachment authority", || {
+        harness.server.attachment_get_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    let background = Replica::new(Arc::new(SerializedReplicaPersistence::new(
+        harness.replica.clone(),
+    )));
+    let observed = background.load(&harness.account_id).await.unwrap().unwrap();
+    let mut stored = harness.server.item.clone();
+    stored.version += 1;
+    let mut item = super::bootstrap::authority_item_from_dto(
+        serde_json::from_slice(&item_body(&stored)).unwrap(),
+    )
+    .unwrap();
+    item.attachments = vec![super::attachment::authority_attachment_from_dto(
+        harness.server.attachment.lock().unwrap().clone(),
+    )];
+    assert!(matches!(
+        background
+            .execute(GuardedCommitPlan::new(
+                harness.account_id.clone(),
+                observed.incarnation,
+                observed.revision,
+                observed.lock_epoch,
+                vec![PlanMutation::CommitAttachmentAuthority {
+                    attachment_id: ATTACHMENT_ID.into(),
+                    attachment_present: true,
+                    item: Box::new(item),
+                }],
+            ))
+            .await
+            .unwrap(),
+        PlanResult::Applied { .. }
+    ));
+
+    let committed = background.load(&harness.account_id).await.unwrap().unwrap();
+    harness.replica.fail_next_commits(1);
+    harness
+        .server
+        .hold_attachment_get
+        .store(false, Ordering::SeqCst);
+    harness.server.attachment_get_release.add_permits(1);
+    assert!(matches!(
+        rename.await.unwrap().unwrap(),
+        RuntimeResponse::AttachmentRenamed { .. }
+    ));
+    assert_eq!(harness.server.patch_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id][0].attachments[0].name,
+        "foreground.txt"
+    );
+    assert_eq!(
+        background.load(&harness.account_id).await.unwrap(),
+        Some(committed.clone())
+    );
+    assert_eq!(
+        harness.runtime.replica().snapshot(&harness.account_id),
+        Some(committed)
+    );
+}
+
+#[tokio::test]
 async fn newer_background_authority_wins_the_guarded_rename_commit() {
     let harness = seeded_attachment().await;
     harness
@@ -6734,7 +6822,7 @@ async fn older_fetched_item_authority_is_retryable_without_commit_or_publication
         .snapshot(&harness.account_id)
         .unwrap();
     let mut newer = current.bootstrap.snapshot().visible_items[0].clone();
-    newer.version = 2;
+    newer.version = 3;
     newer.updated_at = "2026-08-28T12:00:00Z".into();
     harness
         .runtime

@@ -865,6 +865,7 @@ fn js_error(value: JsValue) -> bittery_client_core::RuntimeError {
 
 fn runtime_error(message: &str) -> bittery_client_core::RuntimeError {
     bittery_client_core::RuntimeError {
+        recovery_bound: None,
         code: bittery_client_core::RuntimeErrorCode::InvariantViolation,
         message: message.into(),
     }

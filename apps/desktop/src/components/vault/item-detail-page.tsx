@@ -47,6 +47,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useState } from "react";
+import { resolveAttachmentMetadata } from "@/lib/attachment-metadata";
 import { useI18n } from "../../providers/i18n-provider";
 import Loader from "../loader";
 import { Favicon } from "./favicon";
@@ -426,10 +427,22 @@ export function ItemDetailPage({
 							attachmentMaxFileSizeBytes={
 								itemAttachments.attachmentMaxFileSizeBytes
 							}
-							onDecryptMeta={itemAttachments.decryptMeta}
+							onDecryptMeta={(attachment) =>
+								itemAttachments.decryptMeta(
+									resolveAttachmentMetadata(
+										itemAttachments.attachments,
+										attachment,
+									),
+								)
+							}
 							onUpload={(file) => itemAttachments.upload.mutateAsync(file)}
 							onDownload={(attachment) =>
-								itemAttachments.download.mutateAsync(attachment)
+								itemAttachments.download.mutateAsync(
+									resolveAttachmentMetadata(
+										itemAttachments.attachments,
+										attachment,
+									),
+								)
 							}
 							onRename={(attachmentId, newName) =>
 								itemAttachments.rename.mutateAsync({ attachmentId, newName })

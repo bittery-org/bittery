@@ -2,6 +2,7 @@ import { serveWebRuntimeWorker } from "../src/web/worker-entry";
 import type { RuntimeWasm, WebClientRuntimeLike } from "../src/worker-runtime";
 
 type SeedableRuntime = WebClientRuntimeLike & {
+	setRecoveryExecutor: NonNullable<WebClientRuntimeLike["setRecoveryExecutor"]>;
 	seedAttachmentUploadTestAuthority(
 		serverUrl: string,
 		mode: string,
@@ -20,6 +21,12 @@ class JoinedUploadRuntime implements WebClientRuntimeLike {
 		) => SeedableRuntime;
 		const inner = construct.call(bindings.WebClientRuntime, ...args);
 		return new JoinedUploadRuntime(inner);
+	}
+
+	setRecoveryExecutor(
+		...args: Parameters<SeedableRuntime["setRecoveryExecutor"]>
+	): void {
+		this.inner.setRecoveryExecutor(...args);
 	}
 
 	async open(): Promise<void> {

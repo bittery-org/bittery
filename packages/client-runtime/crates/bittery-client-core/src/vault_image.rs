@@ -614,13 +614,10 @@ impl VaultImageIngressFacade {
             .await
     }
     pub async fn retire_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
-        let source = self
-            .sources
+        self.sources
             .retire_account(&self.runtime_incarnation, account_id)
             .await
-            .map_err(source_error);
-        let artifact = self.artifacts.delete_account(account_id).await;
-        source.and(artifact)
+            .map_err(source_error)
     }
     pub async fn complete_account_retirement(
         &self,
@@ -654,13 +651,20 @@ impl VaultImageIngressFacade {
             .map_err(source_error)
     }
     pub async fn retire_runtime(&self) -> Result<(), RuntimeError> {
-        let source = self
-            .sources
+        self.sources
             .retire_runtime(&self.runtime_incarnation)
             .await
-            .map_err(source_error);
-        let artifact = self.artifacts.wipe().await;
-        source.and(artifact)
+            .map_err(source_error)
+    }
+    /// Durable deletion belongs only to explicit Remove/Wipe after source retirement has drained.
+    pub(crate) async fn delete_account_artifacts(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), RuntimeError> {
+        self.artifacts.delete_account(account_id).await
+    }
+    pub(crate) async fn wipe_artifacts(&self) -> Result<(), RuntimeError> {
+        self.artifacts.wipe().await
     }
     pub async fn sweep_account(
         &self,
@@ -705,15 +709,13 @@ impl<S: VaultImageSourcePort, A: VaultImageArtifactPort> VaultImageIngress<S, A>
         self.sources
             .retire_account(incarnation, account_id)
             .await
-            .map_err(source_error)?;
-        self.artifacts.delete_account(account_id).await
+            .map_err(source_error)
     }
     pub async fn retire_runtime(&self, incarnation: &str) -> Result<(), RuntimeError> {
         self.sources
             .retire_runtime(incarnation)
             .await
-            .map_err(source_error)?;
-        self.artifacts.wipe().await
+            .map_err(source_error)
     }
 }
 

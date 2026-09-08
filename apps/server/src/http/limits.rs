@@ -33,6 +33,14 @@ pub const MAX_PAGE_SIZE: u16 = 500;
 pub const ENCRYPTED_VAULT_KEY_BYTES: usize =
     crate::domains::vaults::key::ENCRYPTED_VAULT_KEY_MAX_BYTES;
 
+/// Minimum characters in a Vault display name, matching
+/// [`VAULT_NAME_MIN_CHARS`](crate::domains::vaults::VAULT_NAME_MIN_CHARS).
+pub const NAME_MIN_CHARS: usize = crate::domains::vaults::VAULT_NAME_MIN_CHARS;
+
+/// Maximum characters in a Vault icon, matching
+/// [`VAULT_ICON_MAX_CHARS`](crate::domains::vaults::VAULT_ICON_MAX_CHARS).
+pub const ICON_MAX_CHARS: usize = crate::domains::vaults::VAULT_ICON_MAX_CHARS;
+
 /// Maximum characters in a vault or team display name, matching
 /// [`VAULT_NAME_MAX_CHARS`](crate::domains::vaults::VAULT_NAME_MAX_CHARS).
 pub const NAME_MAX_CHARS: usize = crate::domains::vaults::VAULT_NAME_MAX_CHARS;

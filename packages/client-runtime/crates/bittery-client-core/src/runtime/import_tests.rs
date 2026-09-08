@@ -725,16 +725,12 @@ async fn exact_replay_installs_only_matching_authority_and_empty_applied_fetches
 }
 
 #[tokio::test]
-async fn production_dispatch_keeps_import_transport_closed() {
+async fn production_dispatch_observes_import_retry_deadlines() {
     let clock = super::operation_fixtures::TestClock::new();
     let persistence = Arc::new(InMemoryReplica::default());
     let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
     let (operation_id, _) = accept(&runtime, &account_id, vec![draft(false)]).await;
 
-    // An eligible batch tells us little: an ungated Operation would still park for want of a
-    // Session. A batch waiting on its own durable schedule is what separates the two. The gate
-    // sits before the scheduling check, so the scan never learns this Operation has a deadline
-    // and parks; without the gate the deadline becomes the scan's wake-up time.
     let transient = LookupFaultPort {
         fault: super::import_executor::ImportExecutorError::Retryable,
         renewals: AtomicUsize::new(0),
@@ -752,9 +748,11 @@ async fn production_dispatch_keeps_import_transport_closed() {
     assert!(
         matches!(
             runtime.dispatch_eligible_operations().await,
-            super::dispatch::DispatchPass::Parked
+            super::dispatch::DispatchPass::WaitFor {
+                milliseconds: 1_000
+            }
         ),
-        "production dispatch never sees an accepted Import batch, not even as a deadline"
+        "production dispatch schedules the durable Import retry"
     );
     let snapshot = persistence.snapshot(&account_id).unwrap();
     assert_eq!(snapshot.operations.len(), 1);
@@ -943,6 +941,24 @@ async fn changed_replay_and_every_closed_rejection_never_project_imported_items(
         assert!(snapshot.bootstrap.items.is_empty());
         assert_eq!(snapshot.receipts.len(), 1);
         assert_eq!(port.fetches.load(Ordering::SeqCst), 0);
+        let RuntimeProjection::Operations(projection) = runtime
+            .projection(&ObservationRequest::Operations {
+                account_id: account_id.clone(),
+            })
+            .unwrap()
+            .projection
+        else {
+            panic!("Operations projection")
+        };
+        assert_eq!(
+            projection.operations[0].resolution,
+            crate::OperationResolution::Rejected
+        );
+        assert_eq!(
+            projection.operations[0].rejection_code.as_deref(),
+            Some(code)
+        );
+        assert_eq!(projection.operations[0].imported_count, None);
     }
 }
 
@@ -1064,7 +1080,9 @@ async fn an_offline_batch_and_its_durable_schedule_survive_a_restart_byte_for_by
     );
     assert!(matches!(
         restarted.dispatch_eligible_operations().await,
-        super::dispatch::DispatchPass::Parked
+        super::dispatch::DispatchPass::WaitFor {
+            milliseconds: 1_000
+        }
     ));
 }
 
@@ -1127,9 +1145,8 @@ async fn a_dropped_response_completes_once_from_the_duplicate_send_and_its_looku
         runtime
             .drive_import_executor_cycle(&account_id, &operation_id, &port)
             .await
-            .unwrap_err()
-            .code,
-        RuntimeErrorCode::InvariantViolation
+            .unwrap(),
+        super::import_executor::ImportExecutorPass::ParkedFenced
     );
     assert_eq!(persistence.snapshot(&account_id).unwrap().receipts.len(), 1);
 }
@@ -1316,12 +1333,13 @@ async fn paginated_authority_reassembles_one_batch_and_refuses_an_unbounded_answ
             runtime
                 .drive_import_executor_cycle(&account_id, &operation_id, &port)
                 .await
-                .unwrap(),
-            super::import_executor::ImportExecutorPass::RetryScheduled
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::InvariantViolation
         );
         let retained = persistence.snapshot(&account_id).unwrap();
         assert_eq!(retained.operations.len(), 1);
-        assert_eq!(retained.operations[0].scheduling.attempt_count, 1);
+        assert_eq!(retained.operations[0].scheduling.attempt_count, 0);
         assert!(retained.receipts.is_empty());
         assert!(retained.bootstrap.items.is_empty());
     }
@@ -1462,8 +1480,9 @@ async fn an_authority_feed_that_never_ends_is_bounded_by_its_page_count() {
         runtime
             .drive_import_executor_cycle(&account_id, &operation_id, &port)
             .await
-            .unwrap(),
-        super::import_executor::ImportExecutorPass::RetryScheduled
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::InvariantViolation
     );
     assert_eq!(
         port.fetches.load(Ordering::SeqCst),
@@ -1472,7 +1491,7 @@ async fn an_authority_feed_that_never_ends_is_bounded_by_its_page_count() {
     );
     let retained = persistence.snapshot(&account_id).unwrap();
     assert_eq!(retained.operations.len(), 1);
-    assert_eq!(retained.operations[0].scheduling.attempt_count, 1);
+    assert_eq!(retained.operations[0].scheduling.attempt_count, 0);
     assert!(retained.receipts.is_empty());
     assert!(retained.bootstrap.items.is_empty());
 }
@@ -1502,7 +1521,7 @@ async fn a_fenced_guarded_commit_keeps_the_batch_accepted_while_a_stale_one_stil
             Interference::LockEpoch => {
                 assert_eq!(
                     pass,
-                    super::import_executor::ImportExecutorPass::RetryScheduled
+                    super::import_executor::ImportExecutorPass::ParkedFenced
                 );
                 assert_eq!(durable.operations.len(), 1, "a fence never loses the batch");
                 assert!(durable.receipts.is_empty());
@@ -2017,19 +2036,39 @@ fn an_authority_item_stays_inside_its_measured_envelope() {
 async fn a_batch_past_the_byte_bound_is_refused_before_it_becomes_durable() {
     let (runtime, account_id) = ready_runtime().await;
 
-    // One draft whose plaintext alone exceeds the frozen-body bound. The count bound cannot see
-    // it: a single Item is far inside `MAX_IMPORT_ITEMS`.
-    let mut oversized = draft(false);
-    let ItemDraft::Login(data) = &mut oversized.draft else {
+    // Every Item fits the individual ciphertext bound, but twenty together exceed the
+    // frozen-body bound. Measure actual encryption so the individual gate cannot mask this one.
+    let mut large = draft(false);
+    let ItemDraft::Login(data) = &mut large.draft else {
         panic!("the fixture draft is a Login")
     };
-    data.notes = Some("n".repeat(super::import::MAX_IMPORT_REQUEST_BYTES + 4096));
+    data.notes = Some("n".repeat(600 * 1024));
+    let (measurement_runtime, measurement_account) = ready_runtime().await;
+    accept(
+        &measurement_runtime,
+        &measurement_account,
+        vec![large.clone()],
+    )
+    .await;
+    let measurement = measurement_runtime
+        .replica()
+        .snapshot(&measurement_account)
+        .unwrap();
+    let body = super::import::decode_import_request(&measurement.operations[0]).unwrap();
+    assert!(body.items[0].encrypted_data.len() <= super::import::SERVER_ITEM_CIPHERTEXT_BYTES);
+    let measured_batch = super::import::ImportRequestBody {
+        items: vec![body.items[0].clone(); 20],
+    };
+    assert!(
+        serde_json::to_vec(&measured_batch).unwrap().len()
+            > super::import::MAX_IMPORT_REQUEST_BYTES
+    );
 
     let error = runtime
         .accept_import_items(
             account_id.clone(),
             TEST_VAULT_ID.into(),
-            vec![oversized],
+            vec![large; 20],
             RequestCancellation::new(),
             || {},
         )
@@ -2050,6 +2089,20 @@ async fn a_batch_past_the_byte_bound_is_refused_before_it_becomes_durable() {
     // than failing the Account.
     let (_, item_ids) = accept(&runtime, &account_id, vec![draft(true)]).await;
     assert_eq!(item_ids.len(), 1);
+}
+
+#[test]
+fn import_item_ciphertext_bound_matches_the_generated_server_input_contract() {
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../../api-contract/openapi.v1.json")).unwrap();
+    let published = contract["components"]["schemas"]["BulkImportItemInput"]["properties"]
+        ["encryptedData"]["maxLength"]
+        .as_u64()
+        .expect("the Server publishes its Import Item ciphertext bound");
+    assert_eq!(
+        super::import::SERVER_ITEM_CIPHERTEXT_BYTES as u64,
+        published
+    );
 }
 
 /// A persisted batch past the byte bound is refused where the executor reads it, too.
@@ -2078,4 +2131,159 @@ async fn a_persisted_batch_past_the_byte_bound_is_refused_where_the_executor_rea
         .err()
         .expect("an over-byte persisted batch is not readable");
     assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+}
+
+#[tokio::test]
+async fn operations_projection_tracks_retry_and_terminal_receipts_across_restart_without_plaintext()
+{
+    let clock = super::operation_fixtures::TestClock::new();
+    let persistence = Arc::new(InMemoryReplica::default());
+    let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
+    let (operation_id, _) = accept(&runtime, &account_id, vec![draft(true)]).await;
+    let request = ObservationRequest::Operations {
+        account_id: account_id.clone(),
+    };
+    let projected = || {
+        let RuntimeProjection::Operations(value) = runtime.projection(&request).unwrap().projection
+        else {
+            panic!("Operations projection")
+        };
+        value
+    };
+    let pending = projected();
+    assert_eq!(pending.operations.len(), 1);
+    assert_eq!(pending.operations[0].operation_id, operation_id);
+    assert_eq!(
+        pending.operations[0].kind,
+        crate::OperationProjectionKind::ImportItems
+    );
+    assert_eq!(
+        pending.operations[0].resolution,
+        crate::OperationResolution::Pending
+    );
+    assert_eq!(pending.operations[0].attempt_count.as_deref(), Some("0"));
+    assert_eq!(pending.operations[0].imported_count, None);
+    let serialized = serde_json::to_value(&pending).unwrap();
+    assert!(serialized["operations"][0].get("request").is_none());
+    assert!(serialized["operations"][0].get("items").is_none());
+    let fault = LookupFaultPort {
+        fault: super::import_executor::ImportExecutorError::Retryable,
+        renewals: AtomicUsize::new(0),
+    };
+    runtime
+        .drive_import_executor_cycle(&account_id, &operation_id, &fault)
+        .await
+        .unwrap();
+    let retry = projected();
+    assert_eq!(retry.operations[0].attempt_count.as_deref(), Some("1"));
+    assert!(retry.replica_revision > pending.replica_revision);
+    let accepted = accepted_items(&runtime, &account_id);
+    let port = ScriptedPort::new(&persistence, &account_id)
+        .script_lookups(vec![Ok(None)])
+        .script_posts(vec![Ok(applied_response(&operation_id, 1))])
+        .script_pages(vec![Ok(authority_page(
+            &[authority_dto(&accepted[0])],
+            None,
+        ))]);
+    runtime
+        .drive_import_executor_cycle(&account_id, &operation_id, &port)
+        .await
+        .unwrap();
+    let applied = projected();
+    assert_eq!(applied.operations.len(), 1);
+    assert_eq!(
+        applied.operations[0].resolution,
+        crate::OperationResolution::Applied
+    );
+    assert_eq!(applied.operations[0].imported_count, Some(1));
+    assert_eq!(applied.operations[0].attempt_count, None);
+    assert_eq!(applied.operations[0].next_attempt_at_ms, None);
+    let reopened = runtime_over(&persistence, clock);
+    reopened.replica().load(&account_id).await.unwrap().unwrap();
+    let RuntimeProjection::Operations(restored) = reopened.projection(&request).unwrap().projection
+    else {
+        panic!("Operations projection")
+    };
+    assert_eq!(restored, applied);
+}
+
+#[tokio::test]
+async fn an_import_item_over_the_server_ciphertext_limit_refuses_before_acceptance_and_preserves_siblings(
+) {
+    for oversized_first in [false, true] {
+        let (runtime, account_id) = ready_runtime().await;
+        let before = runtime.replica().snapshot(&account_id).unwrap();
+        let mut oversized = draft(false);
+        let ItemDraft::Login(data) = &mut oversized.draft else {
+            unreachable!()
+        };
+        data.notes = Some("n".repeat(1024 * 1024));
+        let small = draft(true);
+        let batch = if oversized_first {
+            vec![oversized.clone(), small.clone()]
+        } else {
+            vec![small.clone(), oversized.clone()]
+        };
+        let accepted_callbacks = AtomicUsize::new(0);
+        let result = runtime
+            .accept_import_items(
+                account_id.clone(),
+                TEST_VAULT_ID.into(),
+                batch,
+                RequestCancellation::new(),
+                || {
+                    accepted_callbacks.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .await;
+        if result.is_ok() {
+            // Preserve the exact real-encryption reproduction in the regression: this is
+            // under the aggregate bound, but the Server would reject the whole Operation.
+            let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+            let operation = snapshot.operations.first().unwrap();
+            let body = super::import::decode_import_request(operation).unwrap();
+            let largest = body
+                .items
+                .iter()
+                .map(|item| item.encrypted_data.len())
+                .max()
+                .unwrap();
+            assert!(operation.request.body.len() < super::import::MAX_IMPORT_REQUEST_BYTES);
+            assert!(largest > 1024 * 1024);
+            panic!(
+                "accepted an Import Item with {largest} ciphertext bytes beside a valid sibling"
+            );
+        }
+        assert_eq!(result.unwrap_err().code, RuntimeErrorCode::SizeRejected);
+        assert_eq!(accepted_callbacks.load(Ordering::SeqCst), 0);
+        assert_eq!(runtime.replica().snapshot(&account_id).unwrap(), before);
+
+        // The host can split the refusal without losing the ordinary sibling. Neither
+        // refusal creates an Operation or consumes an acceptance callback.
+        assert_eq!(
+            runtime
+                .accept_import_items(
+                    account_id.clone(),
+                    TEST_VAULT_ID.into(),
+                    vec![oversized],
+                    RequestCancellation::new(),
+                    || {},
+                )
+                .await
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::SizeRejected
+        );
+        let (_, ids) = accept(&runtime, &account_id, vec![small]).await;
+        assert_eq!(ids.len(), 1);
+        assert_eq!(
+            runtime
+                .replica()
+                .snapshot(&account_id)
+                .unwrap()
+                .operations
+                .len(),
+            1
+        );
+    }
 }

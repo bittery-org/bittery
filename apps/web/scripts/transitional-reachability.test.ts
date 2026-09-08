@@ -52,6 +52,51 @@ describe("the Web entry graph", () => {
 		).toBe(true);
 	});
 
+	test("includes the production Runtime Worker reached through its bundler URL", () => {
+		expect(graph.files).toContain("src/lib/runtime.worker.ts");
+	});
+
+	test("follows shared workspace bridges before classifying transitional owners", () => {
+		expect(graph.files).toContain("../../packages/ui/src/index.ts");
+		expect(graph.files).toContain(
+			"../../packages/client-runtime/src/client/index.ts",
+		);
+	});
+
+	test("forbids Item writers behind every supported static loading form", () => {
+		for (const name of [
+			"named-alias",
+			"namespace",
+			"namespace-reexport",
+			"reexport-entry",
+			"dynamic",
+			"require",
+			"import-equals",
+			"side-effect",
+			"type-specifier",
+			"worker-entry",
+			"relative-owner",
+			"root-owner",
+		]) {
+			const fixture = buildWebImportGraph([
+				resolve(import.meta.dirname, `fixtures/item-write/${name}.fixture.txt`),
+			]);
+			expect(describeAudit(auditTransitionalReachability(fixture))).not.toBe(
+				"",
+			);
+		}
+	});
+
+	test("an erased local type import does not execute its owner's value imports", () => {
+		const fixture = buildWebImportGraph([
+			resolve(
+				import.meta.dirname,
+				"fixtures/item-write/type-only-entry.fixture.txt",
+			),
+		]);
+		expect(describeAudit(auditTransitionalReachability(fixture))).toBe("");
+	});
+
 	test("counts a type-only import as reaching nothing", () => {
 		const typeOnly = graph.imports.filter(
 			(imported) =>
@@ -100,9 +145,9 @@ describe("what the Web may still reach in the transitional stack", () => {
 	});
 });
 
-describe("what this audit deliberately does not assert yet", () => {
+describe("the final Web Item cutover", () => {
 	test("no Web entry reaches a transitional Item writer", () => {
-		expect(FORBIDDEN_KINDS.has("item-write")).toBe(false);
+		expect(FORBIDDEN_KINDS.has("item-write")).toBe(true);
 		const writes = audit.reached
 			.filter((item) => item.kind === "item-write")
 			.map((item) => item.symbol);

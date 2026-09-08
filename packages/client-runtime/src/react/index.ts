@@ -14,6 +14,7 @@ export {
 	useCreateVault,
 	useRuntimeItems,
 	useRuntimeLock,
+	useRuntimeOperations,
 	useRuntimePendingShareResults,
 	useRuntimeQuickUnlock,
 	useRuntimeSession,

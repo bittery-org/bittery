@@ -20,8 +20,9 @@ import {
 	IconTrash as Trash,
 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Favicon } from "@/components/vault/favicon";
+import { useAccountPresentationState } from "@/hooks/use-account-presentation-state";
 import {
 	usePermanentDeleteItem,
 	useRestoreItem,
@@ -53,20 +54,18 @@ function formatDeletedDate(
 function VaultTrashPage() {
 	const { m } = useI18n();
 	const runtimeItems = useRuntimeItems();
-	const deletedItems = useMemo(
-		() => runtimeItems.items.filter((item) => item.deletedAt != null),
-		[runtimeItems.items],
-	);
+	const deletedItems = runtimeItems.trashedItems;
 	const isLoading = runtimeItems.state === "loading";
 	const restoreItem = useRestoreItem();
 	const permanentDeleteItem = usePermanentDeleteItem();
 
-	const [itemToDelete, setItemToDelete] = useState<{
-		id: string;
-		vaultId: string;
-		accountId: string;
-		title: string;
-	} | null>(null);
+	const [itemToDelete, setItemToDelete, readItemToDelete] =
+		useAccountPresentationState<{
+			id: string;
+			vaultId: string;
+			accountId: string;
+			title: string;
+		}>(runtimeItems.accountId);
 
 	const sortedItems = useMemo(() => {
 		return [...deletedItems].sort((a, b) => {
@@ -90,6 +89,7 @@ function VaultTrashPage() {
 	};
 
 	const handleConfirmPermanentDelete = async () => {
+		const itemToDelete = readItemToDelete();
 		if (!itemToDelete) return;
 		try {
 			await permanentDeleteItem.mutateAsync({

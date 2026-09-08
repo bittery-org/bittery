@@ -277,13 +277,20 @@ describe("Bittery API facade", () => {
 			}),
 			fetch: async (request) => {
 				requests.push(request);
-				return new Response(JSON.stringify({}), {
-					headers: {
-						"Content-Type": "application/json",
-						ETag: '"version-7"',
-						"Bittery-Request-Id": "request-1",
+				return new Response(
+					JSON.stringify({
+						kind: "update_item",
+						operationId: "request-key-1",
+						result: { status: "applied", itemId: "item-1", version: 7 },
+					}),
+					{
+						headers: {
+							"Content-Type": "application/json",
+							ETag: '"version-7"',
+							"Bittery-Request-Id": "request-1",
+						},
 					},
-				});
+				);
 			},
 		});
 

@@ -3808,7 +3808,7 @@ async fn move_serializes_a_stale_source_attachment_update_without_aad_overwrite(
 }
 
 #[tokio::test]
-async fn rename_committed_before_move_advances_attachment_authority_and_move_rejects() {
+async fn rename_committed_before_move_advances_item_revision_and_move_rejects() {
     let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
     with_api_test_app_state(
         "attachment_rename_before_move",
@@ -3869,7 +3869,7 @@ async fn rename_committed_before_move_advances_attachment_authority_and_move_rej
 
             assert_eq!(renamed.status, StatusCode::OK, "{}", renamed.body);
             assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
-            assert_rejected(&moved.body, "move_item", "attachment_state_conflict");
+            assert_rejected(&moved.body, "move_item", "item_version_conflict");
             assert_eq!(
                 query_as::<_, (String, i32, String, String)>(
                     "SELECT vault_id, envelope_version, encrypted_name, encryption_iv FROM item_attachment WHERE id = 'move_attachment'",
@@ -3879,10 +3879,21 @@ async fn rename_committed_before_move_advances_attachment_authority_and_move_rej
                 .unwrap(),
                 (
                     fixture.main_vault_id.clone(),
-                    2,
+                    1,
                     "newer-source-name".into(),
                     "newer-source-iv".into(),
                 )
+            );
+            assert_eq!(
+                query_as::<_, (i32, i32, String)>(
+                    "SELECT version, encryption_version, last_modified_by FROM item WHERE id = $1",
+                )
+                .bind(&fixture.movable_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                (2, 1, fixture.owner_user_id.clone()),
+                "Rename advances Item concurrency without changing its ciphertext AAD version",
             );
             let projection = app
                 .api_json(
@@ -3893,18 +3904,18 @@ async fn rename_committed_before_move_advances_attachment_authority_and_move_rej
                 )
                 .await;
             assert_eq!(projection.status, StatusCode::OK, "{}", projection.body);
-            assert_eq!(projection.body["items"][0]["envelopeVersion"], json!(2));
+            assert_eq!(projection.body["items"][0]["envelopeVersion"], json!(1));
             assert_eq!(
                 projection.body["items"][0]["encryptedName"],
                 json!("newer-source-name")
             );
             assert_eq!(
-                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM sync_event WHERE event_type = 'item_updated'::sync_event_type AND entity_id = $1")
+                query_scalar::<_, i32>("SELECT version FROM sync_event WHERE event_type = 'item_updated'::sync_event_type AND entity_id = $1")
                     .bind(&fixture.movable_item_id)
-                    .fetch_one(&app.pool)
+                    .fetch_all(&app.pool)
                     .await
                     .unwrap(),
-                1
+                vec![2]
             );
         },
     )
@@ -6577,77 +6588,6 @@ async fn different_operations_racing_for_one_item_retain_applied_and_rejected_ou
             .expect("racing Item count should load");
         assert_eq!(outcome_count, 2);
         assert_eq!(item_count, 1);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn stale_idempotency_claims_fail_closed_and_completed_records_are_cleaned() {
-    use crate::shared::idempotency::{claim, Claim, RequestScope};
-
-    with_api_test_app("idempotency_claim_lifecycle", |app| async move {
-        let fingerprint = [7_u8; 32];
-        let scope = RequestScope {
-            principal_id: "user_idempotency_lifecycle",
-            method: "DELETE",
-            route_target: "/api/v1/items/item_stale",
-            key: "stale-key",
-        };
-        assert!(matches!(
-            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
-            Claim::Execute
-        ));
-        query(
-            "UPDATE idempotency_record SET claim_expires_at = NOW() - INTERVAL '1 second' WHERE idempotency_key = $1",
-        )
-        .bind(scope.key)
-        .execute(&app.pool)
-        .await
-        .expect("claim should become stale");
-        assert!(matches!(
-            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
-            Claim::Indeterminate
-        ));
-        assert!(matches!(
-            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
-            Claim::Indeterminate
-        ));
-
-        query(
-            "INSERT INTO idempotency_record (principal_id, method, route_target, idempotency_key, request_fingerprint, state, response_status, response_content_type, response_body, expires_at) VALUES ($1, 'PATCH', '/api/v1/items/expired', 'expired-key', $2, 'completed', 200, 'application/json', $3, NOW() - INTERVAL '1 second')",
-        )
-        .bind(scope.principal_id)
-        .bind(fingerprint.as_slice())
-        .bind(b"{}".as_slice())
-        .execute(&app.pool)
-        .await
-        .expect("expired completed record should insert");
-        let maintenance_scope = RequestScope {
-            principal_id: scope.principal_id,
-            method: "POST",
-            route_target: "/api/v1/items/maintenance",
-            key: "maintenance-key",
-        };
-        assert!(matches!(
-            claim(&app.pool, &maintenance_scope, &[8_u8; 32])
-                .await
-                .unwrap(),
-            Claim::Execute
-        ));
-        let expired_count: i64 = query_scalar(
-            "SELECT COUNT(*)::bigint FROM idempotency_record WHERE idempotency_key = 'expired-key'",
-        )
-        .fetch_one(&app.pool)
-        .await
-        .expect("expired record count should load");
-        let stale_state: String = query_scalar(
-            "SELECT state FROM idempotency_record WHERE idempotency_key = 'stale-key'",
-        )
-        .fetch_one(&app.pool)
-        .await
-        .expect("stale record should remain terminal");
-        assert_eq!(expired_count, 0);
-        assert_eq!(stale_state, "indeterminate");
     })
     .await;
 }
@@ -9564,7 +9504,8 @@ async fn vault_key_write_routes_reject_oversized_keys() {
             (
                 Method::PUT,
                 "/api/v1/vaults/vault_oversized_key".to_string(),
-                json!({ "name": "Oversized", "vaultType": "personal", "encryptedVaultKey": oversized.clone() }),
+                json!({ "name": "Oversized", "vaultType": "personal", "encryptedVaultKey": oversized.clone(), "icon": "folder" }),
+                idempotency_headers(&session.token, "oversized-vault-key"),
             ),
             (
                 Method::PUT,
@@ -9573,6 +9514,7 @@ async fn vault_key_write_routes_reject_oversized_keys() {
                     fixture.main_vault_id, fixture.addable_user_id
                 ),
                 json!({ "role": "member", "encryptedVaultKey": oversized.clone() }),
+                headers.clone(),
             ),
             (
                 Method::POST,
@@ -9581,11 +9523,12 @@ async fn vault_key_write_routes_reject_oversized_keys() {
                     fixture.main_vault_id
                 ),
                 json!({ "targetType": "personal", "personalEncryptedVaultKey": oversized.clone() }),
+                headers,
             ),
         ];
-        for (method, path, body) in requests {
+        for (method, path, body, headers) in requests {
             let response = app
-                .api_json(method, &path, Some(body), headers.clone())
+                .api_json(method, &path, Some(body), headers)
                 .await;
             assert_eq!(response.status, axum::http::StatusCode::BAD_REQUEST);
             assert_eq!(response.body["code"], json!("BAD_REQUEST"));
@@ -10783,4 +10726,310 @@ fn item_ciphertext_limit_is_byte_based_and_inclusive() {
     assert!(!oversized(Some(&"é".repeat(524_288)), limit));
     assert!(oversized(Some(&format!("{}a", "é".repeat(524_288))), limit));
     assert!(!oversized(None, limit));
+}
+
+fn import_executor_input(
+    operation_id: &str,
+    vault_id: &str,
+    items: &[Value],
+) -> super::ImportItemsOperationInput {
+    super::ImportItemsOperationInput {
+        operation_id: operation_id.into(),
+        vault_id: vault_id.into(),
+        client_id: Some("import-acceptance-test".into()),
+        raw_body: serde_json::to_vec(&json!({ "items": items })).unwrap(),
+        items: items
+            .iter()
+            .map(|item| serde_json::from_value(item.clone()).unwrap())
+            .collect(),
+        ciphertext_limit: 1024 * 1024,
+    }
+}
+
+fn import_resolution_value(
+    resolution: crate::domains::operations::OperationResolution,
+) -> (Value, bool) {
+    match resolution {
+        crate::domains::operations::OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => (serde_json::to_value(outcome).unwrap(), newly_committed),
+        crate::domains::operations::OperationResolution::IdReused => {
+            panic!("exact Import bytes cannot reuse an Operation identity")
+        }
+    }
+}
+
+/// PostgreSQL AFTER-row triggers fail the real executor after its prospective write. A sequence
+/// survives rollback and proves the selected boundary fired, including a deferred commit error.
+/// Import inserts all Items in one statement, so row triggers exercise each Item of that statement
+/// without changing production into a per-Item loop merely to expose a test seam.
+#[tokio::test]
+async fn import_executor_rolls_back_every_applied_write_and_commit_boundary() {
+    with_api_test_app("import_executor_write_faults", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let vault_id = &fixture.owner_personal_vault_id;
+        query("CREATE SEQUENCE import_fault_hit")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query(
+            "CREATE FUNCTION fail_import_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('import_fault_hit'); RAISE EXCEPTION 'injected Import prospective write failure'; END $$",
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        for (case, table, predicate, deferred) in [
+            ("first_item", "item", "NEW.id = 'import-fault-first_item-0'", false),
+            ("middle_item", "item", "NEW.id = 'import-fault-middle_item-1'", false),
+            ("last_item", "item", "NEW.id = 'import-fault-last_item-2'", false),
+            ("vault_sync", "sync_event", "NEW.event_type = 'vault_updated'", false),
+            ("bulk_audit", "audit_log", "NEW.action = 'vault_updated'", false),
+            ("outcome", "operation_outcome", "NEW.operation_kind = 'import_items'", false),
+            ("resolved", "sync_event", "NEW.event_type = 'operation_resolved'", false),
+            ("commit", "operation_outcome", "NEW.operation_kind = 'import_items'", true),
+        ] {
+            let operation_id = format!("import-fault-{case}");
+            let items = (0..3).map(|index| import_item(
+                &format!("{operation_id}-{index}"), IMPORT_CATEGORIES[index], index == 1, "fault-ciphertext",
+            )).collect::<Vec<_>>();
+            let before = import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await;
+            query("SELECT setval('import_fault_hit', 1, false)")
+                .execute(&app.pool).await.unwrap();
+            let kind = if deferred { "CONSTRAINT TRIGGER" } else { "TRIGGER" };
+            let deferral = if deferred { "DEFERRABLE INITIALLY DEFERRED" } else { "" };
+            query(&format!("CREATE {kind} fail_import_write AFTER INSERT ON {table} {deferral} FOR EACH ROW WHEN ({predicate}) EXECUTE FUNCTION fail_import_write()"))
+                .execute(&app.pool).await.unwrap();
+            let result = super::execute_import_items_operation(
+                &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items),
+            ).await;
+            let error = match result { Err(error) => error, Ok(_) => panic!("{case} must fail") };
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{case}: {error:?}");
+            assert!(query_scalar::<_, bool>("SELECT is_called FROM import_fault_hit")
+                .fetch_one(&app.pool).await.unwrap(), "{case} failed before reaching its selected write boundary");
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, before,
+                "{case} must roll back Items, bulk audit, Vault Sync, outcome and resolution together");
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1")
+                .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), 0, "failed transport must not leave a rejection audit");
+            assert!(crate::domains::operations::get_operation_outcome(&app.pool, &fixture.owner_user_id, &operation_id)
+                .await.unwrap().is_none(), "{case} left a false terminal answer");
+            query(&format!("DROP TRIGGER fail_import_write ON {table}"))
+                .execute(&app.pool).await.unwrap();
+            let (outcome, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items),
+            ).await.unwrap());
+            assert!(newly_committed, "{case} exact retry must execute the rolled-back work");
+            assert_eq!(outcome["result"], json!({"status": "applied", "vaultId": vault_id, "importedCount": 3}));
+            let applied = ImportFootprint {items: before.items + 3, audit: before.audit + 1,
+                vault_updated: before.vault_updated + 1, outcome: 1, resolved: 1};
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, applied);
+            let (replayed, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items),
+            ).await.unwrap());
+            assert!(!newly_committed);
+            assert_eq!(replayed, outcome);
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, applied);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn import_executor_empty_and_rejected_decisions_roll_back_at_every_write_boundary() {
+    with_api_test_app("import_executor_terminal_faults", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let vault_id = &fixture.owner_personal_vault_id;
+        query("CREATE SEQUENCE import_fault_hit").execute(&app.pool).await.unwrap();
+        query("CREATE FUNCTION fail_import_terminal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('import_fault_hit'); RAISE EXCEPTION 'injected Import terminal write failure'; END $$")
+            .execute(&app.pool).await.unwrap();
+        for rejected in [false, true] {
+            for (case, table, predicate, deferred) in [
+                ("audit", "audit_log", "NEW.action = 'item_import_rejected'", false),
+                ("outcome", "operation_outcome", "NEW.operation_kind = 'import_items'", false),
+                ("resolved", "sync_event", "NEW.event_type = 'operation_resolved'", false),
+                ("commit", "operation_outcome", "NEW.operation_kind = 'import_items'", true),
+            ] {
+                if !rejected && case == "audit" { continue; }
+                let operation_id = format!("import-terminal-{rejected}-{case}");
+                // A fresh sibling is provisionally inserted alongside the conflicting Item;
+                // the rejected batch must leave neither it nor any false terminal progress.
+                let items = if rejected { vec![
+                    import_item(&format!("{operation_id}-fresh"), "login", false, "fresh"),
+                    import_item(&fixture.active_item_id, "login", false, "conflict"),
+                ] } else { vec![] };
+                let before = import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await;
+                query("SELECT setval('import_fault_hit', 1, false)").execute(&app.pool).await.unwrap();
+                let kind = if deferred { "CONSTRAINT TRIGGER" } else { "TRIGGER" };
+                let deferral = if deferred { "DEFERRABLE INITIALLY DEFERRED" } else { "" };
+                query(&format!("CREATE {kind} fail_import_terminal AFTER INSERT ON {table} {deferral} FOR EACH ROW WHEN ({predicate}) EXECUTE FUNCTION fail_import_terminal()"))
+                    .execute(&app.pool).await.unwrap();
+                assert!(super::execute_import_items_operation(&app.pool, &fixture.owner_user_id,
+                    import_executor_input(&operation_id, vault_id, &items)).await.is_err());
+                assert!(query_scalar::<_, bool>("SELECT is_called FROM import_fault_hit").fetch_one(&app.pool).await.unwrap());
+                assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, before);
+                assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1")
+                    .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), 0);
+                query(&format!("DROP TRIGGER fail_import_terminal ON {table}"))
+                    .execute(&app.pool).await.unwrap();
+                let (outcome, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                    &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items)).await.unwrap());
+                assert!(newly_committed);
+                let expected = if rejected {json!({"status": "rejected", "code": "item_id_conflict"})}
+                    else {json!({"status": "applied", "vaultId": vault_id, "importedCount": 0})};
+                assert_eq!(outcome["result"], expected);
+                assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await,
+                    ImportFootprint {items: before.items, audit: before.audit, vault_updated: before.vault_updated, outcome: 1, resolved: 1});
+                assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = 'item_import_rejected'")
+                    .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), i64::from(rejected));
+            }
+        }
+    }).await;
+}
+
+/// The first writer is held after entering the actual Item insert, while the second is verified
+/// blocked inside the executor. This tests overlapping calls, not sequential replay disguised by
+/// an async join. The production Sync commit-order lock deliberately serializes the two writers.
+#[tokio::test]
+async fn import_executor_concurrent_duplicate_and_conflicting_batches_resolve_atomically() {
+    for duplicate in [true, false] {
+        with_api_test_app(if duplicate {"import_executor_duplicate"} else {"import_executor_conflict"}, move |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let vault_id = fixture.owner_personal_vault_id.clone();
+            query("CREATE FUNCTION hold_import_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('test-hold-import-insert')); RETURN NEW; END $$")
+                .execute(&app.pool).await.unwrap();
+            query("CREATE TRIGGER hold_import_insert BEFORE INSERT ON item FOR EACH ROW WHEN (NEW.id = 'import-race-shared') EXECUTE FUNCTION hold_import_insert()")
+                .execute(&app.pool).await.unwrap();
+            let mut barrier = app.pool.begin().await.unwrap();
+            query("SELECT pg_advisory_xact_lock(hashtext('test-hold-import-insert'))")
+                .execute(&mut *barrier).await.unwrap();
+            let pool = PgPoolOptions::new().max_connections(3)
+                .connect_with(app.pool.connect_options().as_ref().clone()).await.unwrap();
+            let first_items = vec![import_item("import-race-shared", "login", true, "winner"),
+                import_item("import-race-first", "secure-note", false, "winner-sibling")];
+            let second_items = if duplicate {first_items.clone()} else {vec![
+                import_item("import-race-second", "credit-card", false, "loser-sibling"),
+                import_item("import-race-shared", "identity", false, "loser"),
+            ]};
+            let second_operation = if duplicate {"import-race-first-op"} else {"import-race-second-op"};
+            let spawn = |operation_id: &'static str, items: Vec<Value>| {
+                let pool = pool.clone();
+                let user_id = fixture.owner_user_id.clone();
+                let input = import_executor_input(operation_id, &vault_id, &items);
+                tokio::spawn(async move {super::execute_import_items_operation(&pool, &user_id, input).await})
+            };
+            let first = spawn("import-race-first-op", first_items.clone());
+            wait_for_advisory_waiters(&app.pool, 1).await;
+            let second = spawn(second_operation, second_items.clone());
+            wait_for_advisory_waiters(&app.pool, 2).await;
+            barrier.commit().await.unwrap();
+            let (first_outcome, first_new) = import_resolution_value(first.await.unwrap().unwrap());
+            let (second_outcome, second_new) = import_resolution_value(second.await.unwrap().unwrap());
+            assert!(first_new);
+            assert_eq!(first_outcome["result"], json!({"status": "applied", "vaultId": vault_id, "importedCount": 2}));
+            if duplicate {
+                assert!(!second_new);
+                assert_eq!(second_outcome, first_outcome);
+            } else {
+                assert!(second_new);
+                assert_eq!(second_outcome["result"], json!({"status": "rejected", "code": "item_id_conflict"}));
+                assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item WHERE id = 'import-race-second'")
+                    .fetch_one(&app.pool).await.unwrap(), 0, "the losing batch cannot keep its otherwise valid sibling");
+            }
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, "import-race-first-op").await,
+                ImportFootprint {items: 2, audit: 1, vault_updated: 1, outcome: 1, resolved: 1});
+            assert_eq!(query_as::<_, (String, String, bool, String)>("SELECT id, category::text, favorite, encrypted_data FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv' ORDER BY id")
+                .bind(&vault_id).fetch_all(&app.pool).await.unwrap(), vec![
+                    ("import-race-first".into(), "secure-note".into(), false, "winner-sibling".into()),
+                    ("import-race-shared".into(), "login".into(), true, "winner".into()),
+                ], "the losing batch cannot alter the winner's category, favorite or ciphertext");
+            let retained = query_as::<_, (String, Vec<u8>, String)>("SELECT operation_id, request_fingerprint, result_status::text FROM operation_outcome WHERE user_id = $1 ORDER BY operation_id")
+                .bind(&fixture.owner_user_id).fetch_all(&app.pool).await.unwrap();
+            assert_eq!(retained.len(), if duplicate {1} else {2});
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM sync_event WHERE event_type = 'operation_resolved'")
+                .fetch_one(&app.pool).await.unwrap(), if duplicate {1} else {2});
+            // Later authority cannot change either historical outcome: an applied replay does
+            // not recreate a deleted Item, and a rejected replay cannot seize the freed ID.
+            query("DELETE FROM item WHERE id = 'import-race-shared'").execute(&app.pool).await.unwrap();
+            for (operation_id, items, expected) in [
+                ("import-race-first-op", first_items, first_outcome),
+                (second_operation, second_items, second_outcome),
+            ] {
+                let (replayed, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                    &app.pool, &fixture.owner_user_id, import_executor_input(operation_id, &vault_id, &items)).await.unwrap());
+                assert!(!newly_committed);
+                assert_eq!(replayed, expected);
+            }
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv'")
+                .bind(&vault_id).fetch_one(&app.pool).await.unwrap(), 1);
+            assert_eq!(query_as::<_, (String, Vec<u8>, String)>("SELECT operation_id, request_fingerprint, result_status::text FROM operation_outcome WHERE user_id = $1 ORDER BY operation_id")
+                .bind(&fixture.owner_user_id).fetch_all(&app.pool).await.unwrap(), retained);
+            pool.close().await;
+        }).await;
+    }
+}
+
+#[tokio::test]
+async fn import_executor_lost_response_is_recovered_after_session_renewal_and_is_user_scoped() {
+    with_api_test_app("import_executor_response_loss", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let mut current_token = session.token.clone();
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let vault_id = &fixture.owner_personal_vault_id;
+        for (case, items, expected_result) in [
+            ("applied", vec![
+                import_item("import-lost-first", "login", true, "first"),
+                import_item("import-lost-second", "credit-card", false, "second"),
+            ], json!({"status": "applied", "vaultId": vault_id, "importedCount": 2})),
+            ("empty", vec![], json!({"status": "applied", "vaultId": vault_id, "importedCount": 0})),
+            ("rejected", vec![import_item(&fixture.active_item_id, "login", false, "conflict")],
+                json!({"status": "rejected", "code": "item_id_conflict"})),
+        ] {
+            let operation_id = format!("import-lost-{case}");
+            // The Server commits, but no caller consumes its response. A later authenticated
+            // lookup must recover the durable semantic answer independently of that response.
+            drop(super::execute_import_items_operation(&app.pool, &fixture.owner_user_id,
+                import_executor_input(&operation_id, vault_id, &items)).await.unwrap());
+            let expected = json!({"kind": "import_items", "operationId": operation_id, "result": expected_result});
+            let footprint = import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await;
+            let refreshed = app.api_json(Method::POST, "/api/v1/sessions/current/refresh", None,
+                authenticated_json_headers(&current_token)).await;
+            assert_eq!(refreshed.status, StatusCode::OK, "{}", refreshed.body);
+            let renewed_token = refreshed.body["token"].as_str().expect("renewed Session token");
+            assert_ne!(renewed_token, current_token, "the lookup must use an actually renewed credential");
+            current_token = renewed_token.to_owned();
+            let lookup = app.api_json(Method::GET, &format!("/api/v1/operations/{operation_id}"), None,
+                authenticated_json_headers(renewed_token)).await;
+            lookup.assert_contract_status();
+            assert_eq!(lookup.body, expected);
+            let replay = app.api_json(Method::POST, &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({"items": items})), idempotency_headers(renewed_token, &operation_id)).await;
+            replay.assert_contract_status();
+            assert_eq!(replay.body, expected);
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, footprint);
+            if items.len() > 1 {
+                let mut reordered = items.clone();
+                reordered.reverse();
+                let changed = app.api_json(Method::POST, &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                    Some(json!({"items": reordered})), idempotency_headers(renewed_token, &operation_id)).await;
+                assert_eq!(changed.status, StatusCode::UNPROCESSABLE_ENTITY);
+                assert_eq!(changed.body["code"], json!("OPERATION_ID_REUSED"), "ordered Import bytes cannot change on replay");
+                assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, footprint);
+            }
+            let isolated = app.api_json(Method::GET, &format!("/api/v1/operations/{operation_id}"), None,
+                authenticated_json_headers(&outsider.token)).await;
+            assert_eq!(isolated.status, StatusCode::NOT_FOUND);
+            assert_eq!(isolated.body["code"], json!("OPERATION_OUTCOME_NOT_FOUND"));
+            // The same identity belongs to an independent Operation for another User. Their
+            // retained access rejection cannot replace or reveal the original User's answer.
+            let outsider_result = app.api_json(Method::POST, &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({"items": items})), idempotency_headers(&outsider.token, &operation_id)).await;
+            outsider_result.assert_contract_status();
+            assert_eq!(outsider_result.body["result"], json!({"status": "rejected", "code": "vault_access_denied"}));
+            let owner_again = app.api_json(Method::GET, &format!("/api/v1/operations/{operation_id}"), None,
+                authenticated_json_headers(renewed_token)).await;
+            assert_eq!(owner_again.body, expected);
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE operation_id = $1")
+                .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), 2);
+        }
+    }).await;
 }

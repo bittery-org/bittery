@@ -262,7 +262,8 @@ test("starring an item lists it under Favorites, and unstarring empties that lis
 		),
 	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 
-	await page.goto("/vaults/favorites");
+	await page.locator('a[href="/vaults/favorites"]').click();
+	await expect(page).toHaveURL(/\/vaults\/favorites$/);
 	await expect(itemRow(page, starred)).toBeVisible({
 		timeout: VAULT_READY_TIMEOUT_MS,
 	});
@@ -291,7 +292,8 @@ test("a trashed item can be restored, and deleting it forever removes it for goo
 	await page.getByTestId("delete-item-confirm-button").click();
 	await expect(itemRow(page, title)).toHaveCount(0);
 
-	await page.goto("/vaults/trash");
+	await page.locator('a[href="/vaults/trash"]').click();
+	await expect(page).toHaveURL(/\/vaults\/trash$/);
 	const restore = page.locator(
 		`[data-testid="trash-restore-button"][data-item-id="${itemId}"]`,
 	);
@@ -317,7 +319,8 @@ test("a trashed item can be restored, and deleting it forever removes it for goo
 		toastWithText(page, uiText("vaults_detail_toast_item_moved_to_trash")),
 	).toBeVisible();
 
-	await page.goto("/vaults/trash");
+	await page.locator('a[href="/vaults/trash"]').click();
+	await expect(page).toHaveURL(/\/vaults\/trash$/);
 	const deleteForever = page.locator(
 		`[data-testid="trash-delete-forever-button"][data-item-id="${itemId}"]`,
 	);

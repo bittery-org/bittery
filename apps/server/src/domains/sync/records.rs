@@ -205,8 +205,50 @@ pub async fn fetch_bootstrap_items(
     cursor: Option<&str>,
     limit: i32,
 ) -> Result<BoundedBootstrapRows, AppError> {
+    fetch_scoped_bootstrap_items(pool, user_id, cursor, limit, None).await
+}
+
+pub(super) async fn fetch_bootstrap_item(
+    pool: &PgPool,
+    user_id: &str,
+    item_id: &str,
+) -> Result<DbBootstrapItemRow, AppError> {
+    // Decide missing versus denied using only identity/access data, before reading ciphertext.
+    let allowed: Option<bool> = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM vault_key vk WHERE vk.vault_id = i.vault_id AND vk.user_id = $1) FROM item i WHERE i.id = $2",
+    )
+    .bind(user_id)
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to verify Item authority access"))?;
+    match allowed {
+        None => return Err(AppError::not_found("Item not found")),
+        Some(false) => return Err(AppError::forbidden("Access denied")),
+        Some(true) => {}
+    }
+    fetch_scoped_bootstrap_items(pool, user_id, None, 1, Some(item_id))
+        .await?
+        .rows
+        .pop()
+        .ok_or_else(|| AppError::not_found("Item not found"))
+}
+
+async fn fetch_scoped_bootstrap_items(
+    pool: &PgPool,
+    user_id: &str,
+    cursor: Option<&str>,
+    limit: i32,
+    item_id: Option<&str>,
+) -> Result<BoundedBootstrapRows, AppError> {
+    // Keep the exact-identity query indexable even when PostgreSQL chooses a generic plan.
+    let item_filter = if item_id.is_some() {
+        "i.id = $5"
+    } else {
+        "$5::text IS NULL"
+    };
     let weights = query_as::<_, BootstrapPageWeight>(
-        r#"WITH candidates AS (
+        &format!(r#"WITH candidates AS (
             SELECT i.id, ROW_NUMBER() OVER (ORDER BY i.id ASC)::bigint AS position,
                    (20480 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
                     + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
@@ -225,6 +267,7 @@ pub async fn fetch_bootstrap_items(
             FROM item i
             WHERE EXISTS (SELECT 1 FROM vault_key access WHERE access.vault_id = i.vault_id AND access.user_id = $1)
               AND ($2::text IS NULL OR i.id > $2)
+              AND {item_filter}
             ORDER BY i.id ASC LIMIT $3
         ), weighted AS (
             SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
@@ -232,12 +275,13 @@ pub async fn fetch_bootstrap_items(
             FROM candidates
         )
         SELECT id, position, candidate_count, cumulative_bytes FROM weighted
-        WHERE cumulative_bytes <= $4 OR position = 1 ORDER BY position"#,
+        WHERE cumulative_bytes <= $4 OR position = 1 ORDER BY position"#),
     )
     .bind(user_id)
     .bind(cursor)
     .bind(limit + 1)
     .bind(BOOTSTRAP_QUERY_BYTES)
+    .bind(item_id)
     .fetch_all(pool)
     .await
     .map_err(|error| database_error(error, "Failed to size bootstrap item page"))?;

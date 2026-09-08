@@ -90,6 +90,16 @@ describe("the executable whole-repository create-Vault graph", () => {
 		expect(graph.files.length).toBeGreaterThan(400);
 	});
 
+	test("erased local type imports do not make a writer executable", () => {
+		const entry = resolve(
+			import.meta.dirname,
+			"fixtures/item-write/type-only-entry.fixture.txt",
+		);
+		expect(buildRepositoryImportGraph([entry]).files).toEqual([
+			"apps/web/scripts/fixtures/item-write/type-only-entry.fixture.txt",
+		]);
+	});
+
 	test("the retired Core writer is absent and native hosts have no create caller", () => {
 		expect(
 			auditLegacyCreateVaultSymbols(repositoryProductionEntries(), graph).files,

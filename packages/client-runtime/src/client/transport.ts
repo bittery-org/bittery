@@ -1,4 +1,7 @@
-import type { RuntimeErrorCode } from "../../generated/runtime-protocol/contract";
+import type {
+	RecoveryBound,
+	RuntimeErrorCode,
+} from "../../generated/runtime-protocol/contract";
 
 /**
  * The one seam every host substitutes: a Worker channel on Web, a Tauri bridge on Desktop,
@@ -29,23 +32,31 @@ export interface RuntimeTransport {
 export class RuntimeRequestError extends Error {
 	readonly code: RuntimeErrorCode;
 	readonly detail: string;
+	readonly recoveryBound?: RecoveryBound;
 
-	constructor(code: RuntimeErrorCode, detail: string) {
+	constructor(
+		code: RuntimeErrorCode,
+		detail: string,
+		recoveryBound?: RecoveryBound,
+	) {
 		super(`The Runtime rejected the call: ${code}`);
 		this.name = "RuntimeRequestError";
 		this.code = code;
 		this.detail = detail;
+		if (recoveryBound !== undefined) this.recoveryBound = recoveryBound;
 	}
 }
 
 /**
  * Classifies a transport rejection. The transport's own failures are not Runtime outcomes,
- * so only its two declared codes map across; anything else is a defect, not a semantic answer.
+ * so only its two declared codes and the Runtime's storage-unavailable startup failure map
+ * across; anything else is a defect, not a semantic answer.
  */
 export function transportErrorCode(error: unknown): RuntimeErrorCode {
 	if (error instanceof RuntimeRequestError) return error.code;
 	const code = (error as { code?: unknown } | null)?.code;
 	if (code === "closed") return "RUNTIME_CLOSED";
 	if (code === "cancelled") return "CANCELLED";
+	if (code === "STORAGE_UNAVAILABLE") return "STORAGE_UNAVAILABLE";
 	return "INVARIANT_VIOLATION";
 }

@@ -275,8 +275,7 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 	let resumedManifestInspectionArmed = false;
 	let firstResumedManifestInspection: Promise<number[]> | undefined;
 	let moveDispatches = 0;
-	let promotedOperationRows: StoredRow[] | undefined;
-	let promotedPreparationRows: StoredRow[] | undefined;
+	let promotionInspection: Promise<[StoredRow[], StoredRow[]]> | undefined;
 	let releaseStagingUpload: (() => void) | undefined;
 	let stagingUploadReleased = false;
 	const stagingUploadHeld = new Promise<void>((resolve) => {
@@ -410,10 +409,11 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 				await route.abort("blockedbyclient");
 				return;
 			}
-			[promotedOperationRows, promotedPreparationRows] = await Promise.all([
+			promotionInspection ??= Promise.all([
 				replicaRows(page, "operations"),
 				replicaRows(page, "attachment_move_preparations"),
 			]);
+			await promotionInspection;
 			await moveDispatchHeld;
 			if (!moveDispatchReleased) {
 				await route.abort("blockedbyclient");
@@ -522,7 +522,9 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 		const upload = (await page.evaluate(
 			async ({ accountId, itemId, suffix }) => {
 				const cryptoModulePath = "/src/lib/crypto.ts";
-				const { attachmentUploadSources, runtime } = await import(cryptoModulePath);
+				const { attachmentUploadSources, runtime } = await import(
+					cryptoModulePath
+				);
 				const plaintext = new TextEncoder().encode(`ticket-28-d-${suffix}`);
 				let offset = 0;
 				const sourceCapabilityId = attachmentUploadSources.grant({
@@ -761,7 +763,13 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 		releaseStagingUpload?.();
 
 		await expect.poll(() => moveDispatches, { timeout: 120_000 }).toBe(1);
-		const promotedOperation = promotedOperationRows?.find(
+		if (!promotionInspection)
+			throw new Error("Move dispatch did not begin its durable inspection.");
+		// Route entry precedes these asynchronous reads. Keep dispatch held until the
+		// exact promotion snapshot is available and its durable records are asserted.
+		const [promotedOperationRows, promotedPreparationRows] =
+			await promotionInspection;
+		const promotedOperation = promotedOperationRows.find(
 			(row) => row.recordId === operationId,
 		);
 		if (!promotedOperation)
@@ -769,17 +777,15 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 		const promotedPayload = JSON.parse(promotedOperation.payloadJson) as {
 			operationId?: string;
 			kind?: string;
-			itemId?: string;
-			vaultId?: string;
+			target?: { type?: string; itemId?: string; vaultId?: string };
 		};
 		expect(promotedPayload).toMatchObject({
 			operationId,
 			kind: "move_item",
-			itemId,
-			vaultId: moveTargetVaultId,
+			target: { type: "item", itemId, vaultId: moveTargetVaultId },
 		});
 		expect(
-			promotedPreparationRows?.some((row) => row.recordId === operationId),
+			promotedPreparationRows.some((row) => row.recordId === operationId),
 		).toBe(false);
 		moveDispatchReleased = true;
 		releaseMoveDispatch?.();
@@ -798,8 +804,7 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 					const receipt = JSON.parse(receiptRow?.payloadJson ?? "{}") as {
 						operationId?: string;
 						kind?: string;
-						itemId?: string;
-						vaultId?: string;
+						target?: { type?: string; itemId?: string; vaultId?: string };
 						result?: { type?: string; entityId?: string };
 					};
 					return {
@@ -812,8 +817,7 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 						receipt: {
 							operationId: receipt.operationId,
 							kind: receipt.kind,
-							itemId: receipt.itemId,
-							vaultId: receipt.vaultId,
+							target: receipt.target,
 							resultType: receipt.result?.type,
 							entityId: receipt.result?.entityId,
 						},
@@ -827,8 +831,7 @@ test("authenticated real Core resumes durable Attachment Move preparation after 
 				receipt: {
 					operationId,
 					kind: "move_item",
-					itemId,
-					vaultId: moveTargetVaultId,
+					target: { type: "item", itemId, vaultId: moveTargetVaultId },
 					resultType: "applied",
 					entityId: itemId,
 				},

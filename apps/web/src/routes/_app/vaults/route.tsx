@@ -1,6 +1,8 @@
-import { useCreateVault } from "@bittery/client-runtime/react";
 import {
-	useAccountSwitcher,
+	useCreateVault,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
+import {
 	useAvailableTags,
 	useDeleteVault,
 	useItemCounts,
@@ -54,7 +56,12 @@ function VaultsLayout() {
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
-	const { accounts, activeAccount } = useAccountSwitcher();
+	const session = useRuntimeSession();
+	const accounts = session.accounts.flatMap((account) =>
+		account.access === "unlocked" && account.displayIdentity
+			? [{ accountId: account.accountId, email: account.displayIdentity.email }]
+			: [],
+	);
 
 	const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 	const [isCreateVaultDialogOpen, setIsCreateVaultDialogOpen] = useState(false);
@@ -201,16 +208,8 @@ function VaultsLayout() {
 					open={isCreateVaultDialogOpen}
 					onOpenChange={setIsCreateVaultDialogOpen}
 					onSubmit={handleCreateVault}
-					accounts={accounts.map(
-						({ accountId, email, name, teamName, teamAvatarUrl }) => ({
-							accountId,
-							email,
-							name,
-							teamName,
-							teamAvatarUrl,
-						}),
-					)}
-					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
+					accounts={accounts}
+					defaultAccountId={session.accountId ?? ""}
 				/>
 
 				<EditVaultDialog

@@ -26,8 +26,8 @@ import {
  *
  * This file is what the rest of the suite leans on, so it pins the parts that
  * could rot silently: which store each value lives in, that a restored context
- * really talked to the server and really unwrapped the master unlock key, that
- * two restored contexts stay two sync devices, and that a restore stays cheap.
+ * really talked to the server and really unwrapped the master unlock key,
+ * and that a restore stays cheap. Independent Devices are tested in sync.spec.ts.
  *
  * The snapshot is taken straight after signup, *before* the vault exists - which
  * is how the migrated specs will use it, and which proves a snapshot does not
@@ -210,30 +210,8 @@ test("a restored context is signed in, unlocked, and decrypts an item written el
 	).toContainText(itemUsername);
 });
 
-test("two concurrently restored contexts are two sync clients of one account", async ({
-	browser,
-}) => {
-	test.setTimeout(TEST_BUDGET_MS);
-	await ensureSeedData(browser);
-
-	const [first, second] = await Promise.all([
-		restoredPage(browser),
-		restoredPage(browser),
-	]);
-
-	const clientId = (page: Page) =>
-		page.evaluate(() => sessionStorage.getItem("bittery_sync_client_id"));
-	await expect.poll(() => clientId(first)).toBeTruthy();
-	await expect.poll(() => clientId(second)).toBeTruthy();
-	// Restoring must not clone the sync identity; `sync.spec.ts` depends on a
-	// fresh context minting its own.
-	expect(await clientId(first)).not.toBe(await clientId(second));
-
-	for (const page of [first, second]) {
-		await openVault(page, vaultId);
-		await expect(itemRow(page, itemTitle)).toBeVisible();
-	}
-});
+// Independent Device identity is covered by real Runtime Sign-ins in sync.spec.ts.
+// Copying an encrypted Device installation is not a second unlocked Device.
 
 test("a restore stays inside its budget", async ({ browser }) => {
 	test.setTimeout(TEST_BUDGET_MS);

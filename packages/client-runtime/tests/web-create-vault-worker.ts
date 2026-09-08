@@ -14,9 +14,11 @@ globalThis.fetch = async (...args) => {
 };
 
 type SeedableRuntime = WebClientRuntimeLike & {
+	setRecoveryExecutor: NonNullable<WebClientRuntimeLike["setRecoveryExecutor"]>;
 	seedCreateVaultTestAuthority(
 		serverUrl: string,
 		pauseCheckpoint?: string,
+		secondAccount?: boolean,
 	): Promise<void>;
 };
 
@@ -35,11 +37,18 @@ class JoinedCreateVaultRuntime implements WebClientRuntimeLike {
 		);
 	}
 
+	setRecoveryExecutor(
+		...args: Parameters<SeedableRuntime["setRecoveryExecutor"]>
+	): void {
+		this.inner.setRecoveryExecutor(...args);
+	}
+
 	async open(): Promise<void> {
 		await this.inner.open();
 		await this.inner.seedCreateVaultTestAuthority(
 			self.location.origin,
 			new URL(self.location.href).searchParams.get("pause") ?? undefined,
+			new URL(self.location.href).searchParams.get("secondAccount") === "1",
 		);
 	}
 	request_json(requestId: string, requestJson: string): Promise<string> {

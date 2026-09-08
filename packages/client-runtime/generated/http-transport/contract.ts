@@ -14,10 +14,38 @@ type: "responseTooLarge"
 } | {
 type: "cancelled"
 })
+export type HttpStreamCommand = ({
+request: HttpRequest
+type: "openStream"
+} | {
+dispatchId: string
+type: "readStream"
+})
+export type HttpStreamResponse = ({
+headers: HttpHeader[]
+status: number
+type: "opened"
+} | {
+/**
+ * @minItems 1
+ */
+bytes: [number, ...(number)[]]
+type: "chunk"
+} | {
+type: "ended"
+} | {
+type: "networkFailure"
+} | {
+type: "responseTooLarge"
+} | {
+type: "cancelled"
+})
 
 export interface HttpTransportContract {
 request: HttpRequest
 response: HttpResponse
+stream_command: HttpStreamCommand
+stream_response: HttpStreamResponse
 }
 export interface HttpRequest {
 body: number[]

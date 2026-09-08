@@ -347,6 +347,61 @@ describe("Web Vault-image source registry", () => {
 		}
 	});
 
+	test("replays an applied end-acceptance release after its response is lost without crossing incarnation fences", async () => {
+		const registry = new WebVaultImageSourceRegistry({
+			identity: () => "cap-a",
+		});
+		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
+		const capabilityId = registry.grant({
+			accountId: "account-a",
+			operationId: "operation-a",
+			vaultId: "vault-a",
+			contentType: "image/png",
+			byteLength: 1n,
+			source: source(),
+		});
+		expect((await registry.invoke(claim(capabilityId), "runtime-a")).type).toBe(
+			"claimed",
+		);
+		expect(
+			(
+				await registry.invoke(
+					JSON.stringify({ type: "close", capabilityId }),
+					"runtime-a",
+				)
+			).type,
+		).toBe("closed");
+		const control = (type: "beginAcceptance" | "endAcceptance") =>
+			JSON.stringify({
+				type,
+				accountId: "account-a",
+				operationId: "operation-a",
+			});
+		expect(
+			(await registry.invoke(control("beginAcceptance"), "runtime-a")).type,
+		).toBe("acceptanceBegun");
+		// The real host applies the release; the bridge loses only its acknowledgment.
+		await expect(
+			(async () => {
+				expect(
+					(await registry.invoke(control("endAcceptance"), "runtime-a")).type,
+				).toBe("acceptanceEnded");
+				throw new Error("Injected lost end-acceptance response");
+			})(),
+		).rejects.toThrow("Injected lost end-acceptance response");
+		expect(
+			(await registry.invoke(control("endAcceptance"), "runtime-a")).type,
+		).toBe("acceptanceEnded");
+		expect(
+			(await registry.invoke(control("endAcceptance"), "runtime-other")).type,
+		).toBe("sourceFailure");
+		// Replay cannot retain a phantom acceptance fence or prevent the real owner from closing.
+		await registry.drainClose();
+		expect(
+			(await registry.invoke(control("endAcceptance"), "runtime-a")).type,
+		).toBe("sourceFailure");
+	});
+
 	test("Runtime source controls acquire and release the same retirement fence", async () => {
 		for (const authority of ["account", "runtime", "close"] as const) {
 			const registry = new WebVaultImageSourceRegistry({

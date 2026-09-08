@@ -16,6 +16,8 @@ import { ShareLinksList } from "./share-links-list";
 interface ShareHistoryDialogProps {
 	links: ComponentProps<typeof ShareLinksList>["links"];
 	isLoading: boolean;
+	failed?: boolean;
+	onRetry?: () => void;
 	onRevoke: ComponentProps<typeof ShareLinksList>["onRevoke"];
 	onLoadAccessLogs: ComponentProps<typeof ShareLinksList>["onLoadAccessLogs"];
 	trigger?: ReactNode;
@@ -26,6 +28,8 @@ interface ShareHistoryDialogProps {
 export function ShareHistoryDialog({
 	links,
 	isLoading,
+	failed = false,
+	onRetry,
 	onRevoke,
 	onLoadAccessLogs,
 	trigger,
@@ -63,12 +67,21 @@ export function ShareHistoryDialog({
 					</DialogDescription>
 				</DialogHeader>
 				<div className="flex-1 overflow-y-auto pr-2">
-					<ShareLinksList
-						links={links}
-						isLoading={isLoading}
-						onRevoke={onRevoke}
-						onLoadAccessLogs={onLoadAccessLogs}
-					/>
+					{failed ? (
+						<div role="alert" className="space-y-2 p-4">
+							<p>{m.sharing_history_dialog_error()}</p>
+							{onRetry && (
+								<Button onClick={onRetry}>{m.sharing_history_dialog_retry()}</Button>
+							)}
+						</div>
+					) : (
+						<ShareLinksList
+							links={links}
+							isLoading={isLoading}
+							onRevoke={onRevoke}
+							onLoadAccessLogs={onLoadAccessLogs}
+						/>
+					)}
 				</div>
 			</DialogContent>
 		</Dialog>

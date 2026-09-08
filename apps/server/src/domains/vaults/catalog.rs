@@ -7,7 +7,7 @@ use super::{
     ByteBoundedPage, ConvertVaultTypeInput, ConvertVaultTypeResponse, CreateVaultImageUploadInput,
     CreateVaultInput, SuccessResponse, UpdateVaultInput, UpdateVaultResponse, VaultDetailsResponse,
     VaultIdInput, VaultListEntryResponse, VaultStatsResponse, VAULT_ICON_MAX_CHARS,
-    VAULT_NAME_MAX_CHARS,
+    VAULT_NAME_MAX_CHARS, VAULT_NAME_MIN_CHARS,
 };
 use crate::{
     config::{format_timestamp, DeploymentMode},
@@ -525,8 +525,8 @@ fn validate_create_vault_intent(vault_id: &str, input: &CreateVaultInput) -> Res
         return Err(AppError::bad_request("Invalid params"));
     }
     let name_chars = input.name.chars().count();
-    let valid_name =
-        input.name == input.name.trim() && (2..=VAULT_NAME_MAX_CHARS).contains(&name_chars);
+    let valid_name = input.name == input.name.trim()
+        && (VAULT_NAME_MIN_CHARS..=VAULT_NAME_MAX_CHARS).contains(&name_chars);
     let valid_icon = input.icon.as_deref().is_some_and(|icon| {
         let chars = icon.chars().count();
         icon == icon.trim() && (1..=VAULT_ICON_MAX_CHARS).contains(&chars)

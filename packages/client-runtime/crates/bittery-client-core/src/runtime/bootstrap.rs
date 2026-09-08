@@ -1,4 +1,4 @@
-use super::outcome::CompletionResult;
+use super::outcome::{CompletionResult, OutcomeResolutionAuthBudget};
 use crate::{
     auth_http::{AuthHttpClient, AuthenticatedOutcome},
     authentication_installation::parse_session_expiry_ms,
@@ -8,14 +8,14 @@ use crate::{
         AbandonBootstrapPlan, AuthorityAttachmentRecord, AuthorityItemCategory,
         AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
         BeginBootstrapPlan, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
-        BootstrapPageCursor, BootstrapPhase, MarkRefreshRequiredPlan, PlanResult,
+        BootstrapPageCursor, BootstrapPhase, CursorAdvance, MarkRefreshRequiredPlan, PlanResult,
         PromoteBootstrapPlan, ReplicaSnapshot, ReplicaState, Sha256Fingerprint,
         StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
     },
     server_contract::{
         BootstrapAttachmentResponse, BootstrapItemResponse, BootstrapItemsResponse,
-        BootstrapVaultSummary, ItemCategory, ItemResponseDto, SyncCursorResponse, SyncEntityType,
-        VaultRole, VaultType,
+        BootstrapVaultSummary, ItemResponseDto, SyncCursorResponse, SyncEntityType, VaultRole,
+        VaultType,
     },
     AccountAccessState, AccountId, AccountWaitingReason, ItemProjectionStatus, RequestCancellation,
     Runtime, RuntimeError, RuntimeErrorCode,
@@ -88,7 +88,7 @@ impl Runtime {
             .run_bootstrap(account_id, &http, session, cancellation)
             .await
         {
-            Ok(()) => Ok(()),
+            Ok(_) => Ok(()),
             Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
                 self.mark_reauthentication_required(account_id);
                 Err(error)
@@ -97,22 +97,22 @@ impl Runtime {
         }
     }
 
-    async fn run_bootstrap(
+    pub(super) async fn run_bootstrap(
         &self,
         account_id: &AccountId,
         http: &AuthHttpClient<'_>,
         session: CurrentSessionDocument,
         cancellation: RequestCancellation,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<bool, RuntimeError> {
         let session = self
             .hydrate_bootstrap_generation(account_id, http, session, cancellation.clone())
             .await?;
-        self.catch_up_changes(account_id, http, session, cancellation)
+        let (_, caught_up) = self
+            .catch_up_changes(account_id, http, session, cancellation)
             .await?;
-        // SSE is a long-lived hint, not bounded Bootstrap authority. Ticket 30 owns the Runtime
-        // loop that will hold and cancel that connection for the unlocked Account lifetime.
+        // The live runner owns connection lifetime; this bounded pass only installs authority.
         self.decrypt_visible_items(account_id)?;
-        Ok(())
+        Ok(caught_up)
     }
 
     async fn hydrate_bootstrap_generation(
@@ -315,22 +315,29 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         mut session: CurrentSessionDocument,
         cancellation: RequestCancellation,
-    ) -> Result<CurrentSessionDocument, RuntimeError> {
+    ) -> Result<(CurrentSessionDocument, bool), RuntimeError> {
+        let mut auth_budget = OutcomeResolutionAuthBudget::default();
         loop {
             let snapshot = self.require_snapshot(account_id)?;
             if snapshot.bootstrap.state != ReplicaState::Ready {
-                return Ok(session);
+                return Ok((session, false));
             }
             let since_id = match &snapshot.bootstrap.active_cursor {
                 SyncCursor::CapturedValue { id } => Some(id.clone()),
                 SyncCursor::CapturedEmpty => None,
-                SyncCursor::Cold => return Ok(session),
+                SyncCursor::Cold => return Ok((session, false)),
             };
             let mut token = session.token.as_ref().to_owned();
             let mut changes = http
                 .sync_changes(&token, since_id.as_deref(), cancellation.clone())
                 .await?;
             if matches!(changes, AuthenticatedOutcome::ReauthenticationRequired) {
+                if !auth_budget.consume_renewal() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationRequired,
+                        "Sync renewal allowance is exhausted",
+                    ));
+                }
                 session = self
                     .renew_session(account_id, &session, http, cancellation.clone())
                     .await?;
@@ -341,7 +348,7 @@ impl Runtime {
             }
             let changes = match changes {
                 AuthenticatedOutcome::Ok(changes) => changes,
-                AuthenticatedOutcome::Transient => return Ok(session),
+                AuthenticatedOutcome::Transient => return Ok((session, false)),
                 AuthenticatedOutcome::ReauthenticationRequired => {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::AuthenticationRequired,
@@ -349,7 +356,46 @@ impl Runtime {
                     ));
                 }
             };
-            if changes.requires_full_refresh {
+            // A response cannot silently rebase work fetched from an older page boundary.
+            let page_cursor = snapshot.bootstrap.active_cursor.clone();
+            if self.require_snapshot(account_id)?.bootstrap.active_cursor != page_cursor {
+                return Ok((session, false));
+            }
+            let structural_refresh = changes.events.iter().any(|event| {
+                !matches!(
+                    event.entity_type,
+                    SyncEntityType::Item | SyncEntityType::Operation
+                )
+            });
+            if changes.requires_full_refresh || structural_refresh {
+                // A fresh Bootstrap covers Vault/key/access/User changes. Before its watermark
+                // can replace this page, finish any locally accepted Operations named by it.
+                for event in changes
+                    .events
+                    .iter()
+                    .filter(|event| event.entity_type == SyncEntityType::Operation)
+                {
+                    match self
+                        .reconcile_resolved_operation_fenced(
+                            account_id,
+                            &event.entity_id,
+                            http,
+                            &mut session,
+                        )
+                        .await
+                    {
+                        CompletionResult::Completed => {}
+                        CompletionResult::Retry | CompletionResult::Failed => {
+                            return Ok((session, false))
+                        }
+                        CompletionResult::Reauthenticate => {
+                            return Err(RuntimeError::new(
+                                RuntimeErrorCode::AuthenticationRequired,
+                                "Sync requires a current Session",
+                            ))
+                        }
+                    }
+                }
                 let snapshot = self.require_snapshot(account_id)?;
                 if snapshot.bootstrap.state == ReplicaState::Ready
                     && snapshot.bootstrap.staging_generation.is_none()
@@ -377,12 +423,18 @@ impl Runtime {
                 continue;
             }
             if changes.events.is_empty() {
-                return Ok(session);
+                return Ok((session, !changes.has_more));
             }
-            let terminal_cursor = changes
+            let Some(terminal_cursor) = changes
                 .cursor
                 .as_ref()
-                .map(captured_watermark_from_response);
+                .filter(|cursor| {
+                    !cursor.id.is_empty() && Some(cursor.id.as_str()) != since_id.as_deref()
+                })
+                .map(captured_watermark_from_response)
+            else {
+                return Ok((session, false));
+            };
             let page_operation_ids: Vec<_> = changes
                 .events
                 .iter()
@@ -403,7 +455,9 @@ impl Runtime {
                         .await
                     {
                         CompletionResult::Completed => continue,
-                        CompletionResult::Retry | CompletionResult::Failed => return Ok(session),
+                        CompletionResult::Retry | CompletionResult::Failed => {
+                            return Ok((session, false))
+                        }
                         CompletionResult::Reauthenticate => {
                             return Err(RuntimeError::new(
                                 RuntimeErrorCode::AuthenticationRequired,
@@ -415,43 +469,36 @@ impl Runtime {
                 if event.entity_type != SyncEntityType::Item {
                     continue;
                 }
-                let mut token = session.token.as_ref().to_owned();
-                let mut fetched = http
-                    .fetch_item(&token, &event.entity_id, cancellation.clone())
-                    .await?;
-                if matches!(fetched, AuthenticatedOutcome::ReauthenticationRequired) {
-                    session = self
-                        .renew_session(account_id, &session, http, cancellation.clone())
-                        .await?;
-                    token = session.token.as_ref().to_owned();
-                    fetched = http
-                        .fetch_item(&token, &event.entity_id, cancellation.clone())
-                        .await?;
-                }
-                let item = match fetched {
-                    AuthenticatedOutcome::Ok(item) => item,
-                    AuthenticatedOutcome::Transient => return Ok(session),
-                    AuthenticatedOutcome::ReauthenticationRequired => {
-                        return Err(RuntimeError::new(
-                            RuntimeErrorCode::AuthenticationRequired,
-                            "Session is missing or expired",
-                        ));
-                    }
-                };
                 let snapshot = self.require_snapshot(account_id)?;
-                let expected = snapshot.bootstrap.active_cursor.clone();
+                let guard = guard_from(&snapshot);
+                if snapshot.bootstrap.active_cursor != page_cursor {
+                    return Ok((session, false));
+                }
+                let item = self
+                    .fetch_sync_item_authority(
+                        account_id,
+                        &event.entity_id,
+                        http,
+                        &mut session,
+                        &mut auth_budget,
+                        cancellation.clone(),
+                    )
+                    .await?;
+                if let Some(item) = &item {
+                    self.validate_authoritative_item(account_id, item)?;
+                }
                 match self
                     .replica
-                    .apply_authoritative_item(
-                        account_id,
-                        expected.clone(),
-                        expected,
-                        authority_item_from_dto(item)?,
+                    .apply_sync_item_authority(
+                        guard,
+                        page_cursor.clone(),
+                        event.entity_id.clone(),
+                        item,
                     )
                     .await
                 {
                     Ok(PlanResult::Applied { .. }) => {}
-                    Ok(PlanResult::Stale { .. }) | Err(_) => return Ok(session),
+                    Ok(PlanResult::Stale { .. }) | Err(_) => return Ok((session, false)),
                     Ok(PlanResult::Missing) => {
                         return Err(RuntimeError::new(
                             RuntimeErrorCode::AccountMissing,
@@ -460,12 +507,23 @@ impl Runtime {
                     }
                 }
             }
+            // Install the page's plaintext before the terminal commit exposes its new revision.
+            // Otherwise a publication can consume that revision with old Items and suppress the
+            // later plaintext delivery as a duplicate, including publications from another Account.
+            self.decrypt_visible_items(account_id)?;
             match self
-                .advance_sync_page_cursor_fenced(account_id, page_operation_ids, terminal_cursor)
+                .advance_sync_page_cursor_fenced(
+                    account_id,
+                    page_operation_ids,
+                    CursorAdvance {
+                        expected: page_cursor,
+                        next: terminal_cursor,
+                    },
+                )
                 .await
             {
                 CompletionResult::Completed => {}
-                CompletionResult::Retry | CompletionResult::Failed => return Ok(session),
+                CompletionResult::Retry | CompletionResult::Failed => return Ok((session, false)),
                 CompletionResult::Reauthenticate => {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::AuthenticationRequired,
@@ -474,8 +532,43 @@ impl Runtime {
                 }
             }
             if !changes.has_more {
-                return Ok(session);
+                return Ok((session, true));
             }
+        }
+    }
+
+    async fn fetch_sync_item_authority(
+        &self,
+        account_id: &AccountId,
+        item_id: &str,
+        http: &AuthHttpClient<'_>,
+        session: &mut CurrentSessionDocument,
+        budget: &mut OutcomeResolutionAuthBudget,
+        cancellation: RequestCancellation,
+    ) -> Result<Option<AuthorityItemRecord>, RuntimeError> {
+        let mut answer = http
+            .fetch_sync_item_authority(session.token.as_ref(), item_id, cancellation.clone())
+            .await?;
+        if matches!(answer, AuthenticatedOutcome::ReauthenticationRequired)
+            && budget.consume_renewal()
+        {
+            *session = self
+                .renew_session(account_id, session, http, cancellation.clone())
+                .await?;
+            answer = http
+                .fetch_sync_item_authority(session.token.as_ref(), item_id, cancellation)
+                .await?;
+        }
+        match answer {
+            AuthenticatedOutcome::Ok(item) => Ok(item.as_ref().map(authority_item_from_bootstrap)),
+            AuthenticatedOutcome::Transient => Err(RuntimeError::new(
+                RuntimeErrorCode::RetryableTransport,
+                "Sync Item authority is unavailable",
+            )),
+            AuthenticatedOutcome::ReauthenticationRequired => Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Sync requires a current Session",
+            )),
         }
     }
 
@@ -922,10 +1015,7 @@ fn authority_from_bootstrap_page(
             next_cursor: next_cursor.clone(),
             watermark: captured_watermark(sync_cursor.as_ref()),
             vaults: Vec::new(),
-            items: items
-                .iter()
-                .map(authority_item_from_bootstrap)
-                .collect::<Result<Vec<_>, _>>()?,
+            items: items.iter().map(authority_item_from_bootstrap).collect(),
         }),
     }
 }
@@ -950,13 +1040,11 @@ fn authority_vault(vault: &BootstrapVaultSummary) -> Result<AuthorityVaultRecord
     })
 }
 
-fn authority_item_from_bootstrap(
-    item: &BootstrapItemResponse,
-) -> Result<AuthorityItemRecord, RuntimeError> {
-    Ok(AuthorityItemRecord {
+fn authority_item_from_bootstrap(item: &BootstrapItemResponse) -> AuthorityItemRecord {
+    AuthorityItemRecord {
         id: item.id.clone(),
         vault_id: item.vault_id.clone(),
-        category: item_category(item.category.clone())?,
+        category: item.category.clone().into(),
         favorite: item.favorite,
         encrypted_data: item.encrypted_data.clone(),
         encryption_iv: item.encryption_iv.clone(),
@@ -973,7 +1061,7 @@ fn authority_item_from_bootstrap(
             .iter()
             .map(authority_attachment_from_bootstrap)
             .collect(),
-    })
+    }
 }
 
 fn authority_attachment_from_bootstrap(
@@ -1005,7 +1093,7 @@ pub(super) fn authority_item_from_dto(
     Ok(AuthorityItemRecord {
         id: item.id,
         vault_id: item.vault_id,
-        category: item_category(item.category)?,
+        category: item.category.into(),
         favorite: item.favorite,
         encrypted_data: item.encrypted_data,
         encryption_iv: item.encryption_iv,
@@ -1018,16 +1106,6 @@ pub(super) fn authority_item_from_dto(
         updated_at: item.updated_at,
         deleted_at: item.deleted_at,
         attachments: Vec::new(),
-    })
-}
-
-fn item_category(category: ItemCategory) -> Result<AuthorityItemCategory, RuntimeError> {
-    Ok(match category {
-        ItemCategory::Login => AuthorityItemCategory::Login,
-        ItemCategory::SecureNote => AuthorityItemCategory::SecureNote,
-        ItemCategory::CreditCard => AuthorityItemCategory::CreditCard,
-        ItemCategory::Identity => AuthorityItemCategory::Identity,
-        ItemCategory::Totp => AuthorityItemCategory::Totp,
     })
 }
 

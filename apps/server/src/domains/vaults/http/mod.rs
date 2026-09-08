@@ -1379,21 +1379,12 @@ mod tests {
         );
     }
 
-    /// No Item route may reach the legacy response-cache wrapper any more.
-    ///
-    /// Rotation still uses it, so `idempotency_record` and its module survive until ticket 29.
-    /// This assertion holds the line that the Item half of the migration cannot slip back.
     #[test]
-    fn no_item_route_reaches_the_legacy_response_cache() {
-        let source = include_str!("items.rs");
-        assert!(
-            !source.contains("idempotency::execute"),
-            "Item routes must resolve through the retained Operation contract"
-        );
-        assert!(
-            include_str!("rotation.rs").contains("idempotency::execute"),
-            "this assertion is only meaningful while some caller still exists"
-        );
+    fn rotation_and_item_routes_use_retained_outcomes() {
+        for source in [include_str!("items.rs"), include_str!("rotation.rs")] {
+            assert!(!source.contains("idempotency::execute"));
+            assert!(source.contains("OperationOutcome"));
+        }
     }
 
     #[test]

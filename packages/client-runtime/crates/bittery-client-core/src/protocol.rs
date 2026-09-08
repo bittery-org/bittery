@@ -55,6 +55,39 @@ string_id!(Incarnation);
     deny_unknown_fields
 )]
 pub enum RuntimeRequest {
+    RebootstrapAccountRecovery {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+    },
+    InspectRecovery {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "Option<String>")
+        )]
+        account_id: Option<AccountId>,
+    },
+    ExportAccountRecovery {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        password: String,
+        sink_capability_id: String,
+    },
+    RepairAccountRecovery {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        password: String,
+        source_capability_id: String,
+    },
     SignIn {
         server_url: String,
         email: String,
@@ -213,6 +246,30 @@ pub enum RuntimeRequest {
         account_id: AccountId,
         operation_id: String,
     },
+    ListItemShareLinks {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+    },
+    ListShareAccessLogs {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        link_id: String,
+    },
+    RevokeShareLink {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        link_id: String,
+    },
     RenameAttachment {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -277,6 +334,23 @@ pub enum RuntimeRequest {
 impl fmt::Debug for RuntimeRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RebootstrapAccountRecovery { .. } => {
+                formatter.write_str("RebootstrapAccountRecovery([redacted scope])")
+            }
+            Self::InspectRecovery { account_id } => formatter
+                .debug_struct("InspectRecovery")
+                .field("account_id", account_id)
+                .finish(),
+            Self::ExportAccountRecovery { account_id, .. } => formatter
+                .debug_struct("ExportAccountRecovery")
+                .field("account_id", account_id)
+                .field("password_and_capability", &"[redacted]")
+                .finish(),
+            Self::RepairAccountRecovery { account_id, .. } => formatter
+                .debug_struct("RepairAccountRecovery")
+                .field("account_id", account_id)
+                .field("password_and_capability", &"[redacted]")
+                .finish(),
             Self::SignIn {
                 server_url, email, ..
             } => formatter
@@ -410,6 +484,30 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("operation_id", operation_id)
                 .finish(),
+            Self::ListItemShareLinks {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("ListItemShareLinks")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
+            Self::ListShareAccessLogs {
+                account_id,
+                link_id,
+            } => formatter
+                .debug_struct("ListShareAccessLogs")
+                .field("account_id", account_id)
+                .field("link_id", link_id)
+                .finish(),
+            Self::RevokeShareLink {
+                account_id,
+                link_id,
+            } => formatter
+                .debug_struct("RevokeShareLink")
+                .field("account_id", account_id)
+                .field("link_id", link_id)
+                .finish(),
             Self::RenameAttachment {
                 account_id,
                 attachment_id,
@@ -457,6 +555,10 @@ impl fmt::Debug for RuntimeRequest {
 impl RuntimeRequest {
     pub fn account_id(&self) -> Option<&AccountId> {
         match self {
+            Self::RebootstrapAccountRecovery { account_id } => Some(account_id),
+            Self::InspectRecovery { account_id } => account_id.as_ref(),
+            Self::ExportAccountRecovery { account_id, .. }
+            | Self::RepairAccountRecovery { account_id, .. } => Some(account_id),
             Self::SignIn { .. } => None,
             Self::QuickUnlock { account_id, .. } => Some(account_id),
             Self::Lock { account_id } | Self::SignOut { account_id } => Some(account_id),
@@ -474,6 +576,9 @@ impl RuntimeRequest {
             | Self::PermanentlyDeleteItem { account_id, .. }
             | Self::CreateShare { account_id, .. }
             | Self::AcknowledgeShareResult { account_id, .. }
+            | Self::ListItemShareLinks { account_id, .. }
+            | Self::ListShareAccessLogs { account_id, .. }
+            | Self::RevokeShareLink { account_id, .. }
             | Self::RenameAttachment { account_id, .. }
             | Self::DeleteAttachment { account_id, .. }
             | Self::DownloadAttachment { account_id, .. }
@@ -538,6 +643,70 @@ pub struct CreateShareDraft {
     pub is_one_time_use: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_emails: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShareAllowedEmail {
+    pub email: String,
+    pub verified: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShareLinkSummary {
+    pub id: String,
+    pub status: ShareLinkStatus,
+    pub access_mode: ShareAccessMode,
+    pub is_one_time_use: bool,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "plain_i32_schema")
+    )]
+    pub access_count: i32,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_i32_schema")
+    )]
+    pub max_access_count: Option<i32>,
+    pub allowed_emails: Vec<ShareAllowedEmail>,
+    pub expires_at: String,
+    pub created_at: String,
+    pub last_accessed_at: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShareAccessLog {
+    pub id: String,
+    pub accessed_by_email: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub success: bool,
+    pub failure_reason: Option<String>,
+    pub accessed_at: String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ShareLinkStatus {
+    Active,
+    Expired,
+    Exhausted,
+    Revoked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1067,6 +1236,36 @@ pub enum CustomFieldKind {
     deny_unknown_fields
 )]
 pub enum RuntimeResponse {
+    RecoveryDiagnosed {
+        diagnostics: StorageRecoveryDiagnostics,
+    },
+    RecoveryExported {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        classification: RecoveryClassification,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        byte_length: u64,
+    },
+    RecoveryRepaired {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        #[serde(with = "decimal_u64")]
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(schema_with = "decimal_u64::json_schema")
+        )]
+        replica_revision: u64,
+    },
     SignedIn {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -1132,6 +1331,33 @@ pub enum RuntimeResponse {
         )]
         account_id: AccountId,
         operation_id: String,
+    },
+    ItemShareLinks {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        item_id: String,
+        links: Vec<ShareLinkSummary>,
+        base_share_url: String,
+    },
+    ShareAccessLogs {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        link_id: String,
+        logs: Vec<ShareAccessLog>,
+    },
+    ShareLinkRevoked {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+        link_id: String,
     },
     AttachmentRenamed {
         #[cfg_attr(
@@ -1282,6 +1508,13 @@ pub enum ObservationRequest {
         )]
         account_id: AccountId,
     },
+    Operations {
+        #[cfg_attr(
+            feature = "runtime-protocol-contract-schema",
+            schemars(with = "String")
+        )]
+        account_id: AccountId,
+    },
     PendingShareResults {
         #[cfg_attr(
             feature = "runtime-protocol-contract-schema",
@@ -1301,9 +1534,9 @@ pub enum ObservationRequest {
 impl ObservationRequest {
     pub fn account_id(&self) -> Option<&AccountId> {
         match self {
-            Self::Items { account_id } | Self::PendingShareResults { account_id } => {
-                Some(account_id)
-            }
+            Self::Items { account_id }
+            | Self::Operations { account_id }
+            | Self::PendingShareResults { account_id } => Some(account_id),
             Self::RuntimeStatus { account_id } => account_id.as_ref(),
             Self::WritableVaultCatalog => None,
         }
@@ -1319,6 +1552,7 @@ impl ObservationRequest {
 pub enum RuntimeProjection {
     WritableVaultCatalog(WritableVaultCatalogProjection),
     Items(ItemsProjection),
+    Operations(OperationsProjection),
     PendingShareResults(PendingShareResultsProjection),
     RuntimeStatus(RuntimeStatusProjection),
 }
@@ -1328,6 +1562,7 @@ impl RuntimeProjection {
         match self {
             Self::WritableVaultCatalog(value) => value.revision,
             Self::Items(value) => value.replica_revision,
+            Self::Operations(value) => value.replica_revision,
             Self::PendingShareResults(value) => value.replica_revision,
             Self::RuntimeStatus(value) => value.revision,
         }
@@ -1337,6 +1572,7 @@ impl RuntimeProjection {
         match self {
             Self::WritableVaultCatalog(_) => 0,
             Self::Items(value) => value.items.len(),
+            Self::Operations(_) => 0,
             Self::PendingShareResults(_) => 0,
             Self::RuntimeStatus(_) => 0,
         }
@@ -1735,6 +1971,7 @@ pub enum RuntimeErrorCode {
     AccountFailed,
     AuthenticationRequired,
     AuthenticationUnavailable,
+    StorageUnavailable,
     RetryableTransport,
     AuthorityMissing,
     AccessDenied,
@@ -1746,6 +1983,28 @@ pub enum RuntimeErrorCode {
     InvariantViolation,
 }
 
+/// Closed recovery implementation guards; these are not Account capacity limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    any(
+        feature = "runtime-protocol-contract-schema",
+        feature = "recovery-contract-schema"
+    ),
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoveryBound {
+    RecordBytes,
+    ArchiveBytes,
+    RecordCount,
+    ArtifactCount,
+    ReportBytes,
+    SummaryBytes,
+    ControlBytes,
+    CursorBytes,
+    ChunkBytes,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[cfg_attr(
     feature = "runtime-protocol-contract-schema",
@@ -1755,6 +2014,12 @@ pub enum RuntimeErrorCode {
 pub struct RuntimeError {
     pub code: RuntimeErrorCode,
     pub message: String,
+    #[serde(
+        default,
+        rename = "recoveryBound",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub recovery_bound: Option<RecoveryBound>,
 }
 
 impl RuntimeError {
@@ -1762,6 +2027,7 @@ impl RuntimeError {
         Self {
             code,
             message: message.into(),
+            recovery_bound: None,
         }
     }
 }
@@ -1871,4 +2137,216 @@ mod server_account_deletion_protocol_tests {
             })
         );
     }
+}
+
+/// Non-secret progress from accepted Operations and their durable terminal receipts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationsProjection {
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
+    pub account_id: AccountId,
+    #[serde(with = "decimal_u64")]
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "decimal_u64::json_schema")
+    )]
+    pub replica_revision: u64,
+    pub operations: Vec<OperationProjection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationProjection {
+    pub operation_id: String,
+    pub kind: OperationProjectionKind,
+    /// Terminal receipts do not retain historical scheduling diagnostics.
+    pub attempt_count: Option<String>,
+    pub next_attempt_at_ms: Option<String>,
+    pub resolution: OperationResolution,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_import_count_schema")
+    )]
+    pub imported_count: Option<u16>,
+    pub rejection_code: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationResolution {
+    Pending,
+    Applied,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationProjectionKind {
+    CreateVault,
+    CreateItem,
+    UpdateItem,
+    SetItemFavorite,
+    TrashItem,
+    RestoreItem,
+    MoveItem,
+    PermanentlyDeleteItem,
+    CreateShare,
+    ImportItems,
+}
+
+impl From<crate::replica::OperationKind> for OperationProjectionKind {
+    fn from(value: crate::replica::OperationKind) -> Self {
+        match value {
+            crate::replica::OperationKind::CreateVault => Self::CreateVault,
+            crate::replica::OperationKind::CreateItem => Self::CreateItem,
+            crate::replica::OperationKind::UpdateItem => Self::UpdateItem,
+            crate::replica::OperationKind::SetItemFavorite => Self::SetItemFavorite,
+            crate::replica::OperationKind::TrashItem => Self::TrashItem,
+            crate::replica::OperationKind::RestoreItem => Self::RestoreItem,
+            crate::replica::OperationKind::MoveItem => Self::MoveItem,
+            crate::replica::OperationKind::PermanentlyDeleteItem => Self::PermanentlyDeleteItem,
+            crate::replica::OperationKind::CreateShare => Self::CreateShare,
+            crate::replica::OperationKind::ImportItems => Self::ImportItems,
+        }
+    }
+}
+
+#[cfg(feature = "runtime-protocol-contract-schema")]
+fn optional_import_count_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": ["integer", "null"], "minimum": 0, "maximum": 200 })
+}
+
+#[cfg(feature = "runtime-protocol-contract-schema")]
+fn optional_plain_i32_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": ["integer", "null"], "minimum": -2147483648_i64, "maximum": 2147483647_i64 })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StorageRecoveryDiagnostics {
+    pub failure: Option<RuntimeErrorCode>,
+    pub maintenance: RecoveryMaintenanceStatus,
+    pub schema: RecoverySchemaStatus,
+    pub device: RecoveryDeviceStatus,
+    pub accounts: Vec<StorageRecoveryAccount>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StorageRecoveryAccount {
+    pub email: Option<String>,
+    pub server_url: Option<String>,
+    pub user_id: Option<String>,
+    pub can_rebootstrap: bool,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(with = "String")
+    )]
+    pub account_id: AccountId,
+    pub state: RecoveryStorageState,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_u32_schema")
+    )]
+    pub operation_count: Option<u32>,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_u32_schema")
+    )]
+    pub receipt_count: Option<u32>,
+    #[cfg_attr(
+        feature = "runtime-protocol-contract-schema",
+        schemars(schema_with = "optional_plain_u32_schema")
+    )]
+    pub missing_artifacts: Option<u32>,
+    pub can_export: bool,
+    pub can_repair: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoveryClassification {
+    Complete,
+    Partial,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoveryMaintenanceStatus {
+    Available,
+    Unsupported,
+    Busy,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoverySchemaStatus {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoveryDeviceStatus {
+    FreshOrUnknown,
+    KnownAccounts,
+    StorageUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "runtime-protocol-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoveryStorageState {
+    Ready,
+    Corrupt,
+    Missing,
+    Unknown,
+    Unreadable,
 }

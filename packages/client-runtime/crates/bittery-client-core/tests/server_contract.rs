@@ -130,3 +130,67 @@ fn vault_image_staging_closed_values_round_trip_and_reject_impossible_wire_shape
         assert!(serde_json::from_value::<VaultImageStagingStatusResponse>(impossible).is_err());
     }
 }
+
+#[test]
+fn rotation_outcomes_round_trip_closed_creation_finalization_and_per_kind_rejections() {
+    for (suffix, create_rejection, final_rejection) in [
+        (
+            "vault_member_removal_rotation_plans",
+            "vault_member_not_found",
+            "vault_membership_changed",
+        ),
+        (
+            "team_leave_rotation_plans",
+            "team_member_not_found",
+            "team_membership_changed",
+        ),
+        (
+            "team_member_removal_rotation_plans",
+            "team_member_not_found",
+            "team_membership_changed",
+        ),
+    ] {
+        for stage in ["create", "finalize"] {
+            let kind = format!("{stage}_{suffix}");
+            let applied = if stage == "create" {
+                json!({"status":"applied","plans":[{"id":"plan-1","vaultId":"vault-1","initiatorUserId":"actor","expectedKeyVersion":2,"state":"preparing","idleExpiresAt":"2026-09-07T12:00:00Z","absoluteExpiresAt":"2026-09-08T12:00:00Z"}]})
+            } else {
+                let mut value = json!({"status":"applied","rotations":[{"planId":"plan-1","vaultId":"vault-1","keyVersion":3,"rotationId":"rotation-1"}]});
+                if suffix.starts_with("team_") {
+                    value["personalTeamId"] = json!("personal-1");
+                }
+                value
+            };
+            let rejected = json!({"status":"rejected","code":if stage == "create" {create_rejection} else {final_rejection}});
+            for result in [applied.clone(), rejected.clone()] {
+                let wire = json!({"operationId":"operation-1","kind":kind,"result":result});
+                let decoded: OperationOutcome = serde_json::from_value(wire.clone()).unwrap();
+                // Generated optional fields use Option: a missing detail decodes as None and
+                // serializes as null. The Runtime only reads these Server response DTOs.
+                let mut expected = wire;
+                if stage == "finalize" && result["status"] == "rejected" {
+                    expected["result"]["details"] = serde_json::Value::Null;
+                }
+                assert_eq!(serde_json::to_value(decoded).unwrap(), expected);
+            }
+            let mut invalid = json!({"operationId":"operation-1","kind":kind,"result":rejected});
+            invalid["result"]["code"] = json!(if stage == "create" {
+                final_rejection
+            } else {
+                create_rejection
+            });
+            assert!(serde_json::from_value::<OperationOutcome>(invalid).is_err());
+            let mut extra = json!({"operationId":"operation-1","kind":kind,"result":applied});
+            extra["result"]["responseBytes"] = json!("opaque");
+            assert!(serde_json::from_value::<OperationOutcome>(extra).is_err());
+            if stage == "finalize" {
+                let stale = json!({"operationId":"operation-1","kind":kind,"result":{"status":"rejected","code":"rotation_plan_stale","details":{"planId":"plan-1","reason":"item_state"}}});
+                let decoded: OperationOutcome = serde_json::from_value(stale.clone()).unwrap();
+                assert_eq!(serde_json::to_value(decoded).unwrap(), stale);
+                let mut invalid = stale;
+                invalid["result"]["details"]["reason"] = json!("future_reason");
+                assert!(serde_json::from_value::<OperationOutcome>(invalid).is_err());
+            }
+        }
+    }
+}

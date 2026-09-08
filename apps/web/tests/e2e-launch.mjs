@@ -15,7 +15,13 @@
  * plus every variable the server itself reads (PORT, BITTERY_MODE, ...).
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import {
+	accessSync,
+	constants,
+	mkdirSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,20 +64,32 @@ if (!process.env.DATABASE_URL) {
 mkdirSync(dirname(outboxPath), { recursive: true });
 writeFileSync(outboxPath, "");
 
-// playwright.config.ts already builds these before any server starts, so this
-// is a ~1s fingerprint check there; it stays so the script also runs standalone.
-run("cargo", [
-	"build",
-	"--manifest-path",
-	manifestPath,
-	"--bin",
-	"bittery-server",
-	"--bin",
-	"migrate",
-]);
-run(resolve(binDir, "migrate"), ["--fresh"]);
-
+// Standalone launch builds by default; explicit preparation also applies to
+// Playwright's child launchers, including a caller-selected CARGO_TARGET_DIR.
+if (process.env.E2E_SERVER_BINARIES_READY !== "1") {
+	run("cargo", [
+		"build",
+		"--manifest-path",
+		manifestPath,
+		"--bin",
+		"bittery-server",
+		"--bin",
+		"migrate",
+	]);
+}
+const migrateBin = resolve(binDir, "migrate");
 const serverBin = resolve(binDir, "bittery-server");
+// Check both before resetting the database: an incomplete prebuild cannot boot.
+for (const binary of [migrateBin, serverBin]) {
+	try {
+		if (!statSync(binary).isFile()) throw new Error("not a regular file");
+		accessSync(binary, constants.X_OK);
+	} catch (error) {
+		fail(`Required E2E binary ${binary} is unavailable: ${error.message}`);
+	}
+}
+run(migrateBin, ["--fresh"]);
+
 // POSIX-only, and Node 22.12+. Without this the failure surfaces as a Playwright
 // `webServer` timeout, which reads as a broken app rather than a broken launcher.
 if (typeof process.execve !== "function") {

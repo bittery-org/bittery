@@ -9,11 +9,13 @@ import type {
 	CreateShareDraft,
 	ItemsProjection,
 	ObservationRequest,
+	OperationsProjection,
 	PendingShareResultsProjection,
 	RuntimeOutcome,
 	RuntimeRequest,
 	RuntimeResponse,
 	RuntimeStatusProjection,
+	StorageRecoveryDiagnostics,
 	WritableVaultCatalogProjection,
 } from "../../generated/runtime-protocol/contract";
 import {
@@ -40,12 +42,19 @@ export type {
 	ItemDraft,
 	ItemProjection,
 	LoginItemData,
+	OperationProjection,
+	OperationsProjection,
 	Passkey,
 	PasskeyStatus,
 	PasskeyStatusReason,
 	PasswordHistoryEntry,
 	PhoneNumber,
+	RecoveryBound,
 	SecureNoteItemData,
+	ShareAccessLog,
+	ShareLinkSummary,
+	StorageRecoveryAccount,
+	StorageRecoveryDiagnostics,
 	TotpAlgorithm,
 	TotpDigits,
 	VaultImageSourceInput,
@@ -159,6 +168,30 @@ export type RuntimeImportBatchAccepted = Omit<
 	Extract<RuntimeResponse, { type: "importBatchAccepted" }>,
 	"type"
 >;
+export type ListItemShareLinksInput = Omit<
+	Extract<RuntimeRequest, { type: "listItemShareLinks" }>,
+	"type"
+>;
+export type RuntimeItemShareLinks = Omit<
+	Extract<RuntimeResponse, { type: "itemShareLinks" }>,
+	"type"
+>;
+export type ListShareAccessLogsInput = Omit<
+	Extract<RuntimeRequest, { type: "listShareAccessLogs" }>,
+	"type"
+>;
+export type RuntimeShareAccessLogs = Omit<
+	Extract<RuntimeResponse, { type: "shareAccessLogs" }>,
+	"type"
+>;
+export type RevokeShareLinkInput = Omit<
+	Extract<RuntimeRequest, { type: "revokeShareLink" }>,
+	"type"
+>;
+export type RuntimeShareLinkRevoked = Omit<
+	Extract<RuntimeResponse, { type: "shareLinkRevoked" }>,
+	"type"
+>;
 export type RenameAttachmentInput = Omit<
 	Extract<RuntimeRequest, { type: "renameAttachment" }>,
 	"type"
@@ -227,6 +260,37 @@ export interface RuntimeCallOptions {
 }
 
 export interface RuntimeClient {
+	rebootstrapAccountRecovery(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "rebootstrapAccountRecovery" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<
+		Omit<Extract<RuntimeResponse, { type: "recoveryRepaired" }>, "type">
+	>;
+	inspectRecovery(
+		input?: Omit<Extract<RuntimeRequest, { type: "inspectRecovery" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<StorageRecoveryDiagnostics>;
+	exportAccountRecovery(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "exportAccountRecovery" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<
+		Omit<Extract<RuntimeResponse, { type: "recoveryExported" }>, "type">
+	>;
+	repairAccountRecovery(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "repairAccountRecovery" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<
+		Omit<Extract<RuntimeResponse, { type: "recoveryRepaired" }>, "type">
+	>;
 	signIn(
 		input: SignInInput,
 		options?: RuntimeCallOptions,
@@ -305,6 +369,18 @@ export interface RuntimeClient {
 		input: ImportItemsInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeImportBatchAccepted>;
+	listItemShareLinks(
+		input: ListItemShareLinksInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeItemShareLinks>;
+	listShareAccessLogs(
+		input: ListShareAccessLogsInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeShareAccessLogs>;
+	revokeShareLink(
+		input: RevokeShareLinkInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeShareLinkRevoked>;
 	renameAttachment(
 		input: RenameAttachmentInput,
 		options?: RuntimeCallOptions,
@@ -331,6 +407,7 @@ export interface RuntimeClient {
 	): Promise<RuntimeShareResultAcknowledged>;
 	/** The Items observation for one Account. The same Account returns the same store. */
 	items(accountId: string): RuntimeStore<ItemsProjection>;
+	operations(accountId: string): RuntimeStore<OperationsProjection>;
 	/** Durable, Account-scoped Share results waiting for host delivery acknowledgement. */
 	pendingShareResults(
 		accountId: string,
@@ -403,6 +480,38 @@ export function createRuntimeClient(
 	}
 
 	return {
+		async rebootstrapAccountRecovery(input, callOptions) {
+			const { type: _, ...result } = await call(
+				{ type: "rebootstrapAccountRecovery", ...input },
+				"recoveryRepaired",
+				callOptions,
+			);
+			return result;
+		},
+		async inspectRecovery(input, callOptions) {
+			const { diagnostics } = await call(
+				{ type: "inspectRecovery", ...input },
+				"recoveryDiagnosed",
+				callOptions,
+			);
+			return diagnostics;
+		},
+		async exportAccountRecovery(input, callOptions) {
+			const { type: _, ...result } = await call(
+				{ type: "exportAccountRecovery", ...input },
+				"recoveryExported",
+				callOptions,
+			);
+			return result;
+		},
+		async repairAccountRecovery(input, callOptions) {
+			const { type: _, ...result } = await call(
+				{ type: "repairAccountRecovery", ...input },
+				"recoveryRepaired",
+				callOptions,
+			);
+			return result;
+		},
 		async signIn(input, callOptions) {
 			const { accountId, userId } = await call(
 				{ type: "signIn", ...input },
@@ -522,6 +631,30 @@ export function createRuntimeClient(
 			);
 			return { operationId, vaultId, itemIds, replicaRevision };
 		},
+		async listItemShareLinks(input, callOptions) {
+			const { type: _, ...result } = await call(
+				{ type: "listItemShareLinks", ...input },
+				"itemShareLinks",
+				callOptions,
+			);
+			return result;
+		},
+		async listShareAccessLogs(input, callOptions) {
+			const { type: _, ...result } = await call(
+				{ type: "listShareAccessLogs", ...input },
+				"shareAccessLogs",
+				callOptions,
+			);
+			return result;
+		},
+		async revokeShareLink(input, callOptions) {
+			const { type: _, ...result } = await call(
+				{ type: "revokeShareLink", ...input },
+				"shareLinkRevoked",
+				callOptions,
+			);
+			return result;
+		},
 		async renameAttachment(input, callOptions) {
 			const { accountId, attachmentId } = await call(
 				{ type: "renameAttachment", ...input },
@@ -575,6 +708,12 @@ export function createRuntimeClient(
 				type: "items",
 				accountId,
 			} satisfies ObservationRequest);
+		},
+		operations(accountId) {
+			return registry.store<OperationsProjection>({
+				type: "operations",
+				accountId,
+			});
 		},
 		pendingShareResults(accountId) {
 			return registry.store<PendingShareResultsProjection>({
@@ -635,7 +774,11 @@ export function decodeOutcome(responseJson: string): RuntimeResponse {
 		);
 	}
 	if (outcome.type === "failed") {
-		throw new RuntimeRequestError(outcome.value.code, outcome.value.message);
+		throw new RuntimeRequestError(
+			outcome.value.code,
+			outcome.value.message,
+			outcome.value.recoveryBound ?? undefined,
+		);
 	}
 	return outcome.value;
 }

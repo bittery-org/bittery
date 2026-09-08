@@ -220,7 +220,7 @@ Object.assign(globalThis, {
 
 async function countVaultImageArtifactRows(): Promise<number> {
 	const database = await new Promise<IDBDatabase>((resolve, reject) => {
-		const request = indexedDB.open("bittery-vault-image-artifacts", 1);
+		const request = indexedDB.open("bittery-vault-image-artifacts", 2);
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () => reject(request.error);
 	});

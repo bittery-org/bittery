@@ -1,6 +1,7 @@
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import type {
 	ItemsProjection,
+	OperationsProjection,
 	PendingShareResultsProjection,
 	RuntimeStatusProjection,
 	WritableVaultCatalogProjection,
@@ -142,4 +143,14 @@ export function useCreateVault(): UseMutationResult<
 	return useMutation({
 		mutationFn: (input: CreateVaultInput) => client.createVault(input),
 	});
+}
+
+export function useRuntimeOperations(
+	accountId: string | null | undefined,
+): RuntimeSnapshot<OperationsProjection> {
+	const client = useRuntimeClient();
+	return useRuntimeStore(
+		accountId == null ? null : client.operations(accountId),
+		IDLE_SNAPSHOT as RuntimeSnapshot<OperationsProjection>,
+	);
 }

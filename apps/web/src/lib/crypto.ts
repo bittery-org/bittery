@@ -56,6 +56,8 @@ export const attachmentUploadSources = composition.attachmentUploadSources;
 export const attachmentDownloadSinks = composition.attachmentDownloadSinks;
 /** Browser-only Vault-image source registration; Rust binds generated identities on claim. */
 export const vaultImageSources = composition.vaultImageSources;
+/** Opaque encrypted recovery File grants; no password or plaintext archive cache. */
+export const recoveryFiles = composition.recoveryFiles;
 /** Rust-owned Account identity normalization used before durable deletion markers. */
 export const normalizeAccountEmail = composition.normalizeAccountEmail;
 /**

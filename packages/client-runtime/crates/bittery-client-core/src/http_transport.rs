@@ -1,13 +1,10 @@
 use crate::{RequestCancellation, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::{collections::HashSet, sync::Arc};
+
+mod stream;
+pub(crate) use stream::{HttpByteStream, HttpStreamOpening};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
@@ -219,6 +216,8 @@ impl HttpResponse {
 struct HttpTransportContract {
     request: HttpRequest,
     response: HttpResponse,
+    stream_command: stream::HttpStreamCommand,
+    stream_response: stream::HttpStreamResponse,
 }
 
 #[cfg(feature = "http-transport-contract-schema")]
@@ -248,6 +247,31 @@ pub trait SerializedHttpExecutor {
 /// Owns response validation and cancellation policy behind the primitive host seam.
 pub(crate) struct HttpTransport {
     executor: Arc<dyn SerializedHttpExecutor>,
+}
+
+/// A polled host invocation owns cancellation until it completes or transfers its stream lease.
+struct HttpDispatchLease {
+    executor: Arc<dyn SerializedHttpExecutor>,
+    dispatch_id: String,
+    cancel_on_drop: bool,
+}
+
+impl HttpDispatchLease {
+    fn new(executor: Arc<dyn SerializedHttpExecutor>, dispatch_id: String) -> Self {
+        Self {
+            executor,
+            dispatch_id,
+            cancel_on_drop: true,
+        }
+    }
+}
+
+impl Drop for HttpDispatchLease {
+    fn drop(&mut self) {
+        if self.cancel_on_drop {
+            self.executor.cancel(&self.dispatch_id);
+        }
+    }
 }
 
 struct UnavailableHttpExecutor;
@@ -298,21 +322,18 @@ impl HttpTransport {
             .map_err(|_| transport_invariant("HTTP request could not be serialized"))?;
         let dispatch_id = request.dispatch_id.clone();
         let max_response_bytes = request.max_response_bytes;
-        let invocation_started = Arc::new(AtomicBool::new(false));
-        let started = invocation_started.clone();
         let executor = self.executor.clone();
         let invocation = async move {
-            started.store(true, Ordering::SeqCst);
-            executor.invoke(request_json).await
+            let mut lease = HttpDispatchLease::new(executor, dispatch_id);
+            let result = lease.executor.invoke(request_json).await;
+            lease.cancel_on_drop = false;
+            result
         };
         tokio::pin!(invocation);
 
         tokio::select! {
             biased;
             () = cancellation.cancelled() => {
-                if invocation_started.load(Ordering::SeqCst) {
-                    self.executor.cancel(&dispatch_id);
-                }
                 Ok(HttpResponse::Cancelled)
             }
             result = &mut invocation => {
@@ -335,7 +356,10 @@ fn transport_invariant(message: &'static str) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{atomic::AtomicUsize, Mutex};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    };
     use tokio::sync::{oneshot, Notify};
 
     struct StubExecutor {
@@ -425,6 +449,7 @@ mod tests {
                 body: vec![9, 8],
             }
         );
+        assert!(executor.cancellations.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -670,6 +695,33 @@ mod tests {
         cancellation.cancel();
         cancellation.cancel();
         assert_eq!(execution.await.unwrap(), HttpResponse::Cancelled);
+        assert_eq!(executor.cancel_count.load(Ordering::SeqCst), 1);
+        assert!(release
+            .send(r#"{"type":"completed","status":200,"headers":[],"body":[]}"#.to_owned())
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn dropping_a_polled_finite_dispatch_cancels_its_exact_host_invocation() {
+        let (release, receiver) = oneshot::channel();
+        let executor = Arc::new(BlockingExecutor {
+            invoked: Notify::new(),
+            release: Mutex::new(Some(receiver)),
+            invoke_count: AtomicUsize::new(0),
+            cancel_count: AtomicUsize::new(0),
+        });
+        let transport = HttpTransport::new(executor.clone());
+        let mut execution = Box::pin(transport.execute_with_dispatch_id(
+            request(1),
+            RequestCancellation::new(),
+            "dispatch-7".to_owned(),
+        ));
+        tokio::select! {
+            _ = executor.invoked.notified() => {},
+            _ = &mut execution => panic!("held dispatch completed"),
+        }
+        drop(execution);
+        assert_eq!(executor.invoke_count.load(Ordering::SeqCst), 1);
         assert_eq!(executor.cancel_count.load(Ordering::SeqCst), 1);
         assert!(release
             .send(r#"{"type":"completed","status":200,"headers":[],"body":[]}"#.to_owned())

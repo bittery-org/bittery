@@ -1,3 +1,4 @@
+import { useRuntimeSession } from "@bittery/client-runtime/react";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	type DragItemData,
@@ -15,7 +16,8 @@ import {
 	useSensors,
 } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
-import { createContext, type ReactNode, useContext, useState } from "react";
+import { createContext, type ReactNode, useContext } from "react";
+import { useAccountPresentationState } from "@/hooks/use-account-presentation-state";
 import { useMoveItem } from "@/hooks/use-runtime-item-mutations";
 import { getServerUrl } from "@/lib/auth-server";
 import { useI18n } from "@/providers/i18n-provider";
@@ -40,9 +42,13 @@ interface VaultDndProviderProps {
 
 export function VaultDndProvider({ children }: VaultDndProviderProps) {
 	const { m } = useI18n();
-	const [activeItem, setActiveItem] = useState<DecryptedItem | null>(null);
-	const [sourceVaultId, setSourceVaultId] = useState<string | null>(null);
-	const [sourceAccountId, setSourceAccountId] = useState<string | null>(null);
+	const session = useRuntimeSession();
+	const [drag, setDrag, readDrag] = useAccountPresentationState<{
+		item: DecryptedItem;
+		sourceVaultId: string;
+		accountId: string;
+	}>(session.state === "unlocked" ? session.accountId : null);
+	const activeItem = drag?.item ?? null;
 	const moveItem = useMoveItem();
 	const navigate = useNavigate();
 
@@ -57,21 +63,22 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 	function handleDragStart(event: DragStartEvent) {
 		const data = event.active.data.current as DragItemData | undefined;
 		if (data?.type === "vault-item") {
-			setActiveItem(data.item);
-			setSourceVaultId(data.sourceVaultId);
-			setSourceAccountId(data.accountId);
+			setDrag({
+				item: data.item,
+				sourceVaultId: data.sourceVaultId,
+				accountId: data.accountId,
+			});
 		}
 	}
 
 	function handleDragEnd(event: DragEndEvent) {
 		const { over } = event;
 
-		const draggedItem = activeItem;
-		const draggedSourceVaultId = sourceVaultId;
-		const draggedSourceAccountId = sourceAccountId;
-		setActiveItem(null);
-		setSourceVaultId(null);
-		setSourceAccountId(null);
+		const current = readDrag();
+		const draggedItem = current?.item;
+		const draggedSourceVaultId = current?.sourceVaultId;
+		const draggedSourceAccountId = current?.accountId;
+		setDrag(null);
 
 		if (
 			!over ||
@@ -101,7 +108,6 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 		moveItem.mutate(
 			{
 				itemId: draggedItem.id,
-				sourceVaultId: draggedSourceVaultId,
 				targetVaultId,
 				accountId: draggedSourceAccountId,
 				targetAccountId: dropData.accountId,
@@ -127,9 +133,7 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 	}
 
 	function handleDragCancel() {
-		setActiveItem(null);
-		setSourceVaultId(null);
-		setSourceAccountId(null);
+		setDrag(null);
 	}
 
 	return (

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createRuntimeClient } from "./client";
 import {
 	createRuntimeWorkerService,
 	createWorkerRuntime,
@@ -2216,5 +2217,258 @@ describe("Runtime main-thread facade", () => {
 			type: "unobserve",
 			observationId: "vault",
 		});
+	});
+});
+describe("recovery ownership", () => {
+	for (const failingOpen of ["replica", "family"] as const) {
+		test(`failed startup observation preserves ${failingOpen} storage failure and the same recovery owner`, async () => {
+			const core = Object.assign(new RuntimeDouble(), {
+				setRecoveryExecutor() {},
+			});
+			core.open = async () => {
+				core.openCalls++;
+				throw Object.assign(new Error("stored row invalid"), {
+					code: "STORAGE_UNAVAILABLE",
+				});
+			};
+			core.close = async () => {
+				core.closeCalls++;
+				throw new Error("physical retirement failed");
+			};
+			let constructed = 0;
+			const service = createRuntimeWorkerService({
+				storageFamily: {
+					open: async () => {
+						if (failingOpen === "family")
+							throw Object.assign(
+								new Error("prior connection blocks upgrade"),
+								{ code: "STORAGE_UNAVAILABLE" },
+							);
+					},
+					close: async () => {},
+				},
+				executor: { invoke: async () => "{}" },
+				platformStorageExecutor: { invoke: async () => "{}" },
+				httpExecutor: { invoke: async () => "{}", cancel() {} },
+				attachmentArtifactExecutor: {
+					invoke: async () => ({ controlResponseJson: "{}" }),
+				},
+				binaryTransferExecutorFactory: () => ({
+					...unavailableForegroundUploadBinary,
+					invoke: async () => ({ controlResponseJson: "{}" }),
+					close() {},
+				}),
+				accountLeaseExecutor: { acquire: async () => null },
+				...authenticatedDownloadSinkPorts,
+				authClient: { clientId: "client", platform: "web", version: "1" },
+				prepareRecoveryRuntimeIncarnation: async () => {},
+				recoveryExecutorFactory: () => ({
+					invoke: async () => ({ controlResponseJson: '{"type":"end"}' }),
+					cancel() {},
+					close: async () => {},
+				}),
+				loadWasm: async () => ({
+					WebClientRuntime: {
+						withExecutors: () => core,
+						withConfiguredAttachmentMovePreparation: () => {
+							constructed++;
+							return core;
+						},
+					},
+				}),
+			});
+			const signal = new AbortController().signal;
+			const client = createRuntimeClient({
+				transport: {
+					request: async (requestId, requestJson) =>
+						(await service.request(
+							{ type: "request", requestId, requestJson },
+							signal,
+							() => {},
+						)) as string,
+					observe: async (observationId, requestJson, listener) => {
+						await service.request(
+							{ type: "observe", observationId, requestJson },
+							signal,
+							(value) =>
+								listener((value as { projectionJson: string }).projectionJson),
+						);
+					},
+					unobserve: async (observationId) => {
+						await service.request(
+							{ type: "unobserve", observationId },
+							signal,
+							() => {},
+						);
+					},
+					close: service.close,
+				},
+			});
+			const unsubscribe = client.session().subscribe(() => {});
+			await flush();
+			expect(client.session().getSnapshot()).toMatchObject({
+				state: "unavailable",
+				code: "STORAGE_UNAVAILABLE",
+			});
+			expect(core.closeCalls).toBe(0);
+			await service.request(
+				{
+					type: "request",
+					requestId: "recover",
+					requestJson: '{"type":"inspectRecovery"}',
+				},
+				signal,
+				() => {},
+			);
+			expect(core.requests.at(-1)?.requestJson).toBe(
+				'{"type":"inspectRecovery"}',
+			);
+			expect(constructed).toBe(1);
+			expect(core.openCalls).toBe(failingOpen === "replica" ? 1 : 0);
+			unsubscribe();
+			await expect(service.close()).rejects.toMatchObject({
+				code: "ATTACHMENT_MOVE_PREPARATION_FAILED",
+			});
+			await expect(
+				service.request(
+					{
+						type: "request",
+						requestId: "later",
+						requestJson: '{"type":"inspectRecovery"}',
+					},
+					signal,
+					() => {},
+				),
+			).rejects.toThrow();
+			expect(constructed).toBe(1);
+		});
+	}
+	test("failed opening retains the same recovery-only Runtime and drains its physical owner on close", async () => {
+		const events: string[] = [];
+		const core = Object.assign(new RuntimeDouble(), {
+			setRecoveryExecutor() {
+				events.push("setter");
+			},
+		});
+		core.open = async () => {
+			core.openCalls++;
+			events.push("open");
+			throw new Error("stored row invalid");
+		};
+		core.close = async () => {
+			core.closeCalls++;
+			events.push("core-close");
+		};
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel() {} },
+			storageFamily: {
+				open: async () => {
+					events.push("family-open");
+				},
+				close: async () => {
+					events.push("family-close");
+				},
+			},
+			prepareRecoveryRuntimeIncarnation: async () => {
+				events.push("grants");
+			},
+			recoveryExecutorFactory: () => ({
+				cancel() {},
+				invoke: async () => ({ controlResponseJson: '{"type":"end"}' }),
+				close: async () => {
+					events.push("recovery-close");
+				},
+			}),
+			loadWasm: async () => ({
+				WebClientRuntime: { withExecutors: () => core },
+			}),
+		});
+		const call = (type: string) =>
+			service.request(
+				{
+					type: "request",
+					requestId: type,
+					requestJson: JSON.stringify({ type }),
+				},
+				new AbortController().signal,
+				() => {},
+			);
+		await call("inspectRecovery");
+		await call("inspectRecovery");
+		expect(core.openCalls).toBe(1);
+		expect(core.closeCalls).toBe(0);
+		await expect(call("device")).rejects.toThrow();
+		expect(core.closeCalls).toBe(0);
+		await service.close();
+		expect(events).toEqual([
+			"grants",
+			"setter",
+			"family-open",
+			"open",
+			"core-close",
+			"recovery-close",
+			"family-close",
+		]);
+	});
+	test("a decorated recovery request cannot retain a Runtime whose normal opening failed", async () => {
+		const core = new RuntimeDouble();
+		core.open = async () => {
+			throw new Error("failed opening");
+		};
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel() {} },
+			loadWasm: async () => ({
+				WebClientRuntime: { withExecutors: () => core },
+			}),
+		});
+		await expect(
+			service.request(
+				{
+					type: "request",
+					requestId: "bad",
+					requestJson: '{"type":"inspectRecovery","unknown":true}',
+				},
+				new AbortController().signal,
+				() => {},
+			),
+		).rejects.toThrow("failed opening");
+		expect(core.requests).toEqual([]);
+		expect(core.closeCalls).toBe(1);
+	});
+	test("explicit Wipe after recovery uses a fresh Runtime behind the drained close barrier", async () => {
+		const old = new RuntimeDouble();
+		const fresh = new RuntimeDouble();
+		let constructed = 0;
+		const service = createRuntimeWorkerService({
+			executor: { invoke: async () => "{}" },
+			platformStorageExecutor: { invoke: async () => "{}" },
+			httpExecutor: { invoke: async () => "{}", cancel() {} },
+			loadWasm: async () => ({
+				WebClientRuntime: {
+					withExecutors: () => (constructed++ === 0 ? old : fresh),
+				},
+			}),
+		});
+		const call = (type: string) =>
+			service.request(
+				{
+					type: "request",
+					requestId: type,
+					requestJson: JSON.stringify({ type }),
+				},
+				new AbortController().signal,
+				() => {},
+			);
+		await call("inspectRecovery");
+		await call("wipe");
+		expect(old.closeCalls).toBe(1);
+		expect(fresh.openCalls).toBe(1);
+		expect(old.requests.map((x) => x.requestId)).toEqual(["inspectRecovery"]);
+		expect(fresh.requests.map((x) => x.requestId)).toEqual(["wipe"]);
+		await service.close();
 	});
 });

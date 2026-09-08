@@ -320,6 +320,20 @@ export class WebClientRuntime {
     return ret;
   }
   /**
+   * @param {Function} invoke
+   * @param {Function} cancel
+   */
+  setRecoveryExecutor(invoke, cancel) {
+    const ret = wasm.webclientruntime_setRecoveryExecutor(
+      this.__wbg_ptr,
+      invoke,
+      cancel,
+    );
+    if (ret[1]) {
+      throw takeFromExternrefTable0(ret[0]);
+    }
+  }
+  /**
    * @param {string} observation_id
    */
   unobserve(observation_id) {
@@ -2661,6 +2675,16 @@ function __wbg_get_imports() {
       const ret = result;
       return ret;
     },
+    __wbg_instanceof_Uint8Array_309b927aaf7a3fc7: function (arg0) {
+      let result;
+      try {
+        result = arg0 instanceof Uint8Array;
+      } catch (_) {
+        result = false;
+      }
+      const ret = result;
+      return ret;
+    },
     __wbg_keys_58421f8f96795607: function (arg0) {
       const ret = Object.keys(arg0);
       return ret;
@@ -2703,6 +2727,10 @@ function __wbg_get_imports() {
       } finally {
         state0.a = 0;
       }
+    },
+    __wbg_new_b667d279fd5aa943: function (arg0, arg1) {
+      const ret = new Error(getStringFromWasm0(arg0, arg1));
+      return ret;
     },
     __wbg_new_cd45aabdf6073e84: function (arg0) {
       const ret = new Uint8Array(arg0);
@@ -2786,6 +2814,12 @@ function __wbg_get_imports() {
       const ret = Promise.resolve(arg0);
       return ret;
     },
+    __wbg_set_8535240470bf2500: function () {
+      return handleError(function (arg0, arg1, arg2) {
+        const ret = Reflect.set(arg0, arg1, arg2);
+        return ret;
+      }, arguments);
+    },
     __wbg_static_accessor_GLOBAL_4ef717fb391d88b7: function () {
       const ret = typeof global === "undefined" ? null : global;
       return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
@@ -2819,7 +2853,7 @@ function __wbg_get_imports() {
       return ret;
     },
     __wbindgen_cast_0000000000000001: function (arg0, arg1) {
-      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 330, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1254, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
       const ret = makeMutClosure(
         arg0,
         arg1,

@@ -12,7 +12,7 @@ const allSuites = [
 	"tests/web-vault-image-artifact.chromium.test.ts",
 	"tests/web-vault-image-http.chromium.test.ts",
 	"tests/web-create-vault.chromium.test.ts",
-	"../../apps/web/tests/browser/runtime-import-parking.chromium.test.ts",
+	"../../apps/web/tests/browser/runtime-import-progress.chromium.test.ts",
 ];
 const selectors = new Map([
 	["binary-transfer", ["tests/web-binary-transfer.chromium.test.ts"]],

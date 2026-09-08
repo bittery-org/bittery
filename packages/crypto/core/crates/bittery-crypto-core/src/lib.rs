@@ -15,6 +15,7 @@ pub mod key_derivation;
 pub mod key_rotation;
 pub mod passkey;
 pub mod recovery;
+pub mod replica_recovery;
 pub mod rsa;
 pub mod secret_key;
 mod share_capability;

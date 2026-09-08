@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use axum::{
+    body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
     http::HeaderMap,
-    response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,7 @@ use crate::http::{
     dto::ProblemDetails,
     error::ApiError,
     error_code::ErrorCode,
-    extractors::{ApiJson, AuthenticatedRequest},
-    idempotency,
+    extractors::{ApiJson, ApiJsonBytes, AuthenticatedRequest},
     openapi::ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
@@ -48,7 +47,7 @@ enum RotationErrorResponses {
     NotFound(ProblemDetails),
     #[response(
         status = 409,
-        description = "Rotation plan is stale or conflicts with current state",
+        description = "Operation ID reused or concurrent update requires retry",
         content_type = "application/problem+json"
     )]
     Conflict(ProblemDetails),
@@ -66,7 +65,7 @@ enum RotationErrorResponses {
     UnsupportedMediaType(ProblemDetails),
     #[response(
         status = 422,
-        description = "Idempotency key was reused with a different request",
+        description = "JSON body does not match the request schema",
         content_type = "application/problem+json"
     )]
     Unprocessable(ProblemDetails),
@@ -76,18 +75,10 @@ enum RotationErrorResponses {
         content_type = "application/problem+json"
     )]
     Internal(ProblemDetails),
-    #[response(status = 503, description = "An identical idempotent request is still pending", content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))]
-    ServiceUnavailable(ProblemDetails),
 }
 use crate::{
     db::enums::VaultKeyRotationManifestKind,
-    domains::vaults::rotation::{
-        departure as member_departure, membership as vault_membership,
-        plans::{
-            self as vault_key_rotation, PreparationPage, RotationPlanSummary, RotationResult,
-            StagedOutput,
-        },
-    },
+    domains::vaults::rotation::plans::{self as vault_key_rotation, PreparationPage, StagedOutput},
     AppState,
 };
 
@@ -118,42 +109,75 @@ struct StagedOutputRequest {
     id: String,
     payload: String,
 }
-#[derive(Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct FinalizeResponse {
-    plan_id: String,
-    vault_id: String,
-    key_version: i32,
-    rotation_id: String,
-}
-
-#[derive(Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct PlanSetResponse {
-    plans: Vec<RotationPlanSummary>,
-}
-
 #[derive(Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FinalizePlanSetRequest {
     plan_ids: Vec<String>,
 }
 
-#[derive(Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct FinalizePlanSetResponse {
-    personal_team_id: Option<String>,
-    rotations: Vec<FinalizeResponse>,
+use crate::domains::operations::{
+    self,
+    rotation::{RotationEffect, RotationOperationInput},
+    OperationOutcome, OperationResolution,
+};
+fn empty_body(
+    body: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<Vec<u8>, ApiError> {
+    let bytes = body.map_err(|_| {
+        ApiError::payload_too_large("The request body exceeds this route's byte limit")
+    })?;
+    if !bytes.is_empty() {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidRequest,
+            "This operation requires an empty body",
+        ));
+    }
+    Ok(bytes.to_vec())
 }
-
-impl From<RotationResult> for FinalizeResponse {
-    fn from(v: RotationResult) -> Self {
-        Self {
-            plan_id: v.plan_id,
-            vault_id: v.vault_id,
-            key_version: v.key_version,
-            rotation_id: v.rotation_id,
+fn validate_plan_ids(ids: &[String], vault: bool) -> Result<(), ApiError> {
+    let mut unique = std::collections::HashSet::new();
+    if (vault && ids.len() != 1)
+        || ids
+            .iter()
+            .any(|id| uuid::Uuid::parse_str(id).is_err() || !unique.insert(id))
+    {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidRequest,
+            "Expected distinct valid Rotation plan IDs; Vault removal requires exactly one",
+        ));
+    }
+    Ok(())
+}
+async fn run_operation(
+    state: &AppState,
+    auth: &AuthenticatedRequest,
+    headers: &HeaderMap,
+    effect: RotationEffect,
+    raw_body: Vec<u8>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    let input = RotationOperationInput {
+        operation_id: operations::http::required_operation_id(headers)?,
+        user_id: auth.session.user_id.clone(),
+        effect,
+        raw_body,
+        deployment_mode: state.config.server.mode,
+    };
+    match operations::rotation::execute(&state.db_pool, state.billing_gateway.as_deref(), input)
+        .await?
+    {
+        OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
         }
+        OperationResolution::IdReused => Err(ApiError::conflict(
+            ErrorCode::OperationIdReused,
+            "The Operation ID is already bound to another request",
+        )),
     }
 }
 
@@ -218,233 +242,135 @@ async fn abandon(
     Ok(())
 }
 
-#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans", operation_id="createVaultMemberRemovalRotationPlans", tag="vault-members", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
+#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans", operation_id="createVaultMemberRemovalRotationPlans", tag="vault-key-rotation", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=String,Header)), responses((status=200,body=OperationOutcome), RotationErrorResponses))]
 async fn start_vault_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path((vault_id, user_id)): Path<(String, String)>,
-) -> Result<Response, ApiError> {
-    let pool = state.db_pool.clone();
-    let deployment_mode = state.config.server.mode;
-    let route = format!("/api/v1/vaults/{vault_id}/members/{user_id}/removal-rotation-plans");
-    idempotency::execute(
-        pool,
+    body: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    let body = empty_body(body)?;
+    run_operation(
+        &state,
+        &auth,
         &headers,
-        auth.session.user_id.clone(),
-        "POST",
-        &route,
-        &[],
-        move |pool, actor| async move {
-            let plan = vault_membership::create_removal_plan(
-                &pool,
-                deployment_mode,
-                &actor,
-                &vault_id,
-                &user_id,
-            )
-            .await?;
-            Ok(Json(PlanSetResponse { plans: vec![plan] }).into_response())
+        RotationEffect::CreateVaultRemoval {
+            vault_id,
+            target_id: user_id,
         },
+        body,
     )
     .await
 }
 
-#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeVaultMemberRemovalRotationPlans", tag="vault-members", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
+#[utoipa::path(post, path="/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeVaultMemberRemovalRotationPlans", tag="vault-key-rotation", params(("vaultId"=String,Path),("userId"=String,Path),("Idempotency-Key"=String,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=OperationOutcome), RotationErrorResponses))]
 async fn finalize_vault_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path((vault_id, user_id)): Path<(String, String)>,
-    ApiJson(body): ApiJson<FinalizePlanSetRequest>,
-) -> Result<Response, ApiError> {
-    if body.plan_ids.len() != 1 {
-        return Err(ApiError::bad_request(
-            ErrorCode::InvalidRequest,
-            "Vault Member removal requires exactly one Rotation plan",
-        ));
-    }
-    let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::internal())?;
-    let pool = state.db_pool.clone();
-    let deployment_mode = state.config.server.mode;
-    let plan_id = body.plan_ids[0].clone();
-    let route =
-        format!("/api/v1/vaults/{vault_id}/members/{user_id}/removal-rotation-plans/finalize");
-    let response = idempotency::execute(
-        pool,
+    body: ApiJsonBytes<FinalizePlanSetRequest, ORDINARY_API_BODY_LIMIT_BYTES>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    validate_plan_ids(&body.value.plan_ids, true)?;
+    run_operation(
+        &state,
+        &auth,
         &headers,
-        auth.session.user_id.clone(),
-        "POST",
-        &route,
-        &bytes,
-        move |pool, actor| async move {
-            let result = vault_membership::finalize_removal(
-                &pool,
-                deployment_mode,
-                &actor,
-                &vault_id,
-                &user_id,
-                &plan_id,
-            )
-            .await?;
-            Ok(Json(FinalizePlanSetResponse {
-                personal_team_id: None,
-                rotations: vec![result.rotation.into()],
-            })
-            .into_response())
+        RotationEffect::FinalizeVaultRemoval {
+            vault_id,
+            target_id: user_id,
+            plan_id: body.value.plan_ids[0].clone(),
         },
+        body.bytes,
     )
-    .await?;
-    state.notify_sync();
-    Ok(response)
+    .await
 }
 
-#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans", operation_id="createTeamLeaveRotationPlans", tag="teams", params(("teamId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
+#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans", operation_id="createTeamLeaveRotationPlans", tag="vault-key-rotation", params(("teamId"=String,Path),("Idempotency-Key"=String,Header)), responses((status=200,body=OperationOutcome), RotationErrorResponses))]
 async fn start_team_leave(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(team_id): Path<String>,
-) -> Result<Response, ApiError> {
-    let pool = state.db_pool.clone();
-    let deployment_mode = state.config.server.mode;
-    let route = format!("/api/v1/teams/{team_id}/leave-rotation-plans");
-    idempotency::execute(
-        pool,
+    body: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    let body = empty_body(body)?;
+    run_operation(
+        &state,
+        &auth,
         &headers,
-        auth.session.user_id.clone(),
-        "POST",
-        &route,
-        &[],
-        move |pool, actor| async move {
-            let result =
-                member_departure::create_voluntary_plans(&pool, deployment_mode, &team_id, &actor)
-                    .await?;
-            Ok(Json(PlanSetResponse {
-                plans: result.plans,
-            })
-            .into_response())
-        },
+        RotationEffect::CreateTeamLeave { team_id },
+        body,
     )
     .await
 }
 
-#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans", operation_id="createTeamMemberRemovalRotationPlans", tag="team-members", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), responses((status=200,body=PlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
+#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans", operation_id="createTeamMemberRemovalRotationPlans", tag="vault-key-rotation", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=String,Header)), responses((status=200,body=OperationOutcome), RotationErrorResponses))]
 async fn start_team_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path((team_id, user_id)): Path<(String, String)>,
-) -> Result<Response, ApiError> {
-    let pool = state.db_pool.clone();
-    let deployment_mode = state.config.server.mode;
-    let route = format!("/api/v1/teams/{team_id}/members/{user_id}/removal-rotation-plans");
-    idempotency::execute(
-        pool,
+    body: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    let body = empty_body(body)?;
+    run_operation(
+        &state,
+        &auth,
         &headers,
-        auth.session.user_id.clone(),
-        "POST",
-        &route,
-        &[],
-        move |pool, actor| async move {
-            let result = member_departure::create_administrative_plans(
-                &pool,
-                deployment_mode,
-                &team_id,
-                &actor,
-                &user_id,
-            )
-            .await?;
-            Ok(Json(PlanSetResponse {
-                plans: result.plans,
-            })
-            .into_response())
+        RotationEffect::CreateTeamRemoval {
+            team_id,
+            target_id: user_id,
         },
+        body,
     )
     .await
 }
 
-async fn finalize_departure(
-    state: &AppState,
-    auth: &AuthenticatedRequest,
-    headers: &HeaderMap,
-    team_id: String,
-    target_id: String,
-    body: FinalizePlanSetRequest,
-    administrative: bool,
-) -> Result<Response, ApiError> {
-    let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::internal())?;
-    let pool = state.db_pool.clone();
-    let billing_gateway = state.billing_gateway.clone();
-    let deployment_mode = state.config.server.mode;
-    let route = if administrative {
-        format!("/api/v1/teams/{team_id}/members/{target_id}/removal-rotation-plans/finalize")
-    } else {
-        format!("/api/v1/teams/{team_id}/leave-rotation-plans/finalize")
-    };
-    let response = idempotency::execute(
-        pool,
-        headers,
-        auth.session.user_id.clone(),
-        "POST",
-        &route,
-        &bytes,
-        move |pool, actor| async move {
-            let result = if administrative {
-                member_departure::finalize_administrative(
-                    &pool,
-                    billing_gateway.as_deref(),
-                    deployment_mode,
-                    &team_id,
-                    &actor,
-                    &target_id,
-                    &body.plan_ids,
-                )
-                .await?
-            } else {
-                member_departure::finalize_voluntary(
-                    &pool,
-                    billing_gateway.as_deref(),
-                    deployment_mode,
-                    &team_id,
-                    &actor,
-                    &body.plan_ids,
-                )
-                .await?
-            };
-            Ok(Json(FinalizePlanSetResponse {
-                personal_team_id: Some(result.personal_team_id),
-                rotations: result.rotations.into_iter().map(Into::into).collect(),
-            })
-            .into_response())
-        },
-    )
-    .await?;
-    state.notify_sync();
-    Ok(response)
-}
-
-#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans/finalize", operation_id="finalizeTeamLeaveRotationPlans", tag="teams", params(("teamId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
+#[utoipa::path(post, path="/teams/{teamId}/leave-rotation-plans/finalize", operation_id="finalizeTeamLeaveRotationPlans", tag="vault-key-rotation", params(("teamId"=String,Path),("Idempotency-Key"=String,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=OperationOutcome), RotationErrorResponses))]
 async fn finalize_team_leave(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(team_id): Path<String>,
-    ApiJson(body): ApiJson<FinalizePlanSetRequest>,
-) -> Result<Response, ApiError> {
-    let target = auth.session.user_id.clone();
-    finalize_departure(&state, &auth, &headers, team_id, target, body, false).await
+    body: ApiJsonBytes<FinalizePlanSetRequest, ORDINARY_API_BODY_LIMIT_BYTES>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    validate_plan_ids(&body.value.plan_ids, false)?;
+    run_operation(
+        &state,
+        &auth,
+        &headers,
+        RotationEffect::FinalizeTeamLeave {
+            team_id,
+            plan_ids: body.value.plan_ids,
+        },
+        body.bytes,
+    )
+    .await
 }
 
-#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeTeamMemberRemovalRotationPlans", tag="team-members", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=Option<String>,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=FinalizePlanSetResponse,headers(("Idempotency-Replayed"=String,description="true when this is a stored replay"))), RotationErrorResponses))]
+#[utoipa::path(post, path="/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize", operation_id="finalizeTeamMemberRemovalRotationPlans", tag="vault-key-rotation", params(("teamId"=String,Path),("userId"=String,Path),("Idempotency-Key"=String,Header)), request_body=FinalizePlanSetRequest, responses((status=200,body=OperationOutcome), RotationErrorResponses))]
 async fn finalize_team_member_removal(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path((team_id, user_id)): Path<(String, String)>,
-    ApiJson(body): ApiJson<FinalizePlanSetRequest>,
-) -> Result<Response, ApiError> {
-    finalize_departure(&state, &auth, &headers, team_id, user_id, body, true).await
+    body: ApiJsonBytes<FinalizePlanSetRequest, ORDINARY_API_BODY_LIMIT_BYTES>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    validate_plan_ids(&body.value.plan_ids, false)?;
+    run_operation(
+        &state,
+        &auth,
+        &headers,
+        RotationEffect::FinalizeTeamRemoval {
+            team_id,
+            target_id: user_id,
+            plan_ids: body.value.plan_ids,
+        },
+        body.bytes,
+    )
+    .await
 }
 
 pub(crate) fn router() -> OpenApiRouter<AppState> {
@@ -500,3 +426,7 @@ mod body_limit_tests {
         .await;
     }
 }
+
+#[cfg(test)]
+#[path = "rotation_tests.rs"]
+mod rotation_tests;

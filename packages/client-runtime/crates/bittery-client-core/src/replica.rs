@@ -9,7 +9,8 @@ use std::{
 };
 
 mod domain;
-mod persistence_contract;
+pub(crate) mod persistence_contract;
+pub(crate) mod recovery;
 #[cfg(all(
     any(test, feature = "replica-conformance"),
     not(target_arch = "wasm32")
@@ -32,24 +33,25 @@ use domain::AccountReplica;
 )]
 pub(crate) use domain::{
     attachment_move_artifact_ref, attachment_move_intent_fingerprint,
-    canonical_create_vault_request, import_items_fingerprint, import_items_path,
-    item_operation_fingerprint, validate_create_vault_text_fields, AbandonBootstrapPlan,
-    AttachmentMoveArtifactRef, AttachmentMovePreparationRecord, AttachmentMoveProgress,
-    AttachmentMoveRecovery, AttachmentMoveUploadState, AuthorityAttachmentRecord,
-    AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole,
-    AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority, BootstrapAuthoritySnapshot,
-    BootstrapContinuation, BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor,
-    BootstrapPageIdentity, BootstrapPhase, CanonicalCreateVaultRequest,
-    CleanupBootstrapGenerationPlan, CleanupBootstrapGenerationResult, CreateVaultCheckpoint,
-    CreateVaultCleanupObligation, CreateVaultImageRecord, CreateVaultOperationRecord,
-    CreateVaultOperationRejectionCode, CursorAdvance, ForegroundAttachmentCommitPlan,
-    ForegroundAttachmentCommitResult, GuardedCommitPlan, ImmutableHttpRequest,
-    ImportItemsOperationRejectionCode, MarkRefreshRequiredPlan, ObservedOutcome, OperationKind,
-    OperationOutcomeResult, OperationReceiptRecord, OperationRecord, OperationRejectionCode,
-    OperationSchedulingState, PlanMutation, PlanResult, PreparedMoveAttachment,
-    PromoteBootstrapPlan, ProtectedShareCapabilityRecord, RecomputedPlanResult, ReplicaItemRecord,
-    ReplicaSnapshot, ReplicaState, ResourceRef, Sha256Fingerprint, StageBootstrapPagePlan,
-    StageBootstrapPageResult, SyncCursor, MAX_IMPORT_ITEMS,
+    canonical_create_vault_request, create_item_fingerprint, import_items_fingerprint,
+    import_items_path, item_operation_fingerprint, share_operation_fingerprint,
+    validate_create_vault_text_fields, AbandonBootstrapPlan, AttachmentMoveArtifactRef,
+    AttachmentMovePreparationRecord, AttachmentMoveProgress, AttachmentMoveRecovery,
+    AttachmentMoveUploadState, AuthorityAttachmentRecord, AuthorityItemCategory,
+    AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
+    BeginBootstrapPlan, BootstrapAuthority, BootstrapAuthoritySnapshot, BootstrapContinuation,
+    BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity,
+    BootstrapPhase, CanonicalCreateVaultRequest, CleanupBootstrapGenerationPlan,
+    CleanupBootstrapGenerationResult, CreateVaultCheckpoint, CreateVaultCleanupObligation,
+    CreateVaultImageRecord, CreateVaultOperationRecord, CreateVaultOperationRejectionCode,
+    CursorAdvance, ForegroundAttachmentCommitPlan, ForegroundAttachmentCommitResult,
+    GuardedCommitPlan, ImmutableHttpRequest, ImportItemsOperationRejectionCode,
+    MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
+    OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
+    PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan,
+    ProtectedShareCapabilityRecord, RecomputedPlanResult, ReplicaItemRecord, ReplicaSnapshot,
+    ReplicaState, ResourceRef, Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult,
+    SyncCursor, MAX_IMPORT_ITEMS,
 };
 
 #[cfg(feature = "persistence-contract-schema")]
@@ -144,6 +146,109 @@ mod bootstrap_authority_tests {
             updated_at: "2026-08-23T00:00:00Z".into(),
             deleted_at: None,
             attachments: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn foreground_convergence_requires_exact_authority_and_live_unowned_state() {
+        for scenario in [
+            "matching",
+            "different",
+            "newer",
+            "presence",
+            "lower-revision",
+            "incarnation",
+            "lock",
+            "failed",
+            "refresh",
+            "operation",
+            "overlay",
+        ] {
+            let (state, account_id) = installed();
+            let authority = item("item-1", "vault-1");
+            state
+                .seed_ready_authority(&account_id, vec![vault("vault-1")], vec![authority.clone()])
+                .unwrap();
+            let mut plan = ForegroundAttachmentCommitPlan::new(
+                account_id.clone(),
+                Incarnation::from("incarnation-bootstrap"),
+                1,
+                0,
+                "deleted-attachment".into(),
+                false,
+                authority,
+            );
+            {
+                let mut state = state.state.lock().unwrap();
+                let current = state.accounts.get_mut(&account_id).unwrap();
+                current.revision = 2;
+                match scenario {
+                    "different" => plan.item.favorite = true,
+                    "newer" => plan.item.version = 0,
+                    "presence" => plan.attachment_present = true,
+                    "lower-revision" => plan.guard.expected_replica_revision = 3,
+                    "incarnation" => {
+                        plan.guard.expected_incarnation = Incarnation::from("previous")
+                    }
+                    "lock" => current.lock_epoch = 1,
+                    "failed" => current.failure = Some(RuntimeErrorCode::InvariantViolation),
+                    "refresh" => current.bootstrap.state = ReplicaState::RefreshRequired,
+                    "operation" => {
+                        current.operations.insert(
+                            "op-owner".into(),
+                            crate::test_fixtures::test_operation("op-owner", "item-1"),
+                        );
+                    }
+                    "overlay" => {
+                        current.items.insert(
+                            "item-1".into(),
+                            crate::test_fixtures::test_overlay(
+                                account_id.clone(),
+                                "item-1",
+                                "op-owner",
+                            ),
+                        );
+                    }
+                    "matching" => {}
+                    _ => unreachable!(),
+                }
+            }
+            let before = state.snapshot(&account_id).unwrap();
+            state.fail_next_commits(1);
+            let state = Arc::new(state);
+            let replica = Replica::new(state.clone());
+            let result = replica.execute_foreground_attachment_exact(plan).await;
+            match scenario {
+                "matching" => assert_eq!(
+                    result.unwrap(),
+                    ForegroundAttachmentCommitResult::Applied {
+                        replica_revision: 2
+                    }
+                ),
+                "incarnation" => {
+                    assert_eq!(result.unwrap(), ForegroundAttachmentCommitResult::Missing)
+                }
+                "lock" => assert_eq!(
+                    result.unwrap_err().code,
+                    RuntimeErrorCode::AuthenticationRequired
+                ),
+                _ => assert_eq!(
+                    result.unwrap(),
+                    ForegroundAttachmentCommitResult::StaleReplica { actual_revision: 2 },
+                    "{scenario}"
+                ),
+            }
+            assert_eq!(
+                state.snapshot(&account_id),
+                Some(before.clone()),
+                "{scenario}"
+            );
+            assert_eq!(replica.snapshot(&account_id), Some(before), "{scenario}");
+            assert_eq!(
+                state.pending_commit_failures.load(Ordering::SeqCst),
+                1,
+                "{scenario}: convergence must never write"
+            );
         }
     }
 
@@ -1033,15 +1138,13 @@ mod bootstrap_authority_tests {
         older.version = 0;
         older.encrypted_data = "stale-ciphertext".into();
         let error = replica
-            .apply_authoritative_item(
-                &account_id,
+            .apply_sync_item_authority(
+                guard(&account_id, replica.snapshot(&account_id).unwrap().revision),
                 SyncCursor::CapturedValue {
                     id: "event-1".into(),
                 },
-                SyncCursor::CapturedValue {
-                    id: "event-2".into(),
-                },
-                older,
+                "item-1".into(),
+                Some(older),
             )
             .await
             .unwrap_err();
@@ -1231,7 +1334,20 @@ impl Replica {
                 "Replica persistence returned a commit response for a load",
             ));
         };
-        reconstruct_snapshot(account_id, head, rows)
+        // The physical load succeeded, but these are stored bytes rather than a caller's command.
+        // Invalid durable rows must keep startup visibly blocked on local storage, never invite
+        // authentication as though this Device had no Account. Executor/protocol failures above
+        // retain their original classification.
+        reconstruct_snapshot(account_id, head, rows).map_err(|error| {
+            if error.code == RuntimeErrorCode::InvariantViolation {
+                RuntimeError::new(
+                    RuntimeErrorCode::StorageUnavailable,
+                    "Stored Replica data is invalid or inconsistent",
+                )
+            } else {
+                error
+            }
+        })
     }
 
     pub(crate) async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
@@ -1697,9 +1813,30 @@ impl Replica {
             ));
         }
         if current.revision != plan.guard.expected_replica_revision {
+            // Sync may have installed this exact foreground result while its authority probe
+            // was in flight. Recognize convergence without overwriting any newer Replica work.
+            let converged = current.revision > plan.guard.expected_replica_revision
+                && current.failure.is_none()
+                && current.bootstrap.state == ReplicaState::Ready
+                && !current.item_has_optimistic_owner(&plan.item.id)
+                && current
+                    .bootstrap
+                    .snapshot()
+                    .visible_items
+                    .iter()
+                    .any(|item| item == &plan.item)
+                && plan.item.attachments.iter().any(|attachment| {
+                    attachment.id == plan.attachment_id && attachment.item_id == plan.item.id
+                }) == plan.attachment_present;
             let actual_revision = current.revision;
             self.cache(current);
-            return Ok(ForegroundAttachmentCommitResult::StaleReplica { actual_revision });
+            return Ok(if converged {
+                ForegroundAttachmentCommitResult::Applied {
+                    replica_revision: actual_revision,
+                }
+            } else {
+                ForegroundAttachmentCommitResult::StaleReplica { actual_revision }
+            });
         }
         if let Some(current_version) = current
             .bootstrap
@@ -1819,15 +1956,16 @@ impl Replica {
         Ok(result)
     }
 
-    pub(crate) async fn apply_authoritative_item(
+    pub(crate) async fn apply_sync_item_authority(
         &self,
-        account_id: &AccountId,
+        guard: BootstrapGuard,
         expected_cursor: SyncCursor,
-        next_cursor: SyncCursor,
-        item: AuthorityItemRecord,
+        item_id: String,
+        item: Option<AuthorityItemRecord>,
     ) -> Result<PlanResult, RuntimeError> {
-        self.persist_applied_bootstrap(account_id, true, |account| {
-            account.apply_authoritative_item(&expected_cursor, next_cursor, item)
+        let account_id = guard.account_id.clone();
+        self.persist_applied_bootstrap(&account_id, true, |account| {
+            account.apply_sync_item_authority(&guard, &expected_cursor, &item_id, item)
         })
         .await
     }

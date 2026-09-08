@@ -2018,6 +2018,11 @@ export const webclientruntime_request_json: (
   d: number,
   e: number,
 ) => any;
+export const webclientruntime_setRecoveryExecutor: (
+  a: number,
+  b: any,
+  c: any,
+) => [number, number];
 export const webclientruntime_unobserve: (
   a: number,
   b: number,

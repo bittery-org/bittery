@@ -962,6 +962,22 @@ pub struct ImportItemDraft {
 
 #[derive(Clone, uniffi::Enum)]
 pub enum RuntimeRequest {
+    RebootstrapAccountRecovery {
+        account_id: String,
+    },
+    InspectRecovery {
+        account_id: Option<String>,
+    },
+    ExportAccountRecovery {
+        account_id: String,
+        password: Arc<SecretString>,
+        sink_capability_id: String,
+    },
+    RepairAccountRecovery {
+        account_id: String,
+        password: Arc<SecretString>,
+        source_capability_id: String,
+    },
     SignIn {
         server_url: String,
         email: String,
@@ -1041,6 +1057,18 @@ pub enum RuntimeRequest {
         account_id: String,
         operation_id: String,
     },
+    ListItemShareLinks {
+        account_id: String,
+        item_id: String,
+    },
+    ListShareAccessLogs {
+        account_id: String,
+        link_id: String,
+    },
+    RevokeShareLink {
+        account_id: String,
+        link_id: String,
+    },
     RenameAttachment {
         account_id: String,
         attachment_id: String,
@@ -1064,6 +1092,86 @@ pub enum RuntimeRequest {
     },
 }
 
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ShareAllowedEmail {
+    pub email: String,
+    pub verified: bool,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ShareLinkSummary {
+    pub id: String,
+    pub status: ShareLinkStatus,
+    pub access_mode: ShareAccessMode,
+    pub is_one_time_use: bool,
+    pub access_count: i32,
+    pub max_access_count: Option<i32>,
+    pub allowed_emails: Vec<ShareAllowedEmail>,
+    pub expires_at: String,
+    pub created_at: String,
+    pub last_accessed_at: Option<String>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ShareAccessLog {
+    pub id: String,
+    pub accessed_by_email: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub success: bool,
+    pub failure_reason: Option<String>,
+    pub accessed_at: String,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum ShareLinkStatus {
+    Active,
+    Expired,
+    Exhausted,
+    Revoked,
+}
+impl From<core::ShareLinkSummary> for ShareLinkSummary {
+    fn from(value: core::ShareLinkSummary) -> Self {
+        Self {
+            id: value.id,
+            status: match value.status {
+                core::ShareLinkStatus::Active => ShareLinkStatus::Active,
+                core::ShareLinkStatus::Expired => ShareLinkStatus::Expired,
+                core::ShareLinkStatus::Exhausted => ShareLinkStatus::Exhausted,
+                core::ShareLinkStatus::Revoked => ShareLinkStatus::Revoked,
+            },
+            access_mode: match value.access_mode {
+                core::ShareAccessMode::Anyone => ShareAccessMode::Anyone,
+                core::ShareAccessMode::EmailRestricted => ShareAccessMode::EmailRestricted,
+            },
+            is_one_time_use: value.is_one_time_use,
+            access_count: value.access_count,
+            max_access_count: value.max_access_count,
+            allowed_emails: value
+                .allowed_emails
+                .into_iter()
+                .map(|email| ShareAllowedEmail {
+                    email: email.email,
+                    verified: email.verified,
+                })
+                .collect(),
+            expires_at: value.expires_at,
+            created_at: value.created_at,
+            last_accessed_at: value.last_accessed_at,
+        }
+    }
+}
+impl From<core::ShareAccessLog> for ShareAccessLog {
+    fn from(value: core::ShareAccessLog) -> Self {
+        Self {
+            id: value.id,
+            accessed_by_email: value.accessed_by_email,
+            ip_address: value.ip_address,
+            user_agent: value.user_agent,
+            success: value.success,
+            failure_reason: value.failure_reason,
+            accessed_at: value.accessed_at,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum CreateVaultType {
     Personal,
@@ -1080,6 +1188,18 @@ pub struct VaultImageSourceInput {
 impl fmt::Debug for RuntimeRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RebootstrapAccountRecovery { .. } => {
+                formatter.write_str("RebootstrapAccountRecovery([redacted scope])")
+            }
+            Self::InspectRecovery { .. } => {
+                formatter.write_str("InspectRecovery([redacted scope])")
+            }
+            Self::ExportAccountRecovery { .. } => {
+                formatter.write_str("ExportAccountRecovery([redacted])")
+            }
+            Self::RepairAccountRecovery { .. } => {
+                formatter.write_str("RepairAccountRecovery([redacted])")
+            }
             Self::SignIn {
                 server_url, email, ..
             } => formatter
@@ -1213,6 +1333,30 @@ impl fmt::Debug for RuntimeRequest {
                 .field("account_id", account_id)
                 .field("operation_id", operation_id)
                 .finish(),
+            Self::ListItemShareLinks {
+                account_id,
+                item_id,
+            } => formatter
+                .debug_struct("ListItemShareLinks")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
+            Self::ListShareAccessLogs {
+                account_id,
+                link_id,
+            } => formatter
+                .debug_struct("ListShareAccessLogs")
+                .field("account_id", account_id)
+                .field("link_id", link_id)
+                .finish(),
+            Self::RevokeShareLink {
+                account_id,
+                link_id,
+            } => formatter
+                .debug_struct("RevokeShareLink")
+                .field("account_id", account_id)
+                .field("link_id", link_id)
+                .finish(),
             Self::RenameAttachment {
                 account_id,
                 attachment_id,
@@ -1259,6 +1403,18 @@ impl fmt::Debug for RuntimeRequest {
 
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum RuntimeResponse {
+    RecoveryDiagnosed {
+        diagnostics: StorageRecoveryDiagnostics,
+    },
+    RecoveryExported {
+        account_id: String,
+        classification: RecoveryClassification,
+        byte_length: u64,
+    },
+    RecoveryRepaired {
+        account_id: String,
+        replica_revision: u64,
+    },
     SignedIn {
         account_id: String,
         user_id: String,
@@ -1291,6 +1447,21 @@ pub enum RuntimeResponse {
     ShareResultAcknowledged {
         account_id: String,
         operation_id: String,
+    },
+    ItemShareLinks {
+        account_id: String,
+        item_id: String,
+        links: Vec<ShareLinkSummary>,
+        base_share_url: String,
+    },
+    ShareAccessLogs {
+        account_id: String,
+        link_id: String,
+        logs: Vec<ShareAccessLog>,
+    },
+    ShareLinkRevoked {
+        account_id: String,
+        link_id: String,
     },
     AttachmentRenamed {
         account_id: String,
@@ -1347,6 +1518,7 @@ pub enum ObservationRequest {
     WritableVaultCatalog,
     Items { account_id: String },
     PendingShareResults { account_id: String },
+    Operations { account_id: String },
     RuntimeStatus { account_id: Option<String> },
 }
 
@@ -1607,6 +1779,7 @@ pub enum RuntimeErrorCode {
     AccountFailed,
     AuthenticationRequired,
     AuthenticationUnavailable,
+    StorageUnavailable,
     RetryableTransport,
     AuthorityMissing,
     AccessDenied,
@@ -1616,6 +1789,19 @@ pub enum RuntimeErrorCode {
     SourceFailure,
     SinkFailure,
     InvariantViolation,
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RecoveryBound {
+    RecordBytes,
+    ArchiveBytes,
+    RecordCount,
+    ArtifactCount,
+    ReportBytes,
+    SummaryBytes,
+    ControlBytes,
+    CursorBytes,
+    ChunkBytes,
 }
 
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
@@ -1661,6 +1847,9 @@ pub enum RuntimeProjection {
     Items {
         value: ItemsProjection,
     },
+    Operations {
+        value: OperationsProjection,
+    },
     PendingShareResults {
         value: PendingShareResultsProjection,
     },
@@ -1677,6 +1866,7 @@ impl fmt::Debug for RuntimeProjection {
                 .field(value)
                 .finish(),
             Self::Items { value } => formatter.debug_tuple("Items").field(value).finish(),
+            Self::Operations { value } => formatter.debug_tuple("Operations").field(value).finish(),
             Self::PendingShareResults { value } => formatter
                 .debug_tuple("PendingShareResults")
                 .field(value)
@@ -1694,6 +1884,7 @@ pub enum BindingError {
     Runtime {
         code: RuntimeErrorCode,
         message: String,
+        recovery_bound: Option<RecoveryBound>,
     },
 }
 
@@ -1868,6 +2059,32 @@ impl ObservationHandle {
 impl From<RuntimeRequest> for core::RuntimeRequest {
     fn from(value: RuntimeRequest) -> Self {
         match value {
+            RuntimeRequest::RebootstrapAccountRecovery { account_id } => {
+                Self::RebootstrapAccountRecovery {
+                    account_id: account_id.into(),
+                }
+            }
+            RuntimeRequest::InspectRecovery { account_id } => Self::InspectRecovery {
+                account_id: account_id.map(Into::into),
+            },
+            RuntimeRequest::ExportAccountRecovery {
+                account_id,
+                password,
+                sink_capability_id,
+            } => Self::ExportAccountRecovery {
+                account_id: account_id.into(),
+                password: password.value.clone(),
+                sink_capability_id,
+            },
+            RuntimeRequest::RepairAccountRecovery {
+                account_id,
+                password,
+                source_capability_id,
+            } => Self::RepairAccountRecovery {
+                account_id: account_id.into(),
+                password: password.value.clone(),
+                source_capability_id,
+            },
             RuntimeRequest::SignIn {
                 server_url,
                 email,
@@ -2020,6 +2237,27 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 account_id: account_id.into(),
                 operation_id,
             },
+            RuntimeRequest::ListItemShareLinks {
+                account_id,
+                item_id,
+            } => Self::ListItemShareLinks {
+                account_id: account_id.into(),
+                item_id,
+            },
+            RuntimeRequest::ListShareAccessLogs {
+                account_id,
+                link_id,
+            } => Self::ListShareAccessLogs {
+                account_id: account_id.into(),
+                link_id,
+            },
+            RuntimeRequest::RevokeShareLink {
+                account_id,
+                link_id,
+            } => Self::RevokeShareLink {
+                account_id: account_id.into(),
+                link_id,
+            },
             RuntimeRequest::RenameAttachment {
                 account_id,
                 attachment_id,
@@ -2102,6 +2340,9 @@ impl From<ObservationRequest> for core::ObservationRequest {
             ObservationRequest::Items { account_id } => Self::Items {
                 account_id: account_id.into(),
             },
+            ObservationRequest::Operations { account_id } => Self::Operations {
+                account_id: account_id.into(),
+            },
             ObservationRequest::PendingShareResults { account_id } => Self::PendingShareResults {
                 account_id: account_id.into(),
             },
@@ -2115,6 +2356,25 @@ impl From<ObservationRequest> for core::ObservationRequest {
 impl From<core::RuntimeResponse> for RuntimeResponse {
     fn from(value: core::RuntimeResponse) -> Self {
         match value {
+            core::RuntimeResponse::RecoveryDiagnosed { diagnostics } => Self::RecoveryDiagnosed {
+                diagnostics: diagnostics.into(),
+            },
+            core::RuntimeResponse::RecoveryExported {
+                account_id,
+                classification,
+                byte_length,
+            } => Self::RecoveryExported {
+                account_id: account_id.into(),
+                classification: classification.into(),
+                byte_length,
+            },
+            core::RuntimeResponse::RecoveryRepaired {
+                account_id,
+                replica_revision,
+            } => Self::RecoveryRepaired {
+                account_id: account_id.into(),
+                replica_revision,
+            },
             core::RuntimeResponse::SignedIn {
                 account_id,
                 user_id,
@@ -2170,6 +2430,33 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
             } => Self::ShareResultAcknowledged {
                 account_id: account_id.into(),
                 operation_id,
+            },
+            core::RuntimeResponse::ItemShareLinks {
+                account_id,
+                item_id,
+                links,
+                base_share_url,
+            } => Self::ItemShareLinks {
+                account_id: account_id.as_str().to_owned(),
+                item_id,
+                links: links.into_iter().map(Into::into).collect(),
+                base_share_url,
+            },
+            core::RuntimeResponse::ShareAccessLogs {
+                account_id,
+                link_id,
+                logs,
+            } => Self::ShareAccessLogs {
+                account_id: account_id.as_str().to_owned(),
+                link_id,
+                logs: logs.into_iter().map(Into::into).collect(),
+            },
+            core::RuntimeResponse::ShareLinkRevoked {
+                account_id,
+                link_id,
+            } => Self::ShareLinkRevoked {
+                account_id: account_id.as_str().to_owned(),
+                link_id,
             },
             core::RuntimeResponse::AttachmentRenamed {
                 account_id,
@@ -2262,6 +2549,9 @@ impl From<core::RuntimeProjection> for RuntimeProjection {
                 value: value.into(),
             },
             core::RuntimeProjection::Items(value) => Self::Items {
+                value: value.into(),
+            },
+            core::RuntimeProjection::Operations(value) => Self::Operations {
                 value: value.into(),
             },
             core::RuntimeProjection::PendingShareResults(value) => Self::PendingShareResults {
@@ -2922,6 +3212,7 @@ impl From<core::RuntimeErrorCode> for RuntimeErrorCode {
             core::RuntimeErrorCode::AccountFailed => Self::AccountFailed,
             core::RuntimeErrorCode::AuthenticationRequired => Self::AuthenticationRequired,
             core::RuntimeErrorCode::AuthenticationUnavailable => Self::AuthenticationUnavailable,
+            core::RuntimeErrorCode::StorageUnavailable => Self::StorageUnavailable,
             core::RuntimeErrorCode::RetryableTransport => Self::RetryableTransport,
             core::RuntimeErrorCode::AuthorityMissing => Self::AuthorityMissing,
             core::RuntimeErrorCode::AccessDenied => Self::AccessDenied,
@@ -2935,11 +3226,28 @@ impl From<core::RuntimeErrorCode> for RuntimeErrorCode {
     }
 }
 
+impl From<core::RecoveryBound> for RecoveryBound {
+    fn from(value: core::RecoveryBound) -> Self {
+        match value {
+            core::RecoveryBound::RecordBytes => Self::RecordBytes,
+            core::RecoveryBound::ArchiveBytes => Self::ArchiveBytes,
+            core::RecoveryBound::RecordCount => Self::RecordCount,
+            core::RecoveryBound::ArtifactCount => Self::ArtifactCount,
+            core::RecoveryBound::ReportBytes => Self::ReportBytes,
+            core::RecoveryBound::SummaryBytes => Self::SummaryBytes,
+            core::RecoveryBound::ControlBytes => Self::ControlBytes,
+            core::RecoveryBound::CursorBytes => Self::CursorBytes,
+            core::RecoveryBound::ChunkBytes => Self::ChunkBytes,
+        }
+    }
+}
+
 impl From<core::RuntimeError> for BindingError {
     fn from(value: core::RuntimeError) -> Self {
         Self::Runtime {
             code: value.code.into(),
             message: value.message,
+            recovery_bound: value.recovery_bound.map(Into::into),
         }
     }
 }
@@ -2954,6 +3262,8 @@ mod observation_buffer;
 mod observation_slots;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod web_recovery_bridge;
 #[cfg(target_arch = "wasm32")]
 pub use web::WebClientRuntime;
 #[allow(
@@ -3010,6 +3320,51 @@ pub use web_attachment_move_bridge::WebAttachmentMoveBridgeTestHarness;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn share_management_native_adapter_preserves_explicit_scopes_and_closed_results() {
+        for request in [
+            RuntimeRequest::ListItemShareLinks {
+                account_id: "account-2".into(),
+                item_id: "item-1".into(),
+            },
+            RuntimeRequest::ListShareAccessLogs {
+                account_id: "account-2".into(),
+                link_id: "link-1".into(),
+            },
+            RuntimeRequest::RevokeShareLink {
+                account_id: "account-2".into(),
+                link_id: "link-1".into(),
+            },
+        ] {
+            let converted: core::RuntimeRequest = request.into();
+            assert!(matches!(converted,
+                core::RuntimeRequest::ListItemShareLinks {account_id, ..}
+                | core::RuntimeRequest::ListShareAccessLogs {account_id, ..}
+                | core::RuntimeRequest::RevokeShareLink {account_id, ..}
+                if account_id.as_str() == "account-2"));
+        }
+        assert!(
+            matches!(RuntimeResponse::from(core::RuntimeResponse::ShareLinkRevoked {
+            account_id: core::AccountId::from("account-2"), link_id: "link-1".into(),
+        }), RuntimeResponse::ShareLinkRevoked {account_id, link_id} if account_id == "account-2" && link_id == "link-1")
+        );
+        let log = ShareAccessLog::from(core::ShareAccessLog {
+            id: "entry".into(),
+            accessed_by_email: Some("reader@example.test".into()),
+            ip_address: None,
+            user_agent: None,
+            success: false,
+            failure_reason: Some("expired".into()),
+            accessed_at: "2026-01-01".into(),
+        });
+        assert_eq!(
+            log.accessed_by_email.as_deref(),
+            Some("reader@example.test")
+        );
+        assert!(!log.success);
+        assert_eq!(log.failure_reason.as_deref(), Some("expired"));
+    }
+
     use super::*;
 
     #[test]
@@ -3292,6 +3647,217 @@ mod tests {
             "UNIQUE_PENDING_SHARE_URL",
         ] {
             assert!(!output.contains(marker), "debug output leaked {marker}");
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct OperationsProjection {
+    pub account_id: String,
+    pub replica_revision: u64,
+    pub operations: Vec<OperationProjection>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct OperationProjection {
+    pub operation_id: String,
+    pub kind: OperationProjectionKind,
+    pub attempt_count: Option<String>,
+    pub next_attempt_at_ms: Option<String>,
+    pub resolution: OperationResolution,
+    pub imported_count: Option<u16>,
+    pub rejection_code: Option<String>,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum OperationResolution {
+    Pending,
+    Applied,
+    Rejected,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum OperationProjectionKind {
+    CreateVault,
+    CreateItem,
+    UpdateItem,
+    SetItemFavorite,
+    TrashItem,
+    RestoreItem,
+    MoveItem,
+    PermanentlyDeleteItem,
+    CreateShare,
+    ImportItems,
+}
+impl From<core::OperationsProjection> for OperationsProjection {
+    fn from(value: core::OperationsProjection) -> Self {
+        Self {
+            account_id: value.account_id.as_str().to_owned(),
+            replica_revision: value.replica_revision,
+            operations: value
+                .operations
+                .into_iter()
+                .map(|op| OperationProjection {
+                    operation_id: op.operation_id,
+                    kind: op.kind.into(),
+                    attempt_count: op.attempt_count,
+                    next_attempt_at_ms: op.next_attempt_at_ms,
+                    resolution: match op.resolution {
+                        core::OperationResolution::Pending => OperationResolution::Pending,
+                        core::OperationResolution::Applied => OperationResolution::Applied,
+                        core::OperationResolution::Rejected => OperationResolution::Rejected,
+                    },
+                    imported_count: op.imported_count,
+                    rejection_code: op.rejection_code,
+                })
+                .collect(),
+        }
+    }
+}
+impl From<core::OperationProjectionKind> for OperationProjectionKind {
+    fn from(value: core::OperationProjectionKind) -> Self {
+        match value {
+            core::OperationProjectionKind::CreateVault => Self::CreateVault,
+            core::OperationProjectionKind::CreateItem => Self::CreateItem,
+            core::OperationProjectionKind::UpdateItem => Self::UpdateItem,
+            core::OperationProjectionKind::SetItemFavorite => Self::SetItemFavorite,
+            core::OperationProjectionKind::TrashItem => Self::TrashItem,
+            core::OperationProjectionKind::RestoreItem => Self::RestoreItem,
+            core::OperationProjectionKind::MoveItem => Self::MoveItem,
+            core::OperationProjectionKind::PermanentlyDeleteItem => Self::PermanentlyDeleteItem,
+            core::OperationProjectionKind::CreateShare => Self::CreateShare,
+            core::OperationProjectionKind::ImportItems => Self::ImportItems,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RecoveryClassification {
+    Complete,
+    Partial,
+}
+impl From<core::RecoveryClassification> for RecoveryClassification {
+    fn from(value: core::RecoveryClassification) -> Self {
+        match value {
+            core::RecoveryClassification::Complete => Self::Complete,
+            core::RecoveryClassification::Partial => Self::Partial,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RecoveryMaintenanceStatus {
+    Available,
+    Unsupported,
+    Busy,
+    Unavailable,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RecoverySchemaStatus {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+impl From<core::RecoverySchemaStatus> for RecoverySchemaStatus {
+    fn from(value: core::RecoverySchemaStatus) -> Self {
+        match value {
+            core::RecoverySchemaStatus::Supported => Self::Supported,
+            core::RecoverySchemaStatus::Unsupported => Self::Unsupported,
+            core::RecoverySchemaStatus::Unknown => Self::Unknown,
+        }
+    }
+}
+impl From<core::RecoveryMaintenanceStatus> for RecoveryMaintenanceStatus {
+    fn from(value: core::RecoveryMaintenanceStatus) -> Self {
+        match value {
+            core::RecoveryMaintenanceStatus::Available => Self::Available,
+            core::RecoveryMaintenanceStatus::Unsupported => Self::Unsupported,
+            core::RecoveryMaintenanceStatus::Busy => Self::Busy,
+            core::RecoveryMaintenanceStatus::Unavailable => Self::Unavailable,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RecoveryDeviceStatus {
+    FreshOrUnknown,
+    KnownAccounts,
+    StorageUnavailable,
+}
+impl From<core::RecoveryDeviceStatus> for RecoveryDeviceStatus {
+    fn from(value: core::RecoveryDeviceStatus) -> Self {
+        match value {
+            core::RecoveryDeviceStatus::FreshOrUnknown => Self::FreshOrUnknown,
+            core::RecoveryDeviceStatus::KnownAccounts => Self::KnownAccounts,
+            core::RecoveryDeviceStatus::StorageUnavailable => Self::StorageUnavailable,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RecoveryStorageState {
+    Ready,
+    Corrupt,
+    Missing,
+    Unknown,
+    Unreadable,
+}
+impl From<core::RecoveryStorageState> for RecoveryStorageState {
+    fn from(value: core::RecoveryStorageState) -> Self {
+        match value {
+            core::RecoveryStorageState::Ready => Self::Ready,
+            core::RecoveryStorageState::Corrupt => Self::Corrupt,
+            core::RecoveryStorageState::Missing => Self::Missing,
+            core::RecoveryStorageState::Unknown => Self::Unknown,
+            core::RecoveryStorageState::Unreadable => Self::Unreadable,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct StorageRecoveryDiagnostics {
+    pub failure: Option<RuntimeErrorCode>,
+    pub maintenance: RecoveryMaintenanceStatus,
+    pub schema: RecoverySchemaStatus,
+    pub device: RecoveryDeviceStatus,
+    pub accounts: Vec<StorageRecoveryAccount>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct StorageRecoveryAccount {
+    pub email: Option<String>,
+    pub server_url: Option<String>,
+    pub user_id: Option<String>,
+    pub can_rebootstrap: bool,
+    pub account_id: String,
+    pub state: RecoveryStorageState,
+    pub operation_count: Option<u32>,
+    pub receipt_count: Option<u32>,
+    pub missing_artifacts: Option<u32>,
+    pub can_export: bool,
+    pub can_repair: bool,
+}
+impl From<core::StorageRecoveryDiagnostics> for StorageRecoveryDiagnostics {
+    fn from(value: core::StorageRecoveryDiagnostics) -> Self {
+        Self {
+            failure: value.failure.map(Into::into),
+            maintenance: value.maintenance.into(),
+            schema: value.schema.into(),
+            device: value.device.into(),
+            accounts: value.accounts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<core::StorageRecoveryAccount> for StorageRecoveryAccount {
+    fn from(value: core::StorageRecoveryAccount) -> Self {
+        Self {
+            email: value.email,
+            server_url: value.server_url,
+            user_id: value.user_id,
+            can_rebootstrap: value.can_rebootstrap,
+            account_id: value.account_id.into(),
+            state: value.state.into(),
+            operation_count: value.operation_count,
+            receipt_count: value.receipt_count,
+            missing_artifacts: value.missing_artifacts,
+            can_export: value.can_export,
+            can_repair: value.can_repair,
         }
     }
 }

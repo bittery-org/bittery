@@ -1,7 +1,7 @@
 # Atomically cut Import over to Server and Web Runtime ownership
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 56
 Parent: [28 — finalized E1–E10 frontier](28-remaining-item-write-kinds.md#final-web-item-and-import-frontier)
 
@@ -11,6 +11,10 @@ Complete the Import cutover so Server, Runtime dispatch, and Web share one durab
 contract. The Web hook retains provider presentation only; no transitional Import owner is reachable.
 
 ## Current state
+
+Resumed 2026-09-07 with delegated implementation and independent review required. Full CI gates
+are waived by the maintainer for this run. Baseline targeted Server Import (12) and authority-page
+(3) tests and `pnpm check:server` pass; joined Runtime/Web acceptance remains in progress.
 
 Commit `87386201` delivered the Server Operation executor, paged Item authority route, generated
 contracts, and Runtime acceptance byte bound. Its title overstates completion:
@@ -73,3 +77,38 @@ renders as imported; authoritative contradiction and fenced commits cannot spin.
 Run focused Server/Runtime/Web and real-browser acceptance, all caller graphs, generated/OpenAPI
 and dependent type checks, `pnpm check:ci`, `pnpm check:ci:rust`, and `git diff --check`.
 Historical handoff failures are evidence to recheck, not permission to skip these gates.
+
+### Runtime progress contract
+
+`operations` observes Account-scoped accepted Operations and terminal receipts, with no request,
+ciphertext, or plaintext. Pending entries carry the actual persisted attempt count and next-attempt
+time. Terminal receipts carry resolution, Import count or rejection code; scheduling fields are null
+because compact receipts do not retain historical scheduling diagnostics. Remount/restart observes
+the same durable result without a second progress store.
+
+## Completion evidence
+
+Production Runtime dispatch, durable Operations progress, paginated authority reconciliation, Web
+Import/export consumers, and whole-repository caller gates are complete. Independent Standards and
+Spec reviews passed, including the Server transaction fault matrix, export lifecycle fencing, exact
+JSON transport headers, and per-Item encrypted-size refusal that preserves valid siblings.
+
+Validation passed: 16 PostgreSQL Import tests and Server checks; 35 Core Import unit tests plus two
+integration tests, dispatch and HTTP tests; client/Web regressions and dependent types; contract and
+binding generation checks; formatting and diff checks. All eight real provider browser cases passed.
+The joined Worker/Core suite passed 135 assertions covering all five categories and favorite in
+new/existing Vaults, response loss and paginated authority, 201 Items with 200 applied before a
+retained final-batch rejection, and actual cross-Account mapping without changing the active source
+Account's Items or Operations. Explicit React harness type checking also passed.
+
+Full CI was waived by the user and was not run. Ticket 58 owns the remaining Web consumer acceptance.
+
+## Simplification pass
+
+Independent review approved one private encrypted Import wire type, one exhaustive category
+conversion, and a shared presentation reset. Acceptance and persisted-Replica validation remain
+separate; provider data is forwarded unchanged, including sparse fields that Runtime must refuse.
+The sparse-provider regression passed 70 assertions. After cleanup, Core Import/Bootstrap tests,
+dependent types, caller graphs, formatting, contract and Web binding checks passed. The rebuilt
+joined Worker/Core suite passed all 135 assertions, and all nine provider/field-preservation
+browser scenarios passed. No speculative public abstraction was added.

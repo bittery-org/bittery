@@ -205,6 +205,8 @@ function observationKey(request: ObservationRequest): string {
 			return "writableVaultCatalog";
 		case "items":
 			return `items:${request.accountId}`;
+		case "operations":
+			return `operations:${request.accountId}`;
 		case "pendingShareResults":
 			return `pendingShareResults:${request.accountId}`;
 		case "runtimeStatus":

@@ -1,4 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { IDBFactory } from "fake-indexeddb";
+
+beforeEach(() =>
+	Object.defineProperty(globalThis, "indexedDB", {
+		configurable: true,
+		value: new IDBFactory(),
+	}),
+);
+
 import { IndexedDbAttachmentArtifactExecutor } from "../indexeddb-attachment-artifact-executor";
 import { WebBinaryTransferExecutor } from "../web-binary-transfer-executor";
 import type { RuntimeWasm } from "../worker-runtime";
@@ -24,8 +33,9 @@ class ScopeDouble implements WebRuntimeWorkerScope {
 			typeof message === "object" &&
 			message !== null &&
 			(message as { type?: unknown }).type === "host-request" &&
-			(message as { payload?: { type?: unknown } }).payload?.type ===
-				"attachmentDownloadSinkRuntimeScope"
+			["attachmentDownloadSinkRuntimeScope", "recoveryRuntimeScope"].includes(
+				String((message as { payload?: { type?: unknown } }).payload?.type),
+			)
 		) {
 			const id = (message as { id: number }).id;
 			queueMicrotask(() =>
@@ -45,6 +55,7 @@ class ScopeDouble implements WebRuntimeWorkerScope {
 }
 
 class RuntimeDouble {
+	setRecoveryExecutor(): void {}
 	cancel(): void {}
 	async close(): Promise<void> {}
 	async open(): Promise<void> {}
@@ -162,7 +173,7 @@ describe("Web Runtime Worker composition", () => {
 						(post as { id?: unknown }).id === id,
 				);
 				if (found !== undefined) return found as { ok: boolean };
-				await Promise.resolve();
+				await new Promise((resolve) => setTimeout(resolve, 1));
 			}
 			throw new Error(`Worker response ${id} did not arrive.`);
 		};

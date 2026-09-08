@@ -1,5 +1,8 @@
 use crate::{
-    http_transport::{HttpDispatch, HttpHeader, HttpMethod, HttpResponse, HttpTransport},
+    http_transport::{
+        HttpByteStream, HttpDispatch, HttpHeader, HttpMethod, HttpResponse, HttpStreamOpening,
+        HttpTransport,
+    },
     replica::ImmutableHttpRequest,
     server_contract::{
         AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, DeleteAccountRequest,
@@ -607,13 +610,55 @@ impl<'transport> AuthHttpClient<'transport> {
         validate_bearer(token)?;
         validate_identifier(item_id, "Item")?;
         let url = self.endpoint(&["api", "v1", "items", item_id])?;
+        self.get_optional_authenticated_json(
+            url,
+            VAULT_KEY_RESPONSE_BYTES,
+            token,
+            cancellation,
+            transport_is_transient,
+        )
+        .await
+    }
+
+    /// Complete encrypted Item authority uses Bootstrap's metadata visibility policy. A forbidden
+    /// response remains unavailable; only the Server's explicit404 proves absence.
+    pub(crate) async fn fetch_sync_item_authority(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<Option<crate::server_contract::BootstrapItemResponse>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let url = self.endpoint(&["api", "v1", "items", item_id, "authority"])?;
+        self.get_optional_authenticated_json(
+            url,
+            VAULT_KEY_RESPONSE_BYTES,
+            token,
+            cancellation,
+            false,
+        )
+        .await
+    }
+
+    async fn get_optional_authenticated_json<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        max_bytes: u32,
+        token: &str,
+        cancellation: RequestCancellation,
+        transport_is_transient: bool,
+    ) -> Result<AuthenticatedOutcome<Option<T>>, RuntimeError> {
         let raw = match self
             .execute_raw(
                 HttpMethod::Get,
                 url,
                 self.headers(Some(token))?,
                 Vec::new(),
-                VAULT_KEY_RESPONSE_BYTES,
+                max_bytes,
                 cancellation,
             )
             .await
@@ -637,11 +682,11 @@ impl<'transport> AuthHttpClient<'transport> {
         }
     }
 
-    pub(crate) async fn sse_wakeup(
+    pub(crate) async fn open_sync_events(
         &self,
         token: &str,
         cancellation: RequestCancellation,
-    ) -> Result<AuthenticatedOutcome<Vec<u8>>, RuntimeError> {
+    ) -> Result<AuthenticatedOutcome<HttpByteStream>, RuntimeError> {
         validate_bearer(token)?;
         let url = self.endpoint(&["api", "v1", "sync", "events"])?;
         let mut headers = self.headers(Some(token))?;
@@ -649,19 +694,41 @@ impl<'transport> AuthHttpClient<'transport> {
             name: "Accept".to_owned(),
             value: "text/event-stream".to_owned(),
         });
-        let raw = self
-            .execute_raw(
-                HttpMethod::Get,
-                url,
-                headers,
-                Vec::new(),
-                VAULT_KEY_RESPONSE_BYTES,
+        let opened = self
+            .transport
+            .open_stream(
+                HttpDispatch::new(HttpMethod::Get, url.into(), headers, Vec::new(), 64 * 1024),
                 cancellation,
             )
             .await?;
-        match raw.status {
-            200 => Ok(AuthenticatedOutcome::Ok(raw.body)),
-            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+        match opened {
+            HttpStreamOpening::Opened {
+                status: 200,
+                headers,
+                stream,
+            } => {
+                let content_types: Vec<_> = headers
+                    .iter()
+                    .filter(|header| header.name.eq_ignore_ascii_case("content-type"))
+                    .collect();
+                if content_types.len() != 1
+                    || !content_types[0]
+                        .value
+                        .split(';')
+                        .next()
+                        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
+                {
+                    return Ok(AuthenticatedOutcome::Transient);
+                }
+                Ok(AuthenticatedOutcome::Ok(stream))
+            }
+            HttpStreamOpening::Opened { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpStreamOpening::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Sync stream opening was cancelled",
+            )),
             _ => Ok(AuthenticatedOutcome::Transient),
         }
     }
@@ -1491,6 +1558,60 @@ impl<'transport> AuthHttpClient<'transport> {
             .await
     }
 
+    pub(crate) async fn fetch_import_authority_page(
+        &self,
+        token: &str,
+        vault_id: &str,
+        item_ids: &[String],
+        cursor: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<(Vec<u8>, Option<String>)>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(vault_id, "Vault")?;
+        let url = self.endpoint(&["api", "v1", "vaults", vault_id, "item-authority-pages"])?;
+        let body = serde_json::to_vec(
+            &serde_json::json!({"itemIds": item_ids, "cursor": cursor, "limit": 200}),
+        )
+        .map_err(|_| invariant("Import authority request is invalid"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.extend([
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+            HttpHeader {
+                name: "Accept".into(),
+                value: "application/json".into(),
+            },
+        ]);
+        let raw = self
+            .execute_raw(
+                HttpMethod::Post,
+                url,
+                headers,
+                body,
+                16 * 1024 * 1024,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let mut cursors = raw
+                    .headers
+                    .iter()
+                    .filter(|header| header.name.eq_ignore_ascii_case("Bittery-Next-Cursor"));
+                let cursor = cursors.next().map(|header| header.value.clone());
+                if cursors.next().is_some() {
+                    return Err(invariant("Import authority repeated its cursor header"));
+                }
+                Ok(AuthenticatedOutcome::Ok((raw.body, cursor)))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
     pub(crate) async fn fetch_vault_key_page_raw(
         &self,
         token: &str,
@@ -1519,6 +1640,124 @@ impl<'transport> AuthHttpClient<'transport> {
             }
             401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
             _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn list_item_share_links(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::ShareLinkListResponse>, RuntimeError>
+    {
+        validate_identifier(item_id, "Item")?;
+        self.share_management_json(
+            HttpMethod::Get,
+            self.endpoint(&["api", "v1", "items", item_id, "share-links"])?,
+            token,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn share_access_log_page(
+        &self,
+        token: &str,
+        link_id: &str,
+        cursor: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<crate::server_contract::CursorPageShareAccessLogResponse>,
+        RuntimeError,
+    > {
+        validate_identifier(link_id, "Share link")?;
+        let mut url = self.endpoint(&["api", "v1", "share-links", link_id, "access-logs"])?;
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        self.share_management_json(HttpMethod::Get, url, token, cancellation)
+            .await
+    }
+
+    pub(crate) async fn revoke_share_link(
+        &self,
+        token: &str,
+        link_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::SuccessResponse>, RuntimeError> {
+        validate_identifier(link_id, "Share link")?;
+        self.share_management_json(
+            HttpMethod::Delete,
+            self.endpoint(&["api", "v1", "share-links", link_id])?,
+            token,
+            cancellation,
+        )
+        .await
+    }
+
+    // This is foreground work, never an accepted Operation. In particular an ambiguous DELETE
+    // is reported to its caller, not automatically replayed or represented as retained success.
+    async fn share_management_json<T: DeserializeOwned>(
+        &self,
+        method: HttpMethod,
+        url: Url,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<T>, RuntimeError> {
+        let mut headers = self.headers(Some(token))?;
+        headers.push(HttpHeader {
+            name: "Accept".into(),
+            value: "application/json".into(),
+        });
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    method,
+                    url.into(),
+                    headers,
+                    Vec::new(),
+                    VAULT_KEY_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let value = serde_json::from_slice(&body)
+                    .map_err(|_| invariant("Share management returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(value))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed { status: 403, .. } => Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Share management was denied",
+            )),
+            HttpResponse::Completed { status: 404, .. } => Err(RuntimeError::new(
+                RuntimeErrorCode::AuthorityMissing,
+                "Share link or Item is unavailable",
+            )),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Share management was cancelled",
+            )),
+            HttpResponse::Completed {
+                status: 0 | 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Completed { .. } => Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Share management request was refused",
+            )),
         }
     }
 
@@ -2345,6 +2584,61 @@ mod tests {
         AuthClientConfig::new("client-7".into(), ClientPlatform::Web, "0.5.2".into()).unwrap()
     }
 
+    #[tokio::test]
+    async fn sync_stream_opening_preserves_session_headers_and_validates_media_type() {
+        for (status, content_types, expected) in [
+            (200, vec!["text/event-stream; charset=utf-8"], "opened"),
+            (401, vec!["application/json"], "renew"),
+            (503, vec!["text/event-stream"], "transient"),
+            (200, vec!["application/json"], "transient"),
+            (200, vec![], "transient"),
+            (
+                200,
+                vec!["text/event-stream", "text/event-stream"],
+                "transient",
+            ),
+        ] {
+            let executor = Arc::new(ScriptedExecutor::new(vec![json!({
+                "type": "opened", "status": status,
+                "headers": content_types.into_iter().map(|value| json!({"name":"Content-Type", "value":value})).collect::<Vec<_>>()
+            }).to_string()]));
+            let transport = HttpTransport::new(executor.clone());
+            let client =
+                AuthHttpClient::new(&transport, "https://server.test/prefix", false, metadata())
+                    .unwrap();
+            let result = client
+                .open_sync_events("session-7", RequestCancellation::new())
+                .await
+                .unwrap();
+            let actual = match result {
+                AuthenticatedOutcome::Ok(_) => "opened",
+                AuthenticatedOutcome::ReauthenticationRequired => "renew",
+                AuthenticatedOutcome::Transient => "transient",
+            };
+            assert_eq!(actual, expected);
+            let requests = executor.requests();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0]["type"], "openStream");
+            let request = &requests[0]["request"];
+            assert_eq!(
+                request["url"],
+                "https://server.test/prefix/api/v1/sync/events"
+            );
+            assert_eq!(request["method"], "GET");
+            assert_eq!(request["body"], json!([]));
+            let headers = request["headers"].as_array().unwrap();
+            assert_eq!(
+                headers
+                    .iter()
+                    .filter(|header| header["name"] == "Authorization")
+                    .count(),
+                1
+            );
+            assert!(headers.contains(&json!({"name":"Authorization", "value":"Bearer session-7"})));
+            assert!(headers.contains(&json!({"name":"Accept", "value":"text/event-stream"})));
+        }
+    }
+
     fn vault_key(id: &str) -> Value {
         json!({
             "encryptedVaultKey": format!("wrapped-{id}"),
@@ -2430,6 +2724,76 @@ mod tests {
             "encryptionAlgorithm": "AES-GCM-AAD-V1",
             "fileSize": 1048576
         })
+    }
+
+    #[tokio::test]
+    async fn import_authority_posts_the_identity_set_and_preserves_raw_pages_and_continuation() {
+        let raw_body = b"[  ]\n".to_vec();
+        let response = json!({ "type": "completed", "status": 200,
+            "headers": [{"name": "Content-Type", "value": "application/json"}, {"name": "bittery-next-cursor", "value": "next-page"}],
+            "body": raw_body }).to_string();
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            response,
+            completed(401, "application/json", json!({})),
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+        let ids = vec!["item-2".to_owned(), "item-1".to_owned()];
+        let answer = client
+            .fetch_import_authority_page(
+                "token",
+                "vault-1",
+                &ids,
+                Some("previous"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let AuthenticatedOutcome::Ok((body, cursor)) = answer else {
+            panic!("raw authority")
+        };
+        assert_eq!(body, raw_body);
+        assert_eq!(cursor.as_deref(), Some("next-page"));
+        let requests = executor.requests();
+        assert_eq!(requests[0]["method"], "POST");
+        let headers: Vec<HttpHeader> =
+            serde_json::from_value(requests[0]["headers"].clone()).unwrap();
+        let content_types: Vec<_> = headers
+            .iter()
+            .filter(|header| header.name.eq_ignore_ascii_case("Content-Type"))
+            .map(|header| header.value.as_str())
+            .collect();
+        assert_eq!(content_types, ["application/json"]);
+        let accepted_types: Vec<_> = headers
+            .iter()
+            .filter(|header| header.name.eq_ignore_ascii_case("Accept"))
+            .map(|header| header.value.as_str())
+            .collect();
+        assert_eq!(accepted_types, ["application/json"]);
+        assert_eq!(
+            requests[0]["url"],
+            "https://vault.example.test/api/v1/vaults/vault-1/item-authority-pages"
+        );
+        let bytes: Vec<u8> = serde_json::from_value(requests[0]["body"].clone()).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"itemIds": ids, "cursor": "previous", "limit": 200})
+        );
+        assert!(matches!(
+            client
+                .fetch_import_authority_page(
+                    "token",
+                    "vault-1",
+                    &ids,
+                    None,
+                    RequestCancellation::new()
+                )
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::ReauthenticationRequired
+        ));
     }
 
     #[tokio::test]

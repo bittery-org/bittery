@@ -171,7 +171,7 @@ enum ExactSendOutcome {
     Reauthenticate,
 }
 
-pub(super) struct ProductionCreateVaultPort<'a> {
+pub(super) struct ProductionOperationPort<'a> {
     runtime: &'a Runtime,
     account_id: AccountId,
     http: AuthHttpClient<'a>,
@@ -179,7 +179,7 @@ pub(super) struct ProductionCreateVaultPort<'a> {
     upload: Mutex<Option<(String, String, Vec<HttpHeader>)>>,
 }
 
-impl ProductionCreateVaultPort<'_> {
+impl ProductionOperationPort<'_> {
     pub(super) fn staging_body(
         binding: &super::create_vault_staging::CreateVaultStagingBinding,
     ) -> Result<VaultImageStagingBody, super::create_vault_staging::CreateVaultStagingError> {
@@ -297,7 +297,7 @@ fn production_exchange<T>(
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl super::create_vault_staging::CreateVaultStagingPort for ProductionCreateVaultPort<'_> {
+impl super::create_vault_staging::CreateVaultStagingPort for ProductionOperationPort<'_> {
     async fn status(
         &self,
         binding: &super::create_vault_staging::CreateVaultStagingBinding,
@@ -427,7 +427,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for ProductionCreateVau
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl super::create_vault_executor::CreateVaultExecutorPort for ProductionCreateVaultPort<'_> {
+impl super::create_vault_executor::CreateVaultExecutorPort for ProductionOperationPort<'_> {
     async fn lookup(
         &self,
         operation: &OperationRecord,
@@ -546,7 +546,7 @@ impl super::create_vault_executor::CreateVaultExecutorPort for ProductionCreateV
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl super::create_vault_cleanup::CreateVaultCleanupPort for ProductionCreateVaultPort<'_> {
+impl super::create_vault_cleanup::CreateVaultCleanupPort for ProductionOperationPort<'_> {
     async fn cleanup_remote(
         &self,
         binding: &super::create_vault_staging::CreateVaultStagingBinding,
@@ -569,6 +569,106 @@ impl super::create_vault_cleanup::CreateVaultCleanupPort for ProductionCreateVau
         &self,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
         self.renewed_session().await
+    }
+}
+
+fn import_exchange<T>(
+    result: Result<AuthenticatedOutcome<T>, RuntimeError>,
+) -> Result<T, super::import_executor::ImportExecutorError> {
+    match result {
+        Ok(AuthenticatedOutcome::Ok(value)) => Ok(value),
+        Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
+            Err(super::import_executor::ImportExecutorError::Unauthorized)
+        }
+        Ok(AuthenticatedOutcome::Transient) | Err(_) => {
+            Err(super::import_executor::ImportExecutorError::Retryable)
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl super::import_executor::ImportExecutorPort for ProductionOperationPort<'_> {
+    async fn lookup(
+        &self,
+        operation: &OperationRecord,
+    ) -> Result<
+        Option<super::import_executor::ImportExchangeResponse>,
+        super::import_executor::ImportExecutorError,
+    > {
+        let session = self.session.lock().await;
+        import_exchange(
+            self.http
+                .fetch_operation_outcome(
+                    session.token.as_ref(),
+                    &operation.operation_id,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?
+        .map(|value| {
+            serde_json::to_vec(&value)
+                .map(|body| super::import_executor::ImportExchangeResponse { status: 200, body })
+                .map_err(|_| super::import_executor::ImportExecutorError::Retryable)
+        })
+        .transpose()
+    }
+    async fn post_exact(
+        &self,
+        operation: &OperationRecord,
+    ) -> Result<
+        super::import_executor::ImportExchangeResponse,
+        super::import_executor::ImportExecutorError,
+    > {
+        let session = self.session.lock().await;
+        let value = import_exchange(
+            self.http
+                .dispatch_operation(
+                    session.token.as_ref(),
+                    &operation.operation_id,
+                    &operation.request,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        Ok(super::import_executor::ImportExchangeResponse {
+            status: value.status,
+            body: value.body,
+        })
+    }
+    async fn fetch_items(
+        &self,
+        vault_id: &str,
+        item_ids: &[String],
+        cursor: Option<&str>,
+    ) -> Result<
+        super::import_executor::ImportAuthorityPage,
+        super::import_executor::ImportExecutorError,
+    > {
+        let session = self.session.lock().await;
+        let (raw_response_body, next_cursor) = import_exchange(
+            self.http
+                .fetch_import_authority_page(
+                    session.token.as_ref(),
+                    vault_id,
+                    item_ids,
+                    cursor,
+                    RequestCancellation::new(),
+                )
+                .await,
+        )?;
+        Ok(super::import_executor::ImportAuthorityPage {
+            raw_response_body,
+            next_cursor,
+        })
+    }
+    async fn renew_session(&self) -> Result<(), super::import_executor::ImportExecutorError> {
+        self.renewed_session().await.map_err(|error| match error {
+            super::create_vault_staging::CreateVaultStagingError::Unauthorized => {
+                super::import_executor::ImportExecutorError::Unauthorized
+            }
+            _ => super::import_executor::ImportExecutorError::Retryable,
+        })
     }
 }
 
@@ -741,6 +841,7 @@ impl Runtime {
     /// Wakes the dispatcher because something that can change eligibility happened.
     pub(super) fn wake_dispatch(&self) {
         self.dispatch_wake.notify_waiters();
+        self.live_sync_wake.notify_waiters();
     }
 
     /// A usable Session exists again, so parked work can resume immediately instead of waiting for
@@ -821,12 +922,6 @@ impl Runtime {
                 };
             }
             for operation in &snapshot.operations {
-                // Ticket 56 accepts and persists Import batches but Ticket 57 owns the atomic
-                // legacy-route cutover. Keeping this before scheduling/lease inspection makes
-                // production Import transport literally unreachable rather than merely failing.
-                if operation.kind == OperationKind::ImportItems {
-                    continue;
-                }
                 if operation.scheduling.not_before_ms > now_ms {
                     earliest = Some(
                         earliest.map_or(operation.scheduling.not_before_ms, |current| {
@@ -898,7 +993,7 @@ impl Runtime {
             Ok(http) => http,
             Err(_) => return self.schedule_production_cleanup_retry(key),
         };
-        let port = ProductionCreateVaultPort {
+        let port = ProductionOperationPort {
             runtime: self,
             account_id: account_id.clone(),
             http,
@@ -971,7 +1066,7 @@ impl Runtime {
         ) else {
             return;
         };
-        let port = ProductionCreateVaultPort {
+        let port = ProductionOperationPort {
             runtime: self,
             account_id: binding.account_id.clone(),
             http,
@@ -1003,6 +1098,9 @@ impl Runtime {
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
     ) -> AttemptOutcome {
+        if operation.kind == OperationKind::ImportItems {
+            return self.attempt_import_dispatch(snapshot, operation).await;
+        }
         if operation.kind == OperationKind::CreateVault {
             #[cfg(feature = "binding-test-harness")]
             if operation.create_vault.as_ref().is_some_and(|intent| {
@@ -1100,6 +1198,108 @@ impl Runtime {
             .await
     }
 
+    async fn attempt_import_dispatch(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+    ) -> AttemptOutcome {
+        let account_id = snapshot.account_id.clone();
+        let Some(auth_config) = self.auth_client_config.clone() else {
+            return AttemptOutcome::Parked;
+        };
+        let metadata = match self
+            .platform_storage
+            .load_account_metadata(&account_id, &snapshot.incarnation)
+            .await
+        {
+            Ok(Some(metadata)) => metadata,
+            Ok(None) => {
+                self.mark_reauthentication_required(&account_id);
+                return AttemptOutcome::Parked;
+            }
+            Err(_) => {
+                return if self.persist_backoff(snapshot, operation).await {
+                    AttemptOutcome::Progressed
+                } else {
+                    AttemptOutcome::Parked
+                };
+            }
+        };
+        let session = match self
+            .platform_storage
+            .load_current_session(&account_id, &snapshot.incarnation)
+            .await
+        {
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                self.mark_reauthentication_required(&account_id);
+                return AttemptOutcome::Parked;
+            }
+            Err(_) => {
+                return if self.persist_backoff(snapshot, operation).await {
+                    AttemptOutcome::Progressed
+                } else {
+                    AttemptOutcome::Parked
+                };
+            }
+        };
+        let http = match AuthHttpClient::new(
+            &self.http_transport,
+            &metadata.normalized_server_url,
+            metadata.insecure_transport_confirmed,
+            auth_config,
+        ) {
+            Ok(http) => http,
+            Err(_) => {
+                return if self.persist_backoff(snapshot, operation).await {
+                    AttemptOutcome::Progressed
+                } else {
+                    AttemptOutcome::Parked
+                };
+            }
+        };
+        let port = ProductionOperationPort {
+            runtime: self,
+            account_id: account_id.clone(),
+            http,
+            session: tokio::sync::Mutex::new(session),
+            upload: Mutex::new(None),
+        };
+        match self
+            .drive_import_executor_cycle(&account_id, &operation.operation_id, &port)
+            .await
+        {
+            Ok(
+                super::import_executor::ImportExecutorPass::Completed
+                | super::import_executor::ImportExecutorPass::RetryScheduled,
+            ) => AttemptOutcome::Progressed,
+            Ok(
+                super::import_executor::ImportExecutorPass::ParkedFenced
+                | super::import_executor::ImportExecutorPass::ReauthenticationRequired,
+            ) => AttemptOutcome::Parked,
+            Err(error) => match create_vault_recovery_policy(
+                &super::create_vault_staging::CreateVaultRecoveryError::Fatal(error),
+            ) {
+                CreateVaultRecoveryPolicy::FailAccount => {
+                    self.fail_account_module(&account_id).await;
+                    AttemptOutcome::Parked
+                }
+                CreateVaultRecoveryPolicy::ReauthenticationRequired => {
+                    self.mark_reauthentication_required(&account_id);
+                    AttemptOutcome::Parked
+                }
+                CreateVaultRecoveryPolicy::Retry => {
+                    if self.persist_backoff(snapshot, operation).await {
+                        AttemptOutcome::Progressed
+                    } else {
+                        AttemptOutcome::Parked
+                    }
+                }
+                _ => AttemptOutcome::Parked,
+            },
+        }
+    }
+
     async fn attempt_create_vault_dispatch(
         &self,
         snapshot: &ReplicaSnapshot,
@@ -1151,7 +1351,7 @@ impl Runtime {
                 return AttemptOutcome::Progressed;
             }
         };
-        let port = ProductionCreateVaultPort {
+        let port = ProductionOperationPort {
             runtime: self,
             account_id: account_id.clone(),
             http,
@@ -1333,9 +1533,9 @@ impl Runtime {
         &self,
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
-    ) {
+    ) -> bool {
         let Ok(now_ms) = self.clock.now_ms() else {
-            return;
+            return false;
         };
         let attempt_count = operation.scheduling.attempt_count.saturating_add(1);
         let rescheduled = OperationRecord {
@@ -1361,6 +1561,9 @@ impl Runtime {
             self.device_revision.fetch_add(1, Ordering::SeqCst);
             drop(publication);
             self.publish_all_unless_closed();
+            true
+        } else {
+            false
         }
     }
 

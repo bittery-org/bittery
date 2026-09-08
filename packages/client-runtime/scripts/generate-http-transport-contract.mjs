@@ -56,19 +56,35 @@ for (const name of ["uint8", "uint16", "uint32"]) ajv.addFormat(name, true);
 ajv.addSchema(schema);
 const requestId = `${schemaId}:request`;
 const responseId = `${schemaId}:response`;
+const streamCommandId = `${schemaId}:stream-command`;
+const streamResponseId = `${schemaId}:stream-response`;
 ajv.addSchema({ $id: requestId, $ref: `${schemaId}#/$defs/HttpRequest` });
 ajv.addSchema({ $id: responseId, $ref: `${schemaId}#/$defs/HttpResponse` });
+ajv.addSchema({
+	$id: streamCommandId,
+	$ref: `${schemaId}#/$defs/HttpStreamCommand`,
+});
+ajv.addSchema({
+	$id: streamResponseId,
+	$ref: `${schemaId}#/$defs/HttpStreamResponse`,
+});
 ajv.getSchema(requestId);
 ajv.getSchema(responseId);
+ajv.getSchema(streamCommandId);
+ajv.getSchema(streamResponseId);
 const standaloneValidator = generateStandaloneValidator(ajv, {
 	validateHttpRequestJson: requestId,
 	validateHttpResponseJson: responseId,
+	validateHttpStreamCommandJson: streamCommandId,
+	validateHttpStreamResponseJson: streamResponseId,
 });
 const validatorText = `/* This file is generated. Do not edit. */\n${standaloneValidator}`;
 const declarationsText = `/* This file is generated. Do not edit. */
-import type { HttpRequest, HttpResponse } from "./contract";
+import type { HttpRequest, HttpResponse, HttpStreamCommand, HttpStreamResponse } from "./contract";
 export declare function validateHttpRequestJson(value: unknown): value is HttpRequest;
 export declare function validateHttpResponseJson(value: unknown): value is HttpResponse;
+export declare function validateHttpStreamCommandJson(value: unknown): value is HttpStreamCommand;
+export declare function validateHttpStreamResponseJson(value: unknown): value is HttpStreamResponse;
 `;
 
 const outputs = [

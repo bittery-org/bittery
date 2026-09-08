@@ -158,6 +158,7 @@ function apiServerEnv(options: {
 		JWT_SECRET: "e2e-jwt-secret-not-used-outside-tests",
 		BITTERY_STORAGE_ENDPOINT: OBJECT_STORAGE_ENDPOINT,
 		BITTERY_STORAGE_BUCKET: "bittery-e2e",
+		BITTERY_STORAGE_CDN_URL: `${OBJECT_STORAGE_ENDPOINT}/bittery-e2e`,
 		BITTERY_STORAGE_ACCESS_KEY_ID: "e2e-access-key",
 		BITTERY_STORAGE_SECRET_ACCESS_KEY: "e2e-secret-key",
 		BITTERY_STORAGE_REGION: "auto",

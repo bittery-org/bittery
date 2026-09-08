@@ -22,19 +22,48 @@ use serde::Serialize;
 use sha2::Digest;
 use zeroize::{Zeroize, Zeroizing};
 
-/// The Server recomputes this same length-delimited SHA-256 for every create request it accepts,
-/// so the fingerprint Rust stores is the one an outcome can be matched against.
-const OPERATION_DISCRIMINATOR: &[u8] = b"bittery.operation.v1";
-const CREATE_ITEM_KIND: &[u8] = b"create_item";
-const CREATE_ITEM_ROUTE: &[u8] = b"PUT /api/v1/vaults/{vaultId}/items/{itemId}";
-
 const UPDATE_ITEM_ROUTE: &str = "PATCH /api/v1/items/{itemId}";
 const FAVORITE_ITEM_ROUTE: &str = "PATCH /api/v1/items/{itemId}/favorite";
 const TRASH_ITEM_ROUTE: &str = "DELETE /api/v1/items/{itemId}";
 const RESTORE_ITEM_ROUTE: &str = "POST /api/v1/items/{itemId}/restore";
 const MOVE_ITEM_ROUTE: &str = "POST /api/v1/items/{itemId}/moves";
 const PERMANENTLY_DELETE_ITEM_ROUTE: &str = "DELETE /api/v1/items/{itemId}/permanent";
-const CREATE_SHARE_ROUTE: &str = "POST /api/v1/items/{itemId}/share-links";
+
+/// Preserve the existing Login history policy at the Core acceptance boundary.
+fn apply_login_password_history(
+    login: &mut crate::LoginItemData,
+    previous_password: Option<&str>,
+    changed_at: &str,
+) {
+    let mut candidates = std::mem::take(&mut login.password_history);
+    if let Some(previous) = previous_password
+        .filter(|password| !password.is_empty() && Some(*password) != login.password.as_deref())
+    {
+        candidates.insert(
+            0,
+            crate::PasswordHistoryEntry {
+                password: previous.to_owned(),
+                changed_at: changed_at.to_owned(),
+            },
+        );
+    }
+    for mut entry in candidates {
+        if !entry.password.is_empty()
+            && !entry.changed_at.is_empty()
+            && Some(entry.password.as_str()) != login.password.as_deref()
+            && login.password_history.len() < 10
+            && !login
+                .password_history
+                .iter()
+                .any(|kept| kept.password == entry.password)
+        {
+            login.password_history.push(entry);
+        } else {
+            entry.password.zeroize();
+            entry.changed_at.zeroize();
+        }
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,32 +143,7 @@ pub(crate) fn create_item_path(vault_id: &str, item_id: &str) -> String {
     format!("/api/v1/vaults/{vault_id}/items/{item_id}")
 }
 
-/// Covers the route identity and the exact body bytes, and deliberately not the Operation ID.
-///
-/// Fingerprint and identity have to be able to disagree: slice C reads the same ID arriving with
-/// another fingerprint as identity reuse, which is only detectable while the two are independent.
-pub(crate) fn create_item_fingerprint(
-    vault_id: &str,
-    item_id: &str,
-    body: &[u8],
-) -> Sha256Fingerprint {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    for part in [
-        OPERATION_DISCRIMINATOR,
-        CREATE_ITEM_KIND,
-        CREATE_ITEM_ROUTE,
-        vault_id.as_bytes(),
-        item_id.as_bytes(),
-        body,
-        // The Server hashes normalized concurrency preconditions here. A create has none.
-        b"" as &[u8],
-    ] {
-        hasher.update((part.len() as u64).to_be_bytes());
-        hasher.update(part);
-    }
-    Sha256Fingerprint(hasher.finalize().into())
-}
+pub(crate) use crate::replica::{create_item_fingerprint, share_operation_fingerprint};
 
 pub(super) fn item_operation_fingerprint(
     kind: OperationKind,
@@ -149,23 +153,6 @@ pub(super) fn item_operation_fingerprint(
     expected_version: i32,
 ) -> Sha256Fingerprint {
     shared_item_operation_fingerprint(kind, route, item_id, body, expected_version)
-}
-
-pub(super) fn share_operation_fingerprint(item_id: &str, body: &[u8]) -> Sha256Fingerprint {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    for part in [
-        OPERATION_DISCRIMINATOR,
-        b"create_share".as_slice(),
-        CREATE_SHARE_ROUTE.as_bytes(),
-        item_id.as_bytes(),
-        body,
-        b"" as &[u8],
-    ] {
-        hasher.update((part.len() as u64).to_be_bytes());
-        hasher.update(part);
-    }
-    Sha256Fingerprint(hasher.finalize().into())
 }
 
 /// Everything one accepted create owes, computed before any durable write.
@@ -1212,7 +1199,7 @@ impl Runtime {
             value: format!("\"{expected_version}\""),
         };
         let (kind, method, route, path, mut headers, body, operation_vault_id) = match intent {
-            ExistingItemIntent::Update(draft) => {
+            ExistingItemIntent::Update(mut draft) => {
                 if authority_item_category(draft.category()) != item.category {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
@@ -1224,6 +1211,50 @@ impl Runtime {
                     &snapshot.user_id,
                     &master_unlock_key,
                 )?);
+                if let ItemDraft::Login(login) = draft.as_mut() {
+                    let previous_plaintext = Zeroizing::new(
+                        decrypt_with_aad(
+                            &EncryptedData {
+                                ciphertext: item.encrypted_data.clone(),
+                                iv: item.encryption_iv.clone(),
+                                algorithm: item.encryption_algorithm.clone(),
+                            },
+                            &vault_key,
+                            &AadContext {
+                                vault_id: item.vault_id.clone(),
+                                entity_id: item.id.clone(),
+                                entity_type: "item".into(),
+                                version: item.encryption_version as u64,
+                                user_id: item.encrypted_by_user_id.clone(),
+                            },
+                        )
+                        .map_err(|_| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the selected Item ciphertext could not be opened",
+                            )
+                        })?,
+                    );
+                    let previous = ZeroizingJsonValue::new(
+                        serde_json::from_str(&previous_plaintext).map_err(|_| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the selected Login plaintext is invalid",
+                            )
+                        })?,
+                    );
+                    let password = match previous.0.get("password") {
+                        None | Some(serde_json::Value::Null) => None,
+                        Some(serde_json::Value::String(value)) => Some(value.as_str()),
+                        _ => {
+                            return Err(RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the selected Login password is invalid",
+                            ))
+                        }
+                    };
+                    apply_login_password_history(login, password, accepted_at);
+                }
                 let plaintext = Zeroizing::new(item_plaintext(&draft).map_err(|_| {
                     RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,

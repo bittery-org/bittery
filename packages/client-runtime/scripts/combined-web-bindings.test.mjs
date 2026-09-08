@@ -397,6 +397,53 @@ test("one WebAssembly module exposes crypto and the Client Runtime", async () =>
 	assert.deepEqual(productionWasm, [resolve(combinedRoot, "index_bg.wasm")]);
 });
 
+test("Replica storage-unavailable startup errors retain their code across WASM and retry explicitly", async () => {
+	const bindings = await import(
+		pathToFileURL(resolve(combinedRoot, "index.js")).href
+	);
+	await bindings.default({
+		module_or_path: await readFile(resolve(combinedRoot, "index_bg.wasm")),
+	});
+	let attempts = 0;
+	const runtime = bindings.WebClientRuntime.withExecutors(
+		async () => {
+			attempts += 1;
+			throw Object.assign(new Error("PRIVATE_DATABASE_DETAIL"), {
+				code: "STORAGE_UNAVAILABLE",
+			});
+		},
+		async () =>
+			JSON.stringify({
+				type: "value",
+				value: JSON.stringify({
+					version: 1,
+					accounts: [
+						{
+							accountId: "account-a",
+							activeIncarnation: "generation-a",
+							pendingInstall: null,
+						},
+					],
+				}),
+			}),
+		async () => '{"type":"networkFailure"}',
+		() => undefined,
+	);
+	try {
+		for (const expected of [1, 2]) {
+			await assert.rejects(runtime.open(), (error) => {
+				assert.equal(error.code, "STORAGE_UNAVAILABLE");
+				assert.doesNotMatch(String(error), /PRIVATE_DATABASE_DETAIL/);
+				return true;
+			});
+			assert.equal(attempts, expected);
+		}
+	} finally {
+		await runtime.close();
+		runtime.free();
+	}
+});
+
 test("artifact policy stays internal to the Rust Runtime", async () => {
 	const bindings = await import(
 		pathToFileURL(resolve(combinedRoot, "index.js")).href

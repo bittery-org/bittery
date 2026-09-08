@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const packageRoot = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
@@ -38,6 +39,8 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"StartLoginRequest",
 	"SyncChangesResponse",
 	"SuccessResponse",
+	"ShareLinkListResponse",
+	"CursorPage_ShareAccessLogResponse",
 	"TravelModeResponse",
 	"UpdateItemBody",
 	"UpdateAttachmentBody",
@@ -250,6 +253,11 @@ function rustType(schema, owner, field) {
 	if (reference) type = rustTypeName(reference);
 	else if (owner === "CursorPage_AuthVaultKeyResponse" && field === "items") {
 		type = "Vec<AuthVaultKeyResponse>";
+	} else if (
+		owner === "CursorPage_ShareAccessLogResponse" &&
+		field === "items"
+	) {
+		type = "Vec<ShareAccessLogResponse>";
 	} else if (value?.type === "array") {
 		if (!value.items)
 			unsupportedSchema(owner, field, "array has no item schema");
@@ -442,6 +450,16 @@ export function generateServerContract(document, sourceBytes) {
 	// Utoipa inlines this page's item shape even though the same named schema exists.
 	if (selected.has("CursorPage_AuthVaultKeyResponse"))
 		selected.add("AuthVaultKeyResponse");
+	if (selected.has("CursorPage_ShareAccessLogResponse")) {
+		const inline =
+			schemas.CursorPage_ShareAccessLogResponse.properties?.items?.items;
+		if (!isDeepStrictEqual(inline, schemas.ShareAccessLogResponse)) {
+			throw new Error(
+				"Share access-log page item differs from its named response schema",
+			);
+		}
+		selected.add("ShareAccessLogResponse");
+	}
 
 	const digest = createHash("sha256").update(sourceBytes).digest("hex");
 	const definitions = [...selected].sort(compareCodePoints).map((name) => {

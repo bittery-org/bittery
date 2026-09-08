@@ -135,6 +135,7 @@ impl NativeArtifactPort {
                 lift_answer(answer).map_err(|_| BindingError::Runtime {
                     code: crate::RuntimeErrorCode::InvariantViolation,
                     message: "Vault image native answer is invalid".into(),
+                    recovery_bound: None,
                 })
             })
             .map_err(|_| invariant())
@@ -297,6 +298,7 @@ impl NativeSourcePort {
                 lift_answer(answer).map_err(|_| BindingError::Runtime {
                     code: crate::RuntimeErrorCode::InvariantViolation,
                     message: "Vault image native answer is invalid".into(),
+                    recovery_bound: None,
                 })
             })
             .map_err(|_| core::VaultImageSourceError::Source)
@@ -323,6 +325,7 @@ impl core::VaultImageSource for NativeSource {
                 lift_answer(answer).map_err(|_| BindingError::Runtime {
                     code: crate::RuntimeErrorCode::InvariantViolation,
                     message: "Vault image native answer is invalid".into(),
+                    recovery_bound: None,
                 })
             })
             .map_err(|_| core::VaultImageSourceError::Source)?;
@@ -352,6 +355,7 @@ impl core::VaultImageSource for NativeSource {
                 lift_answer(answer).map_err(|_| BindingError::Runtime {
                     code: crate::RuntimeErrorCode::InvariantViolation,
                     message: "Vault image native answer is invalid".into(),
+                    recovery_bound: None,
                 })
             })
             .map_err(|_| core::VaultImageSourceError::Source)?;
@@ -489,6 +493,7 @@ fn expect_source_answer(
 }
 fn invariant() -> core::RuntimeError {
     core::RuntimeError {
+        recovery_bound: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Vault image native invocation failed".into(),
     }

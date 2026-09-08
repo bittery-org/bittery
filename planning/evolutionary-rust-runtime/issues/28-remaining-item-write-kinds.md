@@ -1,7 +1,7 @@
 # Remaining Item write kinds through the Runtime
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 22, 24, 31, 32, 43, 45, 46, 48, 58
 Spec: ../spec.md#offline-create
 
@@ -182,3 +182,45 @@ Ticket 58 must prove the complete Web graph and whole-repository create/Import g
 forbidden reachability, with production Worker/browser acceptance and full TypeScript/Rust CI.
 [ticket 29](29-rotation-operation-outcomes.md) alone owns final response-cache deletion;
 [ticket 30](30-runtime-owned-live-sync.md) owns live Sync. Later hosts reuse Runtime behavior.
+
+## Completion for this run
+
+Tickets 57 and 58 passed independent review, delegated simplification passes, targeted tests,
+dependent types, formatting, generation checks, and production browser acceptance. The final Web
+cutover covers 37 distinct browser scenarios; the rebuilt joined Worker/Core suite passed 135
+assertions. Production Web and whole-repository create/Import ownership graphs pass. The user
+explicitly waived both full CI requirements; neither was run or reported as passed.
+
+The umbrella simplification audit found no further useful extraction. Keep separate acceptance and
+Replica validation, durable Operations and foreground services, and host adaptation and Rust policy.
+Live Sync, unmigrated hosts, excluded Vault mutations, and provider-specific S3 enforcement retain
+their existing scope and deployment gates.
+
+## Publication-check follow-up
+
+2026-09-08: the later requested full Server suite exposed a Rename/Move concurrency regression:
+Rename changed Attachment metadata without advancing the parent Item revision, allowing an already
+prepared Move to overwrite the new name. Rename now advances Item revision, modification metadata
+and the `item_updated` Sync version in its existing writer-locked transaction. Item encryption version,
+Attachment envelope version and key wrapping remain unchanged, as required by the accepted contract.
+A stale Move is retained as the existing `item_version_conflict` outcome.
+
+The affected browser rerun then exposed the corresponding foreground race: live Sync could install
+that Rename before its request finished probing authority, causing the unchanged Replica revision
+guard to reject a result already present locally. A native regression and the actual Worker failure
+both reproduced the same retryable rejection. Foreground Attachment completion now recognizes an
+identical complete Item and Attachment result at a strictly newer Replica revision without writing
+again. Incarnation, lock epoch, Account failure, Bootstrap readiness and accepted-work ownership
+remain fenced; different or newer authority is still rejected. Item ciphertext and its encryption
+version stay unchanged when the parent revision advances.
+
+The focused `rename_committed_before_move_advances_item_revision_and_move_rejects` regression
+passes, preserving the renamed source Attachment and proving Item revision 2, encryption version 1,
+Attachment envelope version 1 and exactly one Sync update at version 2. Independent Standards/Spec
+and simplification review approved both corrections. All 102 foreground Attachment tests and the
+11-case convergence guard matrix passed, including exact durable/cache preservation and no extra
+commit. The final Chromium foreground Attachment UI and durable Attachment Move scenarios passed
+(2/2). Both local `pnpm check:ci` and `pnpm check:ci:rust` commands passed, alongside the complete
+Server suite (544 library and 2 binary tests); see the [publication gate](../map.md#publication-checks).
+This supplements the historical targeted acceptance above without reopening the ticket or changing
+cryptographic semantics.

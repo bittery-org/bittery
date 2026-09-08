@@ -404,16 +404,19 @@ test("a replaced Runtime renders bootstrapped encrypted authority after transpor
 			throw new Error("The home Items observation did not reach the Worker.");
 		}
 
-		// Settings has no Items consumer. Moving there removes the home projection;
-		// the later Vault navigation creates a new observation after transport is gone.
-		await page
-			.getByRole("link", { name: "Settings", exact: true })
-			.first()
-			.click();
-		await page.waitForURL("**/settings");
-		await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible({
-			timeout: VAULT_READY_TIMEOUT_MS,
-		});
+		// Team has no Items consumer; Settings retains one for its Export dialog.
+		// Prove this navigation releases Home's observation before disconnecting, then
+		// require a fresh observation when the Vault is opened without transport.
+		await page.getByRole("link", { name: "Team", exact: true }).first().click();
+		await page.waitForURL("**/team");
+		await expect(
+			page
+				.getByRole("tab", {
+					name: uiText("team_page_tab_members"),
+					exact: true,
+				})
+				.or(page.getByText(uiText("team_page_empty_no_team"), { exact: true })),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 		await expect
 			.poll(async () => {
 				const commands = await runtimeObservationCommands(page);

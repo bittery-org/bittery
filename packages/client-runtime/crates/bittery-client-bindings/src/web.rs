@@ -67,37 +67,66 @@ impl core::SerializedHttpExecutor for JsSerializedHttpExecutor {
 async fn invoke_serialized(
     invoke: &js_sys::Function,
     request_json: &str,
-    error: fn(&str) -> core::RuntimeError,
+    error: fn(&str, Option<&JsValue>) -> core::RuntimeError,
 ) -> Result<String, core::RuntimeError> {
     let promise = invoke
         .call1(&JsValue::UNDEFINED, &JsValue::from_str(&request_json))
-        .map_err(|_| error("invocation failed"))?
+        .map_err(|cause| error("invocation failed", Some(&cause)))?
         .dyn_into::<js_sys::Promise>()
-        .map_err(|_| error("did not return a Promise"))?;
+        .map_err(|_| error("did not return a Promise", None))?;
     let response = JsFuture::from(promise)
         .await
-        .map_err(|_| error("invocation failed"))?;
+        .map_err(|cause| error("invocation failed", Some(&cause)))?;
     response
         .as_string()
-        .ok_or_else(|| error("returned a non-string response"))
+        .ok_or_else(|| error("returned a non-string response", None))
 }
 
-fn replica_invoke_error(reason: &str) -> core::RuntimeError {
+fn replica_invoke_error(reason: &str, cause: Option<&JsValue>) -> core::RuntimeError {
+    if cause
+        .and_then(|value| js_sys::Reflect::get(value, &JsValue::from_str("code")).ok())
+        .and_then(|value| value.as_string())
+        .as_deref()
+        == Some("STORAGE_UNAVAILABLE")
+    {
+        return core::RuntimeError {
+            recovery_bound: None,
+            code: core::RuntimeErrorCode::StorageUnavailable,
+            message: "Replica storage is unavailable; close other Bittery tabs and retry".into(),
+        };
+    }
     core::RuntimeError {
+        recovery_bound: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: format!("Replica persistence {reason}"),
     }
 }
 
-fn platform_storage_invoke_error(_reason: &str) -> core::RuntimeError {
+fn lifecycle_js_error(error: core::RuntimeError) -> JsValue {
+    if error.code == core::RuntimeErrorCode::StorageUnavailable {
+        let value = js_sys::Error::new(&error.message);
+        let _ = js_sys::Reflect::set(
+            &value,
+            &JsValue::from_str("code"),
+            &JsValue::from_str("STORAGE_UNAVAILABLE"),
+        );
+        value.into()
+    } else {
+        JsValue::from_str(&error.to_string())
+    }
+}
+
+fn platform_storage_invoke_error(_reason: &str, _cause: Option<&JsValue>) -> core::RuntimeError {
     core::RuntimeError {
+        recovery_bound: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Platform storage invocation failed".into(),
     }
 }
 
-fn http_invoke_error(_reason: &str) -> core::RuntimeError {
+fn http_invoke_error(_reason: &str, _cause: Option<&JsValue>) -> core::RuntimeError {
     core::RuntimeError {
+        recovery_bound: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "HTTP transport invocation failed".into(),
     }
@@ -195,6 +224,20 @@ impl WebClientRuntime {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self::from_inner(core::Runtime::new())
+    }
+
+    #[wasm_bindgen(js_name = setRecoveryExecutor)]
+    pub fn set_recovery_executor(
+        &self,
+        invoke: js_sys::Function,
+        cancel: js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_recovery_executor(Arc::new(crate::web_recovery_bridge::JsRecoveryExecutor {
+                invoke,
+                cancel,
+            }))
+            .map_err(lifecycle_js_error)
     }
 
     #[wasm_bindgen(js_name = withReplicaExecutor)]
@@ -327,6 +370,7 @@ impl WebClientRuntime {
         // to any host call, so an Operation accepted offline keeps being retried while the page
         // does nothing at all. It returns when the Runtime closes.
         spawn_local(Arc::clone(&inner).run_operation_dispatch());
+        spawn_local(Arc::clone(&inner).run_live_sync());
         Self {
             inner,
             cancellations: Mutex::new(HashMap::new()),
@@ -347,10 +391,7 @@ impl WebClientRuntime {
     }
 
     pub async fn open(&self) -> Result<(), JsValue> {
-        self.inner
-            .open()
-            .await
-            .map_err(|error| JsValue::from_str(&error.to_string()))
+        self.inner.open().await.map_err(lifecycle_js_error)
     }
 
     #[doc(hidden)]
@@ -444,9 +485,14 @@ impl WebClientRuntime {
         &self,
         server_url: String,
         pause_checkpoint: Option<String>,
+        second_account: Option<bool>,
     ) -> Result<(), JsValue> {
         self.inner
-            .seed_create_vault_binding_test_authority(server_url, pause_checkpoint)
+            .seed_create_vault_binding_test_authority(
+                server_url,
+                pause_checkpoint,
+                second_account.unwrap_or(false),
+            )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))
     }
@@ -496,7 +542,7 @@ impl WebClientRuntime {
         let handle = self
             .inner
             .observe(request, sink.clone())
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            .map_err(lifecycle_js_error)?;
         let observation = Arc::new(WebObservation {
             handle,
             sink,

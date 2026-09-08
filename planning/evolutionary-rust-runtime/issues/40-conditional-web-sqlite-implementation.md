@@ -1,7 +1,7 @@
 # Conditional Web SQLite implementation
 
 Type: task
-Status: needs-info
+Status: wontfix
 Blocked by: 39
 Decision: 39
 
@@ -25,5 +25,11 @@ and storage-denial cases pass. A reachability audit proves one Web Replica autho
 
 ## Conditional status
 
-This ticket remains `needs-info` unless ticket 39 explicitly selects SQLite. If IndexedDB remains the
-deployment choice, mark this ticket `wontfix` rather than building a dormant second writer.
+2026-09-08: The maintainer explicitly declined this implementation after selecting IndexedDB in
+[resolved ticket 39](39-web-sqlite-deployment-decision.md). No SQLite executor, migration, reset or
+deployment-header change is introduced. The prototype was removed after capture; simplification
+keeps the existing IndexedDB path without a dormant alternate writer. Recovery remains in
+[ticket 42](42-browser-replica-recovery.md).
+
+Independent Standards/Spec and simplification review passed; both links and diff checks passed.
+This declined branch has no production implementation to test. Full CI was waived and not run.

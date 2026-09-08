@@ -912,6 +912,20 @@ pub(crate) async fn update_vault_attachment(
         "Failed to lock Item Attachment writer",
     )
     .await?;
+    // Rename changes the Item's authoritative Attachment metadata, not either ciphertext AAD
+    // version. Advance only its concurrency revision so an already prepared Move cannot overwrite
+    // the new name. The Item and Attachment writes share this transaction and writer lock.
+    let item_version = query_scalar::<_, i32>(
+        "UPDATE item SET version = version + 1, last_modified_by = $1, updated_at = $2 WHERE id = $3 AND vault_id = $4 RETURNING version",
+    )
+    .bind(user_id)
+    .bind(OffsetDateTime::now_utc())
+    .bind(&attachment.item_id)
+    .bind(&attachment.vault_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to advance Attachment Item authority"))?
+    .ok_or_else(|| AppError::conflict("Attachment authority changed"))?;
     let updated = query(
 		"UPDATE item_attachment SET encrypted_name = $1, encryption_iv = $2, encryption_algorithm = $3 WHERE id = $4 AND vault_id = $5 AND envelope_version = $6",
 	)
@@ -934,7 +948,7 @@ pub(crate) async fn update_vault_attachment(
         &attachment.vault_id,
         user_id,
         request_client_id,
-        load_item_row(pool, &attachment.item_id).await?.version,
+        item_version,
     )
     .await?;
     transaction

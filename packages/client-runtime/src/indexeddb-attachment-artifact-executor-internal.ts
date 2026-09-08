@@ -1,5 +1,12 @@
+import {
+	assertIndexedDbLayout,
+	IndexedDbStorageError,
+	type IndexedDbStoreLayout,
+	openIndexedDatabase,
+} from "./indexeddb-lifecycle";
+
 const DATABASE_NAME = "bittery_attachment_artifacts";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const METADATA_STORE = "artifacts";
 const CHUNK_STORE = "chunks";
 const PROVISIONAL_METADATA_STORE = "provisional_artifacts";
@@ -227,7 +234,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		writer: ProvisionalToken,
 	): Promise<ProvisionalToken | undefined> {
 		assertCanonicalToken(writer);
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			PROVISIONAL_METADATA_STORE,
 			"readwrite",
@@ -296,7 +303,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 			throw new Error("Provisional chunk index is out of range");
 		if (bytes.byteLength === 0 || bytes.byteLength > 256 * 1024)
 			throw new Error("Provisional chunk length is invalid");
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			[PROVISIONAL_METADATA_STORE, PROVISIONAL_CHUNK_STORE],
 			"readwrite",
@@ -364,7 +371,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		state: "sealed" | "published";
 	}> {
 		assertTokenOwns(writer, owner);
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			PROVISIONAL_METADATA_STORE,
 			"readwrite",
@@ -419,7 +426,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		assertTokenOwns(token, owner);
 		if (!isUint32(chunkIndex) || chunkIndex >= owner.chunkCount)
 			throw new Error("Provisional chunk index is out of range");
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(
 				[PROVISIONAL_METADATA_STORE, PROVISIONAL_CHUNK_STORE],
@@ -451,7 +458,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		owner: IndexedDbAttachmentArtifactOwner,
 	): Promise<void> {
 		assertTokenOwns(token, owner);
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			[METADATA_STORE, PROVISIONAL_METADATA_STORE],
 			"readwrite",
@@ -501,7 +508,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 	async recoverProvisional(
 		scope: ProvisionalArtifactScopeControl,
 	): Promise<ProvisionalToken> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(
 				PROVISIONAL_METADATA_STORE,
@@ -532,7 +539,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		state: "sealed" | "published";
 	}> {
 		assertCanonicalToken(token);
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(
 				[METADATA_STORE, PROVISIONAL_METADATA_STORE],
@@ -603,7 +610,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 			chunkIndex >= owner.chunkCount
 		)
 			throw new Error("Attachment artifact chunk index is out of range");
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			[METADATA_STORE, CHUNK_STORE],
 			"readwrite",
@@ -680,7 +687,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 	async beginPublish(
 		owner: IndexedDbAttachmentArtifactOwner,
 	): Promise<"verifying" | "published"> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(METADATA_STORE, "readwrite");
 		const completed = transactionDone(transaction);
 		try {
@@ -718,7 +725,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 	async finishPublish(
 		owner: IndexedDbAttachmentArtifactOwner,
 	): Promise<"published" | "alreadyPublished"> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(METADATA_STORE, "readwrite");
 		const completed = transactionDone(transaction);
 		try {
@@ -753,7 +760,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 
 	async deleteAccount(accountId: string): Promise<void> {
 		requireNonEmpty("accountId", accountId);
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			[
 				METADATA_STORE,
@@ -789,7 +796,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 	}
 
 	async wipeDevice(): Promise<void> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const storeNames = [
 			CHUNK_STORE,
 			PROVISIONAL_CHUNK_STORE,
@@ -814,7 +821,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 	}
 
 	async listArtifactIds(accountId: string): Promise<readonly string[]> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(METADATA_STORE, "readonly");
 			const records = await requestResult<StoredArtifact[]>(
@@ -833,7 +840,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 	async listProvisionalTokens(
 		accountId: string,
 	): Promise<readonly ProvisionalToken[]> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(
 				[METADATA_STORE, PROVISIONAL_METADATA_STORE],
@@ -883,7 +890,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		token: ProvisionalToken,
 	): Promise<"progress" | "deleted" | "missing"> {
 		assertCanonicalToken(token);
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			[METADATA_STORE, PROVISIONAL_METADATA_STORE, PROVISIONAL_CHUNK_STORE],
 			"readwrite",
@@ -947,7 +954,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		accountId: string,
 		artifactId: string,
 	): Promise<"progress" | "deleted" | "missing"> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		const transaction = database.transaction(
 			[METADATA_STORE, CHUNK_STORE],
 			"readwrite",
@@ -991,7 +998,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		owner: IndexedDbAttachmentArtifactOwner,
 		chunkIndex: number,
 	): Promise<ArrayBuffer> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(CHUNK_STORE, "readonly");
 			const chunk = await requestResult<StoredChunk | undefined>(
@@ -1021,7 +1028,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		chunkIndex: number,
 		allowedStates: readonly PublicationState[],
 	): Promise<IndexedDbAttachmentArtifactChunk> {
-		const database = await openDatabase(this.#databaseName);
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(
 				[METADATA_STORE, CHUNK_STORE, PROVISIONAL_CHUNK_STORE],
@@ -1113,57 +1120,102 @@ function deleteIndexedRecords(
 	});
 }
 
-async function openDatabase(databaseName: string): Promise<IDBDatabase> {
-	if (globalThis.indexedDB === undefined)
-		throw new Error("IndexedDB is unavailable");
-	const request = globalThis.indexedDB.open(databaseName, DATABASE_VERSION);
-	request.onupgradeneeded = () => {
-		const database = request.result;
-		if (!database.objectStoreNames.contains(METADATA_STORE)) {
-			const artifacts = database.createObjectStore(METADATA_STORE, {
-				keyPath: ["accountId", "artifactId"],
-			});
-			artifacts.createIndex(ACCOUNT_INDEX, "accountId");
-		}
-		if (!database.objectStoreNames.contains(CHUNK_STORE)) {
-			const chunks = database.createObjectStore(CHUNK_STORE, {
-				keyPath: ["accountId", "artifactId", "chunkIndex"],
-			});
-			chunks.createIndex(ACCOUNT_INDEX, "accountId");
-			chunks.createIndex("by_artifact", ["accountId", "artifactId"]);
-		}
-		if (!database.objectStoreNames.contains(PROVISIONAL_METADATA_STORE)) {
-			const provisional = database.createObjectStore(
-				PROVISIONAL_METADATA_STORE,
-				{ keyPath: ["accountId", "operationId", "attachmentId", "generation"] },
-			);
-			provisional.createIndex(ACCOUNT_INDEX, "accountId");
-			provisional.createIndex(SCOPE_INDEX, [
-				"accountId",
-				"operationId",
-				"attachmentId",
-			]);
-		}
-		if (!database.objectStoreNames.contains(PROVISIONAL_CHUNK_STORE)) {
-			const chunks = database.createObjectStore(PROVISIONAL_CHUNK_STORE, {
-				keyPath: [
+const ATTACHMENT_LAYOUT: readonly IndexedDbStoreLayout[] = [
+	["artifacts", ["accountId", "artifactId"], [["by_account", "accountId"]]],
+	[
+		"chunks",
+		["accountId", "artifactId", "chunkIndex"],
+		[
+			["by_account", "accountId"],
+			["by_artifact", ["accountId", "artifactId"]],
+		],
+	],
+	[
+		"provisional_artifacts",
+		["accountId", "operationId", "attachmentId", "generation"],
+		[
+			["by_account", "accountId"],
+			["by_scope", ["accountId", "operationId", "attachmentId"]],
+		],
+	],
+	[
+		"provisional_chunks",
+		["accountId", "operationId", "attachmentId", "generation", "chunkIndex"],
+		[
+			["by_account", "accountId"],
+			[
+				"by_generation",
+				["accountId", "operationId", "attachmentId", "generation"],
+			],
+		],
+	],
+];
+export async function openAttachmentArtifactDatabase(
+	databaseName = DATABASE_NAME,
+): Promise<IDBDatabase> {
+	return openIndexedDatabase({
+		name: databaseName,
+		version: DATABASE_VERSION,
+		upgrade(database, transaction, oldVersion) {
+			if (oldVersion !== 0) {
+				if (oldVersion !== 1 && oldVersion !== 2)
+					throw new IndexedDbStorageError("unsupported_version");
+				assertIndexedDbLayout(
+					database,
+					oldVersion === 1 ? ATTACHMENT_LAYOUT.slice(0, 2) : ATTACHMENT_LAYOUT,
+					transaction,
+				);
+			}
+
+			if (!database.objectStoreNames.contains(METADATA_STORE)) {
+				const artifacts = database.createObjectStore(METADATA_STORE, {
+					keyPath: ["accountId", "artifactId"],
+				});
+				artifacts.createIndex(ACCOUNT_INDEX, "accountId");
+			}
+			if (!database.objectStoreNames.contains(CHUNK_STORE)) {
+				const chunks = database.createObjectStore(CHUNK_STORE, {
+					keyPath: ["accountId", "artifactId", "chunkIndex"],
+				});
+				chunks.createIndex(ACCOUNT_INDEX, "accountId");
+				chunks.createIndex("by_artifact", ["accountId", "artifactId"]);
+			}
+			if (!database.objectStoreNames.contains(PROVISIONAL_METADATA_STORE)) {
+				const provisional = database.createObjectStore(
+					PROVISIONAL_METADATA_STORE,
+					{
+						keyPath: ["accountId", "operationId", "attachmentId", "generation"],
+					},
+				);
+				provisional.createIndex(ACCOUNT_INDEX, "accountId");
+				provisional.createIndex(SCOPE_INDEX, [
+					"accountId",
+					"operationId",
+					"attachmentId",
+				]);
+			}
+			if (!database.objectStoreNames.contains(PROVISIONAL_CHUNK_STORE)) {
+				const chunks = database.createObjectStore(PROVISIONAL_CHUNK_STORE, {
+					keyPath: [
+						"accountId",
+						"operationId",
+						"attachmentId",
+						"generation",
+						"chunkIndex",
+					],
+				});
+				chunks.createIndex(ACCOUNT_INDEX, "accountId");
+				chunks.createIndex("by_generation", [
 					"accountId",
 					"operationId",
 					"attachmentId",
 					"generation",
-					"chunkIndex",
-				],
-			});
-			chunks.createIndex(ACCOUNT_INDEX, "accountId");
-			chunks.createIndex("by_generation", [
-				"accountId",
-				"operationId",
-				"attachmentId",
-				"generation",
-			]);
-		}
-	};
-	return requestResult(request);
+				]);
+			}
+		},
+		validate: (database, transaction) =>
+			assertIndexedDbLayout(database, ATTACHMENT_LAYOUT, transaction),
+	});
 }
 
 function tokenKey(token: ProvisionalToken): string[] {

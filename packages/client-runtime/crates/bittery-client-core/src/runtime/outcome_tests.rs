@@ -1752,6 +1752,86 @@ async fn ordinary_operation_sync_hint_proves_identity_before_terminal_page_progr
 }
 
 #[tokio::test]
+async fn refresh_cannot_pass_a_later_unresolved_operation_event() {
+    for requires_full_refresh in [false, true] {
+        let harness = seeded_with_existing_item(false, false).await;
+        let (operation_id, _) = harness
+            .accept_existing(OrdinaryItemCase::Update.request(harness.account_id.clone()))
+            .await;
+        let before = harness.snapshot();
+        harness
+            .server
+            .outcome_faults
+            .lock()
+            .unwrap()
+            .push_back(Fault::NetworkFailure);
+        harness
+            .server
+            .sync_pages
+            .lock()
+            .unwrap()
+            .push_back(serde_json::json!({
+                "events": [
+                    {
+                        "id": "refresh-vault-event",
+                        "type": "vault_updated",
+                        "entityType": "vault",
+                        "entityId": TEST_VAULT_ID,
+                        "userId": USER,
+                        "vaultId": TEST_VAULT_ID,
+                        "clientId": null,
+                        "metadata": null,
+                        "timestamp": "1700000000000",
+                        "version": 1
+                    },
+                    {
+                        "id": "refresh-operation-event",
+                        "type": "operation_resolved",
+                        "entityType": "operation",
+                        "entityId": operation_id,
+                        "userId": USER,
+                        "vaultId": null,
+                        "clientId": null,
+                        "metadata": null,
+                        "timestamp": "1700000000000",
+                        "version": 1
+                    }
+                ],
+                "cursor": { "id": "refresh-operation-event" },
+                "hasMore": false,
+                "requiresFullRefresh": requires_full_refresh
+            }));
+        let request_start = harness.server.requests.lock().unwrap().len();
+
+        harness
+            .runtime
+            .bootstrap_account(&harness.account_id, RequestCancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(harness.server.outcome_lookups(), 1);
+        assert_eq!(
+            harness.snapshot(),
+            before,
+            "a structural refresh cannot pass later accepted work, even when history expired"
+        );
+        let requests = harness.server.requests.lock().unwrap();
+        let paths: Vec<_> = requests[request_start..]
+            .iter()
+            .map(|request| url::Url::parse(&request.url).unwrap().path().to_owned())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "/api/v1/sync/changes".to_owned(),
+                format!("/api/v1/operations/{operation_id}")
+            ],
+            "no fresh Bootstrap may be requested before exact outcome reconciliation"
+        );
+    }
+}
+
+#[tokio::test]
 async fn ordinary_sync_replay_commit_failure_moves_neither_work_nor_page_cursor() {
     let harness = seeded_with_existing_item(false, false).await;
     harness.server.lose_next_response();
@@ -2437,7 +2517,11 @@ async fn sync_has_more_fetches_the_next_page_from_the_committed_page_cursor() {
         .iter()
         .enumerate()
         .filter(|(_, request)| {
-            request.method == "GET" && request.url.ends_with("/api/v1/items/item-existing")
+            request.method == "GET"
+                && (request.url.ends_with("/api/v1/items/item-existing")
+                    || request
+                        .url
+                        .ends_with("/api/v1/items/item-existing/authority"))
         })
         .map(|(index, _)| index)
         .collect();
@@ -2451,6 +2535,12 @@ async fn sync_has_more_fetches_the_next_page_from_the_committed_page_cursor() {
         })
         .unwrap();
     assert_eq!(page_two_item_gets.len(), 2);
+    assert!(page_two_requests[page_two_item_gets[0]]
+        .url
+        .ends_with("/api/v1/items/item-existing/authority"));
+    assert!(page_two_requests[page_two_item_gets[1]]
+        .url
+        .ends_with("/api/v1/items/item-existing"));
     assert!(page_two_item_gets[0] < page_two_outcome_get);
     assert!(page_two_outcome_get < page_two_item_gets[1]);
 
@@ -2777,6 +2867,18 @@ async fn sync_reconciliation_keeps_the_session_renewed_by_an_authoritative_fetch
         ],
         "the next Sync event must use the Session renewed during reconciliation"
     );
+    assert!(
+        harness
+            .server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.url.ends_with("/authority")
+                && request.header("authorization")
+                    == Some(format!("Bearer {SECOND_TOKEN}").as_str())),
+        "the complete Item authority read also uses the renewed Session"
+    );
     assert_eq!(
         harness.server.refresh_calls.load(Ordering::SeqCst),
         1,
@@ -2845,4 +2947,92 @@ async fn reconciliation_is_one_transaction_and_a_failed_commit_changes_nothing()
 
     harness.runtime.close().await;
     dispatcher.await.unwrap();
+}
+
+#[tokio::test]
+async fn rotation_outcomes_never_resolve_an_accepted_item_operation() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness
+        .accept_existing(OrdinaryItemCase::Update.request(harness.account_id.clone()))
+        .await;
+    let operation = harness.operation().unwrap();
+    for (kind, code) in [
+        (
+            "create_vault_member_removal_rotation_plans",
+            "vault_member_not_found",
+        ),
+        (
+            "finalize_vault_member_removal_rotation_plans",
+            "vault_membership_changed",
+        ),
+        ("create_team_leave_rotation_plans", "team_member_not_found"),
+        (
+            "finalize_team_leave_rotation_plans",
+            "team_membership_changed",
+        ),
+        (
+            "create_team_member_removal_rotation_plans",
+            "team_member_not_found",
+        ),
+        (
+            "finalize_team_member_removal_rotation_plans",
+            "team_membership_changed",
+        ),
+    ] {
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "operationId": operation.operation_id,
+            "kind": kind,
+            "result": {"status": "rejected", "code": code},
+        }))
+        .unwrap();
+        assert!(
+            matches!(
+                harness
+                    .runtime
+                    .read_dispatch_answer(&operation, 200, &bytes),
+                super::outcome::SemanticAnswer::IdentityReused
+            ),
+            "known Rotation kind {kind} is another operation, not a transient parse failure"
+        );
+    }
+}
+
+#[tokio::test]
+async fn remote_rotation_resolution_events_advance_sync_without_lookup_or_account_failure() {
+    let harness = seeded(false).await;
+    let before = harness.snapshot();
+    let lookups_before = harness.server.outcome_lookups();
+    for (index, kind) in [
+        "create_vault_member_removal_rotation_plans",
+        "finalize_vault_member_removal_rotation_plans",
+        "create_team_leave_rotation_plans",
+        "finalize_team_leave_rotation_plans",
+        "create_team_member_removal_rotation_plans",
+        "finalize_team_member_removal_rotation_plans",
+    ]
+    .iter()
+    .enumerate()
+    {
+        // The Server's Sync event carries the Operation ID, not its retained kind. A
+        // nonpending remote ID is consumed before any outcome lookup/deserialization.
+        let cursor = format!("rotation-sync-{index}");
+        harness
+            .server
+            .script_operation_event(&format!("remote-{kind}"), &cursor);
+        harness
+            .runtime
+            .bootstrap_account(&harness.account_id, RequestCancellation::new())
+            .await
+            .unwrap();
+        let advanced = harness.snapshot();
+        assert_eq!(advanced.failure, None);
+        assert_eq!(advanced.items, before.items);
+        assert_eq!(advanced.operations, before.operations);
+        assert_eq!(advanced.receipts, before.receipts);
+        assert_eq!(
+            advanced.bootstrap.active_cursor,
+            crate::replica::SyncCursor::CapturedValue { id: cursor }
+        );
+    }
+    assert_eq!(harness.server.outcome_lookups(), lookups_before);
 }

@@ -99,6 +99,29 @@ impl TeardownHostCleanup for UnavailableTeardownHostCleanup {
 }
 
 impl Runtime {
+    async fn delete_vault_images_for_teardown(&self, scope: &TeardownScope) {
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone();
+        let Some(facade) = facade else { return };
+        let mut failures = 0_u32;
+        loop {
+            let result = match scope {
+                TeardownScope::Account { account_id } => {
+                    facade.delete_account_artifacts(account_id).await
+                }
+                TeardownScope::Device => facade.wipe_artifacts().await,
+            };
+            if result.is_ok() {
+                return;
+            }
+            self.device_timer.sleep_ms(10_u64 << failures.min(7)).await;
+            failures = failures.saturating_add(1);
+        }
+    }
+
     pub(super) async fn remove_account(
         &self,
         account_id: AccountId,
@@ -207,6 +230,7 @@ impl Runtime {
                 self.retire_all_vault_images().await;
             }
         }
+        self.delete_vault_images_for_teardown(&scope).await;
         {
             let _publication = self.publication.lock().expect("publication lock poisoned");
             self.pending_teardown

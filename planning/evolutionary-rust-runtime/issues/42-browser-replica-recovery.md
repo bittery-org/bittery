@@ -1,7 +1,7 @@
 # Browser Replica recovery and export
 
 Type: task
-Status: needs-info
+Status: resolved
 Blocked by: 38, 39, 40, 41
 
 ## Outcome
@@ -30,3 +30,24 @@ that resolves the conditional branch; recovery still applies to IndexedDB.
 Inject failures and prove surviving accepted work is neither silently discarded nor duplicated.
 Unknown/lost state stays explicit. Recovery exposes no plaintext, crosses no Account scope, and
 creates no reachable dual writers.
+
+## Accepted contract
+
+2026-09-08: the maintainer approved the [recovery contract](../browser-replica-recovery.md):
+protected Account-scoped locked export, metadata-only diagnostics, whole-Runtime maintenance,
+strictly proved same-Account repair and explicit re-Bootstrap. Preserve accepted work, report
+unknown state honestly, and retain existing explicit Remove/Wipe behavior without automatic reset.
+
+## Completion
+
+2026-09-08: implemented the approved contract. Independent Standards/Spec review and the complete
+simplification pass approved the result. Recovery reuses existing ownership, cancellation,
+persistence fences and artifact storage. Guarded publication resumes after hashing inside an
+IndexedDB callback in the same transaction, preserving atomicity in Chromium and Firefox.
+
+Targeted crypto/Core/host tests, types, formatting and generation checks passed. Chromium's six
+recovery/loss cases and the affected final repair pair passed. All six Firefox cases passed across
+targeted runs: four earlier cases and the final repair/re-Bootstrap pair. The existing durability
+and Attachment Move scenarios and all seven Sync scenarios passed.
+See [validation and limits](../browser-replica-recovery.md#validation-and-limits) for the exact scope.
+Full CI was waived and was not run.

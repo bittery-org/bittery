@@ -5,6 +5,12 @@ import type {
 } from "../generated/vault-image-control/contract";
 import { validateVaultImageControlRequest } from "../generated/vault-image-control/validator";
 import { wipeBinaryIntrinsic } from "./binary-intrinsics";
+import {
+	assertIndexedDbLayout,
+	IndexedDbStorageError,
+	type IndexedDbStoreLayout,
+	openIndexedDatabase,
+} from "./indexeddb-lifecycle";
 
 type ArtifactRow = Metadata & { published: boolean };
 type ChunkRow = Scope & { chunkIndex: number; bytes: Uint8Array };
@@ -129,26 +135,21 @@ export class IndexedDbVaultImageArtifactExecutor {
 	}
 	async #database() {
 		if (this.#opening !== undefined) return this.#opening;
-		this.#opening = new Promise((resolve, reject) => {
-			const request = indexedDB.open(this.#name, 1);
-			request.onupgradeneeded = () => {
-				const db = request.result;
-				const artifacts = db.createObjectStore("artifacts", {
-					keyPath: ["accountId", "operationId"],
-				});
-				artifacts.createIndex("by_account", "accountId");
-				const chunks = db.createObjectStore("chunks", {
-					keyPath: ["accountId", "operationId", "chunkIndex"],
-				});
-				chunks.createIndex("by_scope", ["accountId", "operationId"]);
-				chunks.createIndex("by_account", "accountId");
-			};
-			request.onsuccess = () => resolve(request.result);
-			request.onerror = () =>
-				reject(request.error ?? new Error("Vault-image IndexedDB open failed"));
+		const opening = openVaultImageArtifactDatabase(this.#name, () => {
+			if (this.#opening === opening) this.#opening = undefined;
 		});
-		return this.#opening;
+		this.#opening = opening;
+		void opening.catch(() => {
+			if (this.#opening === opening) this.#opening = undefined;
+		});
+		return opening;
 	}
+	async close(): Promise<void> {
+		const opening = this.#opening;
+		this.#opening = undefined;
+		if (opening !== undefined) (await opening.catch(() => undefined))?.close();
+	}
+
 	async #begin(scope: Scope) {
 		const db = await this.#database();
 		const tx = db.transaction("artifacts", "readwrite");
@@ -464,3 +465,44 @@ const complete = (transaction: IDBTransaction) =>
 					new Error("Vault-image IndexedDB transaction failed"),
 			);
 	});
+
+const IMAGE_LAYOUT: readonly IndexedDbStoreLayout[] = [
+	["artifacts", ["accountId", "operationId"], [["by_account", "accountId"]]],
+	[
+		"chunks",
+		["accountId", "operationId", "chunkIndex"],
+		[
+			["by_scope", ["accountId", "operationId"]],
+			["by_account", "accountId"],
+		],
+	],
+];
+export async function openVaultImageArtifactDatabase(
+	databaseName = "bittery-vault-image-artifacts",
+	onVersionChange?: () => void,
+): Promise<IDBDatabase> {
+	return openIndexedDatabase({
+		name: databaseName,
+		version: 2,
+		onVersionChange,
+		upgrade(database, transaction, oldVersion) {
+			if (oldVersion !== 0) {
+				if (oldVersion !== 1)
+					throw new IndexedDbStorageError("unsupported_version");
+				assertIndexedDbLayout(database, IMAGE_LAYOUT, transaction);
+			} else
+				for (const [name, keyPath, indexes] of IMAGE_LAYOUT) {
+					const store = database.createObjectStore(name, {
+						keyPath: typeof keyPath === "string" ? keyPath : [...keyPath],
+					});
+					for (const [indexName, indexKey] of indexes)
+						store.createIndex(
+							indexName,
+							typeof indexKey === "string" ? indexKey : [...indexKey],
+						);
+				}
+		},
+		validate: (database, transaction) =>
+			assertIndexedDbLayout(database, IMAGE_LAYOUT, transaction),
+	});
+}

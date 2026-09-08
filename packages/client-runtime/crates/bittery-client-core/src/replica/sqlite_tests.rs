@@ -50,6 +50,175 @@ fn operation(operation_id: &str, item_id: &str) -> super::OperationRecord {
     crate::test_fixtures::test_operation(operation_id, item_id)
 }
 
+#[test]
+fn sqlite_refuses_a_future_physical_version_without_changing_the_database() {
+    let database = TestDatabase::new("future-physical-version");
+    let connection = rusqlite::Connection::open(&database.path).unwrap();
+    connection
+        .execute_batch("PRAGMA application_id = 1112822361; PRAGMA user_version = 99; CREATE TABLE future_work (payload TEXT); INSERT INTO future_work VALUES ('accepted');")
+        .unwrap();
+    drop(connection);
+    let before = std::fs::read(&database.path).unwrap();
+
+    let error = SqliteReplica::open(&database.path)
+        .err()
+        .expect("future schema must be refused");
+    assert_eq!(format!("{:?}", error.code), "StorageUnavailable");
+    assert_eq!(std::fs::read(&database.path).unwrap(), before);
+}
+
+#[test]
+fn sqlite_refuses_foreign_or_unrecognized_unversioned_databases_without_adopting_them() {
+    for (name, schema) in [
+        (
+            "foreign",
+            "PRAGMA application_id = 123; CREATE TABLE work (payload TEXT);",
+        ),
+        ("unrecognized", "CREATE TABLE replica_heads (payload TEXT);"),
+        ("unstamped-version", "PRAGMA user_version = 1;"),
+    ] {
+        let database = TestDatabase::new(name);
+        rusqlite::Connection::open(&database.path)
+            .unwrap()
+            .execute_batch(schema)
+            .unwrap();
+        let before = std::fs::read(&database.path).unwrap();
+        let error = SqliteReplica::open(&database.path)
+            .err()
+            .expect("unsupported file must be refused");
+        assert_eq!(error.code, crate::RuntimeErrorCode::StorageUnavailable);
+        assert_eq!(std::fs::read(&database.path).unwrap(), before);
+    }
+}
+
+#[tokio::test]
+async fn sqlite_migration_is_atomic_at_every_write_boundary_with_accepted_work() {
+    for boundary in 1..=4 {
+        let database = TestDatabase::new(&format!("migration-failure-{boundary}"));
+        let replica = Replica::new(Arc::new(SqliteReplica::open(&database.path).unwrap()));
+        install(&replica, "account-a").await;
+        install(&replica, "account-b").await;
+        replica
+            .execute(plan("account-a", 0, "accepted-a"))
+            .await
+            .unwrap();
+        replica
+            .execute(plan("account-b", 0, "accepted-b"))
+            .await
+            .unwrap();
+        let before_a = replica.load(&AccountId::from("account-a")).await.unwrap();
+        let before_b = replica.load(&AccountId::from("account-b")).await.unwrap();
+        drop(replica);
+        // Version 0 has the identical physical tables: only the new identity/version stamps differ.
+        rusqlite::Connection::open(&database.path)
+            .unwrap()
+            .execute_batch("PRAGMA application_id = 0; PRAGMA user_version = 0;")
+            .unwrap();
+        let before = std::fs::read(&database.path).unwrap();
+        let error = SqliteReplica::open_failing_migration_after(&database.path, boundary)
+            .err()
+            .expect("migration fault must fail open");
+        assert_eq!(error.code, crate::RuntimeErrorCode::StorageUnavailable);
+        assert_eq!(std::fs::read(&database.path).unwrap(), before);
+
+        let replica = Replica::new(Arc::new(SqliteReplica::open(&database.path).unwrap()));
+        assert_eq!(
+            replica.load(&AccountId::from("account-a")).await.unwrap(),
+            before_a
+        );
+        assert_eq!(
+            replica.load(&AccountId::from("account-b")).await.unwrap(),
+            before_b
+        );
+        let connection = rusqlite::Connection::open(&database.path).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "application_id", |row| row.get::<_, i32>(0))
+                .unwrap(),
+            1112822361
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0))
+                .unwrap(),
+            1
+        );
+    }
+}
+
+#[test]
+fn sqlite_new_database_migration_rolls_back_every_write_boundary() {
+    for boundary in 1..=4 {
+        let database = TestDatabase::new(&format!("new-migration-failure-{boundary}"));
+        assert!(SqliteReplica::open_failing_migration_after(&database.path, boundary).is_err());
+        let connection = rusqlite::Connection::open(&database.path).unwrap();
+        let count: i32 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE type = 'table'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "application_id", |row| row.get::<_, i32>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0))
+                .unwrap(),
+            0
+        );
+        drop(connection);
+        assert!(SqliteReplica::open(&database.path).is_ok());
+    }
+}
+
+#[tokio::test]
+async fn sqlite_shared_histories_survive_legacy_migration_at_every_checkpoint() {
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../generated/replica-conformance/history-corpus.json"
+    ))
+    .unwrap();
+    for history in corpus["histories"].as_array().unwrap() {
+        let database = TestDatabase::new(&format!(
+            "migration-corpus-{}",
+            history["name"].as_str().unwrap()
+        ));
+        for step in history["steps"].as_array().unwrap() {
+            let adapter = SqliteReplica::open(&database.path).unwrap();
+            let request = serde_json::from_value(step["request"].clone()).unwrap();
+            let expected: ReplicaPersistenceResponse =
+                serde_json::from_value(step["expectedResponse"].clone()).unwrap();
+            assert_eq!(
+                ReplicaPersistence::invoke(&adapter, request).await.unwrap(),
+                expected
+            );
+            drop(adapter);
+            rusqlite::Connection::open(&database.path)
+                .unwrap()
+                .execute_batch("PRAGMA application_id = 0; PRAGMA user_version = 0;")
+                .unwrap();
+            let adapter = SqliteReplica::open(&database.path).unwrap();
+            for checkpoint in step["expectedLoadedState"].as_array().unwrap() {
+                let account_id = AccountId::from(checkpoint["accountId"].as_str().unwrap());
+                let expected: ReplicaPersistenceResponse =
+                    serde_json::from_value(checkpoint["response"].clone()).unwrap();
+                let actual = ReplicaPersistence::invoke(
+                    &adapter,
+                    ReplicaPersistenceRequest::Load { account_id },
+                )
+                .await
+                .unwrap();
+                assert_eq!(actual, expected, "{}: {}", history["name"], step["label"]);
+            }
+        }
+    }
+}
+
 fn persisted_create_vault_operation(account_id: &str, with_image: bool) -> OperationRecord {
     let vault_id = "vault-persisted";
     let operation_id = if with_image {
@@ -515,7 +684,7 @@ async fn sqlite_load_rejects_receipts_whose_kind_and_resource_target_disagree() 
             .load(&AccountId::from("account-corrupt"))
             .await
             .unwrap_err();
-        assert_eq!(error.code, crate::RuntimeErrorCode::InvariantViolation);
+        assert_eq!(error.code, crate::RuntimeErrorCode::StorageUnavailable);
     }
 }
 
@@ -658,7 +827,7 @@ async fn sqlite_reopen_rejects_each_create_vault_cleanup_authority_mismatch() {
             .unwrap_err();
         assert_eq!(
             error.code,
-            crate::RuntimeErrorCode::InvariantViolation,
+            crate::RuntimeErrorCode::StorageUnavailable,
             "{label}"
         );
     }
@@ -829,7 +998,7 @@ async fn serialized_and_sqlite_create_vault_rows_validate_exact_final_request_be
         let error = reopened.load(&account_id).await.unwrap_err();
         assert_eq!(
             error.code,
-            crate::RuntimeErrorCode::InvariantViolation,
+            crate::RuntimeErrorCode::StorageUnavailable,
             "{label}"
         );
     }
@@ -971,7 +1140,7 @@ async fn guarded_serialized_and_sqlite_create_vault_reject_self_consistent_inval
         let error = reopened.load(&account_id).await.unwrap_err();
         assert_eq!(
             error.code,
-            crate::RuntimeErrorCode::InvariantViolation,
+            crate::RuntimeErrorCode::StorageUnavailable,
             "{label}"
         );
     }

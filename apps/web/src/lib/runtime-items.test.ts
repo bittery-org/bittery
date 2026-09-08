@@ -5,15 +5,14 @@ import {
 	type RuntimeSessionSnapshot,
 } from "@bittery/client-runtime/client";
 import type { ItemsProjection } from "@bittery/client-runtime/protocol";
+import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
 	creatableVaults,
 	deriveRuntimeItemsView,
 	findRuntimeVault,
 	mapRuntimeItemsProjection,
 	mapRuntimeVaults,
-	refuseCreate,
-	toLoginItemDraft,
-	unsupportedDraftFields,
+	toRuntimeItemDraft,
 	vaultNavEntries,
 } from "./runtime-items";
 
@@ -39,11 +38,16 @@ const ONE_ITEM: ItemsProjection = {
 			itemId: "item-1",
 			accountId: "account-1",
 			vaultId: "vault-1",
-			title: "Bank",
 			status: "authoritative",
 			favorite: false,
 			createdAt: "2026-08-23T00:00:00Z",
 			updatedAt: "2026-08-23T00:00:00Z",
+			data: {
+				category: "login",
+				data: {
+					title: "Bank",
+				},
+			},
 		},
 	],
 };
@@ -78,21 +82,31 @@ describe("Runtime Items projection mapping", () => {
 					itemId: "item-b",
 					accountId: "account-1",
 					vaultId: "vault-1",
-					title: "Beta",
 					status: "authoritative",
 					favorite: true,
 					createdAt: "2026-08-23T00:00:00Z",
 					updatedAt: "2026-08-23T01:00:00Z",
+					data: {
+						category: "login",
+						data: {
+							title: "Beta",
+						},
+					},
 				},
 				{
 					itemId: "item-a",
 					accountId: "account-1",
 					vaultId: "vault-1",
-					title: "Alpha",
 					status: "authoritative",
 					favorite: false,
 					createdAt: "2026-08-23T00:00:00Z",
 					updatedAt: "2026-08-23T00:00:00Z",
+					data: {
+						category: "login",
+						data: {
+							title: "Alpha",
+						},
+					},
 				},
 			],
 		});
@@ -114,20 +128,30 @@ describe("Runtime Items projection mapping", () => {
 					itemId: "item-1",
 					accountId: "account-1",
 					vaultId: "vault-1",
-					title: "Bank",
 					status: "authoritative",
 					favorite: false,
 					createdAt: "2026-08-23T00:00:00Z",
 					updatedAt: "2026-08-23T00:00:00Z",
-					username: "person",
-					password: "secret",
-					url: "https://bank.test",
-					urls: ["https://bank.test"],
-					notes: "note",
-					tags: ["finance"],
-					customFields: [
-						{ id: "field-1", label: "PIN", value: "1234", type: "password" },
-					],
+					data: {
+						category: "login",
+						data: {
+							title: "Bank",
+							username: "person",
+							password: "secret",
+							url: "https://bank.test",
+							urls: ["https://bank.test"],
+							notes: "note",
+							tags: ["finance"],
+							customFields: [
+								{
+									id: "field-1",
+									label: "PIN",
+									value: "1234",
+									type: "password",
+								},
+							],
+						},
+					},
 				},
 			],
 		});
@@ -150,16 +174,21 @@ describe("Runtime Items projection mapping", () => {
 					itemId: "item-1",
 					accountId: "account-1",
 					vaultId: "vault-1",
-					title: "Bank",
 					status: "pending",
 					favorite: false,
 					createdAt: "2026-08-23T00:00:00Z",
 					updatedAt: "2026-08-23T00:00:00Z",
-					url: null,
-					username: null,
-					password: null,
-					notes: null,
-					note: null,
+					data: {
+						category: "login",
+						data: {
+							title: "Bank",
+							url: null,
+							username: null,
+							password: null,
+							notes: null,
+							note: null,
+						},
+					},
 				},
 			],
 		});
@@ -290,6 +319,37 @@ describe("Runtime Items projection mapping", () => {
 });
 
 describe("what the vault pages render", () => {
+	test("trash leaves ordinary lists, counts and tags while remaining available for restore", () => {
+		const trashed = {
+			...ONE_ITEM.items[0]!,
+			deletedAt: "2026-08-30T12:00:00Z",
+			favorite: true,
+			data: {
+				category: "login" as const,
+				data: { title: "Trashed", tags: ["only-trash"] },
+			},
+		};
+		const view = deriveRuntimeItemsView(
+			session({ state: "unlocked", accountId: "account-1" }),
+			{
+				state: "ready",
+				value: {
+					...ONE_ITEM,
+					items: [trashed, { ...ONE_ITEM.items[0]!, itemId: "active" }],
+				},
+			},
+		);
+		expect(view.items.map((item) => item.id)).toEqual(["active"]);
+		expect(view.items.filter((item) => item.favorite)).toEqual([]);
+		expect(view.items.flatMap((item) => item.tags ?? [])).toEqual([]);
+		expect(view.trashedItems.map((item) => item.id)).toEqual(["item-1"]);
+		const restored = deriveRuntimeItemsView(
+			session({ state: "unlocked", accountId: "account-1" }),
+			{ state: "ready", value: ONE_ITEM },
+		);
+		expect(restored.items.map((item) => item.id)).toEqual(["item-1"]);
+		expect(restored.trashedItems).toEqual([]);
+	});
 	test("a restored but locked Account is a lock, not an empty list", () => {
 		const view = deriveRuntimeItemsView(
 			session({ state: "locked", accountId: "account-1" }),
@@ -372,11 +432,16 @@ describe("what an unfinished write looks like to the list", () => {
 					itemId: "item-1",
 					accountId: "account-1",
 					vaultId: "vault-1",
-					title: "Bank",
 					status,
 					favorite: false,
 					createdAt: "2026-08-23T00:00:00Z",
 					updatedAt: "2026-08-23T00:00:00Z",
+					data: {
+						category: "login",
+						data: {
+							title: "Bank",
+						},
+					},
 				},
 			],
 		};
@@ -455,12 +520,12 @@ describe("the Vaults a create can use", () => {
 		expect(vaults.every((vault) => vault.accountId === "account-1")).toBe(true);
 	});
 
-	test("only a writable personal Vault is offered as a create target", () => {
+	test("every writable Vault is offered as a create target", () => {
 		expect(
 			creatableVaults(mapRuntimeVaults({ ...ONE_ITEM, vaults: VAULTS })).map(
 				(v) => v.id,
 			),
-		).toEqual(["personal-1"]);
+		).toEqual(["personal-1", "team-1"]);
 	});
 
 	test("an Account with no Vaults offers none instead of guessing", () => {
@@ -511,43 +576,46 @@ describe("the Vaults a create can use", () => {
 });
 
 describe("the draft the Runtime is asked to seal", () => {
-	test("carries the Login fields and nothing the Runtime does not model", () => {
-		expect(
-			toLoginItemDraft({
-				title: "Bank",
-				url: "https://bank.test",
-				urls: ["https://second.bank.test"],
-				username: "person",
-				password: "secret",
-				notes: "note",
-				customFields: [
-					{ id: "field-1", label: "PIN", value: "1234", type: "password" },
-				],
-				tags: ["finance"],
-			}),
-		).toEqual({
-			title: "Bank",
-			url: "https://bank.test",
-			urls: ["https://second.bank.test"],
-			username: "person",
-			password: "secret",
-			notes: "note",
-			note: undefined,
-			customFields: [
-				{ id: "field-1", label: "PIN", value: "1234", type: "password" },
-			],
-			tags: ["finance"],
-		});
-	});
-
-	test("names what the first slice cannot store instead of dropping it", () => {
-		expect(unsupportedDraftFields({ title: "Bank" })).toEqual([]);
-		expect(
-			unsupportedDraftFields({ title: "Bank", totpSecret: "JBSWY3DPEHPK3PXP" }),
-		).toEqual(["totpSecret"]);
-		expect(
-			unsupportedDraftFields({ title: "Card", cardNumber: "4111111111111111" }),
-		).toEqual(["cardNumber"]);
+	test("preserves all categories and extended fields at creation", () => {
+		const drafts: Array<{ category: ItemCategory; data: DecryptedItemData }> = [
+			{
+				category: "login",
+				data: {
+					title: "Login",
+					passwordHistory: [{ password: "old", changedAt: "2026-09-01" }],
+					totpSecret: "JBSWY3DPEHPK3PXP",
+				},
+			},
+			{ category: "secure-note", data: { title: "Note", note: "body" } },
+			{
+				category: "credit-card",
+				data: { title: "Card", cardNumber: "4111111111111111" },
+			},
+			{
+				category: "identity",
+				data: {
+					title: "Identity",
+					firstName: "Person",
+					passportNumber: "1234",
+				},
+			},
+			{
+				category: "totp",
+				data: {
+					title: "Authenticator",
+					totpSecret: "JBSWY3DPEHPK3PXP",
+					linkedItemId: "login-1",
+				},
+			},
+		];
+		for (const item of drafts) {
+			expect<unknown>(
+				toRuntimeItemDraft(item.category, { ...item.data }),
+			).toEqual({
+				category: item.category === "totp" ? "authenticator" : item.category,
+				data: item.data,
+			});
+		}
 	});
 });
 
@@ -564,16 +632,16 @@ describe("where a create goes", () => {
 	test("every vault page hands its create to the Runtime", () => {
 		for (const relative of CREATE_PAGES) {
 			const source = readFileSync(new URL(relative, import.meta.url), "utf8");
-			expect(source).toContain("useAcceptLoginItem");
+			expect(source).toContain("useAcceptItem");
 			expect(source).toContain("creatableVaults");
 		}
 		const hook = readFileSync(
-			new URL("../hooks/use-accept-login-item.ts", import.meta.url),
+			new URL("../hooks/use-accept-item.ts", import.meta.url),
 			"utf8",
 		);
 		expect(hook).toContain("@bittery/client-runtime/react");
-		expect(hook).toContain("useCreateLoginItem");
-		expect(hook).toContain("toLoginItemDraft");
+		expect(hook).toContain("runtime.createItem");
+		expect(hook).toContain("toRuntimeItemDraft");
 		expect(hook).not.toContain("@bittery/core/hooks");
 		expect(hook).not.toContain("@bittery/storage");
 		expect(hook).not.toContain("@bittery/sync");
@@ -605,38 +673,48 @@ describe("where a create goes", () => {
 	});
 });
 
-describe("what the first create slice refuses", () => {
-	const LOGIN = { title: "Bank" } as const;
-
-	test("a Login draft into a known Account is accepted", () => {
-		expect(
-			refuseCreate({ accountId: "account-1", category: "login", data: LOGIN }),
-		).toBeNull();
+test("Import projections retain each category and every category-specific field", () => {
+	const drafts: ItemsProjection["items"][number]["data"][] = [
+		{
+			category: "login",
+			data: {
+				title: "Login",
+				passwordHistory: [{ password: "old", changedAt: "2026-09-01" }],
+				totpSecret: "secret",
+			},
+		},
+		{ category: "secure-note", data: { title: "Note", note: "body" } },
+		{
+			category: "credit-card",
+			data: { title: "Card", cardNumber: "1234", cvv: "567" },
+		},
+		{
+			category: "identity",
+			data: { title: "Identity", firstName: "Pat", email: "pat@example.test" },
+		},
+		{
+			category: "authenticator",
+			data: { title: "Authenticator", totpSecret: "secret", totpDigits: 8 },
+		},
+	];
+	const item = ONE_ITEM.items[0];
+	if (!item) throw new Error("Item fixture is missing");
+	const mapped = mapRuntimeItemsProjection({
+		...ONE_ITEM,
+		items: drafts.map((data, index) => ({
+			...item,
+			itemId: `import-${index}`,
+			data,
+			favorite: true,
+		})),
 	});
-
-	test("another category is refused, not written somewhere else", () => {
-		expect(
-			refuseCreate({
-				accountId: "account-1",
-				category: "secure-note",
-				data: LOGIN,
-			}),
-		).toEqual({ reason: "category" });
-	});
-
-	test("a field the Runtime cannot seal is refused, not dropped", () => {
-		expect(
-			refuseCreate({
-				accountId: "account-1",
-				category: "login",
-				data: { ...LOGIN, totpSecret: "JBSWY3DPEHPK3PXP" },
-			}),
-		).toEqual({ reason: "unsupportedFields", fields: ["totpSecret"] });
-	});
-
-	test("no Account is a refusal, never a guess at one", () => {
-		expect(
-			refuseCreate({ accountId: null, category: "login", data: LOGIN }),
-		).toEqual({ reason: "noAccount" });
-	});
+	expect(mapped.map((item) => item.category)).toEqual([
+		"login",
+		"secure-note",
+		"credit-card",
+		"identity",
+		"totp",
+	]);
+	for (const [index, draft] of drafts.entries())
+		expect(mapped[index]).toMatchObject({ ...draft.data, favorite: true });
 });

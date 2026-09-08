@@ -9,7 +9,6 @@ use crate::error::{AppError, AppErrorCode};
 use super::{dto::ProblemDetails, error_code::ErrorCode};
 
 const RATE_LIMIT_RETRY_AFTER_SECONDS: u32 = 60;
-const TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS: u32 = 1;
 pub(crate) const MAX_RETRY_AFTER_SECONDS: u32 = 86_400;
 
 #[derive(Clone, Copy, Debug)]
@@ -107,19 +106,6 @@ impl ApiError {
 
     pub(crate) fn not_found(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, code, "Not found", detail, false)
-    }
-
-    pub(crate) fn service_unavailable(code: ErrorCode, detail: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            code,
-            "Service unavailable",
-            detail,
-            true,
-        )
-        .with_retry_after(RetryAfter::seconds(
-            TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS,
-        ))
     }
 
     pub(crate) fn unauthorized(detail: impl Into<String>) -> Self {
@@ -434,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn rate_limits_and_temporary_unavailability_have_typed_retry_delays() {
+    fn rate_limits_have_typed_retry_delays() {
         let rate_limited =
             super::ApiError::from(AppError::too_many_requests("slow down")).into_response();
         assert_eq!(rate_limited.status(), StatusCode::TOO_MANY_REQUESTS);
@@ -445,19 +431,6 @@ mod tests {
                 .parse::<u32>()
                 .unwrap(),
             super::RATE_LIMIT_RETRY_AFTER_SECONDS
-        );
-
-        let unavailable =
-            super::ApiError::service_unavailable(ErrorCode::ServiceUnavailable, "try again")
-                .into_response();
-        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            unavailable.headers()["retry-after"]
-                .to_str()
-                .unwrap()
-                .parse::<u32>()
-                .unwrap(),
-            super::TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS
         );
     }
 

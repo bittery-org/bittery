@@ -11,6 +11,7 @@ persistence-contract-schema = ["dep:schemars"]
 platform-storage-contract-schema = ["dep:schemars"]
 http-transport-contract-schema = ["dep:schemars"]
 runtime-protocol-contract-schema = ["dep:schemars"]
+recovery-contract-schema = ["persistence-contract-schema"]
 replica-conformance = []
 binding-test-harness = []
 
@@ -61,3 +62,8 @@ required-features = ["runtime-protocol-contract-schema"]
 name = "generate-replica-conformance-corpus"
 path = "src/bin/generate_replica_conformance_corpus.rs"
 required-features = ["replica-conformance"]
+
+[[bin]]
+name = "generate-recovery-contract-schema"
+path = "src/bin/generate_recovery_contract_schema.rs"
+required-features = ["recovery-contract-schema"]

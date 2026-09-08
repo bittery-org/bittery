@@ -1,29 +1,27 @@
 //! Vault Member removal policy over the shared key-rotation mechanism.
 
+use super::failure::RotationFailure;
+use crate::db::enums::OperationRejectionCode as Code;
 use serde::Serialize;
 use serde_json::json;
-use sqlx::{query, query_as, PgPool};
+#[cfg(test)]
+use sqlx::PgPool;
+use sqlx::{query, query_as, Postgres, Transaction};
 
 use crate::{
     config::DeploymentMode,
-    db::{
-        enums::{BillingPlan, BillingStatus, KeyRotationReason, VaultRole, VaultType},
-        events::begin_serializable_sync_event_transaction,
-    },
+    db::enums::{BillingPlan, BillingStatus, KeyRotationReason, VaultRole, VaultType},
     domains::billing::entitlements::resolve_vault_sharing_entitlement,
     error::AppError,
     shared::transaction::database_error,
 };
 
 use super::plans::{
-    self as vault_key_rotation, CreateRotationPlanInput, FinalizeError, RotationPlanSummary,
-    RotationResult,
+    self as vault_key_rotation, CreateRotationPlanInput, RotationPlanSummary, RotationResult,
 };
 
 const REASON: &str = "member_removed";
 const CONTEXT: &str = "vault_member_removal";
-const VAULT_SHARING_UNAVAILABLE_MESSAGE: &str =
-    "Shared vault management is only available on Family or Team plans with active billing.";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,20 +61,24 @@ fn member_role_violation(actor: VaultRole, target: VaultRole) -> Option<MemberMa
     }
 }
 
-fn authorize(actor: VaultRole, target: VaultRole, self_removal: bool) -> Result<(), AppError> {
+fn authorize(
+    actor: VaultRole,
+    target: VaultRole,
+    self_removal: bool,
+) -> Result<(), RotationFailure> {
     match member_management_violation(actor, target, self_removal) {
         None => Ok(()),
         Some(MemberManagementViolation::SelfAction) => {
-            Err(AppError::bad_request("Cannot remove yourself"))
+            Err(RotationFailure::rejected(Code::SelfRemovalForbidden))
         }
         Some(MemberManagementViolation::InsufficientPermissions) => {
-            Err(AppError::forbidden("Insufficient permissions"))
+            Err(RotationFailure::rejected(Code::VaultAccessDenied))
         }
         Some(MemberManagementViolation::TargetIsOwner) => {
-            Err(AppError::forbidden("Cannot remove vault owner"))
+            Err(RotationFailure::rejected(Code::VaultOwnerProtected))
         }
         Some(MemberManagementViolation::AdminManagingAdmin) => {
-            Err(AppError::forbidden("Admins cannot remove other admins"))
+            Err(RotationFailure::rejected(Code::VaultAdminPeerProtected))
         }
     }
 }
@@ -115,83 +117,83 @@ fn authorize_vault_policy(
     team_id: Option<&str>,
     billing_plan: Option<BillingPlan>,
     billing_status: Option<BillingStatus>,
-) -> Result<(), AppError> {
+) -> Result<(), RotationFailure> {
     if vault_type != VaultType::Team || team_id.is_none() {
-        return Err(AppError::bad_request(
-            "Only team vaults support removing members",
-        ));
+        return Err(RotationFailure::rejected(Code::SharedVaultRequired));
     }
     if !resolve_vault_sharing_entitlement(deployment_mode.as_str(), billing_plan, billing_status)
         .allowed
     {
-        return Err(AppError::forbidden(VAULT_SHARING_UNAVAILABLE_MESSAGE));
+        return Err(RotationFailure::rejected(
+            Code::VaultSharingEntitlementDenied,
+        ));
     }
     Ok(())
 }
 
 async fn authorize_managed_vault(
-    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     vault_id: &str,
     actor_id: &str,
     deployment_mode: DeploymentMode,
-) -> Result<(), AppError> {
-    let policy: (VaultType, Option<String>, Option<BillingPlan>, Option<BillingStatus>) = query_as(
+) -> Result<(), RotationFailure> {
+    let (vault_type, team_id, billing_plan, billing_status): (VaultType, Option<String>, Option<BillingPlan>, Option<BillingStatus>) = query_as(
         "SELECT v.type,v.team_id,t.billing_plan,t.billing_status FROM vault v JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$2 JOIN \"user\" actor ON actor.id=actor_key.user_id LEFT JOIN team t ON t.id=actor.team_id WHERE v.id=$1",
     )
     .bind(vault_id)
     .bind(actor_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|error| database_error(error, "Vault membership operation failed"))?
-    .ok_or_else(|| AppError::forbidden("Insufficient permissions"))?;
+    .ok_or_else(|| RotationFailure::rejected(Code::VaultAccessDenied))?;
     authorize_vault_policy(
         deployment_mode,
-        policy.0,
-        policy.1.as_deref(),
-        policy.2,
-        policy.3,
+        vault_type,
+        team_id.as_deref(),
+        billing_plan,
+        billing_status,
     )
 }
 
 async fn roles(
-    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     vault_id: &str,
     actor_id: &str,
     target_id: &str,
-) -> Result<(VaultRole, VaultRole), AppError> {
+) -> Result<(VaultRole, VaultRole), RotationFailure> {
     let actor =
         query_as::<_, (VaultRole,)>("SELECT role FROM vault_key WHERE vault_id=$1 AND user_id=$2")
             .bind(vault_id)
             .bind(actor_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|error| database_error(error, "failed to load Vault removal actor"))?
-            .ok_or_else(|| AppError::forbidden("Insufficient permissions"))?
+            .ok_or_else(|| RotationFailure::rejected(Code::VaultAccessDenied))?
             .0;
     let target =
         query_as::<_, (VaultRole,)>("SELECT role FROM vault_key WHERE vault_id=$1 AND user_id=$2")
             .bind(vault_id)
             .bind(target_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|error| database_error(error, "failed to load Vault removal target"))?
-            .ok_or_else(|| AppError::not_found("Member not found"))?
+            .ok_or_else(|| RotationFailure::rejected(Code::VaultMemberNotFound))?
             .0;
     Ok((actor, target))
 }
 
-pub(crate) async fn create_removal_plan(
-    pool: &PgPool,
+pub(crate) async fn create_removal_plan_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
     deployment_mode: DeploymentMode,
     actor_id: &str,
     vault_id: &str,
     target_id: &str,
-) -> Result<RotationPlanSummary, AppError> {
-    let (actor, target) = roles(pool, vault_id, actor_id, target_id).await?;
+) -> Result<RotationPlanSummary, RotationFailure> {
+    let (actor, target) = roles(tx, vault_id, actor_id, target_id).await?;
     authorize(actor, target, actor_id == target_id)?;
-    authorize_managed_vault(pool, vault_id, actor_id, deployment_mode).await?;
-    vault_key_rotation::create_plan(
-        pool,
+    authorize_managed_vault(tx, vault_id, actor_id, deployment_mode).await?;
+    vault_key_rotation::create_plan_in_transaction(
+        tx,
         CreateRotationPlanInput {
             vault_id: vault_id.to_owned(),
             initiator_user_id: actor_id.to_owned(),
@@ -201,8 +203,92 @@ pub(crate) async fn create_removal_plan(
         },
     )
     .await
+    .map_err(Into::into)
 }
 
+pub(crate) async fn finalize_removal_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    deployment_mode: DeploymentMode,
+    actor_id: &str,
+    vault_id: &str,
+    target_id: &str,
+    plan_id: &str,
+) -> Result<VaultMemberRemovalResult, RotationFailure> {
+    let policy = vault_key_rotation::lock_plan_policy(tx, plan_id)
+        .await
+        .map_err(|error| RotationFailure::finalize(plan_id, error))?;
+    if policy.initiator_user_id != actor_id {
+        return Err(RotationFailure::rejected(Code::RotationPlanUnavailable));
+    }
+    if policy.vault_id != vault_id
+        || policy.excluded_user_id.as_deref() != Some(target_id)
+        || policy.reason != REASON
+        || policy.authorization_context != CONTEXT
+    {
+        return Err(RotationFailure::rejected(Code::RotationPlanMismatch));
+    }
+    let actor_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM vault_key WHERE vault_id=$1 AND user_id=$2)",
+    )
+    .bind(vault_id)
+    .bind(actor_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| database_error(error, "Failed to load Vault actor"))?;
+    if !actor_exists {
+        return Err(RotationFailure::rejected(Code::VaultAccessDenied));
+    }
+    let (actor_role, target_role, vault_type, team_id) = query_as::<_, (VaultRole, VaultRole, VaultType, Option<String>)>(
+        "SELECT actor.role,target.role,v.type,v.team_id FROM vault_key actor JOIN vault_key target ON target.vault_id=actor.vault_id JOIN vault v ON v.id=actor.vault_id WHERE actor.vault_id=$1 AND actor.user_id=$2 AND target.user_id=$3 FOR UPDATE OF actor,target,v",
+    ).bind(vault_id).bind(actor_id).bind(target_id).fetch_optional(&mut **tx).await.map_err(|error| database_error(error, "Vault membership operation failed"))?
+      .ok_or_else(|| RotationFailure::rejected(Code::VaultMembershipChanged))?;
+    authorize(actor_role, target_role, actor_id == target_id)?;
+    if vault_type != VaultType::Team || team_id.is_none() {
+        return Err(RotationFailure::rejected(Code::SharedVaultRequired));
+    }
+    let billing: Option<(BillingPlan, BillingStatus)> = query_as(
+        "SELECT t.billing_plan,t.billing_status FROM \"user\" actor JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 FOR UPDATE OF actor,t",
+    )
+    .bind(actor_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| database_error(error, "Vault membership operation failed"))?;
+    authorize_vault_policy(
+        deployment_mode,
+        vault_type,
+        team_id.as_deref(),
+        billing.map(|value| value.0),
+        billing.map(|value| value.1),
+    )?;
+    let rotation = vault_key_rotation::finalize_locked_plan(tx, plan_id, actor_id)
+        .await
+        .map_err(|error| RotationFailure::finalize(plan_id, error))?;
+    query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ('audit_' || md5(random()::text || clock_timestamp()::text),$1,'vault_member_removed','vault',$2,$3)")
+        .bind(actor_id).bind(vault_id).bind(json!({"removedUserId": target_id, "keyRotationId": rotation.rotation_id}).to_string())
+        .execute(&mut **tx).await.map_err(|error| database_error(error, "Vault membership operation failed"))?;
+    Ok(VaultMemberRemovalResult { rotation })
+}
+
+#[cfg(test)]
+pub(crate) async fn create_removal_plan(
+    pool: &PgPool,
+    deployment_mode: DeploymentMode,
+    actor_id: &str,
+    vault_id: &str,
+    target_id: &str,
+) -> Result<RotationPlanSummary, AppError> {
+    let mut tx = crate::db::events::begin_serializable_sync_event_transaction(pool)
+        .await
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    let result =
+        create_removal_plan_in_transaction(&mut tx, deployment_mode, actor_id, vault_id, target_id)
+            .await?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    Ok(result)
+}
+#[cfg(test)]
 pub(crate) async fn finalize_removal(
     pool: &PgPool,
     deployment_mode: DeploymentMode,
@@ -211,78 +297,37 @@ pub(crate) async fn finalize_removal(
     target_id: &str,
     plan_id: &str,
 ) -> Result<VaultMemberRemovalResult, AppError> {
-    let mut tx = begin_serializable_sync_event_transaction(pool)
+    let mut tx = crate::db::events::begin_serializable_sync_event_transaction(pool)
         .await
-        .map_err(|error| database_error(error, "Vault membership operation failed"))?;
-    let policy = vault_key_rotation::lock_plan_policy(&mut tx, plan_id)
-        .await
-        .map_err(finalize_error)?;
-    if policy.vault_id != vault_id
-        || policy.initiator_user_id != actor_id
-        || policy.excluded_user_id.as_deref() != Some(target_id)
-        || policy.reason != REASON
-        || policy.authorization_context != CONTEXT
-    {
-        return Err(AppError::bad_request(
-            "Rotation plan does not match this Vault Member removal",
-        ));
-    }
-    let row = query_as::<_, (VaultRole, VaultRole, VaultType, Option<String>)>(
-        "SELECT actor.role,target.role,v.type,v.team_id FROM vault_key actor JOIN vault_key target ON target.vault_id=actor.vault_id JOIN vault v ON v.id=actor.vault_id WHERE actor.vault_id=$1 AND actor.user_id=$2 AND target.user_id=$3 FOR UPDATE OF actor,target,v",
-    ).bind(vault_id).bind(actor_id).bind(target_id).fetch_optional(&mut *tx).await.map_err(|error| database_error(error, "Vault membership operation failed"))?
-      .ok_or_else(|| AppError::conflict("Vault membership changed while rotation was prepared"))?;
-    authorize(row.0, row.1, actor_id == target_id)?;
-    if row.2 != VaultType::Team || row.3.is_none() {
-        return Err(AppError::bad_request(
-            "Only team vaults support removing members",
-        ));
-    }
-    let billing: Option<(BillingPlan, BillingStatus)> = query_as(
-        "SELECT t.billing_plan,t.billing_status FROM \"user\" actor JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 FOR UPDATE OF actor,t",
-    )
-    .bind(actor_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| database_error(error, "Vault membership operation failed"))?;
-    authorize_vault_policy(
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    match finalize_removal_in_transaction(
+        &mut tx,
         deployment_mode,
-        row.2,
-        row.3.as_deref(),
-        billing.map(|value| value.0),
-        billing.map(|value| value.1),
-    )?;
-    let rotation = match vault_key_rotation::finalize_locked_plan(&mut tx, plan_id, actor_id).await
+        actor_id,
+        vault_id,
+        target_id,
+        plan_id,
+    )
+    .await
     {
-        Ok(rotation) => rotation,
-        Err(FinalizeError::Stale(reason)) => {
+        Ok(result) => {
+            tx.commit()
+                .await
+                .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+            Ok(result)
+        }
+        Err(error) => {
             tx.rollback()
                 .await
-                .map_err(|error| database_error(error, "Vault membership operation failed"))?;
-            vault_key_rotation::record_stale(pool, plan_id, reason).await?;
-            return Err(finalize_error(FinalizeError::Stale(reason)));
-        }
-        Err(error) => return Err(finalize_error(error)),
-    };
-    query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ('audit_' || md5(random()::text || clock_timestamp()::text),$1,'vault_member_removed','vault',$2,$3)")
-        .bind(actor_id).bind(vault_id).bind(json!({"removedUserId": target_id, "keyRotationId": rotation.rotation_id}).to_string())
-        .execute(&mut *tx).await.map_err(|error| database_error(error, "Vault membership operation failed"))?;
-    tx.commit()
-        .await
-        .map_err(|error| database_error(error, "Vault membership operation failed"))?;
-    Ok(VaultMemberRemovalResult { rotation })
-}
-
-fn finalize_error(error: FinalizeError) -> AppError {
-    match error {
-        FinalizeError::Stale(reason) => AppError::rotation_stale(reason),
-        FinalizeError::Incomplete => AppError::conflict("Rotation plan is incomplete"),
-        FinalizeError::InvalidState => AppError::conflict("Rotation plan is no longer active"),
-        FinalizeError::RetryableConflict => AppError::retryable_conflict(
-            "A concurrent update interrupted the removal. Retry the request.",
-        ),
-        FinalizeError::Database(message) => {
-            tracing::error!(%message, "Vault removal rotation failed");
-            AppError::internal("Vault membership operation failed")
+                .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+            if let RotationFailure::Rejected {
+                stale: Some((id, reason)),
+                ..
+            } = &error
+            {
+                vault_key_rotation::record_stale(pool, id, *reason).await?;
+            }
+            Err(error.into())
         }
     }
 }

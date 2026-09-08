@@ -1,0 +1,2 @@
+import hooks = require("@bittery/core/hooks");
+void hooks.usePermanentDeleteItem;

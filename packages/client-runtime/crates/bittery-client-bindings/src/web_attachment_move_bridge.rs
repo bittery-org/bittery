@@ -1166,6 +1166,7 @@ mod wasm {
 
     fn lease_error() -> core::RuntimeError {
         core::RuntimeError {
+            recovery_bound: None,
             code: core::RuntimeErrorCode::InvariantViolation,
             message: "Attachment Move Account lease invocation failed".into(),
         }
@@ -1296,6 +1297,7 @@ mod wasm {
                 ),
             };
             destroyed.map(|()| answer).map_err(|()| core::RuntimeError {
+                recovery_bound: None,
                 code: core::RuntimeErrorCode::InvariantViolation,
                 message: "Ciphertext spool cleanup failed".into(),
             })
@@ -1750,6 +1752,7 @@ mod wasm {
 
         pub fn observe_lifecycle_error(&self, callback: Function) {
             let error = core::RuntimeError {
+                recovery_bound: None,
                 code: core::RuntimeErrorCode::InvariantViolation,
                 message: "TEST_PRIVATE_LIFECYCLE_DETAIL".into(),
             };
@@ -1937,6 +1940,7 @@ mod tests {
     #[test]
     fn lifecycle_error_observation_redacts_internal_details() {
         let error = bittery_client_core::RuntimeError {
+            recovery_bound: None,
             code: bittery_client_core::RuntimeErrorCode::InvariantViolation,
             message: "UNIQUE_SIGNED_URL_AND_HOST_DETAIL".into(),
         };

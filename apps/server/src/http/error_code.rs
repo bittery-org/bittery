@@ -81,16 +81,8 @@ pub enum ErrorCode {
     // Idempotency codes.
     /// `Idempotency-Key` is not 1 to 255 visible ASCII characters.
     InvalidIdempotencyKey,
-    /// `Idempotency-Key` was already used for a request with different bytes.
-    IdempotencyKeyReused,
     /// `Idempotency-Key` is not accepted because the response carries a one-time secret.
     IdempotencyNotAllowed,
-    /// An identical idempotent request is still executing.
-    IdempotencyRequestInProgress,
-    /// A claim outlived its execution lease; the outcome needs operator recovery.
-    IdempotencyOutcomeIndeterminate,
-    /// The outcome could not be stored or replayed.
-    IdempotencyResponseUnavailable,
     /// The stable Operation ID is missing or malformed.
     InvalidOperationId,
     /// An Operation ID was already bound to different immutable request bytes.
@@ -142,11 +134,7 @@ impl ErrorCode {
         Self::SearchTooLong,
         Self::TooManyHiddenVaults,
         Self::InvalidIdempotencyKey,
-        Self::IdempotencyKeyReused,
         Self::IdempotencyNotAllowed,
-        Self::IdempotencyRequestInProgress,
-        Self::IdempotencyOutcomeIndeterminate,
-        Self::IdempotencyResponseUnavailable,
         Self::InvalidOperationId,
         Self::OperationIdReused,
         Self::OperationOutcomeNotFound,
@@ -192,11 +180,7 @@ impl ErrorCode {
             Self::SearchTooLong => "SEARCH_TOO_LONG",
             Self::TooManyHiddenVaults => "TOO_MANY_HIDDEN_VAULTS",
             Self::InvalidIdempotencyKey => "INVALID_IDEMPOTENCY_KEY",
-            Self::IdempotencyKeyReused => "IDEMPOTENCY_KEY_REUSED",
             Self::IdempotencyNotAllowed => "IDEMPOTENCY_NOT_ALLOWED",
-            Self::IdempotencyRequestInProgress => "IDEMPOTENCY_REQUEST_IN_PROGRESS",
-            Self::IdempotencyOutcomeIndeterminate => "IDEMPOTENCY_OUTCOME_INDETERMINATE",
-            Self::IdempotencyResponseUnavailable => "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
             Self::InvalidOperationId => "INVALID_OPERATION_ID",
             Self::OperationIdReused => "OPERATION_ID_REUSED",
             Self::OperationOutcomeNotFound => "OPERATION_OUTCOME_NOT_FOUND",

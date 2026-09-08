@@ -3237,6 +3237,101 @@
         ]
       }
     },
+    "/api/v1/items/{itemId}/authority": {
+      "get": {
+        "tags": [
+          "sync"
+        ],
+        "operationId": "getItemAuthority",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete Item authority using Bootstrap visibility, within the Bootstrap Item byte budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapItemResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Item identity",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Item access denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Complete Item exceeds the response byte budget",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/items/{itemId}/favorite": {
       "patch": {
         "tags": [
@@ -7935,7 +8030,7 @@
     "/api/v1/teams/{teamId}/leave-rotation-plans": {
       "post": {
         "tags": [
-          "teams"
+          "vault-key-rotation"
         ],
         "operationId": "createTeamLeaveRotationPlans",
         "parameters": [
@@ -7950,30 +8045,19 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -8019,7 +8103,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8049,7 +8133,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8060,24 +8144,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8097,7 +8163,7 @@
     "/api/v1/teams/{teamId}/leave-rotation-plans/finalize": {
       "post": {
         "tags": [
-          "teams"
+          "vault-key-rotation"
         ],
         "operationId": "finalizeTeamLeaveRotationPlans",
         "parameters": [
@@ -8112,12 +8178,9 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -8134,18 +8197,10 @@
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FinalizePlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -8191,7 +8246,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8221,7 +8276,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8232,24 +8287,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8541,7 +8578,7 @@
     "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans": {
       "post": {
         "tags": [
-          "team-members"
+          "vault-key-rotation"
         ],
         "operationId": "createTeamMemberRemovalRotationPlans",
         "parameters": [
@@ -8564,30 +8601,19 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -8633,7 +8659,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8663,7 +8689,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8674,24 +8700,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8711,7 +8719,7 @@
     "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize": {
       "post": {
         "tags": [
-          "team-members"
+          "vault-key-rotation"
         ],
         "operationId": "finalizeTeamMemberRemovalRotationPlans",
         "parameters": [
@@ -8734,12 +8742,9 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -8756,18 +8761,10 @@
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FinalizePlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -8813,7 +8810,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8843,7 +8840,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8854,24 +8851,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10315,7 +10294,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10345,7 +10324,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10356,24 +10335,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10483,7 +10444,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10513,7 +10474,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10524,24 +10485,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10637,7 +10580,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10667,7 +10610,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10678,24 +10621,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13461,7 +13386,7 @@
     "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans": {
       "post": {
         "tags": [
-          "vault-members"
+          "vault-key-rotation"
         ],
         "operationId": "createVaultMemberRemovalRotationPlans",
         "parameters": [
@@ -13484,30 +13409,19 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -13553,7 +13467,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13583,7 +13497,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13594,24 +13508,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13631,7 +13527,7 @@
     "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize": {
       "post": {
         "tags": [
-          "vault-members"
+          "vault-key-rotation"
         ],
         "operationId": "finalizeVaultMemberRemovalRotationPlans",
         "parameters": [
@@ -13654,12 +13550,9 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -13676,18 +13569,10 @@
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FinalizePlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -13733,7 +13618,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13763,7 +13648,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13774,24 +13659,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15344,6 +15211,112 @@
         ],
         "description": "The non-secret answer retained for Share creation. The raw token and Share key exist only in\nthe Account-protected Client Replica and can never be reconstructed from this value."
       },
+      "CreateTeamLeaveRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_member_not_found",
+          "personal_team_departure_forbidden",
+          "team_owner_leave_forbidden"
+        ]
+      },
+      "CreateTeamLeaveRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "plans",
+              "status"
+            ],
+            "properties": {
+              "plans": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationPlanSnapshot"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateTeamLeaveRotationPlansRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "CreateTeamMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_member_not_found",
+          "personal_team_departure_forbidden",
+          "self_removal_forbidden",
+          "team_management_denied",
+          "team_owner_protected",
+          "team_management_entitlement_denied",
+          "vault_management_incomplete"
+        ]
+      },
+      "CreateTeamMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "plans",
+              "status"
+            ],
+            "properties": {
+              "plans": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationPlanSnapshot"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateTeamMemberRemovalRotationPlansRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "CreateTeamRequest": {
         "type": "object",
         "required": [
@@ -15400,6 +15373,61 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateVaultMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "vault_access_denied",
+          "vault_member_not_found",
+          "self_removal_forbidden",
+          "vault_owner_protected",
+          "vault_admin_peer_protected",
+          "shared_vault_required",
+          "vault_sharing_entitlement_denied"
+        ]
+      },
+      "CreateVaultMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "plans",
+              "status"
+            ],
+            "properties": {
+              "plans": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationPlanSnapshot"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateVaultMemberRemovalRotationPlansRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ]
       },
       "CreateVaultOperationRejectionCode": {
         "type": "string",
@@ -16794,11 +16822,7 @@
           "SEARCH_TOO_LONG",
           "TOO_MANY_HIDDEN_VAULTS",
           "INVALID_IDEMPOTENCY_KEY",
-          "IDEMPOTENCY_KEY_REUSED",
           "IDEMPOTENCY_NOT_ALLOWED",
-          "IDEMPOTENCY_REQUEST_IN_PROGRESS",
-          "IDEMPOTENCY_OUTCOME_INDETERMINATE",
-          "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
           "INVALID_OPERATION_ID",
           "OPERATION_ID_REUSED",
           "OPERATION_OUTCOME_NOT_FOUND",
@@ -16847,49 +16871,218 @@
         },
         "additionalProperties": false
       },
-      "FinalizePlanSetResponse": {
-        "type": "object",
-        "required": [
-          "rotations"
-        ],
-        "properties": {
-          "personalTeamId": {
-            "type": [
-              "string",
-              "null"
-            ]
+      "FinalizeTeamLeaveRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_membership_changed",
+          "personal_team_departure_forbidden",
+          "team_owner_leave_forbidden",
+          "rotation_plan_unavailable",
+          "rotation_plan_mismatch",
+          "rotation_plan_incomplete",
+          "rotation_plan_stale",
+          "rotation_plan_set_mismatch"
+        ]
+      },
+      "FinalizeTeamLeaveRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "rotations",
+              "personalTeamId",
+              "status"
+            ],
+            "properties": {
+              "personalTeamId": {
+                "type": "string"
+              },
+              "rotations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationResult"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
           },
-          "rotations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FinalizeResponse"
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/FinalizeTeamLeaveRotationPlansRejectionCode"
+              },
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotationStaleDetails"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
             }
           }
-        }
+        ]
       },
-      "FinalizeResponse": {
-        "type": "object",
-        "required": [
-          "planId",
-          "vaultId",
-          "keyVersion",
-          "rotationId"
-        ],
-        "properties": {
-          "keyVersion": {
-            "type": "integer",
-            "format": "int32"
+      "FinalizeTeamMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_membership_changed",
+          "personal_team_departure_forbidden",
+          "self_removal_forbidden",
+          "team_management_denied",
+          "team_owner_protected",
+          "team_management_entitlement_denied",
+          "vault_management_incomplete",
+          "rotation_plan_unavailable",
+          "rotation_plan_mismatch",
+          "rotation_plan_incomplete",
+          "rotation_plan_stale",
+          "rotation_plan_set_mismatch"
+        ]
+      },
+      "FinalizeTeamMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "rotations",
+              "personalTeamId",
+              "status"
+            ],
+            "properties": {
+              "personalTeamId": {
+                "type": "string"
+              },
+              "rotations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationResult"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
           },
-          "planId": {
-            "type": "string"
-          },
-          "rotationId": {
-            "type": "string"
-          },
-          "vaultId": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/FinalizeTeamMemberRemovalRotationPlansRejectionCode"
+              },
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotationStaleDetails"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
           }
-        }
+        ]
+      },
+      "FinalizeVaultMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "vault_access_denied",
+          "vault_membership_changed",
+          "self_removal_forbidden",
+          "vault_owner_protected",
+          "vault_admin_peer_protected",
+          "shared_vault_required",
+          "vault_sharing_entitlement_denied",
+          "rotation_plan_unavailable",
+          "rotation_plan_mismatch",
+          "rotation_plan_incomplete",
+          "rotation_plan_stale"
+        ]
+      },
+      "FinalizeVaultMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "rotations",
+              "status"
+            ],
+            "properties": {
+              "rotations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationResult"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/FinalizeVaultMemberRemovalRotationPlansRejectionCode"
+              },
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotationStaleDetails"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ]
       },
       "FinishLoginRequest": {
         "type": "object",
@@ -17042,6 +17235,12 @@
           }
         ],
         "description": "The closed retained answer for one Import batch. Runtime dispatch remains gated until Ticket 57."
+      },
+      "InitialRotationPlanState": {
+        "type": "string",
+        "enum": [
+          "preparing"
+        ]
       },
       "InvitationDetailsResponse": {
         "type": "object",
@@ -18021,6 +18220,138 @@
                 "$ref": "#/components/schemas/ImportItemsOperationResult"
               }
             }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_vault_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateVaultMemberRemovalRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "finalize_vault_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/FinalizeVaultMemberRemovalRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_team_leave_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateTeamLeaveRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "finalize_team_leave_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/FinalizeTeamLeaveRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_team_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateTeamMemberRemovalRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "finalize_team_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/FinalizeTeamMemberRemovalRotationPlansResult"
+              }
+            }
           }
         ],
         "description": "The one retained outcome shape, discriminated by Operation kind."
@@ -18149,20 +18480,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "PlanSetResponse": {
-        "type": "object",
-        "required": [
-          "plans"
-        ],
-        "properties": {
-          "plans": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RotationPlanSummary"
-            }
-          }
-        }
       },
       "PortalSessionResponse": {
         "type": "object",
@@ -18633,7 +18950,7 @@
           }
         }
       },
-      "RotationPlanSummary": {
+      "RotationPlanSnapshot": {
         "type": "object",
         "required": [
           "id",
@@ -18664,12 +18981,54 @@
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/VaultKeyRotationPlanState"
+            "$ref": "#/components/schemas/InitialRotationPlanState"
           },
           "vaultId": {
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": false
+      },
+      "RotationResult": {
+        "type": "object",
+        "required": [
+          "planId",
+          "vaultId",
+          "keyVersion",
+          "rotationId"
+        ],
+        "properties": {
+          "keyVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "rotationId": {
+            "type": "string"
+          },
+          "vaultId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RotationStaleDetails": {
+        "type": "object",
+        "required": [
+          "planId",
+          "reason"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/VaultKeyRotationStaleReason"
+          }
+        },
+        "additionalProperties": false
       },
       "SecretKeyRotationRequest": {
         "type": "object",
@@ -20268,16 +20627,13 @@
           }
         }
       },
-      "VaultKeyRotationPlanState": {
+      "VaultKeyRotationStaleReason": {
         "type": "string",
         "enum": [
-          "preparing",
-          "ready",
-          "completed",
-          "stale",
-          "failed",
-          "abandoned",
-          "expired"
+          "vault_version",
+          "member_set",
+          "item_state",
+          "attachment_state"
         ]
       },
       "VaultListEntryResponse": {

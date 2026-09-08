@@ -69,7 +69,9 @@ fn registered_bounds() -> BTreeSet<u64> {
         u64::from(BULK_IMPORT_ITEMS),
         u64::from(MAX_PAGE_SIZE),
         ENCRYPTED_VAULT_KEY_BYTES as u64,
+        NAME_MIN_CHARS as u64,
         NAME_MAX_CHARS as u64,
+        ICON_MAX_CHARS as u64,
         MAX_BATCH_ITEMS as u64,
         MAX_CAPABILITIES as u64,
         SUPPORTED_MAJORS as u64,
@@ -145,6 +147,14 @@ fn key_schemas_publish_their_named_limits() {
         schemas["CreateVaultBody"]["properties"]["name"]["maxLength"],
         NAME_MAX_CHARS as u64
     );
+    assert_eq!(
+        schemas["CreateVaultBody"]["properties"]["name"]["minLength"],
+        NAME_MIN_CHARS as u64
+    );
+    assert_eq!(
+        schemas["CreateVaultBody"]["properties"]["icon"]["maxLength"],
+        ICON_MAX_CHARS as u64
+    );
     // `AuditEventsQuery` is `IntoParams`, so its bounds land on the operation's parameters.
     let audit_parameters = &document["paths"]["/api/v1/audit-events"]["get"]["parameters"];
     let audit_parameter = |name: &str| {
@@ -195,7 +205,9 @@ fn published_limits_match_the_runtime_validators() {
         ENCRYPTED_VAULT_KEY_BYTES,
         crate::domains::vaults::key::ENCRYPTED_VAULT_KEY_MAX_BYTES
     );
+    assert_eq!(NAME_MIN_CHARS, crate::domains::vaults::VAULT_NAME_MIN_CHARS);
     assert_eq!(NAME_MAX_CHARS, crate::domains::vaults::VAULT_NAME_MAX_CHARS);
+    assert_eq!(ICON_MAX_CHARS, crate::domains::vaults::VAULT_ICON_MAX_CHARS);
     assert_eq!(
         ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024,
         crate::domains::vaults::http::ITEM_BODY_LIMIT_BYTES,

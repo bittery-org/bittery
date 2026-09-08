@@ -66,7 +66,7 @@ rmSync(lockPath);
 			"tests/web-vault-image-artifact.chromium.test.ts",
 			"tests/web-vault-image-http.chromium.test.ts",
 			"tests/web-create-vault.chromium.test.ts",
-			"../../apps/web/tests/browser/runtime-import-parking.chromium.test.ts",
+			"../../apps/web/tests/browser/runtime-import-progress.chromium.test.ts",
 		].flatMap((suite) => [
 			{
 				event: "start",

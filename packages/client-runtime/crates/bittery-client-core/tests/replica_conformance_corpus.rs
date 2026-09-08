@@ -178,3 +178,100 @@ fn bootstrap_corpus_accumulates_phase_scoped_pages_before_promotion() {
     item_ids.sort();
     assert_eq!(item_ids, ["bootstrap-item-1", "bootstrap-item-2"]);
 }
+
+#[test]
+fn corpus_exercises_multi_item_bootstrap_and_atomic_import_batches() {
+    let corpus: Value =
+        serde_json::from_str(&std::fs::read_to_string(corpus_path()).unwrap()).unwrap();
+    let histories = corpus["histories"].as_array().unwrap();
+    let bootstrap = histories
+        .iter()
+        .find(|history| history["name"] == "five-category-item-authority")
+        .unwrap();
+    let page = bootstrap["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["label"] == "stage five-category Item page")
+        .unwrap();
+    let writes = page["request"]["prepared"]["writes"].as_array().unwrap();
+    assert_eq!(
+        writes
+            .iter()
+            .filter(|write| write["type"] == "put" && write["row"]["store"] == "authorityItems")
+            .count(),
+        5,
+        "one prepared Bootstrap plan must install several Items"
+    );
+    let import = histories
+        .iter()
+        .find(|history| history["name"] == "import-batch-authority-and-rejection-are-atomic")
+        .unwrap();
+    let steps = import["steps"].as_array().unwrap();
+    let accepted = steps
+        .iter()
+        .find(|step| step["label"] == "atomically accept the first Import request")
+        .unwrap();
+    let operation = row_payload(accepted, "operations", "operation-import-first");
+    let body: Vec<u8> = serde_json::from_value(operation["request"]["body"].clone()).unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["items"].as_array().unwrap().len(), 5);
+    let reconciled = steps
+        .iter()
+        .find(|step| {
+            step["label"]
+                == "atomically install first batch authority, its receipt, and remove the Operation"
+        })
+        .unwrap();
+    assert_eq!(
+        row_payload(reconciled, "operationReceipts", "operation-import-first")["result"]
+            ["importedCount"],
+        5
+    );
+    let writes = reconciled["request"]["prepared"]["writes"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        writes
+            .iter()
+            .filter(|write| write["type"] == "put" && write["row"]["store"] == "authorityItems")
+            .count(),
+        5
+    );
+    assert_eq!(
+        writes
+            .iter()
+            .filter(|write| write["type"] == "delete" && write["store"] == "operations")
+            .count(),
+        1
+    );
+    let final_rows = steps.last().unwrap()["expectedLoadedState"][0]["response"]["rows"]
+        .as_array()
+        .unwrap();
+    let items = final_rows
+        .iter()
+        .filter(|row| row["store"] == "authorityItems")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        items.len(),
+        8,
+        "both applied batches preserve the preexisting Bootstrap Item"
+    );
+    assert_eq!(
+        items
+            .iter()
+            .filter(|row| row["key"]["recordId"]
+                .as_str()
+                .unwrap()
+                .contains("operation-import-"))
+            .count(),
+        7
+    );
+    assert_eq!(
+        final_rows
+            .iter()
+            .filter(|row| row["store"] == "operationReceipts")
+            .count(),
+        3
+    );
+}

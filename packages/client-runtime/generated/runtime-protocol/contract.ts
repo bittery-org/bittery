@@ -8,6 +8,9 @@ accountId: string
 type: "items"
 } | {
 accountId: string
+type: "operations"
+} | {
+accountId: string
 type: "pendingShareResults"
 } | {
 accountId: (string | null)
@@ -29,6 +32,18 @@ type: "failed"
 value: RuntimeError
 })
 export type RuntimeResponse = ({
+diagnostics: StorageRecoveryDiagnostics
+type: "recoveryDiagnosed"
+} | {
+accountId: string
+byteLength: string
+classification: RecoveryClassification
+type: "recoveryExported"
+} | {
+accountId: string
+replicaRevision: string
+type: "recoveryRepaired"
+} | {
 accountId: string
 type: "signedIn"
 userId: string
@@ -63,6 +78,21 @@ operationId: string
 type: "shareResultAcknowledged"
 } | {
 accountId: string
+baseShareUrl: string
+itemId: string
+links: ShareLinkSummary[]
+type: "itemShareLinks"
+} | {
+accountId: string
+linkId: string
+logs: ShareAccessLog[]
+type: "shareAccessLogs"
+} | {
+accountId: string
+linkId: string
+type: "shareLinkRevoked"
+} | {
+accountId: string
 attachmentId: string
 type: "attachmentRenamed"
 } | {
@@ -86,8 +116,16 @@ scope: TeardownScope
 status: TeardownStatus
 type: "teardown"
 })
+export type RecoveryStorageState = ("ready" | "corrupt" | "missing" | "unknown" | "unreadable")
+export type RecoveryDeviceStatus = ("freshOrUnknown" | "knownAccounts" | "storageUnavailable")
+export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "STORAGE_UNAVAILABLE" | "RETRYABLE_TRANSPORT" | "AUTHORITY_MISSING" | "ACCESS_DENIED" | "READ_ONLY" | "QUOTA_EXCEEDED" | "SIZE_REJECTED" | "SOURCE_FAILURE" | "SINK_FAILURE" | "INVARIANT_VIOLATION")
+export type RecoveryMaintenanceStatus = ("available" | "unsupported" | "busy" | "unavailable")
+export type RecoverySchemaStatus = ("supported" | "unsupported" | "unknown")
+export type RecoveryClassification = ("complete" | "partial")
 export type AccountAccessState = ("signedOut" | "locked" | "unlocked")
 export type ServerAccountDeletionOutcome = ("deleted" | "confirmationEmailMismatch" | "blocked")
+export type ShareAccessMode = ("anyone" | "email-restricted")
+export type ShareLinkStatus = ("active" | "expired" | "exhausted" | "revoked")
 /**
  * Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.
  */
@@ -99,13 +137,19 @@ type: "account"
 type: "device"
 })
 export type TeardownStatus = ("complete" | "incomplete")
-export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "RETRYABLE_TRANSPORT" | "AUTHORITY_MISSING" | "ACCESS_DENIED" | "READ_ONLY" | "QUOTA_EXCEEDED" | "SIZE_REJECTED" | "SOURCE_FAILURE" | "SINK_FAILURE" | "INVARIANT_VIOLATION")
+/**
+ * Closed recovery implementation guards; these are not Account capacity limits.
+ */
+export type RecoveryBound = ("recordBytes" | "archiveBytes" | "recordCount" | "artifactCount" | "reportBytes" | "summaryBytes" | "controlBytes" | "cursorBytes" | "chunkBytes")
 export type RuntimeProjection = ({
 type: "writableVaultCatalog"
 value: WritableVaultCatalogProjection
 } | {
 type: "items"
 value: ItemsProjection
+} | {
+type: "operations"
+value: OperationsProjection
 } | {
 type: "pendingShareResults"
 value: PendingShareResultsProjection
@@ -144,8 +188,26 @@ export type PasskeyStatusReason = ("manual" | "unknown-credential" | "signing-er
 export type TotpAlgorithm = ("SHA1" | "SHA256" | "SHA512")
 export type TotpDigits = (6 | 7 | 8)
 export type ItemProjectionStatus = ("pending" | "authoritative" | "failed")
+export type OperationProjectionKind = ("createVault" | "createItem" | "updateItem" | "setItemFavorite" | "trashItem" | "restoreItem" | "moveItem" | "permanentlyDeleteItem" | "createShare" | "importItems")
+export type OperationResolution = ("pending" | "applied" | "rejected")
 export type AccountWaitingReason = "reauthenticationRequired"
 export type RuntimeRequest = ({
+accountId: string
+type: "rebootstrapAccountRecovery"
+} | {
+accountId?: (string | null)
+type: "inspectRecovery"
+} | {
+accountId: string
+password: string
+sinkCapabilityId: string
+type: "exportAccountRecovery"
+} | {
+accountId: string
+password: string
+sourceCapabilityId: string
+type: "repairAccountRecovery"
+} | {
 email: string
 insecureTransportConfirmed: boolean
 masterPassword: string
@@ -230,6 +292,18 @@ operationId: string
 type: "acknowledgeShareResult"
 } | {
 accountId: string
+itemId: string
+type: "listItemShareLinks"
+} | {
+accountId: string
+linkId: string
+type: "listShareAccessLogs"
+} | {
+accountId: string
+linkId: string
+type: "revokeShareLink"
+} | {
+accountId: string
 attachmentId: string
 name: string
 type: "renameAttachment"
@@ -252,7 +326,6 @@ sourceCapabilityId: string
 type: "uploadAttachment"
 })
 export type CreateVaultType = ("personal" | "shared")
-export type ShareAccessMode = ("anyone" | "email-restricted")
 export type ShareExpiration = ("1hour" | "1day" | "7days" | "14days" | "30days")
 
 export interface RuntimeProtocolContract {
@@ -261,9 +334,55 @@ outcome: RuntimeOutcome
 projection: RuntimeProjection
 request: RuntimeRequest
 }
+export interface StorageRecoveryDiagnostics {
+accounts: StorageRecoveryAccount[]
+device: RecoveryDeviceStatus
+failure: (RuntimeErrorCode | null)
+maintenance: RecoveryMaintenanceStatus
+schema: RecoverySchemaStatus
+}
+export interface StorageRecoveryAccount {
+accountId: string
+canExport: boolean
+canRebootstrap: boolean
+canRepair: boolean
+email: (string | null)
+missingArtifacts: (number | null)
+operationCount: (number | null)
+receiptCount: (number | null)
+serverUrl: (string | null)
+state: RecoveryStorageState
+userId: (string | null)
+}
+export interface ShareLinkSummary {
+accessCount: number
+accessMode: ShareAccessMode
+allowedEmails: ShareAllowedEmail[]
+createdAt: string
+expiresAt: string
+id: string
+isOneTimeUse: boolean
+lastAccessedAt: (string | null)
+maxAccessCount: (number | null)
+status: ShareLinkStatus
+}
+export interface ShareAllowedEmail {
+email: string
+verified: boolean
+}
+export interface ShareAccessLog {
+accessedAt: string
+accessedByEmail: (string | null)
+failureReason: (string | null)
+id: string
+ipAddress: (string | null)
+success: boolean
+userAgent: (string | null)
+}
 export interface RuntimeError {
 code: RuntimeErrorCode
 message: string
+recoveryBound?: (RecoveryBound | null)
 }
 export interface WritableVaultCatalogProjection {
 revision: string
@@ -451,6 +570,26 @@ name: string
 role: ("owner" | "admin" | "member" | "read-only")
 vaultId: string
 vaultType: VaultProjectionType
+}
+/**
+ * Non-secret progress from accepted Operations and their durable terminal receipts.
+ */
+export interface OperationsProjection {
+accountId: string
+operations: OperationProjection[]
+replicaRevision: string
+}
+export interface OperationProjection {
+/**
+ * Terminal receipts do not retain historical scheduling diagnostics.
+ */
+attemptCount: (string | null)
+importedCount: (number | null)
+kind: OperationProjectionKind
+nextAttemptAtMs: (string | null)
+operationId: string
+rejectionCode: (string | null)
+resolution: OperationResolution
 }
 export interface PendingShareResultsProjection {
 accountId: string

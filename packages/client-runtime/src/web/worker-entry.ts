@@ -1,3 +1,6 @@
+import { WebRecoveryExecutor } from "../web-recovery-executor";
+import { RecoveryWorkerFiles } from "../web-recovery-files";
+import { WebStorageFamily } from "../web-storage-family";
 /**
  * The Web Worker composition root.
  *
@@ -52,20 +55,52 @@ export function serveWebRuntimeWorker(
 	const attachmentArtifactExecutor = new IndexedDbAttachmentArtifactExecutor();
 	const vaultImageArtifacts = new IndexedDbVaultImageArtifactExecutor();
 	const accountLeaseExecutor = new WebAccountLeaseExecutor();
+	const storageFamily = new WebStorageFamily(() => vaultImageArtifacts.close());
+	const replica = new IndexedDbReplicaExecutor();
 	serveWorkerChannels(scope, {
 		...(deps.crypto === undefined ? {} : { crypto: deps.crypto }),
 		runtime: createRuntimeWorkerService({
-			executor: new IndexedDbReplicaExecutor(),
+			storageFamily,
+			prepareRecoveryRuntimeIncarnation: async (runtimeIncarnation) => {
+				await hostRpc.request({
+					type: "recoveryRuntimeScope",
+					runtimeIncarnation,
+				});
+			},
+			recoveryExecutorFactory: (runtimeIncarnation) => {
+				const files = new RecoveryWorkerFiles(runtimeIncarnation, (message) =>
+					hostRpc.request(message),
+				);
+				const executor = new WebRecoveryExecutor(storageFamily, files.invoke);
+				return {
+					invoke: executor.invoke.bind(executor),
+					cancel: executor.cancel.bind(executor),
+					close: async () => {
+						await executor.close();
+						await files.close();
+					},
+				};
+			},
+			executor: {
+				invoke: (json) => storageFamily.runNormal(() => replica.invoke(json)),
+			},
 			platformStorageExecutor: {
 				invoke: (requestJson) => hostRpc.request<string>(requestJson),
 			},
 			httpExecutor: new WebHttpTransportExecutor(),
-			attachmentArtifactExecutor,
+			attachmentArtifactExecutor: {
+				invoke: (json, binary) =>
+					storageFamily.runNormal(() =>
+						attachmentArtifactExecutor.invoke(json, binary),
+					),
+			},
 			vaultImageArtifactExecutor: {
 				async invoke(controlRequestJson, binaryChunk) {
-					const response = (await vaultImageArtifacts.invoke(
-						JSON.parse(controlRequestJson),
-						binaryChunk,
+					const response = (await storageFamily.runNormal(() =>
+						vaultImageArtifacts.invoke(
+							JSON.parse(controlRequestJson),
+							binaryChunk,
+						),
 					)) as { type: string; bytes?: Uint8Array };
 					const { bytes, ...control } = response;
 					return {

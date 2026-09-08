@@ -46,6 +46,34 @@ or rollout order.
 
 ## Decisions so far
 
+- [Replica recovery](browser-replica-recovery.md): protected Account-scoped export includes all
+  required locally retained work and files, excludes credentials, and remains available while locked.
+  Maintenance pauses the Runtime; guarded repair and explicit re-Bootstrap preserve proved accepted
+  work. Chromium and Firefox recovery acceptance passed. Unknown state stays explicit, with no
+  automatic reset and unchanged explicit Remove/Wipe.
+
+- [Web deployment](issues/39-web-sqlite-deployment-decision.md): retain IndexedDB and existing
+  headers/browser support; the maintainer explicitly declined conditional SQLite ticket 40.
+- [Extension placement](issues/41-extension-runtime-placement-decision.md): the future Chrome 116+
+  cutover uses one combined Worker in an offscreen document with IndexedDB and a service-worker
+  broker. Broker recycle reattaches; actual owner loss requires unlock. Desktop lock authority
+  remains intact; Firefox/Safari remain roadmap document hosts pending real-host acceptance.
+
+- [Web SQLite feasibility](web-sqlite-prototype-verdict.md): official OPFS passes the exact corpus
+  and first-slice scenario in Chromium/Firefox, but real Safari/iOS and deployment gates remain
+  unmet; the Rust SAH-pool candidate fails simultaneous-tab ownership. Prototypes were captured
+  and removed; ticket 39 owns the production decision.
+
+- [Rotation outcomes](issues/29-rotation-operation-outcomes.md#accepted-decision): six distinct
+  creation/finalization kinds retain original non-secret plan snapshots or rotation results, with
+  closed per-kind rejections; incomplete staging requires a new finalization Operation after repair.
+
+- [Persistence evolution](issues/38-replica-persistence-evolution.md): blocked/failed Web upgrades
+  expose storage-unavailable with explicit retry; versionchange closes stale connections and failed
+  migrations preserve the old database.
+- [Conformance reproducibility](issues/59-bootstrap-write-order-nondeterminism.md): canonicalize
+  generated histories by store/key only; physical migrations do not depend on write ordering.
+
 - [ADR 0014](../../docs/adr/0014-evolve-the-existing-product-around-a-shared-rust-runtime.md): evolve
   the existing product around one shared Rust runtime, preserve current cryptographic behavior, change
   Server and clients together in place, then deliver Android and iOS in that order.
@@ -114,38 +142,78 @@ or rollout order.
 
 ## Current delivery state
 
-Reviewed against committed source at `87386201` on 2026-09-07. Historical handoffs describe earlier
-sessions; current tickets govern remaining work. This documentation review did not rerun product CI.
+Ticket delivery validated the accumulated worktree; ticket notes record its targeted evidence. The earlier documentation review used `87386201` on 2026-09-07. Historical handoffs describe
+earlier sessions; current tickets govern remaining work. Ticket acceptance used an explicit full-CI
+waiver; the later publication checks are recorded below.
 
 - First Web acceptance and its blockers (15–27, 31–32, 35–37) are resolved under the
   [first-slice specification](spec.md). Attachment/lifecycle corrections (43–48) and the final
   category/Vault/Import foundations (49–56) are resolved.
-- [57 — Import cutover](issues/57-import-atomic-cutover.md) is ready and unblocked. The Server half
-  is committed, but Runtime dispatch is gated, the Operations projection is absent, the Web hook
-  still calls the legacy importer, and the Import caller graph/acceptance are unfinished.
-- [58 — final Web host cutover](issues/58-final-web-host-cutover.md) follows 57. Its partial host
-  work is already committed; it still owes consumer review and complete ownership/browser/CI gates.
-  [28](issues/28-remaining-item-write-kinds.md) stays open until those gates pass.
-- [29 — Rotation outcomes](issues/29-rotation-operation-outcomes.md) is `needs-info`: retained
-  applied payloads and per-kind rejection sets still need a decision. Five response-cache call
-  sites remain. Cleanup must preserve ticket 48's separate Account-deletion replay protocol.
-- [30 — live Sync](issues/30-runtime-owned-live-sync.md) follows 28. Bootstrap catches up once;
-  long-lived SSE, reconnect, and automatic cross-device propagation remain undelivered.
-- [38 — persistence evolution](issues/38-replica-persistence-evolution.md) remains `needs-info`.
-  The additive IndexedDB v6-to-v7 upgrade is already delivered; blocked/versionchange behavior and
-  versioned native SQLite migrations remain.
-- [59 — conformance reproducibility](issues/59-bootstrap-write-order-nondeterminism.md) remains
-  `needs-info` for the contract-versus-generator ordering decision. Shared Import histories still
-  avoid multi-Item prepared writes.
+- [57 — Import cutover](issues/57-import-atomic-cutover.md) is resolved after independent review,
+  eight provider browser cases, and 135 joined Worker/Core assertions including existing-Vault,
+  later-batch rejection, and multi-Account coverage. Targeted checks passed; full CI was waived.
+- [58 — final Web host cutover](issues/58-final-web-host-cutover.md) and its parent
+  [28](issues/28-remaining-item-write-kinds.md) are resolved. Independent reviews and simplification
+  passes, 37 distinct production browser cases, 28 ownership-graph tests, dependent types, and
+  affected generation/formatting checks passed. Full CI was waived and not run.
+- [29 — Rotation outcomes](issues/29-rotation-operation-outcomes.md) is resolved: all six routes use
+  retained semantic outcomes and the zero-caller response-cache cleanup is complete. Independent
+  reviews and targeted checks passed; ticket 48's Account-deletion replay protocol remains intact.
+- [30 — live Sync](issues/30-runtime-owned-live-sync.md) is resolved after independent review and
+  simplification. Seven production Sync scenarios, three affected restart/offline paths, 157 joined
+  Worker/Core assertions, and targeted Core/Server/type/generation checks passed across targeted
+  runs. Full CI was waived and not run.
+- [42 — Replica recovery](issues/42-browser-replica-recovery.md) is resolved after independent
+  review and simplification. Chromium/Firefox recovery cases and existing durability, Attachment
+  Move and Sync regressions passed across targeted runs; [validation and limits](browser-replica-recovery.md#validation-and-limits)
+  distinguish real browser loss from injected faults. Full CI was waived and not run.
+- [38 — persistence evolution](issues/38-replica-persistence-evolution.md) is resolved with independent
+  review and targeted validation: populated v5/v6 IndexedDB upgrades, blocked/versionchange handling,
+  versioned SQLite migrations, and visible storage-unavailable retry. Full CI was waived for this run.
+- [59 — conformance reproducibility](issues/59-bootstrap-write-order-nondeterminism.md) is resolved
+  after independent review: generator-only canonicalization is stable across fresh processes,
+  and shared Bootstrap/Import histories exercise multi-Item prepared writes.
+
+## Completion checks for this run
+
+After each ticket, a delegated simplification pass examines the complete change for duplicated
+logic, unnecessary state or wrappers, and useful shared code for later hosts. Implement worthwhile
+reductions while preserving accepted behavior, architecture, and coverage; avoid speculative
+abstractions. An independent subagent reviews the result, followed by the affected targeted checks.
+Record the result briefly in the ticket before closing it.
+
+The newly requested pass also applies to tickets already resolved during this run. Tickets 28, 29,
+30, 34, 38, 39, 40, 41, 42, 57, 58, and 59 completed the pass and independent review. All 59 tickets
+are closed: 58 resolved and conditional ticket 40 explicitly declined (`wontfix`). Historical ticket
+notes retain the full-CI waiver that applied when those tickets were accepted.
+
+## Publication checks
+
+2026-09-08: after ticket acceptance, the user requested full checks before commit, push and a draft
+PR. This later publication gate supplements the targeted evidence and preserves the historical
+waiver notes above.
+
+- `pnpm check:ci` passed locally: 14 package tasks, 445 host tests, 27 root script tests and all
+  nine Chromium test files.
+- `pnpm check:ci:rust` passed locally, including 728 Core tests, 151 crypto tests and 10 vectors,
+  generated contracts and native/Web bindings, and 50 Desktop tests.
+- The full Server suite exposed a stale Move after Attachment Rename. The
+  [ticket 28 follow-up](issues/28-remaining-item-write-kinds.md#publication-check-follow-up)
+  records the parent Item revision correction and the matching-Authority Sync race found by browser
+  acceptance. Exact foreground convergence preserves all guards and makes no additional write.
+  The complete Server suite passed (544 library and 2 binary tests), as did Server formatting,
+  Clippy and compilation. Final Chromium Attachment UI and durable Attachment Move acceptance
+  passed (2/2).
+
+Full-check fixture alignment covers explicit transport failures, valid shared-key ciphertext and
+current host contracts while retaining authority, durability and cancellation assertions. These are
+local command results; the hosted CI matrix has not been run for this publication.
 
 ## Remaining frontiers
 
-- Optional browser SQLite: [34 — prototype](issues/34-web-sqlite-opfs-prototype.md) follows 30/32,
-  then [39 — deployment decision](issues/39-web-sqlite-deployment-decision.md) and
-  [40 — conditional implementation](issues/40-conditional-web-sqlite-implementation.md).
-  [41 — Extension placement](issues/41-extension-runtime-placement-decision.md) remains a separate
-  decision, and [42 — recovery/export](issues/42-browser-replica-recovery.md) applies to the selected
-  engines. Successful Web OPFS evidence does not authorize Extension adoption.
+The tracked decision and implementation tickets are complete. The following broader migration
+frontiers remain outside those 59 tickets:
+
 - Desktop, then Extension production host integration after Web; Android Compose follows, then
   iOS SwiftUI. Native application linking and capability adapters remain host acceptance work.
 - Vault update/delete/type conversion still use transitional ownership and need a separate frontier;

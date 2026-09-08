@@ -12,6 +12,7 @@
 //! `kind` it does not know fails to parse rather than being read as some other Operation's answer.
 
 pub(crate) mod http;
+pub(crate) mod rotation;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -210,12 +211,7 @@ fn item_rejection_code(
         OperationRejectionCode::AttachmentStateConflict => {
             ItemOperationRejectionCode::AttachmentStateConflict
         }
-        OperationRejectionCode::ShareEntitlementDenied
-        | OperationRejectionCode::ShareLimitReached
-        | OperationRejectionCode::VaultIdConflict
-        | OperationRejectionCode::TeamMembershipRequired
-        | OperationRejectionCode::VaultSharingEntitlementDenied
-        | OperationRejectionCode::SharedVaultLimitReached => {
+        _ => {
             return Err(AppError::internal(
                 "Stored Item Operation has a non-Item rejection",
             ));
@@ -417,6 +413,36 @@ pub(crate) enum OperationOutcome {
         operation_id: String,
         result: ImportItemsOperationResult,
     },
+    CreateVaultMemberRemovalRotationPlans {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: rotation::CreateVaultMemberRemovalRotationPlansResult,
+    },
+    FinalizeVaultMemberRemovalRotationPlans {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: rotation::FinalizeVaultMemberRemovalRotationPlansResult,
+    },
+    CreateTeamLeaveRotationPlans {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: rotation::CreateTeamLeaveRotationPlansResult,
+    },
+    FinalizeTeamLeaveRotationPlans {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: rotation::FinalizeTeamLeaveRotationPlansResult,
+    },
+    CreateTeamMemberRemovalRotationPlans {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: rotation::CreateTeamMemberRemovalRotationPlansResult,
+    },
+    FinalizeTeamMemberRemovalRotationPlans {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: rotation::FinalizeTeamMemberRemovalRotationPlansResult,
+    },
 }
 
 impl OperationOutcome {
@@ -458,6 +484,14 @@ impl OperationOutcome {
             }
             OperationKind::ImportItems => {
                 unreachable!("Import outcomes use their batch applied payload")
+            }
+            OperationKind::CreateVaultMemberRemovalRotationPlans
+            | OperationKind::FinalizeVaultMemberRemovalRotationPlans
+            | OperationKind::CreateTeamLeaveRotationPlans
+            | OperationKind::FinalizeTeamLeaveRotationPlans
+            | OperationKind::CreateTeamMemberRemovalRotationPlans
+            | OperationKind::FinalizeTeamMemberRemovalRotationPlans => {
+                unreachable!("Rotation outcomes use their closed semantic payload")
             }
         }
     }
@@ -628,6 +662,9 @@ fn outcome_from_row(
     operation_id: &str,
     row: StoredOutcomeRow,
 ) -> Result<OperationOutcome, AppError> {
+    if rotation::is_rotation_kind(row.operation_kind) {
+        return rotation::outcome_from_row(operation_id, row);
+    }
     if row.operation_kind == OperationKind::ImportItems {
         let result =
             match row.result_status {

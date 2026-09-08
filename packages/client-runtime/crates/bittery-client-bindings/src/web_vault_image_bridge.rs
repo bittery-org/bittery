@@ -489,6 +489,7 @@ fn expect_source(
 }
 fn invariant() -> core::RuntimeError {
     core::RuntimeError {
+        recovery_bound: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Vault image host invocation failed".into(),
     }

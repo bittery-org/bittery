@@ -1,6 +1,6 @@
 //! Durable, short-lived coordination for Vault key rotation.
 //!
-//! Policy modules authorize an intention before calling [`create_plan`]. This module owns the
+//! Policy modules authorize an intention before calling [`create_plan_in_transaction`]. This module owns the
 //! snapshot, staging and atomic cryptographic state transition; it intentionally does not decide
 //! whether a User may remove a Member or depart a Team.
 
@@ -71,8 +71,8 @@ pub(crate) struct StagedOutput {
     pub payload: String,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RotationResult {
     pub plan_id: String,
     pub vault_id: String,
@@ -151,6 +151,7 @@ pub(crate) async fn lock_plan_policy(
 }
 
 /// Snapshots authoritative state. Authorization must already have succeeded in the policy caller.
+#[cfg(test)]
 pub(crate) async fn create_plan(
     pool: &PgPool,
     input: CreateRotationPlanInput,
@@ -158,16 +159,27 @@ pub(crate) async fn create_plan(
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
-    sqlx::query!("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await
-        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    let result = create_plan_in_transaction(&mut tx, input).await?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    Ok(result)
+}
+
+pub(crate) async fn create_plan_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    input: CreateRotationPlanInput,
+) -> Result<RotationPlanSummary, AppError> {
     let expected_key_version: i32 = sqlx::query_scalar!(
         "SELECT key_version FROM vault WHERE id = $1",
         &input.vault_id
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?
     .ok_or_else(|| AppError::not_found("Vault not found"))?;
@@ -190,7 +202,7 @@ pub(crate) async fn create_plan(
         idle_expires_at,
         absolute_expires_at,
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
 
@@ -216,7 +228,7 @@ pub(crate) async fn create_plan(
         &input.vault_id,
         input.excluded_user_id.as_deref(),
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     sqlx::query!(
@@ -241,7 +253,7 @@ pub(crate) async fn create_plan(
         &id,
         &input.vault_id,
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
     sqlx::query!(
@@ -266,12 +278,9 @@ pub(crate) async fn create_plan(
         &id,
         &input.vault_id,
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
-    tx.commit()
-        .await
-        .map_err(|error| database_error(error, "Vault key rotation database operation failed"))?;
 
     Ok(RotationPlanSummary {
         id,
@@ -857,7 +866,7 @@ pub(crate) async fn finalize_locked_plan(
     })
 }
 
-async fn mark_stale(
+pub(crate) async fn mark_stale(
     tx: &mut Transaction<'_, Postgres>,
     plan_id: &str,
     reason: VaultKeyRotationStaleReason,
@@ -872,6 +881,7 @@ async fn mark_stale(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) async fn record_stale(
     pool: &PgPool,
     plan_id: &str,

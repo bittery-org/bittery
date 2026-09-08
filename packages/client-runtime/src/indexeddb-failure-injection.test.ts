@@ -125,7 +125,9 @@ describe("IndexedDB Replica transaction failure injection", () => {
 		) {
 			throw new Error("corpus representatives have unexpected request types");
 		}
-		const representativePut = accepted.prepared.writes[0];
+		const representativePut = accepted.prepared.writes.find(
+			(write) => write.type === "put" && write.row.store === "operations",
+		);
 		if (representativePut?.type !== "put") {
 			throw new Error("expected representative Put");
 		}

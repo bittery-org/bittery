@@ -265,3 +265,58 @@ describe("observation registry", () => {
 		expect(store.getSnapshot().state).toBe("idle");
 	});
 });
+
+test("Operations observations share identity, isolate Accounts and retain terminal progress", async () => {
+	const transport = createFakeRuntimeTransport();
+	const client = createRuntimeClient({ transport });
+	const first = client.operations("account-1");
+	const second = client.operations("account-2");
+	expect(first).toBe(client.operations("account-1"));
+	const stop = first.subscribe(() => undefined);
+	const stopOther = second.subscribe(() => undefined);
+	await transport.settled();
+	transport.publish({
+		type: "operations",
+		value: {
+			accountId: "account-1",
+			replicaRevision: "2",
+			operations: [
+				{
+					operationId: "import-1",
+					kind: "importItems",
+					attemptCount: "1",
+					nextAttemptAtMs: "1000",
+					resolution: "pending",
+					importedCount: null,
+					rejectionCode: null,
+				},
+			],
+		},
+	});
+	expect(first.getSnapshot().state).toBe("ready");
+	expect(second.getSnapshot().state).toBe("loading");
+	transport.publish({
+		type: "operations",
+		value: {
+			accountId: "account-1",
+			replicaRevision: "3",
+			operations: [
+				{
+					operationId: "import-1",
+					kind: "importItems",
+					attemptCount: null,
+					nextAttemptAtMs: null,
+					resolution: "applied",
+					importedCount: 200,
+					rejectionCode: null,
+				},
+			],
+		},
+	});
+	const resolved = first.getSnapshot();
+	expect(
+		resolved.state === "ready" && resolved.value.operations[0]?.importedCount,
+	).toBe(200);
+	stop();
+	stopOther();
+});

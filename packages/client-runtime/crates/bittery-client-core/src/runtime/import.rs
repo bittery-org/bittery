@@ -5,9 +5,7 @@
 //! encrypts every draft, freezes one ordered immutable request, and accepts it atomically, so an
 //! accepted batch survives a restart from the moment this returns.
 //!
-//! What Ticket 57 still gates is only the transport: the scheduling loop skips an accepted Import
-//! Operation, so the batch waits durably instead of being sent. Sending and reconciling it is
-//! `import_executor`'s job.
+//! Sending and reconciling the accepted Operation is `import_executor`'s job.
 
 use super::*;
 use crate::{
@@ -19,7 +17,6 @@ use crate::{
     ImportItemDraft,
 };
 use bittery_crypto_core::{encrypt_with_aad, AadContext};
-use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_IMPORT_AUTHORITY_BYTES: usize = 16 * 1024 * 1024;
 /// One page per accepted Item is the most a complete batch can ever need.
@@ -45,6 +42,10 @@ pub(crate) const MAX_IMPORT_AUTHORITY_CURSOR_BYTES: usize = MAX_IMPORT_AUTHORITY
 /// smaller bound; consuming `/api/meta` to tighten the budget at run time is a separate decision,
 /// not something this constant quietly assumes away.
 pub(super) const SERVER_IMPORT_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Mirrors the Server's `ITEM_CIPHERTEXT_BYTES` for offline acceptance. The contract test
+/// compares it to the generated Import input schema, whose limit comes from that constant.
+pub(super) const SERVER_ITEM_CIPHERTEXT_BYTES: usize = 1024 * 1024;
 
 /// The most non-ciphertext bytes one Item adds to an authority page over the request that froze
 /// it.
@@ -110,22 +111,7 @@ pub(crate) const MAX_IMPORT_REQUEST_BYTES: usize = 15 * 1024 * 1024;
 const _: () = assert!(MAX_IMPORT_REQUEST_BYTES <= DERIVED_IMPORT_REQUEST_CEILING);
 const _: () = assert!(DERIVED_IMPORT_REQUEST_CEILING - MAX_IMPORT_REQUEST_BYTES >= 512 * 1024);
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ImportRequestItem {
-    pub item_id: String,
-    pub category: crate::server_contract::ItemCategory,
-    pub favorite: bool,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ImportRequestBody {
-    pub items: Vec<ImportRequestItem>,
-}
+pub(crate) use crate::wire::import::{ImportRequestBody, ImportRequestItem};
 
 // The Replica owns the canonical Import route and fingerprint. Runtime freezes bytes against the
 // same definition the trust boundary re-derives them from.
@@ -293,6 +279,14 @@ impl Runtime {
                 },
             )
             .map_err(|_| invalid_request("Import Item draft could not be encrypted"))?;
+            // The Server refuses the whole batch if any individual ciphertext is oversized.
+            // Refuse before acceptance so the host can split out that Item and retain siblings.
+            if sealed.ciphertext.len() > SERVER_ITEM_CIPHERTEXT_BYTES {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::SizeRejected,
+                    "an Import Item exceeds its ciphertext byte bound",
+                ));
+            }
             items.push(ImportRequestItem {
                 item_id: item_id.clone(),
                 category: super::create::server_item_category(draft.draft.category()),

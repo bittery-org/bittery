@@ -342,8 +342,17 @@ test("revoking a link disables it for the recipient", async ({
 		toastWithText(page, uiText("sharing_links_list_toast_revoke_success")),
 	).toBeVisible();
 
-	// A fresh load also verifies that revocation survived beyond the query cache.
+	// A deliberate Runtime restart requires real Quick Unlock before reading persisted revocation.
 	await page.reload();
+	await expect(
+		page.getByRole("button", { name: "Unlock Vault", exact: true }),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await page.locator("#password").fill(user.password);
+	await page.getByRole("button", { name: "Unlock Vault", exact: true }).click();
+	await page.waitForURL("**/home", { timeout: VAULT_READY_TIMEOUT_MS });
+	await page
+		.getByRole("link", { name: uiText("nav_item_vaults"), exact: true })
+		.click();
 	await openItem(page, item.title);
 	const refreshed = await openShareHistory(page);
 	await expect(

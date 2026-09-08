@@ -57,15 +57,33 @@ impl DeviceTimer for SystemDeviceTimer {
             std::future::pending::<()>().await;
             return;
         };
-        let delay = JsValue::from_f64(milliseconds as f64);
-        let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-            if set_timeout
-                .call2(&JsValue::UNDEFINED, &resolve, &delay)
-                .is_err()
-            {
-                // Leaving the Promise pending is the fail-closed result.
+        let Ok(clear_timeout) = js_sys::Reflect::get(&global, &JsValue::from_str("clearTimeout"))
+            .and_then(|value| value.dyn_into::<js_sys::Function>())
+        else {
+            std::future::pending::<()>().await;
+            return;
+        };
+        struct TimeoutLease {
+            id: JsValue,
+            clear: js_sys::Function,
+        }
+        impl Drop for TimeoutLease {
+            fn drop(&mut self) {
+                let _ = self.clear.call1(&JsValue::UNDEFINED, &self.id);
             }
+        }
+        let delay = JsValue::from_f64(milliseconds as f64);
+        let mut lease = None;
+        let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+            if let Ok(id) = set_timeout.call2(&JsValue::UNDEFINED, &resolve, &delay) {
+                lease = Some(TimeoutLease {
+                    id,
+                    clear: clear_timeout.clone(),
+                });
+            }
+            // Leaving the Promise pending on failure is the fail-closed result.
         });
         let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+        drop(lease);
     }
 }

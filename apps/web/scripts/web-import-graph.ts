@@ -31,6 +31,13 @@ export const WEB_ENTRIES = [
 	join(SRC_ROOT, "routeTree.gen.ts"),
 ] as const;
 
+/** Classify these ownership boundaries by imported symbol; follow other workspace bridges. */
+export const TRANSITIONAL_MODULE_PREFIXES = [
+	"@bittery/core",
+	"@bittery/storage",
+	"@bittery/sync",
+] as const;
+
 const EXTENSIONS = [
 	".fixture.txt",
 	".ts",
@@ -54,7 +61,7 @@ export interface ExternalImport {
 }
 
 export interface WebImportGraph {
-	/** Every Web file the entries reach, relative to `apps/web`. */
+	/** Every Web or shared source the entries reach, relative to `apps/web`. */
 	readonly files: readonly string[];
 	/** Every value import of an external module from those files. */
 	readonly imports: readonly ExternalImport[];
@@ -74,7 +81,13 @@ function resolveWebModule(specifier: string, from: string): string | null {
 	let base: string;
 	if (specifier.startsWith("@/")) base = join(SRC_ROOT, specifier.slice(2));
 	else if (specifier.startsWith(".")) base = resolve(dirname(from), specifier);
-	else return null;
+	else {
+		return TRANSITIONAL_MODULE_PREFIXES.some((prefix) =>
+			specifier.startsWith(prefix),
+		)
+			? null
+			: resolveWorkspaceExport(specifier, workspacePackages());
+	}
 	// Only a module the bundle executes counts. A stylesheet import resolves to a real
 	// file and reaches nothing, so following it would only pad the graph.
 	for (const extension of EXTENSIONS) {
@@ -84,6 +97,30 @@ function resolveWebModule(specifier: string, from: string): string | null {
 	for (const extension of EXTENSIONS) {
 		const candidate = join(base, `index${extension}`);
 		if (existsSync(candidate)) return candidate;
+	}
+	return null;
+}
+
+/** Relative source imports cannot bypass a package's classified ownership boundary. */
+function transitionalBoundary(specifier: string, from: string): string | null {
+	if (
+		TRANSITIONAL_MODULE_PREFIXES.some((prefix) => specifier.startsWith(prefix))
+	)
+		return specifier;
+	if (!specifier.startsWith(".")) return null;
+	const target = resolveSource(resolve(dirname(from), specifier));
+	if (target === null) return null;
+	for (const workspace of workspacePackages()) {
+		if (!TRANSITIONAL_MODULE_PREFIXES.some((name) => name === workspace.name))
+			continue;
+		if (!target.startsWith(`${workspace.root}/`)) continue;
+		for (const [subpath, exported] of workspace.exports) {
+			if (resolve(workspace.root, exported) === target)
+				return workspace.name + (subpath === "." ? "" : subpath.slice(1));
+		}
+		// Private implementation imports fail as unclassified rather than silently
+		// escaping the public-symbol audit.
+		return `${workspace.name}/${relative(workspace.root, target)}`;
 	}
 	return null;
 }
@@ -163,6 +200,23 @@ function readEdges(file: string): Edge[] {
 				if (!clause || symbols.length === 0) symbols.push("*");
 			}
 			edges.push({ specifier: node.moduleSpecifier.text, symbols });
+		} else if (
+			ts.isNewExpression(node) &&
+			ts.isIdentifier(node.expression) &&
+			["Worker", "SharedWorker"].includes(node.expression.text)
+		) {
+			// Vite recognizes this literal as a separate executable bundle entry.
+			const url = node.arguments?.[0];
+			if (
+				url &&
+				ts.isNewExpression(url) &&
+				ts.isIdentifier(url.expression) &&
+				url.expression.text === "URL" &&
+				url.arguments?.[0]
+			) {
+				const specifier = staticSpecifier(url.arguments[0]);
+				if (specifier !== null) edges.push({ specifier, symbols: ["*"] });
+			}
 		} else if (
 			ts.isCallExpression(node) &&
 			(node.expression.kind === ts.SyntaxKind.ImportKeyword ||
@@ -424,6 +478,7 @@ export function buildRepositoryImportGraph(
 		if (!file || visited.has(file)) continue;
 		visited.add(file);
 		for (const edge of readEdges(file)) {
+			if (edge.symbols.length === 0) continue;
 			const local = resolveRepositoryModule(edge.specifier, file, packages);
 			if (local) {
 				queue.push(local);
@@ -780,6 +835,17 @@ export function buildWebImportGraph(
 		if (file === undefined || visited.has(file)) continue;
 		visited.add(file);
 		for (const edge of readEdges(file)) {
+			if (edge.symbols.length === 0) continue;
+			const boundary = transitionalBoundary(edge.specifier, file);
+			if (boundary !== null) {
+				for (const symbol of edge.symbols)
+					imports.push({
+						module: boundary,
+						symbol,
+						file: relative(APP_ROOT, file),
+					});
+				continue;
+			}
 			const local = resolveWebModule(edge.specifier, file);
 			if (local !== null) {
 				queue.push(local);

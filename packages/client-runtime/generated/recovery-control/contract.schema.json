@@ -1,0 +1,1201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RecoveryContract",
+  "type": "object",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/RecoveryControlRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/RecoveryControlResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response"
+  ],
+  "$defs": {
+    "RecoveryBound": {
+      "description": "Closed recovery implementation guards; these are not Account capacity limits.",
+      "type": "string",
+      "enum": [
+        "recordBytes",
+        "archiveBytes",
+        "recordCount",
+        "artifactCount",
+        "reportBytes",
+        "summaryBytes",
+        "controlBytes",
+        "cursorBytes",
+        "chunkBytes"
+      ]
+    },
+    "RecoveryControlRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "enterMaintenance"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "leaveMaintenance"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listAccounts"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "readEntry"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "record": {
+              "$ref": "#/$defs/RecoveryRecord"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "addArtifactEntry"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "record"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "beginRepairStage"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "row": {
+              "$ref": "#/$defs/RecoveryExpectedRow"
+            },
+            "type": {
+              "type": "string",
+              "const": "stageExpectedRow"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "row"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "payloadByteLength": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "recordId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "store": {
+              "$ref": "#/$defs/ReplicaStore"
+            },
+            "type": {
+              "type": "string",
+              "const": "stageRowStart"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "store",
+            "recordId",
+            "payloadByteLength"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "stageRowChunk"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "stageRowEnd"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "expectedHeadJson": {
+              "type": "string"
+            },
+            "expectedRowCount": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "nextHead": {
+              "$ref": "#/$defs/ReplicaHead"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "stagedRowCount": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "commitRepair"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "expectedHeadJson",
+            "nextHead",
+            "stagedRowCount",
+            "expectedRowCount"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "discardRepairStage"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "maxBytes": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "sourceRead"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "capabilityId",
+            "maxBytes"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "sourceRewind"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "capabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "sourceClose"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "capabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "sinkWrite"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "capabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "sinkCommit"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "capabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "recoveryId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "sinkDiscard"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "recoveryId",
+            "accountId",
+            "capabilityId"
+          ]
+        }
+      ]
+    },
+    "RecoveryControlResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "physicalSchemas": {
+              "$ref": "#/$defs/RecoveryPhysicalSchemas"
+            },
+            "type": {
+              "type": "string",
+              "const": "maintenanceEntered"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "physicalSchemas"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "maintenanceLeft"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": "string"
+            },
+            "nextCursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "accountEntry"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "cursor"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "nextCursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "record": {
+              "$ref": "#/$defs/RecoveryRecord"
+            },
+            "type": {
+              "type": "string",
+              "const": "entry"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "cursor",
+            "record"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "end"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "artifactAdded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "repairStageBegun"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "expectedRowStaged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "rowStarted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "rowChunkStaged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "rowEnded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "repairStageDiscarded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "repaired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "stale"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sourceChunk"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sourceEnded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sourceRewound"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sourceClosed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sinkWritten"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sinkCommitted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sinkDiscarded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "bound": {
+              "$ref": "#/$defs/RecoveryBound"
+            },
+            "type": {
+              "type": "string",
+              "const": "limitExceeded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "bound"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/RecoveryUnavailableReason"
+            },
+            "type": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "RecoveryExpectedRow": {
+      "type": "object",
+      "properties": {
+        "payloadSha256": {
+          "type": "string"
+        },
+        "recordId": {
+          "type": "string"
+        },
+        "store": {
+          "$ref": "#/$defs/ReplicaStore"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "store",
+        "recordId",
+        "payloadSha256"
+      ]
+    },
+    "RecoveryPhysicalSchemas": {
+      "type": "object",
+      "properties": {
+        "attachmentArtifactsVersion": {
+          "type": "integer",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "replicaVersion": {
+          "type": "integer",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "vaultImagesVersion": {
+          "type": "integer",
+          "maximum": 4294967295,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "replicaVersion",
+        "attachmentArtifactsVersion",
+        "vaultImagesVersion"
+      ]
+    },
+    "RecoveryRecord": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "payloadJson": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rawReplicaHead"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "payloadJson"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "payloadJson": {
+              "type": "string"
+            },
+            "recordId": {
+              "type": "string"
+            },
+            "store": {
+              "$ref": "#/$defs/ReplicaStore"
+            },
+            "type": {
+              "type": "string",
+              "const": "rawReplicaRow"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "store",
+            "recordId",
+            "payloadJson"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            },
+            "metadataJson": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "artifactMetadata"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "artifactId",
+            "metadataJson"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            },
+            "chunkIndex": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "chunkSha256": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "artifactChunk"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "artifactId",
+            "chunkIndex",
+            "chunkSha256"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "string"
+            },
+            "metadataJson": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "provisionalMetadata"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId",
+            "attachmentId",
+            "generation",
+            "metadataJson"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "chunkIndex": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "chunkSha256": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "provisionalChunk"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId",
+            "attachmentId",
+            "generation",
+            "chunkIndex",
+            "chunkSha256"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "metadataJson": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultImageMetadata"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId",
+            "metadataJson"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "chunkIndex": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultImageChunk"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId",
+            "chunkIndex"
+          ]
+        }
+      ]
+    },
+    "RecoveryUnavailableReason": {
+      "type": "string",
+      "enum": [
+        "unsupportedSchema",
+        "unsupported",
+        "busy",
+        "storageUnavailable",
+        "corrupt",
+        "quota",
+        "cancelled"
+      ]
+    },
+    "ReplicaHead": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "lockEpoch": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "userId",
+        "incarnation",
+        "replicaRevision",
+        "lockEpoch"
+      ]
+    },
+    "ReplicaStore": {
+      "type": "string",
+      "enum": [
+        "optimisticItems",
+        "operations",
+        "attachmentMovePreparations",
+        "shareCapabilities",
+        "operationReceipts",
+        "replicaMetadata",
+        "bootstrapGenerations",
+        "bootstrapPages",
+        "authorityVaults",
+        "authorityItems"
+      ]
+    },
+    "RuntimeErrorCode": {
+      "type": "string",
+      "enum": [
+        "RUNTIME_CLOSED",
+        "CANCELLED",
+        "ACCOUNT_MISSING",
+        "ACCOUNT_ALREADY_INSTALLED",
+        "ACCOUNT_FAILED",
+        "AUTHENTICATION_REQUIRED",
+        "AUTHENTICATION_UNAVAILABLE",
+        "STORAGE_UNAVAILABLE",
+        "RETRYABLE_TRANSPORT",
+        "AUTHORITY_MISSING",
+        "ACCESS_DENIED",
+        "READ_ONLY",
+        "QUOTA_EXCEEDED",
+        "SIZE_REJECTED",
+        "SOURCE_FAILURE",
+        "SINK_FAILURE",
+        "INVARIANT_VIOLATION"
+      ]
+    }
+  },
+  "$id": "urn:bittery:client-runtime:recovery-control"
+}

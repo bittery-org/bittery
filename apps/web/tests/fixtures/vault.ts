@@ -116,6 +116,7 @@ export async function createVault(
 	const dialog = page.getByTestId("create-vault-dialog");
 	await expect(dialog).toBeVisible();
 	await dialog.locator("#name").fill(name);
+	await expect(dialog.locator("#name")).toHaveValue(name);
 	if (options.iconLabel) {
 		await dialog.getByRole("button", { name: options.iconLabel }).click();
 	}
@@ -205,13 +206,25 @@ export async function gotoRoute(
 	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 }
 
-/** Open a vault's detail route and wait for its header to render. */
+/** Open a Vault through the app, preserving the process-owned Runtime and its live keys. */
 export async function openVault(page: Page, vaultId: string): Promise<void> {
-	await gotoRoute(
-		page,
-		`/vaults/${vaultId}`,
-		page.getByTestId("new-item-button"),
+	const target = vaultNavLink(page, vaultId);
+	if (!(await target.isVisible())) {
+		const vaults = page.locator('a[href="/vaults"]').first();
+		await expect(vaults).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		await vaults.click();
+	}
+	await expect(target).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await target.click();
+	await page.waitForURL((url) => url.pathname === `/vaults/${vaultId}`);
+	await expect(page.getByTestId("vault-detail-list")).toHaveAttribute(
+		"data-vault-id",
+		vaultId,
+		{ timeout: VAULT_READY_TIMEOUT_MS },
 	);
+	await expect(page.getByTestId("new-item-button")).toBeVisible({
+		timeout: VAULT_READY_TIMEOUT_MS,
+	});
 }
 
 /**
@@ -260,10 +273,14 @@ export async function createItem(
 
 /** Select an item in the list and wait for the detail pane to catch up. */
 export async function openItem(page: Page, title: string): Promise<void> {
-	await itemRow(page, title).click();
+	const target = itemRow(page, title);
+	await expect(target).toHaveAttribute("data-item-id", /.+/);
+	const itemId = await target.getAttribute("data-item-id");
+	if (!itemId) throw new Error("The target Item row lost its identity.");
+	await target.click();
 	await expect(page.getByTestId("item-detail-pane")).toHaveAttribute(
 		"data-item-id",
-		/.+/,
+		itemId,
 		{ timeout: VAULT_READY_TIMEOUT_MS },
 	);
 }

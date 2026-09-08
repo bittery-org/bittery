@@ -27,6 +27,7 @@ const validators = [
 	"persistence",
 	"platform-storage",
 	"runtime-protocol",
+	"recovery-control",
 	"transfer-control",
 ];
 
