@@ -55,12 +55,12 @@ IDs. Optimistic concurrency uses ETag and If-Match. Generic batching is removed.
 non-idempotent commands may use a documented `Idempotency-Key` contract, except operations
 returning one-time secrets.
 
-Queued item creation, trash and permanent deletion also persist idempotency outcomes. Although
-their HTTP methods are normally idempotent, replaying a lost success against version checks can
-otherwise wedge the outbound queue. A claim that outlives its five-minute execution lease is
-terminally marked indeterminate and is never executed automatically again. This fail-closed
-choice avoids duplicating a mutation that may have committed immediately before a server crash;
-operator recovery follows `docs/idempotency-recovery.md`.
+The original response-cache claim/lease protocol was superseded by retained semantic Operation
+outcomes in the [evolutionary Runtime contract](../../planning/evolutionary-rust-runtime/spec.md#server-operation-contract).
+Item, Share, Vault, Import, and Rotation writers commit their effect or terminal rejection together
+with audit, Sync, and the User-scoped outcome. Replay and lookup return that retained answer;
+transaction failures retain nothing. The separate account-deletion proof and one-time-secret
+header refusal remain in force. Ticket 29 removes the unused response-cache table and machinery.
 
 All collections are cursor-paginated and bounded by record count and serialized bytes.
 Encrypted item ciphertext is capped at 1 MiB. Bulk import is capped at 200 items and 16 MiB.

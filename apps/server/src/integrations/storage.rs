@@ -12,6 +12,14 @@ use url::Url;
 
 type HmacSha256 = Hmac<Sha256>;
 
+#[derive(Default)]
+struct PresignUploadBinding<'a> {
+    content_type: Option<&'a str>,
+    content_length: Option<i64>,
+    payload_sha256: Option<&'a str>,
+    checksum_sha256: Option<&'a str>,
+}
+
 const AWS_ALGORITHM: &str = "AWS4-HMAC-SHA256";
 const S3_SERVICE: &str = "s3";
 const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
@@ -32,8 +40,26 @@ pub trait ObjectStorage: Send + Sync {
         key: &str,
         content_type: &str,
         content_length: Option<i64>,
+        payload_sha256: Option<&str>,
         expires_in_seconds: Option<u64>,
     ) -> Result<PresignedUploadResult, StorageError>;
+    async fn presign_exact_upload(
+        &self,
+        key: &str,
+        content_type: &str,
+        content_length: i64,
+        payload_sha256: &str,
+        expires_in_seconds: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        self.presign_upload(
+            key,
+            content_type,
+            Some(content_length),
+            Some(payload_sha256),
+            expires_in_seconds,
+        )
+        .await
+    }
     async fn presign_download(
         &self,
         key: &str,
@@ -113,6 +139,15 @@ pub struct PresignedUploadResult {
     pub key: String,
     pub upload_url: String,
     pub public_url: Option<String>,
+    /// Headers whose exact values were included in the upload signature (excluding Host).
+    pub required_headers: Vec<PresignedUploadHeader>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresignedUploadHeader {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,6 +155,8 @@ pub struct PresignedUploadResult {
 pub struct StorageObjectHead {
     pub size: i64,
     pub content_type: Option<String>,
+    /// Provider-reported SHA-256 of the exact uploaded bytes, normalized to lowercase hex.
+    pub payload_sha256: Option<String>,
 }
 
 pub fn create_team_image_key(team_id: &str, file_name: &str) -> String {
@@ -141,6 +178,7 @@ async fn create_presigned_upload(
     key: &str,
     content_type: &str,
     content_length: Option<i64>,
+    payload_sha256: Option<&str>,
     expires_in_seconds: Option<u64>,
 ) -> Result<PresignedUploadResult, StorageError> {
     let config = &storage.config;
@@ -148,8 +186,12 @@ async fn create_presigned_upload(
         config,
         "PUT",
         key,
-        Some(content_type),
-        content_length,
+        PresignUploadBinding {
+            content_type: Some(content_type),
+            content_length,
+            payload_sha256,
+            checksum_sha256: None,
+        },
         Duration::from_secs(expires_in_seconds.unwrap_or(300)),
     )?;
 
@@ -157,12 +199,92 @@ async fn create_presigned_upload(
         key: key.to_string(),
         upload_url,
         public_url: storage.public_url(key),
+        required_headers: {
+            let mut headers = vec![PresignedUploadHeader {
+                name: "Content-Type".to_owned(),
+                value: content_type.to_owned(),
+            }];
+            if let Some(content_length) = content_length {
+                headers.push(PresignedUploadHeader {
+                    name: "Content-Length".to_owned(),
+                    value: content_length.to_string(),
+                });
+            }
+            if let Some(payload_sha256) = payload_sha256 {
+                headers.push(PresignedUploadHeader {
+                    name: "x-amz-content-sha256".to_owned(),
+                    value: payload_sha256.to_owned(),
+                });
+            }
+            headers
+        },
     })
+}
+
+async fn create_exact_presigned_upload(
+    storage: &S3CompatibleStorage,
+    key: &str,
+    content_type: &str,
+    content_length: i64,
+    payload_sha256: &str,
+    expires_in_seconds: Option<u64>,
+) -> Result<PresignedUploadResult, StorageError> {
+    let upload_url = presigned_url(
+        &storage.config,
+        "PUT",
+        key,
+        PresignUploadBinding {
+            content_type: Some(content_type),
+            content_length: Some(content_length),
+            payload_sha256: Some(payload_sha256),
+            checksum_sha256: Some(payload_sha256),
+        },
+        Duration::from_secs(expires_in_seconds.unwrap_or(300)),
+    )?;
+    Ok(PresignedUploadResult {
+        key: key.to_owned(),
+        upload_url,
+        public_url: storage.public_url(key),
+        required_headers: exact_upload_headers(content_type, content_length, payload_sha256)?,
+    })
+}
+
+fn exact_upload_headers(
+    content_type: &str,
+    content_length: i64,
+    payload_sha256: &str,
+) -> Result<Vec<PresignedUploadHeader>, StorageError> {
+    use base64::Engine as _;
+    let checksum = hex::decode(payload_sha256)
+        .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
+    if checksum.len() != 32 {
+        return Err(StorageError::InvalidConfig(
+            "exact upload SHA-256 must contain 32 bytes".to_owned(),
+        ));
+    }
+    Ok(vec![
+        PresignedUploadHeader {
+            name: "Content-Length".to_owned(),
+            value: content_length.to_string(),
+        },
+        PresignedUploadHeader {
+            name: "Content-Type".to_owned(),
+            value: content_type.to_owned(),
+        },
+        PresignedUploadHeader {
+            name: "x-amz-content-sha256".to_owned(),
+            value: payload_sha256.to_owned(),
+        },
+        PresignedUploadHeader {
+            name: "x-amz-checksum-sha256".to_owned(),
+            value: base64::engine::general_purpose::STANDARD.encode(checksum),
+        },
+    ])
 }
 
 async fn delete_object(storage: &S3CompatibleStorage, key: &str) -> Result<(), StorageError> {
     let config = &storage.config;
-    let response = signed_request(&storage.client, config, Method::DELETE, key)?
+    let response = signed_request(&storage.client, config, Method::DELETE, key, false)?
         .send()
         .await
         .map_err(|error| StorageError::DeleteObject(error.to_string()))?;
@@ -186,8 +308,7 @@ async fn create_presigned_download(
         config,
         "GET",
         key,
-        None,
-        None,
+        PresignUploadBinding::default(),
         Duration::from_secs(expires_in_seconds.unwrap_or(300)),
     )
 }
@@ -197,7 +318,7 @@ async fn head_object(
     key: &str,
 ) -> Result<Option<StorageObjectHead>, StorageError> {
     let config = &storage.config;
-    let response = signed_request(&storage.client, config, Method::HEAD, key)?
+    let response = signed_request(&storage.client, config, Method::HEAD, key, true)?
         .send()
         .await
         .map_err(|error| StorageError::HeadObject(error.to_string()))?;
@@ -223,7 +344,22 @@ async fn head_object(
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned);
 
-    Ok(Some(StorageObjectHead { size, content_type }))
+    let payload_sha256 = response
+        .headers()
+        .get("x-amz-checksum-sha256")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.decode(value).ok()
+        })
+        .filter(|value| value.len() == 32)
+        .map(hex::encode);
+
+    Ok(Some(StorageObjectHead {
+        size,
+        content_type,
+        payload_sha256,
+    }))
 }
 
 fn object_url(config: &S3StorageConfig, key: &str) -> Result<Url, StorageError> {
@@ -246,8 +382,7 @@ fn presigned_url(
     config: &S3StorageConfig,
     method: &str,
     key: &str,
-    content_type: Option<&str>,
-    content_length: Option<i64>,
+    binding: PresignUploadBinding<'_>,
     expires_in: Duration,
 ) -> Result<String, StorageError> {
     let mut url = object_url(config, key)?;
@@ -257,11 +392,31 @@ fn presigned_url(
     let scope = credential_scope(&date, &config.region);
 
     let mut headers = vec![("host".to_string(), host_header(&url)?)];
-    if let Some(content_type) = content_type {
+    if let Some(content_type) = binding.content_type {
         headers.push(("content-type".to_string(), content_type.to_string()));
     }
-    if let Some(content_length) = content_length {
+    if let Some(content_length) = binding.content_length {
         headers.push(("content-length".to_string(), content_length.to_string()));
+    }
+    if let Some(payload_sha256) = binding.payload_sha256 {
+        headers.push((
+            "x-amz-content-sha256".to_string(),
+            payload_sha256.to_string(),
+        ));
+    }
+    if let Some(checksum_sha256) = binding.checksum_sha256 {
+        use base64::Engine as _;
+        let checksum = hex::decode(checksum_sha256)
+            .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
+        if checksum.len() != 32 {
+            return Err(StorageError::InvalidConfig(
+                "exact upload SHA-256 must contain 32 bytes".to_owned(),
+            ));
+        }
+        headers.push((
+            "x-amz-checksum-sha256".to_owned(),
+            base64::engine::general_purpose::STANDARD.encode(checksum),
+        ));
     }
     headers.sort_by(|left, right| left.0.cmp(&right.0));
     let signed_headers = headers
@@ -290,7 +445,7 @@ fn presigned_url(
         &canonical_query,
         &headers,
         &signed_headers,
-        UNSIGNED_PAYLOAD,
+        binding.payload_sha256.unwrap_or(UNSIGNED_PAYLOAD),
     );
     let signature = signature(
         &config.secret_access_key,
@@ -309,6 +464,7 @@ fn signed_request(
     config: &S3StorageConfig,
     method: Method,
     key: &str,
+    checksum_mode: bool,
 ) -> Result<reqwest::RequestBuilder, StorageError> {
     let url = object_url(config, key)?;
     let now = chrono::Utc::now();
@@ -316,11 +472,15 @@ fn signed_request(
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let scope = credential_scope(&date, &config.region);
     let payload_hash = hex::encode(Sha256::digest([]));
-    let headers = vec![
+    let mut headers = vec![
         ("host".to_string(), host_header(&url)?),
         ("x-amz-content-sha256".to_string(), payload_hash.clone()),
         ("x-amz-date".to_string(), amz_date.clone()),
     ];
+    if checksum_mode {
+        headers.push(("x-amz-checksum-mode".to_owned(), "ENABLED".to_owned()));
+        headers.sort_by(|left, right| left.0.cmp(&right.0));
+    }
     let signed_headers = headers
         .iter()
         .map(|(name, _)| name.as_str())
@@ -345,12 +505,17 @@ fn signed_request(
         config.access_key_id,
     );
 
-    Ok(client
+    let request = client
         .request(method, url)
         .header(HOST, host_header(&object_url(config, key)?)?)
         .header("x-amz-content-sha256", payload_hash)
         .header("x-amz-date", amz_date)
-        .header("Authorization", authorization))
+        .header("Authorization", authorization);
+    Ok(if checksum_mode {
+        request.header("x-amz-checksum-mode", "ENABLED")
+    } else {
+        request
+    })
 }
 
 #[async_trait::async_trait]
@@ -360,9 +525,36 @@ impl ObjectStorage for S3CompatibleStorage {
         key: &str,
         content_type: &str,
         content_length: Option<i64>,
+        payload_sha256: Option<&str>,
         expires_in_seconds: Option<u64>,
     ) -> Result<PresignedUploadResult, StorageError> {
-        create_presigned_upload(self, key, content_type, content_length, expires_in_seconds).await
+        create_presigned_upload(
+            self,
+            key,
+            content_type,
+            content_length,
+            payload_sha256,
+            expires_in_seconds,
+        )
+        .await
+    }
+    async fn presign_exact_upload(
+        &self,
+        key: &str,
+        content_type: &str,
+        content_length: i64,
+        payload_sha256: &str,
+        expires_in_seconds: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        create_exact_presigned_upload(
+            self,
+            key,
+            content_type,
+            content_length,
+            payload_sha256,
+            expires_in_seconds,
+        )
+        .await
     }
     async fn presign_download(
         &self,
@@ -389,6 +581,7 @@ impl ObjectStorage for UnavailableObjectStorage {
         _key: &str,
         _content_type: &str,
         _content_length: Option<i64>,
+        _payload_sha256: Option<&str>,
         _expires_in_seconds: Option<u64>,
     ) -> Result<PresignedUploadResult, StorageError> {
         Err(StorageError::MissingConfig)
@@ -552,8 +745,9 @@ mod tests {
     };
 
     use super::{
-        create_team_image_key, create_vault_image_key, object_storage_from_config, ObjectStorage,
-        StorageError, UnavailableObjectStorage,
+        canonical_request, create_team_image_key, create_vault_image_key,
+        object_storage_from_config, ObjectStorage, StorageError, UnavailableObjectStorage,
+        UNSIGNED_PAYLOAD,
     };
     use crate::config::{S3Config, StorageConfig};
 
@@ -612,7 +806,13 @@ mod tests {
     #[tokio::test]
     async fn presigned_upload_uses_path_style_bucket_and_signed_content_type() {
         let result = storage("https://storage.example.invalid")
-            .presign_upload("vaults/user_123/avatar file.png", "image/png", None, None)
+            .presign_upload(
+                "vaults/user_123/avatar file.png",
+                "image/png",
+                None,
+                None,
+                None,
+            )
             .await
             .expect("presigned upload should be created");
         let url = Url::parse(&result.upload_url).expect("upload URL should parse");
@@ -637,6 +837,75 @@ mod tests {
             Some("content-type;host"),
         );
         assert!(params.iter().any(|(key, _)| key == "X-Amz-Signature"));
+    }
+
+    #[tokio::test]
+    async fn presigned_upload_binds_the_ciphertext_payload_sha256() {
+        let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let result = storage("https://storage.example.invalid")
+            .presign_upload(
+                "attachments/staging/ciphertext",
+                "application/octet-stream",
+                Some(128),
+                Some(digest),
+                Some(300),
+            )
+            .await
+            .expect("hash-bound presigned upload should be created");
+        let url = Url::parse(&result.upload_url).expect("upload URL should parse");
+        let signed_headers = url
+            .query_pairs()
+            .find(|(key, _)| key == "X-Amz-SignedHeaders")
+            .map(|(_, value)| value.into_owned());
+
+        assert_eq!(
+            signed_headers.as_deref(),
+            Some("content-length;content-type;host;x-amz-content-sha256")
+        );
+        let headers = vec![
+            ("content-length".to_string(), "128".to_string()),
+            (
+                "content-type".to_string(),
+                "application/octet-stream".to_string(),
+            ),
+            ("host".to_string(), "storage.example.invalid".to_string()),
+            ("x-amz-content-sha256".to_string(), digest.to_string()),
+        ];
+        let canonical = canonical_request(
+            "PUT",
+            "/bittery-test/attachments/staging/ciphertext",
+            "query",
+            &headers,
+            signed_headers.as_deref().unwrap(),
+            digest,
+        );
+        assert!(canonical.ends_with(digest));
+        assert!(!canonical.contains(UNSIGNED_PAYLOAD));
+    }
+
+    #[tokio::test]
+    async fn exact_presigned_upload_binds_provider_checksum_for_later_head_confirmation() {
+        let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let result = storage("https://storage.example.invalid")
+            .presign_exact_upload(
+                "vaults/user_123/vault_456/create/operation-aaaaaaaa",
+                "image/png",
+                2_097_152,
+                digest,
+                Some(300),
+            )
+            .await
+            .expect("exact upload should be created");
+        let url = Url::parse(&result.upload_url).expect("upload URL should parse");
+        let signed_headers = url
+            .query_pairs()
+            .find(|(key, _)| key == "X-Amz-SignedHeaders")
+            .map(|(_, value)| value.into_owned());
+
+        assert_eq!(
+            signed_headers.as_deref(),
+            Some("content-length;content-type;host;x-amz-checksum-sha256;x-amz-content-sha256")
+        );
     }
 
     #[tokio::test]
@@ -700,7 +969,7 @@ mod tests {
     #[tokio::test]
     async fn head_object_reads_metadata_from_storage_response() {
         let (endpoint, request) = spawn_storage_response(
-            "HTTP/1.1 200 OK\r\nContent-Length: 42\r\nContent-Type: image/png\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 42\r\nContent-Type: image/png\r\nx-amz-checksum-sha256: qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo=\r\n\r\n",
         );
 
         let head = storage(&endpoint)
@@ -711,12 +980,19 @@ mod tests {
 
         assert_eq!(head.size, 42);
         assert_eq!(head.content_type.as_deref(), Some("image/png"));
+        assert_eq!(
+            head.payload_sha256.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
 
         let request = request.join().expect("mock server should finish");
         assert!(request.starts_with("HEAD /bittery-test/vaults/user/avatar.png "));
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: aws4-hmac-sha256"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("x-amz-checksum-mode: enabled"));
     }
 
     #[tokio::test]

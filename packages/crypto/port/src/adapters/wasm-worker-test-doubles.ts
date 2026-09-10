@@ -1,15 +1,24 @@
 import type { KeyHandleLike } from "@bittery/crypto-wasm";
 import type { KeyRef } from "../crypto-port";
+import type { CryptoPortErrorCode } from "../errors";
 import { createInMemoryCryptoPort } from "../testing/in-memory-crypto";
 import type { UniffiBackend } from "../uniffi-bindings";
 import type { CryptoWorkerScope } from "../wasm.worker";
 import { serveCryptoPort } from "../wasm.worker";
 import type {
 	CryptoPortCall,
-	CryptoPortReply,
 	CryptoWorkerHandle,
 	WasmWorkerDeps,
 } from "./wasm-worker";
+
+type CryptoReplyObservation =
+	| { method: CryptoPortCall["method"]; ok: true; value: unknown }
+	| {
+			method: CryptoPortCall["method"];
+			ok: false;
+			code: CryptoPortErrorCode;
+			message: string;
+	  };
 
 class KeyHandleDouble implements KeyHandleLike {
 	constructor(readonly ref: KeyRef) {}
@@ -110,12 +119,15 @@ function createCryptoWasmDouble(): CryptoWasmDouble {
 
 export class WorkerDouble implements CryptoWorkerHandle {
 	onmessage: ((event: MessageEvent) => void) | null = null;
+	onmessageerror: ((event: MessageEvent) => void) | null = null;
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	readonly calls: CryptoPortCall[] = [];
-	readonly replies: CryptoPortReply[] = [];
+	readonly replies: CryptoReplyObservation[] = [];
 	holdReplies = false;
+	terminateCalls = 0;
 
-	private readonly held: CryptoPortReply[] = [];
+	private readonly held: unknown[] = [];
+	private readonly cryptoCallsByRpcId = new Map<number, CryptoPortCall>();
 	private listener: ((event: { data: unknown }) => void) | null = null;
 
 	constructor(loadBackend: () => Promise<UniffiBackend<KeyHandleLike>>) {
@@ -123,18 +135,33 @@ export class WorkerDouble implements CryptoWorkerHandle {
 			addEventListener: (_type, listener) => {
 				this.listener = listener;
 			},
-			postMessage: (message) => {
-				this.answer(structuredClone(message) as CryptoPortReply);
-			},
+			postMessage: (message) => this.answer(structuredClone(message)),
 		};
 		serveCryptoPort(scope, loadBackend);
 	}
 
 	postMessage(message: unknown): void {
-		const call = structuredClone(message) as CryptoPortCall;
-		this.calls.push(call);
+		const envelope = structuredClone(message) as {
+			type?: string;
+			channel?: string;
+			id?: number;
+			payload?: unknown;
+		};
+		if (
+			envelope.type === "request" &&
+			envelope.channel === "crypto" &&
+			typeof envelope.id === "number"
+		) {
+			const call = envelope.payload as CryptoPortCall;
+			this.calls.push(call);
+			this.cryptoCallsByRpcId.set(envelope.id, call);
+		}
 		const listener = this.listener;
-		queueMicrotask(() => listener?.({ data: call }));
+		queueMicrotask(() => listener?.({ data: envelope }));
+	}
+
+	terminate(): void {
+		this.terminateCalls += 1;
 	}
 
 	releaseHeldReplies(order: "as-received" | "reverse" = "as-received"): void {
@@ -154,17 +181,40 @@ export class WorkerDouble implements CryptoWorkerHandle {
 		return this.calls.filter((call) => call.method === method);
 	}
 
-	private answer(reply: CryptoPortReply): void {
-		this.replies.push(reply);
+	private answer(message: unknown): void {
+		const envelope = message as {
+			type?: string;
+			id?: number;
+			ok?: boolean;
+			value?: unknown;
+			code?: CryptoPortErrorCode;
+			message?: string;
+		};
+		if (envelope.type === "response" && typeof envelope.id === "number") {
+			const call = this.cryptoCallsByRpcId.get(envelope.id);
+			if (call !== undefined) {
+				this.replies.push(
+					envelope.ok
+						? { method: call.method, ok: true, value: envelope.value }
+						: {
+								method: call.method,
+								ok: false,
+								code: envelope.code ?? "backend-failure",
+								message: envelope.message ?? "The crypto worker failed.",
+							},
+				);
+				this.cryptoCallsByRpcId.delete(envelope.id);
+			}
+		}
 		if (this.holdReplies) {
-			this.held.push(reply);
+			this.held.push(message);
 			return;
 		}
-		this.deliver(reply);
+		this.deliver(message);
 	}
 
-	private deliver(reply: CryptoPortReply): void {
-		this.onmessage?.(new MessageEvent("message", { data: reply }));
+	private deliver(message: unknown): void {
+		this.onmessage?.(new MessageEvent("message", { data: message }));
 	}
 }
 

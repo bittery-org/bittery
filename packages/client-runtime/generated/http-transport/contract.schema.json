@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HttpTransportContract",
+  "type": "object",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/HttpRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/HttpResponse"
+    },
+    "stream_command": {
+      "$ref": "#/$defs/HttpStreamCommand"
+    },
+    "stream_response": {
+      "$ref": "#/$defs/HttpStreamResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response",
+    "stream_command",
+    "stream_response"
+  ],
+  "$defs": {
+    "HttpHeader": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "HttpMethod": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ]
+    },
+    "HttpRequest": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        },
+        "dispatchId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HttpHeader"
+          }
+        },
+        "maxResponseBytes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "method": {
+          "$ref": "#/$defs/HttpMethod"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "dispatchId",
+        "method",
+        "url",
+        "headers",
+        "body",
+        "maxResponseBytes"
+      ]
+    },
+    "HttpResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0
+              }
+            },
+            "headers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HttpHeader"
+              }
+            },
+            "status": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 599,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "completed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "status",
+            "headers",
+            "body"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "networkFailure"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "responseTooLarge"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancelled"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "HttpStreamCommand": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/HttpRequest"
+            },
+            "type": {
+              "type": "string",
+              "const": "openStream"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "request"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dispatchId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "readStream"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "dispatchId"
+          ]
+        }
+      ]
+    },
+    "HttpStreamResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "headers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HttpHeader"
+              }
+            },
+            "status": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 599,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "opened"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "status",
+            "headers"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "bytes": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0
+              },
+              "minItems": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "chunk"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "bytes"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ended"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "networkFailure"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "responseTooLarge"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancelled"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    }
+  },
+  "$id": "urn:bittery:client-runtime:http-transport"
+}

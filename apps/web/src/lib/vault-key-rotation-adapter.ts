@@ -1,7 +1,9 @@
 import {
 	type ApiClient,
 	ApiError,
+	type ApiResult,
 	isApiTransportError,
+	type RotationOperationOutcome,
 } from "@bittery/api-contract";
 import type {
 	RotationIntent,
@@ -38,6 +40,18 @@ export type WebRotationIntent =
 	| { kind: "team-member-removal"; teamId: string; userId: string }
 	| { kind: "team-leave"; teamId: string };
 
+type RotationRejection = Extract<
+	RotationOperationOutcome["result"],
+	{ status: "rejected" }
+>;
+
+export class RotationOperationRejectedError extends Error {
+	constructor(readonly result: RotationRejection) {
+		super("Key rotation could not be completed.");
+		this.name = "RotationOperationRejectedError";
+	}
+}
+
 export async function executeWithIdempotentReplay<T>(
 	request: (idempotencyKey: string) => Promise<T>,
 	idempotencyKey: string = crypto.randomUUID(),
@@ -73,7 +87,11 @@ export function createWebRotationPlanClient(
 	return {
 		async start(intent, signal) {
 			const input = webIntent(intent);
-			const result = await executeWithIdempotentReplay((idempotencyKey) => {
+			const result = await executeWithIdempotentReplay<
+				ApiResult<
+					Extract<RotationOperationOutcome, { kind: `create_${string}` }>
+				>
+			>((idempotencyKey) => {
 				const write = { idempotencyKey };
 				return input.kind === "vault-member-removal"
 					? api.vaults.members.startRemovalRotation(
@@ -91,7 +109,9 @@ export function createWebRotationPlanClient(
 							)
 						: api.teams.startLeaveRotation(input.teamId, write, signal);
 			});
-			return result.data.plans.map((plan) => ({
+			if (result.data.result.status === "rejected")
+				throw new RotationOperationRejectedError(result.data.result);
+			return result.data.result.plans.map((plan) => ({
 				planId: plan.id,
 				vaultId: plan.vaultId,
 				expectedKeyVersion: plan.expectedKeyVersion,
@@ -123,7 +143,11 @@ export function createWebRotationPlanClient(
 		async finalize({ intent, plans }, signal) {
 			const input = webIntent(intent);
 			const body = { planIds: plans.map(({ planId }) => planId) };
-			const result = await executeWithIdempotentReplay((idempotencyKey) => {
+			const result = await executeWithIdempotentReplay<
+				ApiResult<
+					Extract<RotationOperationOutcome, { kind: `finalize_${string}` }>
+				>
+			>((idempotencyKey) => {
 				const write = { idempotencyKey };
 				return input.kind === "vault-member-removal"
 					? api.vaults.members.finalizeRemovalRotation(
@@ -148,10 +172,12 @@ export function createWebRotationPlanClient(
 								signal,
 							);
 			});
+			const outcome = result.data.result;
+			if (outcome.status === "rejected")
+				throw new RotationOperationRejectedError(outcome);
 			const rotationId =
-				result.data.rotations[0]?.rotationId ??
-				result.data.personalTeamId ??
-				undefined;
+				outcome.rotations[0]?.rotationId ??
+				("personalTeamId" in outcome ? outcome.personalTeamId : undefined);
 			if (!rotationId)
 				throw new Error("Key rotation finalized without a rotation outcome.");
 			return { rotationId };

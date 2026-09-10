@@ -2,31 +2,32 @@
 
 use std::collections::HashSet;
 
+use super::failure::RotationFailure;
+use crate::db::enums::OperationRejectionCode as Code;
 use serde::Serialize;
 use serde_json::json;
-use sqlx::{query, query_as, query_scalar, PgPool};
+#[cfg(test)]
+use sqlx::PgPool;
+use sqlx::{query, query_as, query_scalar, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
     config::DeploymentMode,
     db::enums::{BillingPlan, BillingStatus, KeyRotationReason, TeamRole, TeamType},
-    domains::billing::{entitlements::team_management_enabled, sync_team_seats_best_effort},
-    error::AppError,
-    integrations::stripe::BillingGateway,
-    shared::transaction::database_error,
+    domains::billing::entitlements::team_management_enabled,
+    shared::transaction::{
+        acquire_team_authority_lock, acquire_user_authority_lock, database_error,
+    },
 };
 
 use super::plans::{
-    self as vault_key_rotation, CreateRotationPlanInput, FinalizeError, RotationPlanSummary,
-    RotationResult,
+    self as vault_key_rotation, CreateRotationPlanInput, RotationPlanSummary, RotationResult,
 };
 
 const REASON: &str = "member_removed";
-const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
-    "Team management is only available on Family or Team plans with active billing.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Intent {
+pub(crate) enum Intent {
     Voluntary,
     Administrative,
 }
@@ -68,26 +69,28 @@ fn authorize(
     target: TeamRole,
     same_user: bool,
     team_type: TeamType,
-) -> Result<(), AppError> {
+) -> Result<(), RotationFailure> {
     if team_type == TeamType::Personal {
-        return Err(AppError::bad_request("You cannot leave a personal team."));
+        return Err(RotationFailure::rejected(
+            Code::PersonalTeamDepartureForbidden,
+        ));
     }
     match intent {
-        Intent::Voluntary if !same_user => Err(AppError::bad_request(
-            "Voluntary departure must target the current Member",
+        Intent::Voluntary if !same_user => Err(RotationFailure::Infrastructure(
+            crate::error::AppError::internal("Invalid voluntary departure target"),
         )),
-        Intent::Voluntary if target == TeamRole::Owner => Err(AppError::bad_request(
-            "The team owner cannot leave. Transfer ownership first.",
-        )),
+        Intent::Voluntary if target == TeamRole::Owner => {
+            Err(RotationFailure::rejected(Code::TeamOwnerLeaveForbidden))
+        }
         Intent::Voluntary => Ok(()),
-        Intent::Administrative if same_user => Err(AppError::bad_request(
-            "You cannot remove yourself from the team",
-        )),
+        Intent::Administrative if same_user => {
+            Err(RotationFailure::rejected(Code::SelfRemovalForbidden))
+        }
         Intent::Administrative if !actor.can_manage() => {
-            Err(AppError::forbidden("Insufficient permissions"))
+            Err(RotationFailure::rejected(Code::TeamManagementDenied))
         }
         Intent::Administrative if target == TeamRole::Owner => {
-            Err(AppError::forbidden("The team owner cannot be removed"))
+            Err(RotationFailure::rejected(Code::TeamOwnerProtected))
         }
         Intent::Administrative => Ok(()),
     }
@@ -98,7 +101,7 @@ fn authorize_entitlement(
     intent: Intent,
     billing_plan: BillingPlan,
     billing_status: BillingStatus,
-) -> Result<(), AppError> {
+) -> Result<(), RotationFailure> {
     if intent == Intent::Voluntary
         || team_management_enabled(
             deployment_mode.as_str(),
@@ -108,18 +111,20 @@ fn authorize_entitlement(
     {
         Ok(())
     } else {
-        Err(AppError::forbidden(TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE))
+        Err(RotationFailure::rejected(
+            Code::TeamManagementEntitlementDenied,
+        ))
     }
 }
 
-async fn create_plans(
-    pool: &PgPool,
+pub(crate) async fn create_plans_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
     deployment_mode: DeploymentMode,
     team_id: &str,
     actor_id: &str,
     target_id: &str,
     intent: Intent,
-) -> Result<DeparturePlanSet, AppError> {
+) -> Result<DeparturePlanSet, RotationFailure> {
     let (actor_role, target_role, team_type, billing_plan, billing_status): (
         TeamRole,
         TeamRole,
@@ -128,8 +133,8 @@ async fn create_plans(
         BillingStatus,
     ) = query_as(
         "SELECT actor.role,target.role,t.type,t.billing_plan,t.billing_status FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3",
-    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(pool).await.map_err(|error| database_error(error, "Member departure operation failed"))?
-      .ok_or_else(|| AppError::not_found("Team member not found"))?;
+    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?
+      .ok_or_else(|| RotationFailure::rejected(Code::TeamMemberNotFound))?;
     authorize(
         intent,
         actor_role,
@@ -140,20 +145,18 @@ async fn create_plans(
     authorize_entitlement(deployment_mode, intent, billing_plan, billing_status)?;
     if intent == Intent::Administrative {
         let has_unmanaged_vault: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM vault v JOIN vault_key target_key ON target_key.vault_id=v.id AND target_key.user_id=$2 LEFT JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$3 WHERE v.team_id=$1 AND (actor_key.role IS NULL OR actor_key.role NOT IN ('owner','admin')))")
-            .bind(team_id).bind(target_id).bind(actor_id).fetch_one(pool).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
+            .bind(team_id).bind(target_id).bind(actor_id).fetch_one(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
         if has_unmanaged_vault {
-            return Err(AppError::forbidden(
-                "You cannot remove this member from only part of their team vault access.",
-            ));
+            return Err(RotationFailure::rejected(Code::VaultManagementIncomplete));
         }
     }
     let vault_ids: Vec<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key vk ON vk.vault_id=v.id WHERE v.team_id=$1 AND vk.user_id=$2 ORDER BY v.id")
-        .bind(team_id).bind(target_id).fetch_all(pool).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
+        .bind(team_id).bind(target_id).fetch_all(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
     let mut plans = Vec::with_capacity(vault_ids.len());
     for vault_id in vault_ids {
         plans.push(
-            vault_key_rotation::create_plan(
-                pool,
+            vault_key_rotation::create_plan_in_transaction(
+                tx,
                 CreateRotationPlanInput {
                     vault_id,
                     initiator_user_id: actor_id.to_owned(),
@@ -168,23 +171,181 @@ async fn create_plans(
     Ok(DeparturePlanSet { plans })
 }
 
-pub(crate) async fn create_voluntary_plans(
+fn exact_plan_set(
+    expected: &HashSet<String>,
+    supplied: &[(String, String)],
+) -> Result<(), RotationFailure> {
+    let actual: HashSet<_> = supplied
+        .iter()
+        .map(|(_, vault_id)| vault_id.clone())
+        .collect();
+    if actual.len() != supplied.len() || &actual != expected {
+        return Err(RotationFailure::rejected(Code::RotationPlanSetMismatch));
+    }
+    Ok(())
+}
+
+pub(crate) async fn finalize_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    deployment_mode: DeploymentMode,
+    team_id: &str,
+    actor_id: &str,
+    target_id: &str,
+    intent: Intent,
+    plan_ids: &[String],
+) -> Result<(DepartureResult, BillingPlan), RotationFailure> {
+    let mut authority_user_ids = [actor_id, target_id];
+    authority_user_ids.sort_unstable();
+    for user_id in authority_user_ids {
+        acquire_user_authority_lock(
+            tx,
+            user_id,
+            "Failed to lock Team Member departure User authority",
+        )
+        .await?;
+    }
+    acquire_team_authority_lock(
+        &mut **tx,
+        team_id,
+        "Failed to lock Team Member departure authority",
+    )
+    .await?;
+    let (actor_role, target_role, team_type, target_name, billing_plan, billing_status): (
+        TeamRole,
+        TeamRole,
+        TeamType,
+        String,
+        BillingPlan,
+        BillingStatus,
+    ) = query_as(
+        "SELECT actor.role,target.role,t.type,target.name,t.billing_plan,t.billing_status FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3 FOR UPDATE OF actor,target,t",
+    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?
+      .ok_or_else(|| RotationFailure::rejected(Code::TeamMembershipChanged))?;
+    authorize(
+        intent,
+        actor_role,
+        target_role,
+        actor_id == target_id,
+        team_type,
+    )?;
+    authorize_entitlement(deployment_mode, intent, billing_plan, billing_status)?;
+    let expected: HashSet<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key vk ON vk.vault_id=v.id WHERE v.team_id=$1 AND vk.user_id=$2")
+        .bind(team_id).bind(target_id).fetch_all(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?.into_iter().collect();
+    if intent == Intent::Administrative {
+        let managed: HashSet<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key target_key ON target_key.vault_id=v.id AND target_key.user_id=$2 JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$3 WHERE v.team_id=$1 AND actor_key.role IN ('owner','admin')")
+            .bind(team_id).bind(target_id).bind(actor_id).fetch_all(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?.into_iter().collect();
+        if managed != expected {
+            return Err(RotationFailure::rejected(Code::VaultManagementIncomplete));
+        }
+    }
+    let mut policies = Vec::with_capacity(plan_ids.len());
+    for plan_id in plan_ids {
+        policies.push((
+            plan_id,
+            vault_key_rotation::lock_plan_policy(tx, plan_id)
+                .await
+                .map_err(|error| RotationFailure::finalize(plan_id, error))?,
+        ));
+    }
+    if policies
+        .iter()
+        .any(|(_, policy)| policy.initiator_user_id != actor_id)
+    {
+        return Err(RotationFailure::rejected(Code::RotationPlanUnavailable));
+    }
+    let supplied: Vec<_> = policies
+        .iter()
+        .map(|(id, p)| ((*id).clone(), p.vault_id.clone()))
+        .collect();
+    exact_plan_set(&expected, &supplied)?;
+    let context = intent.context(team_id);
+    // The immutable policies above already proved every initiator is this actor; foreign
+    // plans were classified as unavailable before these intent/target mismatch checks.
+    if policies.iter().any(|(_, p)| {
+        p.excluded_user_id.as_deref() != Some(target_id)
+            || p.reason != REASON
+            || p.authorization_context != context
+    }) {
+        return Err(RotationFailure::rejected(Code::RotationPlanMismatch));
+    }
+    let mut rotations = Vec::with_capacity(plan_ids.len());
+    for plan_id in plan_ids {
+        rotations.push(
+            vault_key_rotation::finalize_locked_plan(tx, plan_id, actor_id)
+                .await
+                .map_err(|error| RotationFailure::finalize(plan_id, error))?,
+        );
+    }
+
+    let session_ids: Vec<String> =
+        query_scalar("SELECT id FROM session WHERE user_id=$1 FOR UPDATE")
+            .bind(target_id)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(|error| database_error(error, "Member departure operation failed"))?;
+    for session_id in &session_ids {
+        query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ($1,$2,'session_revoked','session',$3,$4)")
+            .bind(format!("audit_{}", Uuid::new_v4())).bind(target_id).bind(session_id)
+            .bind(json!({"reason": if intent == Intent::Voluntary { "team_left" } else { "team_member_removed" }}).to_string())
+            .execute(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
+    }
+    query("DELETE FROM session WHERE user_id=$1")
+        .bind(target_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| database_error(error, "Member departure operation failed"))?;
+    let personal_team_id = format!("team_{}", Uuid::new_v4());
+    query("INSERT INTO team (id,name,owner_id,type,member_limit,billing_plan,billing_status) VALUES ($1,$2,$3,'personal',1,'free','none')")
+        .bind(&personal_team_id).bind(format!("{}'s Team", target_name)).bind(target_id).execute(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
+    query("UPDATE \"user\" SET team_id=$1,role='owner' WHERE id=$2")
+        .bind(&personal_team_id)
+        .bind(target_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| database_error(error, "Member departure operation failed"))?;
+    query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ($1,$2,'team_member_removed','user',$3,$4)")
+        .bind(format!("audit_{}", Uuid::new_v4())).bind(actor_id).bind(target_id)
+        .bind(json!({"teamId":team_id,"reason":intent.audit_reason(),"vaultsRotated":rotations.len()}).to_string())
+        .execute(&mut **tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
+    Ok((
+        DepartureResult {
+            personal_team_id,
+            rotations,
+        },
+        billing_plan,
+    ))
+}
+
+#[cfg(test)]
+use crate::{error::AppError, integrations::stripe::BillingGateway};
+#[cfg(test)]
+async fn create_plans(
     pool: &PgPool,
     deployment_mode: DeploymentMode,
     team_id: &str,
-    user_id: &str,
+    actor_id: &str,
+    target_id: &str,
+    intent: Intent,
 ) -> Result<DeparturePlanSet, AppError> {
-    create_plans(
-        pool,
+    let mut tx = crate::db::events::begin_serializable_sync_event_transaction(pool)
+        .await
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    let result = create_plans_in_transaction(
+        &mut tx,
         deployment_mode,
         team_id,
-        user_id,
-        user_id,
-        Intent::Voluntary,
+        actor_id,
+        target_id,
+        intent,
     )
-    .await
+    .await?;
+    tx.commit()
+        .await
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    Ok(result)
 }
 
+#[cfg(test)]
 pub(crate) async fn create_administrative_plans(
     pool: &PgPool,
     deployment_mode: DeploymentMode,
@@ -202,28 +363,7 @@ pub(crate) async fn create_administrative_plans(
     )
     .await
 }
-
-fn exact_plan_set(
-    expected: &HashSet<String>,
-    supplied: &[(String, String)],
-) -> Result<(), AppError> {
-    let actual: HashSet<_> = supplied
-        .iter()
-        .map(|(_, vault_id)| vault_id.clone())
-        .collect();
-    if actual.len() != supplied.len() {
-        return Err(AppError::bad_request(
-            "Duplicate Vault Rotation plans are not allowed.",
-        ));
-    }
-    if &actual != expected {
-        return Err(AppError::bad_request(
-            "Rotation plans must exactly cover every affected Vault.",
-        ));
-    }
-    Ok(())
-}
-
+#[cfg(test)]
 async fn finalize(
     pool: &PgPool,
     deployment_mode: DeploymentMode,
@@ -232,153 +372,54 @@ async fn finalize(
     target_id: &str,
     intent: Intent,
     plan_ids: &[String],
-) -> Result<(DepartureResult, BillingPlan), AppError> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Member departure operation failed"))?;
-    query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| database_error(error, "Member departure operation failed"))?;
-    let member: (
-        TeamRole,
-        TeamRole,
-        TeamType,
-        String,
-        BillingPlan,
-        BillingStatus,
-    ) = query_as(
-        "SELECT actor.role,target.role,t.type,target.name,t.billing_plan,t.billing_status FROM \"user\" actor JOIN \"user\" target ON target.team_id=actor.team_id JOIN team t ON t.id=actor.team_id WHERE actor.id=$1 AND target.id=$2 AND actor.team_id=$3 FOR UPDATE OF actor,target,t",
-    ).bind(actor_id).bind(target_id).bind(team_id).fetch_optional(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?
-      .ok_or_else(|| AppError::conflict("Team membership changed while departure was prepared"))?;
-    authorize(intent, member.0, member.1, actor_id == target_id, member.2)?;
-    authorize_entitlement(deployment_mode, intent, member.4, member.5)?;
-    let expected: HashSet<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key vk ON vk.vault_id=v.id WHERE v.team_id=$1 AND vk.user_id=$2")
-        .bind(team_id).bind(target_id).fetch_all(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?.into_iter().collect();
-    if intent == Intent::Administrative {
-        let managed: HashSet<String> = query_scalar("SELECT v.id FROM vault v JOIN vault_key target_key ON target_key.vault_id=v.id AND target_key.user_id=$2 JOIN vault_key actor_key ON actor_key.vault_id=v.id AND actor_key.user_id=$3 WHERE v.team_id=$1 AND actor_key.role IN ('owner','admin')")
-            .bind(team_id).bind(target_id).bind(actor_id).fetch_all(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?.into_iter().collect();
-        if managed != expected {
-            return Err(AppError::forbidden(
-                "You cannot remove this member from only part of their team vault access.",
-            ));
-        }
-    }
-    let mut policies = Vec::with_capacity(plan_ids.len());
-    for plan_id in plan_ids {
-        policies.push((
-            plan_id,
-            vault_key_rotation::lock_plan_policy(&mut tx, plan_id)
-                .await
-                .map_err(finalize_error)?,
-        ));
-    }
-    let supplied: Vec<_> = policies
-        .iter()
-        .map(|(id, p)| ((*id).clone(), p.vault_id.clone()))
-        .collect();
-    exact_plan_set(&expected, &supplied)?;
-    let context = intent.context(team_id);
-    if policies.iter().any(|(_, p)| {
-        p.initiator_user_id != actor_id
-            || p.excluded_user_id.as_deref() != Some(target_id)
-            || p.reason != REASON
-            || p.authorization_context != context
-    }) {
-        return Err(AppError::bad_request(
-            "A Rotation plan does not match this Member departure",
-        ));
-    }
-    let mut rotations = Vec::with_capacity(plan_ids.len());
-    for plan_id in plan_ids {
-        match vault_key_rotation::finalize_locked_plan(&mut tx, plan_id, actor_id).await {
-            Ok(rotation) => rotations.push(rotation),
-            Err(FinalizeError::Stale(reason)) => {
-                let stale_plan_id = plan_id.clone();
-                tx.rollback()
-                    .await
-                    .map_err(|error| database_error(error, "Member departure operation failed"))?;
-                vault_key_rotation::record_stale(pool, &stale_plan_id, reason).await?;
-                return Err(finalize_error(FinalizeError::Stale(reason)));
-            }
-            Err(error) => return Err(finalize_error(error)),
-        }
-    }
-
-    let session_ids: Vec<String> =
-        query_scalar("SELECT id FROM session WHERE user_id=$1 FOR UPDATE")
-            .bind(target_id)
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(|error| database_error(error, "Member departure operation failed"))?;
-    for session_id in &session_ids {
-        query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ($1,$2,'session_revoked','session',$3,$4)")
-            .bind(format!("audit_{}", Uuid::new_v4())).bind(target_id).bind(session_id)
-            .bind(json!({"reason": if intent == Intent::Voluntary { "team_left" } else { "team_member_removed" }}).to_string())
-            .execute(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
-    }
-    query("DELETE FROM session WHERE user_id=$1")
-        .bind(target_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| database_error(error, "Member departure operation failed"))?;
-    let personal_team_id = format!("team_{}", Uuid::new_v4());
-    query("INSERT INTO team (id,name,owner_id,type,member_limit,billing_plan,billing_status) VALUES ($1,$2,$3,'personal',1,'free','none')")
-        .bind(&personal_team_id).bind(format!("{}'s Team", member.3)).bind(target_id).execute(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
-    query("UPDATE \"user\" SET team_id=$1,role='owner' WHERE id=$2")
-        .bind(&personal_team_id)
-        .bind(target_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| database_error(error, "Member departure operation failed"))?;
-    query("INSERT INTO audit_log (id,user_id,action,entity_type,entity_id,metadata) VALUES ($1,$2,'team_member_removed','user',$3,$4)")
-        .bind(format!("audit_{}", Uuid::new_v4())).bind(actor_id).bind(target_id)
-        .bind(json!({"teamId":team_id,"reason":intent.audit_reason(),"vaultsRotated":rotations.len()}).to_string())
-        .execute(&mut *tx).await.map_err(|error| database_error(error, "Member departure operation failed"))?;
-    tx.commit()
-        .await
-        .map_err(|error| database_error(error, "Member departure operation failed"))?;
-    Ok((
-        DepartureResult {
-            personal_team_id,
-            rotations,
-        },
-        member.4,
-    ))
-}
-
-pub(crate) async fn finalize_voluntary(
-    pool: &PgPool,
-    billing_gateway: Option<&dyn BillingGateway>,
-    deployment_mode: DeploymentMode,
-    team_id: &str,
-    user_id: &str,
-    plan_ids: &[String],
 ) -> Result<DepartureResult, AppError> {
-    let (result, billing) = finalize(
-        pool,
+    let mut tx = crate::db::events::begin_serializable_sync_event_transaction(pool)
+        .await
+        .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+    match finalize_in_transaction(
+        &mut tx,
         deployment_mode,
         team_id,
-        user_id,
-        user_id,
-        Intent::Voluntary,
+        actor_id,
+        target_id,
+        intent,
         plan_ids,
     )
-    .await?;
-    sync_team_seats_best_effort(pool, billing_gateway, team_id, billing).await;
-    Ok(result)
+    .await
+    {
+        Ok((result, _)) => {
+            tx.commit()
+                .await
+                .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+            Ok(result)
+        }
+        Err(error) => {
+            tx.rollback()
+                .await
+                .map_err(|error| database_error(error, "Rotation test transaction failed"))?;
+            if let RotationFailure::Rejected {
+                stale: Some((id, reason)),
+                ..
+            } = &error
+            {
+                vault_key_rotation::record_stale(pool, id, *reason).await?;
+            }
+            Err(error.into())
+        }
+    }
 }
+
+#[cfg(test)]
 pub(crate) async fn finalize_administrative(
     pool: &PgPool,
-    billing_gateway: Option<&dyn BillingGateway>,
+    _billing: Option<&dyn BillingGateway>,
     deployment_mode: DeploymentMode,
     team_id: &str,
     actor_id: &str,
     target_id: &str,
     plan_ids: &[String],
 ) -> Result<DepartureResult, AppError> {
-    let (result, billing) = finalize(
+    finalize(
         pool,
         deployment_mode,
         team_id,
@@ -387,24 +428,7 @@ pub(crate) async fn finalize_administrative(
         Intent::Administrative,
         plan_ids,
     )
-    .await?;
-    sync_team_seats_best_effort(pool, billing_gateway, team_id, billing).await;
-    Ok(result)
-}
-
-fn finalize_error(error: FinalizeError) -> AppError {
-    match error {
-        FinalizeError::Stale(reason) => AppError::rotation_stale(reason),
-        FinalizeError::Incomplete => AppError::conflict("Rotation plan is incomplete"),
-        FinalizeError::InvalidState => AppError::conflict("Rotation plan is no longer active"),
-        FinalizeError::RetryableConflict => AppError::retryable_conflict(
-            "A concurrent update interrupted the departure. Retry the request.",
-        ),
-        FinalizeError::Database(message) => {
-            tracing::error!(%message, "Member departure rotation failed");
-            AppError::internal("Member departure operation failed")
-        }
-    }
+    .await
 }
 
 #[cfg(test)]

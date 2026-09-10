@@ -31,6 +31,7 @@ export interface SessionRefreshingApiClientOptions {
 	getClientId: () => Promise<string>;
 	clientPlatform: ApiClientPlatform;
 	clientVersion: string;
+	onUnauthorized?: (originAccountId: string | null) => void | Promise<void>;
 	supportedApiMajors?: readonly number[];
 	thresholdRatio?: number;
 	fetch?: ApiFetch;
@@ -252,7 +253,7 @@ export function createSessionRefreshingApiClient(
 			headers.delete("Authorization");
 		}
 
-		const response = await fetchImpl(
+		let response = await fetchImpl(
 			rebuildRequest(request, routedUrl, headers, body),
 		);
 		if (snapshot) {
@@ -275,11 +276,14 @@ export function createSessionRefreshingApiClient(
 				if (refreshedToken && refreshedToken !== token) {
 					const retryHeaders = new Headers(headers);
 					retryHeaders.set("Authorization", `Bearer ${refreshedToken}`);
-					return fetchImpl(
+					response = await fetchImpl(
 						rebuildRequest(request, routedUrl, retryHeaders, body),
 					);
 				}
 			}
+		}
+		if (response.status === 401) {
+			await options.onUnauthorized?.(snapshot?.accountId ?? null);
 		}
 		return response;
 	}

@@ -1,0 +1,2 @@
+const { useRestoreItem: restore } = require("@bittery/core/hooks");
+void restore;

@@ -2,21 +2,20 @@
  * Mobile Platform Provider
  *
  * Configures the PlatformProvider for the mobile app with:
- * - `AccountStore` + `ItemCache` over the two React Native ports
- * - Expo CryptoPort and VaultCrypto over the native FFI module
- * - Real-time sync using WebSocket connection to server
+ * - Tauri storage adapter and the shared Tauri CryptoPort
+ * - VaultCrypto over that same port and storage
+ * - Sync context from MobileSyncProvider
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
 import { useSyncCapability } from "@bittery/sync";
-import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useMobileAccountRuntime } from "../contexts/account-context";
-import { useMobileSync } from "../hooks/use-mobile-sync";
-import { crypto } from "../lib/crypto";
-import { lifecycleDeps } from "../services/lifecycle";
-import { itemCache, storage } from "../services/storage";
-import { vaultCrypto } from "../services/vault-runtime";
+import { useMobileAccountRuntime } from "@/contexts/account-context";
+import { crypto } from "@/lib/crypto";
+import { lifecycleDeps } from "@/lib/lifecycle";
+import { itemCache, storage } from "@/lib/storage";
+import { vaultCrypto } from "@/lib/vault-runtime";
+import { useSyncContext } from "./sync-provider";
 
 /**
  * Props for MobilePlatformProvider
@@ -29,21 +28,19 @@ interface MobilePlatformProviderProps {
  * Mobile-specific PlatformProvider wrapper
  *
  * Provides storage, crypto, and sync services to the shared hooks.
+ * Must be rendered inside MobileSyncProvider to access sync context.
  *
  * Note: Mobile doesn't use the autolock service from @bittery/core/hooks
- * as it has its own BiometricAuthContext-based implementation.
+ * as it wires `@bittery/core/hooks/services/autolock-mobile` directly in
+ * `AccountProvider` instead.
  */
 export function MobilePlatformProvider({
 	children,
 }: MobilePlatformProviderProps) {
-	const queryClient = useQueryClient();
+	const syncContext = useSyncContext();
 	const { manager, vaultRuntime } = useMobileAccountRuntime();
 
-	// Initialize real-time sync with WebSocket connection
-	const syncState = useMobileSync(queryClient, manager, true);
-
-	// Create sync context with real-time sync state
-	const sync = useSyncCapability(syncState);
+	const sync = useSyncCapability(syncContext);
 
 	return (
 		<PlatformProvider

@@ -1,4 +1,3 @@
-import { useItems } from "@bittery/core/hooks";
 import { Button } from "@bittery/ui";
 import { IconChevronRight as ArrowRight } from "@bittery/ui/icons";
 import { Link } from "@tanstack/react-router";
@@ -6,12 +5,13 @@ import { formatDistanceToNow } from "date-fns";
 import { de as dateFnsDe, enUS as dateFnsEnUS } from "date-fns/locale";
 import { useMemo } from "react";
 import { Favicon } from "@/components/vault/favicon";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function RecentActivityCard() {
 	const { m, locale } = useI18n();
 	const dateLocale = locale === "de" ? dateFnsDe : dateFnsEnUS;
-	const { items } = useItems();
+	const { items } = useRuntimeItems();
 
 	const recentItems = useMemo(
 		() =>

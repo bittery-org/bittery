@@ -253,6 +253,47 @@ describe("sync-cache-service", () => {
 		expect(desktopCacheClearCount).toBe(1);
 	});
 
+	test("hands a fetched Operation outcome to the account's durable queue", async () => {
+		const reconciled: string[] = [];
+		const accountId = "acc_alice";
+		const service = createSyncCacheService({
+			storage: createStorageStub({
+				activeAccount: accountId,
+				accounts: [
+					{ accountId, email: "alice@example.com", userId: "user_alice" },
+				],
+				tokensByAccountId: { [accountId]: "token" },
+			}),
+			itemCache: createItemCacheStub(),
+			desktopClient: {
+				getAuthToken: async () => null,
+				clearCache: () => {},
+			},
+			createAccountClient: () => createClientStub(),
+			deltaSync: async () => ({
+				operationId: "operation_rejected",
+				kind: "create_item",
+				result: { status: "rejected", code: "vault_read_only" },
+			}),
+			reconcileOperationOutcome: async (resolvedAccountId, outcome) => {
+				reconciled.push(`${resolvedAccountId}:${outcome.operationId}`);
+			},
+			logger: console,
+		});
+
+		await service.applyDeltaSyncForEvent(
+			createSyncEvent({
+				type: "operation_resolved",
+				entityType: "operation",
+				entityId: "operation_rejected",
+				vaultId: null,
+				userId: "user_alice",
+			}),
+		);
+
+		expect(reconciled).toEqual(["acc_alice:operation_rejected"]);
+	});
+
 	test("non-desktop mode resolves connection context from local token deterministically", async () => {
 		const bobAccountId = "acc_bob_example_com";
 

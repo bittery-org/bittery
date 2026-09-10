@@ -118,6 +118,13 @@ export interface SignUpOptions {
 	plan?: SignUpPlan;
 	/** Budget for the whole flow; WASM key generation and SRP dominate it. */
 	timeoutMs?: number;
+	/**
+	 * Runs after legacy signup has installed its authenticated Account but before
+	 * the fixture performs the first full Runtime sign-in. Acceptance fixtures use
+	 * this only to create Server authority that the initial Runtime Bootstrap must
+	 * discover; it does not replace or shorten either authentication ceremony.
+	 */
+	beforeRuntimeSignIn?: (page: Page) => Promise<void>;
 }
 
 /** The Team tile's name in `packages/shared/src/pricing.ts`. */
@@ -271,9 +278,85 @@ export async function signUp(
 		await page.goto(new URL("/home", appOrigin).href);
 		await page.waitForURL("**/home", { timeout });
 	}
+	// Signup installs the legacy browser account before the process-owned Rust
+	// Runtime has authenticated it. The Runtime route guard therefore sends the
+	// first visit through the existing password Quick Unlock ceremony. Complete
+	// that real ceremony so this helper's promise (a usable signed-in page) stays
+	// true while the migration has two installation moments.
+	const unlockButton = page.getByRole("button", {
+		name: "Unlock Vault",
+		exact: true,
+	});
+	const needsRuntimeUnlock = await Promise.race([
+		unlockButton.waitFor({ state: "visible", timeout }).then(() => true),
+		appShell(page)
+			.waitFor({ state: "visible", timeout })
+			.then(() => false),
+	]);
+	let secretKey: string | undefined;
+	if (needsRuntimeUnlock) {
+		await options.beforeRuntimeSignIn?.(page);
+		// A just-created legacy account has no Rust installation to quick-unlock yet.
+		// Keep the Secret Key before switching the form, then perform the full Rust
+		// Sign-in that creates that installation.
+		secretKey = await readSecretKey(page);
+		await switchToFullSignIn(page, timeout);
+		await page.locator("#email").fill(user.email);
+		await page.locator("#secretKey").fill(secretKey);
+		await page.locator("#password").fill(user.password);
+		await page.getByRole("button", { name: "Sign In", exact: true }).click();
+		await page.waitForURL("**/home", { timeout });
+	}
 	await waitForAppReady(page);
 
-	return { ...user, secretKey: await readSecretKey(page) };
+	return { ...user, secretKey: secretKey ?? (await readSecretKey(page)) };
+}
+
+/**
+ * Retire the locked account and converge on the full sign-in form.
+ *
+ * A Runtime refusal deliberately keeps the page in place. The first refusal
+ * leaves the ordinary retry available; the second also exposes the labelled
+ * browser-only escape. The signup fixture must drive that public contract
+ * instead of assuming every press reloads the document.
+ */
+async function switchToFullSignIn(page: Page, timeout: number): Promise<void> {
+	const fullSignIn = page.locator("#secretKey");
+	const retry = page.getByTestId("use-different-account");
+	const browserOnlyEscape = page.getByTestId("use-different-account-escape");
+	const deadline = Date.now() + timeout;
+	let action = retry;
+
+	for (;;) {
+		await action.click();
+		// Let React publish the running state before accepting the same enabled
+		// button as the settled retry from this attempt.
+		await page.waitForTimeout(100);
+
+		while (Date.now() < deadline) {
+			if (await fullSignIn.isVisible()) {
+				return;
+			}
+			if (
+				(await browserOnlyEscape.isVisible()) &&
+				(await browserOnlyEscape.isEnabled())
+			) {
+				action = browserOnlyEscape;
+				break;
+			}
+			if ((await retry.isVisible()) && (await retry.isEnabled())) {
+				action = retry;
+				break;
+			}
+			await page.waitForTimeout(100);
+		}
+
+		if (Date.now() >= deadline) {
+			throw new Error(
+				"The account retirement neither reached full sign-in nor exposed a retry/escape before the signup timeout.",
+			);
+		}
+	}
 }
 
 export interface SelfHostedSignUpOptions {
@@ -385,14 +468,14 @@ export async function signIn(page: Page, user: TestUser): Promise<void> {
 export async function signOut(page: Page): Promise<void> {
 	await page.getByTestId("user-menu").click();
 	await page.getByTestId("sign-out-button").click();
+	await expect(page.getByTestId("log-out-dialog")).toBeVisible();
+	await page.getByTestId("log-out-confirm").click();
 	await page.waitForURL("**/login", { timeout: COLD_START_TIMEOUT_MS });
 }
 
 /**
- * One browser profile's whole Bittery auth state, split by the store it came
- * from - `packages/storage/src/tiers.ts` puts the session-bound values in
- * `sessionStorage` and the device-bound ones in `localStorage`, and Playwright's
- * own `storageState` carries only the latter.
+ * One browser profile's transitional and Runtime platform documents, split by
+ * the Web Storage area that owns each value.
  */
 export interface AuthSnapshot {
 	local: Record<string, string>;
@@ -406,14 +489,8 @@ export interface AuthSnapshot {
  */
 const SYNC_KEY_PREFIX = "bittery_sync_";
 
-const ACCOUNT_KEY_PREFIX = "bittery_account_";
-
-/** Session-bound per-account values; `STORAGE_TIERS` lines 59-61. */
-const SESSION_BOUND_VALUES = [
-	"jwt_token",
-	"vault_keys",
-	"encrypted_private_key",
-] as const;
+const RUNTIME_STORAGE_PREFIX = "bittery:runtime:platform-storage:";
+const RUNTIME_ACTIVE_ACCOUNT_KEY = "bittery_runtime_account_id";
 
 /**
  * Load-bearing as a pair with `bittery_device_key`: `session_data` carries the
@@ -427,87 +504,84 @@ const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
 
 /**
- * Copy every `bittery_` value the profile holds, out of both stores.
+ * Copy every transitional and Runtime value the profile holds, out of both stores.
  *
- * Throws unless the five values a restore actually needs are present, and in
- * the store this suite expects them in: a tier moved in
- * `packages/storage/src/tiers.ts` then fails here, by name, instead of
- * degrading into unreadable UI flake in every spec that restores.
+ * Throws unless the exact signed-in pointers and Runtime documents are present
+ * in the expected store, so an ownership move fails here by name.
  */
 export async function captureAuthSnapshot(page: Page): Promise<AuthSnapshot> {
-	const snapshot = await page.evaluate((syncPrefix) => {
-		const copy = (store: Storage): Record<string, string> => {
-			const entries: Record<string, string> = {};
-			for (let index = 0; index < store.length; index += 1) {
-				const key = store.key(index);
-				if (!key?.startsWith("bittery_") || key.startsWith(syncPrefix)) {
-					continue;
+	const snapshot = await page.evaluate(
+		({ runtimePrefix, syncPrefix }) => {
+			const copy = (store: Storage): Record<string, string> => {
+				const entries: Record<string, string> = {};
+				for (let index = 0; index < store.length; index += 1) {
+					const key = store.key(index);
+					if (
+						(!key?.startsWith("bittery_") && !key?.startsWith(runtimePrefix)) ||
+						key.startsWith(syncPrefix)
+					) {
+						continue;
+					}
+					const value = store.getItem(key);
+					if (value !== null) {
+						entries[key] = value;
+					}
 				}
-				const value = store.getItem(key);
-				if (value !== null) {
-					entries[key] = value;
-				}
-			}
-			return entries;
-		};
-		return { local: copy(localStorage), session: copy(sessionStorage) };
-	}, SYNC_KEY_PREFIX);
-
+				return entries;
+			};
+			return { local: copy(localStorage), session: copy(sessionStorage) };
+		},
+		{ runtimePrefix: RUNTIME_STORAGE_PREFIX, syncPrefix: SYNC_KEY_PREFIX },
+	);
 	assertSnapshotComplete(snapshot);
 	return snapshot;
 }
 
-/** `bittery_account_<id>_<name>` for every key naming `name`, id extracted. */
-function accountIdsFor(
-	entries: Record<string, string>,
-	name: string,
-): Set<string> {
-	const suffix = `_${name}`;
-	return new Set(
-		Object.keys(entries)
-			.filter((key) => key.startsWith(ACCOUNT_KEY_PREFIX))
-			.filter((key) => key.endsWith(suffix))
-			.map((key) => key.slice(ACCOUNT_KEY_PREFIX.length, -suffix.length)),
-	);
-}
-
 /**
- * The account a restore would come back as. The active pointer decides, because
- * a re-login mints a fresh accountId and leaves the old account's keys behind;
- * the single-id fallback only covers a pointer that has not caught up.
+ * The transitional Account whose metadata this snapshot names.
+ * Runtime authentication has its own Account id and credential documents.
  */
 function snapshotAccountId(snapshot: AuthSnapshot): string | null {
-	const active = snapshot.local[ACTIVE_ACCOUNT_KEY];
-	if (active) {
-		return active;
-	}
-	const ids = accountIdsFor(snapshot.session, "jwt_token");
-	return ids.size === 1 ? ([...ids][0] ?? null) : null;
+	return snapshot.local[ACTIVE_ACCOUNT_KEY] ?? null;
 }
 
 function assertSnapshotComplete(snapshot: AuthSnapshot): void {
-	const accountId = snapshotAccountId(snapshot);
+	const transitionalAccountId = snapshotAccountId(snapshot);
+	const runtimeAccountId = snapshot.local[RUNTIME_ACTIVE_ACCOUNT_KEY];
 	const missing: string[] = [];
 
-	if (accountId) {
-		for (const name of SESSION_BOUND_VALUES) {
-			const key = `${ACCOUNT_KEY_PREFIX}${accountId}_${name}`;
-			if (!(key in snapshot.session)) {
-				missing.push(`sessionStorage: ${key}`);
-			}
-		}
-		const sessionData = `${ACCOUNT_KEY_PREFIX}${accountId}_session_data`;
-		if (!(sessionData in snapshot.local)) {
-			missing.push(`localStorage: ${sessionData}`);
-		}
-	} else {
-		missing.push(
-			`localStorage: ${ACTIVE_ACCOUNT_KEY} (and no single signed-in account to fall back on)`,
-		);
+	if (!transitionalAccountId)
+		missing.push(`localStorage: ${ACTIVE_ACCOUNT_KEY}`);
+	if (!runtimeAccountId)
+		missing.push(`localStorage: ${RUNTIME_ACTIVE_ACCOUNT_KEY}`);
+	if (
+		transitionalAccountId &&
+		runtimeAccountId &&
+		transitionalAccountId === runtimeAccountId
+	) {
+		missing.push("distinct transitional and Runtime Account ids");
 	}
 
 	if (!(DEVICE_KEY in snapshot.local)) {
 		missing.push(`localStorage: ${DEVICE_KEY}`);
+	}
+	if (!(ACCOUNTS_LIST_KEY in snapshot.local)) {
+		missing.push(`localStorage: ${ACCOUNTS_LIST_KEY}`);
+	}
+	for (const [storeName, entries, suffix] of [
+		["localStorage", snapshot.local, "device-catalog"],
+		["localStorage", snapshot.local, "device-key"],
+		["localStorage", snapshot.local, "metadata"],
+		["localStorage", snapshot.local, "quick-unlock"],
+		["sessionStorage", snapshot.session, "current-session"],
+	] as const) {
+		const keys = Object.keys(entries).filter(
+			(key) =>
+				key.startsWith(RUNTIME_STORAGE_PREFIX) && key.endsWith(`:${suffix}`),
+		);
+		if (keys.length !== 1) {
+			missing.push(`${storeName}: exactly one Runtime ${suffix} document`);
+		}
 	}
 
 	if (missing.length > 0) {

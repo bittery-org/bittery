@@ -30,7 +30,7 @@ use crate::http::{
     error::ApiError,
     error_code::ErrorCode,
     extractors::{ApiJson, ApiMergePatch, AuthenticatedRequest},
-    idempotency,
+    one_time_secret,
     openapi::ORDINARY_API_BODY_LIMIT_BYTES,
     pagination::{page_values, ApiPageQuery, CursorContext},
 };
@@ -464,7 +464,7 @@ async fn send_invitation(
     Path(team_id): Path<String>,
     ApiJson(body): ApiJson<SendInvitationRequest>,
 ) -> Result<Json<SendInvitationResponse>, ApiError> {
-    idempotency::reject_one_time_secret(&headers)?;
+    one_time_secret::reject_one_time_secret(&headers)?;
     let pending_vault_keys = body.pending_vault_keys.map(|entries| {
         entries
             .into_iter()
@@ -588,7 +588,7 @@ async fn resend_invitation(
     headers: HeaderMap,
     Path((_team_id, invitation_id)): Path<(String, String)>,
 ) -> Result<Json<ResendInvitationResponse>, ApiError> {
-    idempotency::reject_one_time_secret(&headers)?;
+    one_time_secret::reject_one_time_secret(&headers)?;
     Ok(Json(
         team::resend_invitation(
             &state.db_pool,

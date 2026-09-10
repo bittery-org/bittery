@@ -158,6 +158,7 @@ function apiServerEnv(options: {
 		JWT_SECRET: "e2e-jwt-secret-not-used-outside-tests",
 		BITTERY_STORAGE_ENDPOINT: OBJECT_STORAGE_ENDPOINT,
 		BITTERY_STORAGE_BUCKET: "bittery-e2e",
+		BITTERY_STORAGE_CDN_URL: `${OBJECT_STORAGE_ENDPOINT}/bittery-e2e`,
 		BITTERY_STORAGE_ACCESS_KEY_ID: "e2e-access-key",
 		BITTERY_STORAGE_SECRET_ACCESS_KEY: "e2e-secret-key",
 		BITTERY_STORAGE_REGION: "auto",
@@ -208,9 +209,12 @@ function stackServers(stack: Stack): WebServer[] {
 	const { api, web } = STACK_PORTS[stack];
 	const serverUrl = `http://localhost:${api}`;
 	const webAppUrl = `http://localhost:${web}`;
+	const diagnosticLog = path.join(browserTmpDir, `${stack}-api.log`);
 	return [
 		{
-			command: "node tests/e2e-launch.mjs",
+			// `exec` preserves the launcher's real-server PID while the redirection gives
+			// behavioral E2E assertions access to the exact diagnostics the Server emitted.
+			command: `exec node tests/e2e-launch.mjs > ${JSON.stringify(diagnosticLog)} 2>&1`,
 			url: `${serverUrl}/healthz`,
 			// Never true, not even locally: a reused server keeps its own
 			// environment, which silently drops the rate-limit overrides and the

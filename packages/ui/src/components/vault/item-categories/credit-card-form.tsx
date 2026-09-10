@@ -20,21 +20,23 @@ import {
 
 export interface CreditCardFormData {
 	title: string;
-	cardholderName: string;
-	cardNumber: string;
-	cvv: string;
-	expiryDate: string;
-	billingAddress: string;
-	notes: string;
+	cardholderName?: string;
+	cardNumber?: string;
+	cvv?: string;
+	expiryDate?: string;
+	billingAddress?: string;
+	notes?: string;
 	tags?: string[];
 }
 
 interface CreditCardFormProps extends BaseFormProps {
+	allowIncomplete?: boolean;
 	initialData?: Partial<CreditCardFormData>;
 	onSubmit: (data: CreditCardFormData, vaultId: string) => Promise<void> | void;
 }
 
 export function CreditCardForm({
+	allowIncomplete = false,
 	initialData,
 	onSubmit,
 	onCancel,
@@ -63,10 +65,28 @@ export function CreditCardForm({
 		},
 		onSubmit: async ({ value }) => {
 			try {
-				const submitData: CreditCardFormData = {
-					...value,
-					tags: initialData?.tags,
-				};
+				// Empty controls do not invent fields absent from an imported Card. A field
+				// the user clears (or which was explicitly empty) keeps that intentional empty value.
+				const optional = (current: string, previous: string | undefined) =>
+					current || (previous === undefined ? undefined : "");
+				const submitData: CreditCardFormData = allowIncomplete
+					? {
+							title: value.title,
+							cardholderName: optional(
+								value.cardholderName,
+								initialData?.cardholderName,
+							),
+							cardNumber: optional(value.cardNumber, initialData?.cardNumber),
+							cvv: optional(value.cvv, initialData?.cvv),
+							expiryDate: optional(value.expiryDate, initialData?.expiryDate),
+							billingAddress: optional(
+								value.billingAddress,
+								initialData?.billingAddress,
+							),
+							notes: optional(value.notes, initialData?.notes),
+							tags: initialData?.tags,
+						}
+					: { ...value, tags: initialData?.tags };
 				await onSubmit(submitData, currentVaultId);
 			} catch (error) {
 				const errorMessage =
@@ -126,7 +146,9 @@ export function CreditCardForm({
 					{(field) => (
 						<div className="space-y-2">
 							<Label htmlFor={field.name}>
-								{m.vaults_detail_items_form_credit_card_field_cardholder_name_required()}
+								{allowIncomplete
+									? m.vaults_detail_items_detail_credit_card_field_cardholder_name()
+									: m.vaults_detail_items_form_credit_card_field_cardholder_name_required()}
 							</Label>
 							<Input
 								id={field.name}
@@ -135,7 +157,7 @@ export function CreditCardForm({
 								onBlur={field.handleBlur}
 								onChange={(e) => field.handleChange(e.target.value)}
 								placeholder={m.vaults_detail_items_form_credit_card_placeholder_cardholder_name()}
-								required
+								required={!allowIncomplete}
 							/>
 						</div>
 					)}
@@ -146,7 +168,9 @@ export function CreditCardForm({
 						<div className="space-y-2">
 							<div className="flex items-center justify-between">
 								<Label htmlFor={field.name}>
-									{m.vaults_detail_items_form_credit_card_field_card_number_required()}
+									{allowIncomplete
+										? m.vaults_detail_items_detail_credit_card_field_card_number()
+										: m.vaults_detail_items_form_credit_card_field_card_number_required()}
 								</Label>
 								{detectedBrand && (
 									<span className="rounded-[4px] border bg-foreground/3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
@@ -164,8 +188,8 @@ export function CreditCardForm({
 								onBlur={field.handleBlur}
 								onChange={(e) => handleCardNumberChange(e.target.value)}
 								placeholder={m.vaults_detail_items_form_credit_card_placeholder_card_number()}
+								required={!allowIncomplete}
 								className="font-mono"
-								required
 								maxLength={19}
 							/>
 						</div>
@@ -177,7 +201,9 @@ export function CreditCardForm({
 						{(field) => (
 							<div className="space-y-2">
 								<Label htmlFor={field.name}>
-									{m.vaults_detail_items_form_credit_card_field_expiry_date_required()}
+									{allowIncomplete
+										? m.vaults_detail_items_detail_credit_card_field_expiry_date()
+										: m.vaults_detail_items_form_credit_card_field_expiry_date_required()}
 								</Label>
 								<Input
 									id={field.name}
@@ -186,8 +212,8 @@ export function CreditCardForm({
 									onBlur={field.handleBlur}
 									onChange={(e) => handleExpiryChange(e.target.value)}
 									placeholder={m.vaults_detail_items_form_credit_card_placeholder_expiry_date()}
+									required={!allowIncomplete}
 									className="font-mono"
-									required
 									maxLength={5}
 								/>
 							</div>
@@ -198,7 +224,9 @@ export function CreditCardForm({
 						{(field) => (
 							<div className="space-y-2">
 								<Label htmlFor={field.name}>
-									{m.vaults_detail_items_form_credit_card_field_cvv_required()}
+									{allowIncomplete
+										? m.vaults_detail_items_detail_credit_card_field_cvv()
+										: m.vaults_detail_items_form_credit_card_field_cvv_required()}
 								</Label>
 								<Input
 									id={field.name}
@@ -211,8 +239,8 @@ export function CreditCardForm({
 										field.handleChange(value);
 									}}
 									placeholder={m.vaults_detail_items_form_credit_card_placeholder_cvv()}
+									required={!allowIncomplete}
 									className="font-mono"
-									required
 									maxLength={4}
 								/>
 							</div>

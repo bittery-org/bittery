@@ -92,4 +92,29 @@ export async function createStaticStoredAccountApiClient(
 	});
 }
 
+/**
+ * Builds the unauthenticated client a password-only Quick Unlock ceremony talks to.
+ *
+ * The previous token is deliberately ignored even when still valid: Quick Unlock always runs
+ * `startLogin`/`finishLogin` against this Account's stored Server URL and HTTP consent, then
+ * installs the newly issued Session.
+ */
+export async function createStoredAccountUnlockApiClient(
+	storage: AccountStore,
+	accountId: string,
+): Promise<DefaultApiClient> {
+	const [account, serverUrl] = await Promise.all([
+		storage.getAccountMetadata(accountId),
+		storage.getServerUrl(accountId),
+	]);
+	if (!serverUrl) {
+		throw new Error("Quick Unlock requires the Account's stored Server URL.");
+	}
+	const metadata = {
+		insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
+	};
+
+	return createApiClientForServer(serverUrl, undefined, metadata);
+}
+
 export { createAccountApiClient, createApiClientForServer };

@@ -29,15 +29,21 @@ const EXPECTED: &[&str] = &[
     "INVALID_VERSION",
     "INVALID_ITEM_STATE",
     "INVALID_EMAIL",
+    "ACCOUNT_DELETION_CONFIRMATION_MISMATCH",
+    "ACCOUNT_DELETION_BLOCKED",
     "FIELD_CANNOT_BE_CLEARED",
     "SEARCH_TOO_LONG",
     "TOO_MANY_HIDDEN_VAULTS",
     "INVALID_IDEMPOTENCY_KEY",
-    "IDEMPOTENCY_KEY_REUSED",
     "IDEMPOTENCY_NOT_ALLOWED",
-    "IDEMPOTENCY_REQUEST_IN_PROGRESS",
-    "IDEMPOTENCY_OUTCOME_INDETERMINATE",
-    "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+    "INVALID_OPERATION_ID",
+    "OPERATION_ID_REUSED",
+    "OPERATION_OUTCOME_NOT_FOUND",
+    "ATTACHMENT_STAGING_INCOMPLETE",
+    "ATTACHMENT_STAGING_MISMATCH",
+    "ATTACHMENT_STAGING_BUSY",
+    "ATTACHMENT_AUTHORITY_STALE",
+    "ATTACHMENT_QUOTA_EXCEEDED",
     "ROTATION_STALE_VAULT_VERSION",
     "ROTATION_STALE_MEMBER_SET",
     "ROTATION_STALE_ITEM_STATE",
@@ -74,7 +80,7 @@ fn problem_type_uris_are_the_lowercase_kebab_form_of_the_code() {
         "https://bittery.com/problems/version-conflict"
     );
     assert_eq!(
-        ErrorCode::IdempotencyKeyReused.problem_type(),
-        "https://bittery.com/problems/idempotency-key-reused"
+        ErrorCode::OperationIdReused.problem_type(),
+        "https://bittery.com/problems/operation-id-reused"
     );
 }

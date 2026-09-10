@@ -26,8 +26,8 @@ import {
  *
  * This file is what the rest of the suite leans on, so it pins the parts that
  * could rot silently: which store each value lives in, that a restored context
- * really talked to the server and really unwrapped the master unlock key, that
- * two restored contexts stay two sync devices, and that a restore stays cheap.
+ * really talked to the server and really unwrapped the master unlock key,
+ * and that a restore stays cheap. Independent Devices are tested in sync.spec.ts.
  *
  * The snapshot is taken straight after signup, *before* the vault exists - which
  * is how the migrated specs will use it, and which proves a snapshot does not
@@ -48,6 +48,7 @@ const itemUsername = `restore_user_${suffix}`;
 let user: TestUser;
 let snapshot: AuthSnapshot;
 let vaultId: string;
+let seedPromise: Promise<void> | undefined;
 const openedContexts: { close: () => Promise<void> }[] = [];
 
 /** A fresh context restored from the snapshot, torn down after the file. */
@@ -63,23 +64,30 @@ test.beforeAll(async ({ browser }) => {
 	test.setTimeout(SETUP_BUDGET_MS);
 
 	({ user, snapshot } = await signUpForSpec(browser));
-
-	// The seed data is written from a *restored* context, so the file also proves
-	// a replayed session can create, not only read.
-	const setupContext = await browser.newContext();
-	try {
-		const setupPage = await setupContext.newPage();
-		await restoreSession(setupPage, snapshot);
-		vaultId = await createVault(setupPage, vaultName);
-		await createItem(setupPage, "login", async (sheet) => {
-			await sheet.locator("#title").fill(itemTitle);
-			await sheet.locator("#username").fill(itemUsername);
-			await sheet.locator("#password").fill(`Restore-Pass-${suffix}!`);
-		});
-	} finally {
-		await setupContext.close();
-	}
 });
+
+/** Create the ciphertext fixture only for scenarios that actually read it. */
+async function ensureSeedData(browser: Browser): Promise<void> {
+	if (seedPromise) return seedPromise;
+	seedPromise = (async () => {
+		// The seed data is written from a *restored* context, so the file also proves
+		// a replayed session can create, not only read.
+		const setupContext = await browser.newContext();
+		try {
+			const setupPage = await setupContext.newPage();
+			await restoreSession(setupPage, snapshot);
+			vaultId = await createVault(setupPage, vaultName);
+			await createItem(setupPage, "login", async (sheet) => {
+				await sheet.locator("#title").fill(itemTitle);
+				await sheet.locator("#username").fill(itemUsername);
+				await sheet.locator("#password").fill(`Restore-Pass-${suffix}!`);
+			});
+		} finally {
+			await setupContext.close();
+		}
+	})();
+	return seedPromise;
+}
 
 test.afterAll(async () => {
 	await Promise.all(openedContexts.map((context) => context.close()));
@@ -92,26 +100,78 @@ test("the snapshot splits across the two stores exactly as tiers.ts declares", (
 	const accountId = snapshot.local.bittery_active_account ?? "";
 	expect(accountId).not.toBe("");
 	const accountKey = (name: string) => `bittery_account_${accountId}_${name}`;
+	const accountsDocument = JSON.parse(
+		snapshot.local.bittery_accounts_list ?? "",
+	) as {
+		version: number;
+		accounts: Array<{ accountId: string }>;
+	};
+	const webAccountId = snapshot.local.bittery_web_account_id ?? null;
+	const runtimeAccountId = snapshot.local.bittery_runtime_account_id ?? "";
 
-	for (const name of ["jwt_token", "vault_keys", "encrypted_private_key"]) {
-		expect(snapshot.session).toHaveProperty(accountKey(name));
-		expect(snapshot.local).not.toHaveProperty(accountKey(name));
-	}
+	// Signup may reuse the pre-login id as its transitional Account. Runtime
+	// authentication owns a distinct Account id and does not mirror its Session.
+	expect(webAccountId === null || webAccountId === accountId).toBe(true);
+	expect(accountsDocument.version).toBe(2);
+	expect(accountsDocument.accounts.map((account) => account.accountId)).toEqual(
+		[accountId],
+	);
+	// Runtime scope has its own pointer; deletion recovery state is absent in an
+	// ordinary signed-in snapshot.
+	expect(runtimeAccountId).not.toBe("");
+	expect(runtimeAccountId).not.toBe(accountId);
+	if (webAccountId !== null) expect(runtimeAccountId).not.toBe(webAccountId);
+	expect(snapshot.local).not.toHaveProperty("bittery_account_deletion");
 
-	for (const name of [
+	const forbiddenCredentialSuffixes = [
+		"jwt_token",
+		"vault_keys",
+		"encrypted_private_key",
 		"session_data",
 		"secret_key",
 		"pinned_kdf_params",
-		"server_url",
-	]) {
-		expect(snapshot.local).toHaveProperty(accountKey(name));
-		expect(snapshot.session).not.toHaveProperty(accountKey(name));
+		"last_biometric_auth",
+	].map((name) => `_${name}`);
+	for (const entries of [snapshot.local, snapshot.session]) {
+		expect(
+			Object.keys(entries)
+				.filter((key) => key.startsWith("bittery_account_"))
+				.filter((key) =>
+					forbiddenCredentialSuffixes.some((suffix) => key.endsWith(suffix)),
+				)
+				.sort(),
+		).toEqual([]);
 	}
+	for (const name of ["biometric_enabled", "server_url", "travel_mode_cache"]) {
+		expect(snapshot.local).toHaveProperty(accountKey(name));
+	}
+
+	const runtimePrefix = "bittery:runtime:platform-storage:";
+	const runtimeAccountPrefix = `${runtimePrefix}account:${new TextEncoder().encode(runtimeAccountId).byteLength}:${runtimeAccountId}:incarnation:`;
+	const runtimeLocalKeys = Object.keys(snapshot.local).filter((key) =>
+		key.startsWith(runtimePrefix),
+	);
+	const runtimeAccountLocalKeys = runtimeLocalKeys.filter((key) =>
+		key.startsWith(runtimeAccountPrefix),
+	);
+	expect(runtimeLocalKeys).toContain(`${runtimePrefix}device-catalog`);
+	expect(runtimeLocalKeys).toContain(`${runtimePrefix}device-key`);
+	expect(runtimeLocalKeys).toHaveLength(4);
+	expect(
+		runtimeAccountLocalKeys.map((key) => key.split(":").at(-1)).sort(),
+	).toEqual(["metadata", "quick-unlock"]);
+	const runtimeSessionKeys = Object.keys(snapshot.session).filter((key) =>
+		key.startsWith(runtimePrefix),
+	);
+	expect(runtimeSessionKeys).toHaveLength(1);
+	expect(runtimeSessionKeys[0]?.startsWith(runtimeAccountPrefix)).toBe(true);
+	expect(runtimeSessionKeys[0]?.endsWith(":current-session")).toBe(true);
 
 	for (const key of [
 		"bittery_device_key",
 		"bittery_accounts_list",
 		"bittery_active_account",
+		"bittery_runtime_account_id",
 	]) {
 		expect(snapshot.local).toHaveProperty(key);
 	}
@@ -128,6 +188,7 @@ test("a restored context is signed in, unlocked, and decrypts an item written el
 	browser,
 }) => {
 	test.setTimeout(TEST_BUDGET_MS);
+	await ensureSeedData(browser);
 
 	const page = await restoredPage(browser);
 	expect(new URL(page.url()).pathname).toBe("/home");
@@ -149,29 +210,8 @@ test("a restored context is signed in, unlocked, and decrypts an item written el
 	).toContainText(itemUsername);
 });
 
-test("two concurrently restored contexts are two sync clients of one account", async ({
-	browser,
-}) => {
-	test.setTimeout(TEST_BUDGET_MS);
-
-	const [first, second] = await Promise.all([
-		restoredPage(browser),
-		restoredPage(browser),
-	]);
-
-	const clientId = (page: Page) =>
-		page.evaluate(() => sessionStorage.getItem("bittery_sync_client_id"));
-	await expect.poll(() => clientId(first)).toBeTruthy();
-	await expect.poll(() => clientId(second)).toBeTruthy();
-	// Restoring must not clone the sync identity; `sync.spec.ts` depends on a
-	// fresh context minting its own.
-	expect(await clientId(first)).not.toBe(await clientId(second));
-
-	for (const page of [first, second]) {
-		await openVault(page, vaultId);
-		await expect(itemRow(page, itemTitle)).toBeVisible();
-	}
-});
+// Independent Device identity is covered by real Runtime Sign-ins in sync.spec.ts.
+// Copying an encrypted Device installation is not a second unlocked Device.
 
 test("a restore stays inside its budget", async ({ browser }) => {
 	test.setTimeout(TEST_BUDGET_MS);

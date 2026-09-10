@@ -314,10 +314,6 @@ function getImportErrorMessage(
 			});
 		case "missing-target-mapping":
 			return m.vaults_import_error_missing_target_mapping();
-		case "target-vault-key-decrypt-failed":
-			return m.vaults_import_error_target_vault_key_decrypt_failed({
-				targetVaultName: getStringParam(error.params, "targetVaultName"),
-			});
 		case "vault-import-failed":
 			return m.vaults_import_error_vault_import_failed();
 		case "parse-failed":
@@ -427,6 +423,7 @@ export function VaultImportDialog({
 		mappings,
 		existingVaults,
 		progress,
+		pendingImport,
 		summary,
 		error,
 		isBusy,
@@ -569,6 +566,7 @@ export function VaultImportDialog({
 	const handleStartImport = useCallback(async () => {
 		try {
 			const result = await executeImport();
+			if (result === null) return;
 			onImportCompleted?.(result);
 
 			if (result.failedVaultCount > 0) {
@@ -730,6 +728,11 @@ export function VaultImportDialog({
 				</DialogHeader>
 
 				<div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+					{pendingImport && !isBusy && (
+						<p role="status" className="text-muted-foreground text-sm">
+							{m.vaults_import_progress_uploading_default()}
+						</p>
+					)}
 					{showManagerStep && (
 						<div className="space-y-4">
 							<div className="rounded-xl border bg-muted/20 p-4">

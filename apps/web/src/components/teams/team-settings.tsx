@@ -23,7 +23,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
-import { useQueryInvalidator } from "../../providers/sync-provider";
+import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 import { DeleteTeamDialog } from "./delete-team-dialog";
 import { LeaveTeamDialog } from "./leave-team-dialog";
 

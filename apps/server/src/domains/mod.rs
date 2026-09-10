@@ -1,5 +1,6 @@
 pub(crate) mod auth;
 pub(crate) mod billing;
+pub(crate) mod operations;
 pub(crate) mod sessions;
 pub(crate) mod shares;
 pub(crate) mod sync;

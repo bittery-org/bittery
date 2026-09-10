@@ -43,7 +43,10 @@ export interface BiometricUnlockError {
 	 * Wider than the OS verdict: travel mode can stop an unlock the biometric
 	 * itself passed, and `BiometricErrorType` has no member for a policy stop.
 	 */
-	type: BiometricErrorType | "travel_mode_unverified";
+	type:
+		| BiometricErrorType
+		| "travel_mode_unverified"
+		| "password_unlock_required";
 	/** Set with `master_password_required` when storage published a re-entry period. */
 	masterPasswordReentryPeriodMs?: number;
 }
@@ -93,6 +96,9 @@ function biometricError(
 	// would blame the fingerprint for a policy stop.
 	if (failure?.reason === "travel_mode_unverified") {
 		return { type: "travel_mode_unverified" };
+	}
+	if (failure?.reason === "password_unlock_required") {
+		return { type: "password_unlock_required" };
 	}
 	return { type: "unknown" };
 }

@@ -397,13 +397,7 @@ pub struct StoreRecoveryKeyInput {
     pub recovery_key_hint: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct DeleteAccountInput {
-    pub confirm_email: String,
-}
-
+mod account_deletion;
 mod credentials;
 mod devices;
 pub(crate) mod email;
@@ -417,12 +411,13 @@ pub(crate) mod verification_code;
 
 #[cfg(test)]
 use crate::domains::teams::parse_pending_vault_keys;
+pub(crate) use account_deletion::{delete_server_account, AccountDeletionOutcome};
 #[cfg(test)]
 use bittery_crypto_core::srp6a::{HashAlgorithm, PrimeGroup};
 #[cfg(test)]
 use credentials::validate_encrypted_vault_keys;
 pub(crate) use credentials::{
-    change_password, delete_account, regenerate_secret_key, store_recovery_key, update_email,
+    change_password, regenerate_secret_key, store_recovery_key, update_email,
 };
 pub(crate) use devices::{do_refresh_session, get_me, list_devices, rename_device, revoke_device};
 #[cfg(test)]

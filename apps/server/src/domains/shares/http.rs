@@ -11,9 +11,9 @@ use crate::{
     db::enums::ShareLinkAccessMode,
     domains::shares as share,
     shapes::{
-        allowed_email_shape, create_share_link_shape, email_verification_shape,
-        public_share_access_shape, public_share_info_shape, share_access_log_shape,
-        share_link_list_entry_shape, share_link_list_shape,
+        allowed_email_shape, email_verification_shape, public_share_access_shape,
+        public_share_info_shape, share_access_log_shape, share_link_list_entry_shape,
+        share_link_list_shape,
     },
     AppState,
 };
@@ -22,8 +22,7 @@ use crate::http::{
     dto::{CursorPage, PageRequest, ProblemDetails, SuccessResponse},
     error::ApiError,
     error_code::ErrorCode,
-    extractors::{ApiJson, AuthenticatedRequest},
-    idempotency,
+    extractors::{ApiJson, ApiJsonBytes, AuthenticatedRequest},
     openapi::ORDINARY_API_BODY_LIMIT_BYTES,
     pagination::{
         decode_page_key, page_prefetched, query_limit, timestamp_cursor_key, ApiPageQuery,
@@ -34,6 +33,8 @@ use crate::http::{
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateShareLinkRequest {
+    #[schema(pattern = r"^[0-9a-f]{64}$")]
+    token_hash: String,
     access_mode: ShareLinkAccessMode,
     #[serde(default)]
     is_one_time_use: bool,
@@ -94,15 +95,6 @@ struct EmailAddress(String);
 #[serde(transparent)]
 #[schema(value_type = String, pattern = r"^[A-Za-z0-9_-]{32}$")]
 pub(crate) struct ShareToken(String);
-
-create_share_link_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct CreateShareLinkResponse
-});
-create_share_link_shape!(shape_from {
-    share::CreateShareLinkResponse => CreateShareLinkResponse
-});
 
 allowed_email_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
@@ -226,39 +218,106 @@ fn validate_email_length(email: &str) -> Result<(), ApiError> {
     }
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/share-links", operation_id = "createShareLink", tag = "share-links", params(("itemId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), request_body = CreateShareLinkRequest, responses((status = 201, body = CreateShareLinkResponse), (status = 422, description = "Idempotency is not allowed for one-time-secret responses", body = ProblemDetails, content_type = "application/problem+json"), ShareErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/share-links", operation_id = "createShareLink", tag = "share-links", params(("itemId" = String, Path), ("Idempotency-Key" = String, Header, description = "Stable Client Runtime Operation identity")), request_body = CreateShareLinkRequest, responses((status = 200, body = crate::domains::operations::OperationOutcome), (status = 422, description = "Operation identity was reused for different immutable bytes", body = ProblemDetails, content_type = "application/problem+json"), ShareErrorResponses))]
 async fn create_share_link(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiJson(body): ApiJson<CreateShareLinkRequest>,
-) -> Result<(axum::http::StatusCode, Json<CreateShareLinkResponse>), ApiError> {
-    idempotency::reject_one_time_secret(&headers)?;
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<
+        CreateShareLinkRequest,
+        ORDINARY_API_BODY_LIMIT_BYTES,
+    >,
+) -> Result<Json<crate::domains::operations::OperationOutcome>, ApiError> {
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    if body.token_hash.len() != 64 || !body.token_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidRequest,
+            "tokenHash must be a 64-character hexadecimal SHA-256 digest.",
+        ));
+    }
     if let Some(emails) = &body.allowed_emails {
         for email in emails {
             validate_email_length(&email.0)?;
         }
     }
-    let response = share::create_share_link(
-        &state,
+    let allowed_emails = body
+        .allowed_emails
+        .map(|emails| emails.into_iter().map(|email| email.0).collect());
+    let validation = share::CreateShareLinkInput {
+        access_mode: body.access_mode,
+        expires_in: body.expires_in.as_wire_value().to_string(),
+        allowed_emails: allowed_emails.clone(),
+        encrypted_item_data: body.encrypted_item_data.clone(),
+        encryption_iv: body.encryption_iv.clone(),
+        encrypted_share_key: body.encrypted_share_key.clone(),
+        share_key_iv: body.share_key_iv.clone(),
+    };
+    share::validate_create_share_input(&validation)?;
+    let expires_at = share::calculate_expiration(&validation.expires_in)?;
+    let already_decided = crate::domains::operations::get_operation_outcome(
+        &state.db_pool,
         &request.session.user_id,
-        share::CreateShareLinkInput {
+        &operation_id,
+    )
+    .await?
+    .is_some();
+    if !already_decided
+        && state
+            .rate_limiter
+            .check_and_increment(
+                crate::shared::rate_limit::SCOPE_SHARE_CREATE_DAILY,
+                &request.session.user_id,
+                state.config.rate_limit.share_link_daily,
+                crate::shared::rate_limit::share_create_daily_limit(&state.config.rate_limit)
+                    .window,
+            )
+            .await?
+            .is_limited()
+    {
+        return Err(
+            crate::error::AppError::too_many_requests("Daily share link limit reached").into(),
+        );
+    }
+    let client_id = request.effective_client_id();
+    let resolution = crate::domains::operations::execute_create_share_operation(
+        &state.db_pool,
+        crate::domains::operations::CreateShareOperationInput {
+            operation_id,
+            user_id: request.session.user_id,
             item_id,
+            raw_body: bytes,
+            token_hash: body.token_hash.to_ascii_lowercase(),
             access_mode: body.access_mode,
             is_one_time_use: body.is_one_time_use,
-            expires_in: body.expires_in.as_wire_value().to_string(),
-            allowed_emails: body
-                .allowed_emails
-                .map(|emails| emails.into_iter().map(|email| email.0).collect()),
+            expires_at,
+            allowed_emails,
             encrypted_item_data: body.encrypted_item_data,
             encryption_iv: body.encryption_iv,
             encrypted_share_key: body.encrypted_share_key,
             share_key_iv: body.share_key_iv,
+            client_id,
+            deployment_mode: state.config.server.mode,
+            base_share_url: share::base_share_url(&state.config.server),
         },
     )
     .await?;
-    Ok((axum::http::StatusCode::CREATED, Json(response.into())))
+    match resolution {
+        crate::domains::operations::OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
+        }
+        crate::domains::operations::OperationResolution::IdReused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
 }
 
 #[utoipa::path(get, path = "/items/{itemId}/share-links", operation_id = "listItemShareLinks", tag = "share-links", params(("itemId" = String, Path)), responses((status = 200, body = ShareLinkListResponse), ShareErrorResponses))]

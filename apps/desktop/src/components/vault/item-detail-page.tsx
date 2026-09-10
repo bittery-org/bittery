@@ -1,7 +1,6 @@
 import {
 	getAttachmentUploadErrorCode,
 	useCreateItem,
-	useCreateShare,
 	useDeleteItem,
 	useItem,
 	useItemAttachments,
@@ -33,7 +32,6 @@ import {
 	ItemDetail,
 	PasswordHistoryDialog,
 	ShareHistoryDialog,
-	ShareItemDialog,
 	toast,
 } from "@bittery/ui";
 import {
@@ -42,7 +40,6 @@ import {
 	IconEllipsis,
 	IconHistory,
 	IconPencil,
-	IconShare,
 	IconStar,
 	IconTrash,
 } from "@bittery/ui/icons";
@@ -50,6 +47,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useState } from "react";
+import { resolveAttachmentMetadata } from "@/lib/attachment-metadata";
 import { useI18n } from "../../providers/i18n-provider";
 import Loader from "../loader";
 import { Favicon } from "./favicon";
@@ -73,7 +71,6 @@ export function ItemDetailPage({
 	const { m } = useI18n();
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
 	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
 	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
@@ -89,7 +86,6 @@ export function ItemDetailPage({
 	const deleteItem = useDeleteItem();
 	const toggleFavorite = useToggleFavorite();
 	const createItem = useCreateItem();
-	const createShare = useCreateShare();
 	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
 	const itemAttachments = useItemAttachments(
@@ -175,10 +171,6 @@ export function ItemDetailPage({
 		},
 		[rawItem, decryptedData, itemAccountId, m, updateItem],
 	);
-
-	const handleShare = () => {
-		setIsShareDialogOpen(true);
-	};
 
 	const handleDelete = () => {
 		setIsDeleteDialogOpen(true);
@@ -312,10 +304,6 @@ export function ItemDetailPage({
 						/>
 					</div>
 					<div className="flex shrink-0 items-center gap-1">
-						<Button variant="ghost" size="sm" onClick={handleShare}>
-							<IconShare />
-							{m.sharing_item_dialog_trigger()}
-						</Button>
 						<Button
 							variant="ghost"
 							size="sm"
@@ -439,10 +427,22 @@ export function ItemDetailPage({
 							attachmentMaxFileSizeBytes={
 								itemAttachments.attachmentMaxFileSizeBytes
 							}
-							onDecryptMeta={itemAttachments.decryptMeta}
+							onDecryptMeta={(attachment) =>
+								itemAttachments.decryptMeta(
+									resolveAttachmentMetadata(
+										itemAttachments.attachments,
+										attachment,
+									),
+								)
+							}
 							onUpload={(file) => itemAttachments.upload.mutateAsync(file)}
 							onDownload={(attachment) =>
-								itemAttachments.download.mutateAsync(attachment)
+								itemAttachments.download.mutateAsync(
+									resolveAttachmentMetadata(
+										itemAttachments.attachments,
+										attachment,
+									),
+								)
 							}
 							onRename={(attachmentId, newName) =>
 								itemAttachments.rename.mutateAsync({ attachmentId, newName })
@@ -524,26 +524,6 @@ export function ItemDetailPage({
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
-
-			{/* Share Item Dialog */}
-			{rawItem && decryptedData && (
-				<ShareItemDialog
-					open={isShareDialogOpen}
-					onOpenChange={setIsShareDialogOpen}
-					item={
-						{
-							id: rawItem.id,
-							vaultId: rawItem.vaultId,
-							category: rawItem.category,
-							favorite: rawItem.favorite,
-							createdAt: rawItem.createdAt,
-							updatedAt: rawItem.updatedAt,
-							...decryptedData,
-						} as DecryptedItem
-					}
-					onCreateShare={(request) => createShare.mutateAsync(request)}
-				/>
-			)}
 
 			{/* Share History Dialog */}
 			{rawItem && (

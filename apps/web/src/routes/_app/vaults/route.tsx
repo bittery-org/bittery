@@ -1,17 +1,17 @@
 import {
-	type CreateVaultInput,
-	useAccountSwitcher,
-	useAllVaultKeys,
-	useAvailableTags,
 	useCreateVault,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
+import {
+	useAvailableTags,
 	useDeleteVault,
 	useItemCounts,
-	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
 import {
 	Button,
 	CreateVaultDialog,
+	type CreateVaultFormValue,
 	DeleteVaultDialog,
 	EditVaultDialog,
 	Sheet,
@@ -29,6 +29,9 @@ import {
 import { useState } from "react";
 import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
 
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
+import { findRuntimeVault, vaultNavEntries } from "@/lib/runtime-items";
+import { grantRuntimeVaultImage } from "@/lib/runtime-vault-image";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -42,14 +45,23 @@ function VaultsLayout() {
 	const params = useParams({ strict: false });
 	const currentVaultId = (params as { vaultId?: string }).vaultId;
 
-	const { vaultKeys } = useAllVaultKeys();
-	const { items, isLoading: isLoadingItems } = useItems();
+	// One projection feeds the whole sidebar: the Vaults it lists, the tags it groups by
+	// and the counts beside them. Before this the Vault rows came from the transitional
+	// Vault keys, which a Runtime Sign-in never fills, so the sidebar was empty.
+	const { items, vaults, state: itemsState } = useRuntimeItems();
+	const sidebarVaults = vaultNavEntries(vaults);
 	const availableTags = useAvailableTags(items);
-	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
+	// A count of nothing is not a count of zero: only a ready projection may claim one.
+	const itemCounts = useItemCounts(itemsState === "ready" ? items : undefined);
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
-	const { accounts, activeAccount } = useAccountSwitcher();
+	const session = useRuntimeSession();
+	const accounts = session.accounts.flatMap((account) =>
+		account.access === "unlocked" && account.displayIdentity
+			? [{ accountId: account.accountId, email: account.displayIdentity.email }]
+			: [],
+	);
 
 	const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 	const [isCreateVaultDialogOpen, setIsCreateVaultDialogOpen] = useState(false);
@@ -66,10 +78,23 @@ function VaultsLayout() {
 		name: string;
 	} | null>(null);
 
-	const handleCreateVault = async (data: CreateVaultInput) => {
-		const result = await createVault.mutateAsync({
-			...data,
-		});
+	const handleCreateVault = async (data: CreateVaultFormValue) => {
+		const image = data.imageFile
+			? grantRuntimeVaultImage(data.accountId, data.imageFile)
+			: undefined;
+		const result = await (async () => {
+			try {
+				return await createVault.mutateAsync({
+					accountId: data.accountId,
+					name: data.name,
+					vaultType: data.type === "team" ? "shared" : "personal",
+					icon: data.icon,
+					imageSource: image?.input,
+				});
+			} finally {
+				await image?.discard();
+			}
+		})();
 		navigate({ to: "/vaults/$vaultId", params: { vaultId: result.vaultId } });
 	};
 
@@ -84,9 +109,7 @@ function VaultsLayout() {
 	};
 
 	const handleUpdateVault = async (vaultId: string, data: UpdateVaultData) => {
-		const accountId = vaultKeys.find(
-			(vault) => vault.vaultId === vaultId,
-		)?.accountId;
+		const accountId = findRuntimeVault(vaults, vaultId)?.accountId;
 		if (!accountId) throw new Error();
 		await updateVault.mutateAsync({
 			vaultId,
@@ -105,9 +128,7 @@ function VaultsLayout() {
 	};
 
 	const handleDeleteVault = async (vaultId: string) => {
-		const accountId = vaultKeys.find(
-			(vault) => vault.vaultId === vaultId,
-		)?.accountId;
+		const accountId = findRuntimeVault(vaults, vaultId)?.accountId;
 		if (!accountId) throw new Error();
 		await deleteVault.mutateAsync({ vaultId, accountId });
 		setDeletingVault(null);
@@ -126,7 +147,7 @@ function VaultsLayout() {
 				<aside className="hidden w-54 shrink-0 flex-col border-r lg:flex">
 					<VaultNavSidebar
 						hasHeaderInset
-						vaults={vaultKeys}
+						vaults={sidebarVaults}
 						tags={tags}
 						itemCounts={itemCounts}
 						currentVaultId={currentVaultId}
@@ -161,7 +182,7 @@ function VaultsLayout() {
 				<Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
 					<SheetContent side="left" className="w-64 p-0">
 						<VaultNavSidebar
-							vaults={vaultKeys}
+							vaults={sidebarVaults}
 							tags={tags}
 							itemCounts={itemCounts}
 							currentVaultId={currentVaultId}
@@ -187,16 +208,8 @@ function VaultsLayout() {
 					open={isCreateVaultDialogOpen}
 					onOpenChange={setIsCreateVaultDialogOpen}
 					onSubmit={handleCreateVault}
-					accounts={accounts.map(
-						({ accountId, email, name, teamName, teamAvatarUrl }) => ({
-							accountId,
-							email,
-							name,
-							teamName,
-							teamAvatarUrl,
-						}),
-					)}
-					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
+					accounts={accounts}
+					defaultAccountId={session.accountId ?? ""}
 				/>
 
 				<EditVaultDialog

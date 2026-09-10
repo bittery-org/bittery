@@ -1,14 +1,13 @@
 use super::{
     bad_request_handler_error, enforce_window_limit, validate_hex_string, validate_resource_id,
-    ChangePasswordInput, DeleteAccountInput, EncryptedVaultKeyInput, LogoutResponse,
-    RegenerateSecretKeyInput, StoreRecoveryKeyInput, UpdateEmailInput, ValidatedKdfProfile,
+    ChangePasswordInput, EncryptedVaultKeyInput, LogoutResponse, RegenerateSecretKeyInput,
+    StoreRecoveryKeyInput, UpdateEmailInput, ValidatedKdfProfile,
 };
 use bittery_crypto_core::normalize_email;
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres};
 
 use crate::{
-    db::enums::TeamType,
     db::events::{generate_resource_id, insert_audit_event},
     domains::{
         sessions::{control::record_session_revocations, service::VerifiedSession},
@@ -17,8 +16,8 @@ use crate::{
     error::AppError,
     shared::{
         rate_limit::{
-            account_mutation_limit, SCOPE_CHANGE_PASSWORD_USER, SCOPE_DELETE_ACCOUNT_USER,
-            SCOPE_REGENERATE_SECRET_KEY_USER, SCOPE_UPDATE_EMAIL_USER,
+            account_mutation_limit, SCOPE_CHANGE_PASSWORD_USER, SCOPE_REGENERATE_SECRET_KEY_USER,
+            SCOPE_UPDATE_EMAIL_USER,
         },
         transaction::database_error,
     },
@@ -180,13 +179,13 @@ pub(crate) async fn store_recovery_key(
 ) -> Result<LogoutResponse, AppError> {
     let pool = &app_state.db_pool;
     let user = query_as::<_, DbAccountMutationUserRow>(
-		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(&session.user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|error| database_error(error, "Failed to load user"))?
-	.ok_or_else(|| AppError::not_found("User not found"))?;
+        "SELECT encrypted_master_key FROM \"user\" WHERE id = $1 LIMIT 1",
+    )
+    .bind(&session.user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to load user"))?
+    .ok_or_else(|| AppError::not_found("User not found"))?;
     let had_recovery_key = user.encrypted_master_key.is_some();
 
     store_recovery_key_data(pool, &session.user_id, &input).await?;
@@ -208,69 +207,6 @@ pub(crate) async fn store_recovery_key(
         tracing::error!(error = %error, "Failed to record recovery key audit event");
         AppError::internal("Failed to record recovery key audit event")
     })?;
-
-    Ok(LogoutResponse { success: true })
-}
-
-pub(crate) async fn delete_account(
-    app_state: &AppState,
-    session: &VerifiedSession,
-    input: DeleteAccountInput,
-) -> Result<LogoutResponse, AppError> {
-    enforce_account_mutation_limit(app_state, session, SCOPE_DELETE_ACCOUNT_USER).await?;
-    let pool = &app_state.db_pool;
-    let user = query_as::<_, DbAccountMutationUserRow>(
-		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
-	)
-	.bind(&session.user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|error| database_error(error, "Failed to load user"))?
-	.ok_or_else(|| AppError::not_found("User not found"))?;
-
-    if normalize_email(&user.email) != normalize_email(&input.confirm_email) {
-        return Err(bad_request_handler_error("Email does not match"));
-    }
-    if user.team_owner_id.as_deref() == Some(session.user_id.as_str())
-        && user.team_type != Some(TeamType::Personal)
-    {
-        if let Some(team_id) = user.team_id.as_deref() {
-            let remaining_members =
-                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM \"user\" WHERE team_id = $1")
-                    .bind(team_id)
-                    .fetch_one(pool)
-                    .await
-                    .map_err(|error| database_error(error, "Failed to load team members"))?;
-            let remaining_vaults =
-                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1")
-                    .bind(team_id)
-                    .fetch_one(pool)
-                    .await
-                    .map_err(|error| database_error(error, "Failed to load team vaults"))?;
-            if remaining_members > 1 || remaining_vaults > 0 {
-                return Err(bad_request_handler_error(
-					"You cannot delete your account while you still own a non-personal team with members or team vaults. Dismantle the team or transfer ownership first.",
-				));
-            }
-        }
-    }
-
-    insert_audit_event(
-        pool,
-        &generate_resource_id("audit"),
-        &session.user_id,
-        "account_deleted",
-        "user",
-        &session.user_id,
-        None,
-    )
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "Failed to record account deletion audit event");
-        AppError::internal("Failed to record account deletion audit event")
-    })?;
-
-    delete_user_account_data(pool, &session.user_id).await?;
 
     Ok(LogoutResponse { success: true })
 }
@@ -410,15 +346,6 @@ async fn store_recovery_key_data(
     Ok(())
 }
 
-async fn delete_user_account_data(pool: &PgPool, user_id: &str) -> Result<(), AppError> {
-    query("DELETE FROM \"user\" WHERE id = $1")
-        .bind(user_id)
-        .execute(pool)
-        .await
-        .map_err(|error| database_error(error, "Failed to delete account"))?;
-    Ok(())
-}
-
 async fn apply_encrypted_vault_key_updates(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     user_id: &str,
@@ -438,9 +365,5 @@ async fn apply_encrypted_vault_key_updates(
 }
 #[derive(Debug, sqlx::FromRow)]
 struct DbAccountMutationUserRow {
-    email: String,
     encrypted_master_key: Option<String>,
-    team_id: Option<String>,
-    team_owner_id: Option<String>,
-    team_type: Option<TeamType>,
 }

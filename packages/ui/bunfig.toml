@@ -1,0 +1,2 @@
+[test]
+preload = ["./src/testing/jsdom-preload.ts"]

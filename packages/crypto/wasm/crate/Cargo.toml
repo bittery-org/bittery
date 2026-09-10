@@ -1,5 +1,8 @@
 [dependencies]
-wasm-bindgen = "*"
+wasm-bindgen = "=0.2.126"
+
+[dependencies.bittery-client-bindings]
+path = "../../../client-runtime/crates/bittery-client-bindings"
 
 [dependencies.bittery-crypto-api]
 path = "../../core/crates/bittery-crypto-api"
@@ -9,6 +12,7 @@ features = ["wasm32"]
 path = "../../../../node_modules/.pnpm/uniffi-bindgen-react-native@0.31.0-3_patch_hash=3314dbf8c2f9719ff8cddf62dd60e3bdf63df32bd3a69c78b4cfc94027e7e11a/node_modules/uniffi-bindgen-react-native/crates/ubrn_cli/../uniffi-runtime-javascript"
 
 [features]
+binding-test-harness = ["bittery-client-bindings/binding-test-harness"]
 default = []
 
 [lib]
@@ -16,6 +20,7 @@ crate-type = ["cdylib", "rlib"]
 
 [package]
 edition = "2018"
+license = "GPL-3.0-only"
 name = "bittery-crypto-wasm"
 version = "1.0.0"
 

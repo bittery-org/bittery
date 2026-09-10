@@ -1,11 +1,4 @@
-import {
-	useAllVaultKeys,
-	useAvailableTags,
-	useCreateItem,
-	useDeleteItem,
-	useItems,
-	useUpdateItem,
-} from "@bittery/core/hooks";
+import { useAvailableTags } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import type {
 	DecryptedItem,
@@ -24,9 +17,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 	EditItemSheet,
-	Skeleton,
 	toast,
-	type VaultOption,
 } from "@bittery/ui";
 import { IconLayoutGrid as Grid, IconPlus as Plus } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -34,6 +25,14 @@ import { useState } from "react";
 import { z } from "zod";
 import { ItemDetailPane } from "@/components/vault/item-detail-pane";
 import { ItemList } from "@/components/vault/item-list";
+import { ItemListState } from "@/components/vault/item-list-state";
+import { useAcceptItem } from "@/hooks/use-accept-item";
+import {
+	useDeleteItem,
+	useUpdateItem,
+} from "@/hooks/use-runtime-item-mutations";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
+import { canWriteVault, creatableVaults } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/")({
@@ -51,10 +50,9 @@ function AllItemsPage() {
 	const { m } = useI18n();
 	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 
-	const { items, isLoading } = useItems();
-	const { vaultKeys } = useAllVaultKeys();
+	const { items, accountId, vaults, state: itemsState } = useRuntimeItems();
 	const availableTags = useAvailableTags(items);
-	const createItem = useCreateItem();
+	const acceptItem = useAcceptItem();
 	const updateItem = useUpdateItem();
 	const deleteItem = useDeleteItem();
 
@@ -73,10 +71,7 @@ function AllItemsPage() {
 			: (items.find((item) => item.id === selectedItemId) ?? null);
 
 	const canWriteItems = selectedItem
-		? (() => {
-				const vault = vaultKeys.find((v) => v.vaultId === selectedItem.vaultId);
-				return vault ? vault.role !== "read-only" : false;
-			})()
+		? canWriteVault(vaults, selectedItem.vaultId)
 		: true;
 
 	const handleItemSelect = (item: DecryptedItem) => {
@@ -92,17 +87,13 @@ function AllItemsPage() {
 		vaultId: string,
 		category: ItemCategory,
 	) => {
-		const accountId = vaultKeys.find(
-			(vault) => vault.vaultId === vaultId,
-		)?.accountId;
-		if (!accountId) throw new Error("Vault account is unavailable");
-		const result = await createItem.mutateAsync({
-			vaultId,
+		const accepted = await acceptItem.accept({
 			accountId,
+			vaultId,
 			category,
 			data,
 		});
-		navigate({ to: "/vaults", search: { itemId: result.itemId } });
+		navigate({ to: "/vaults", search: { itemId: accepted.itemId } });
 		setIsCreateItemSheetOpen(false);
 		toast.success(m.vaults_detail_toast_item_created());
 	};
@@ -135,13 +126,7 @@ function AllItemsPage() {
 		}
 	};
 
-	const itemFormVaults: VaultOption[] = vaultKeys.map((v) => ({
-		id: v.vaultId,
-		name: v.vaultName,
-		type: v.vaultType,
-		icon: v.vaultIcon,
-		imageUrl: v.vaultImageUrl,
-	}));
+	const itemFormVaults = creatableVaults(vaults);
 
 	return (
 		<>
@@ -170,12 +155,8 @@ function AllItemsPage() {
 					</Button>
 				</div>
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden py-1">
-					{isLoading ? (
-						<div className="space-y-2 p-2">
-							{[1, 2, 3, 4, 5].map((i) => (
-								<Skeleton key={i} className="h-16" />
-							))}
-						</div>
+					{itemsState !== "ready" ? (
+						<ItemListState state={itemsState} />
 					) : (
 						<ItemList
 							items={items}
@@ -203,7 +184,7 @@ function AllItemsPage() {
 				open={isCreateItemSheetOpen}
 				onOpenChange={setIsCreateItemSheetOpen}
 				vaults={itemFormVaults}
-				selectedVaultId={vaultKeys[0]?.vaultId}
+				selectedVaultId={itemFormVaults[0]?.id}
 				onCreateItem={handleCreateItem}
 			/>
 

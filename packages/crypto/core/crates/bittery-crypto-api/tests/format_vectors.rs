@@ -77,6 +77,74 @@ fn fixed_aes_256_gcm_aad_vector_is_stable_and_opens_through_both_layers() {
 }
 
 #[test]
+fn attachment_move_transcrypt_preserves_the_existing_envelope_format() {
+    use core::attachment_move::{
+        AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveTranscryptor,
+        AttachmentPublicationIdentity,
+    };
+
+    // Produced independently with Node's `crypto.createCipheriv("aes-256-gcm", ...)`.
+    const SOURCE: &[u8] = br#"{"ciphertext":"4uwgK6vmWFzA3ZgI1V2KRmHobkD+uObElS9n8YPj5Vyz4YaqbrrJXQFo1qAWgGbq4Q==","iv":"MzMzMzMzMzMzMzMz","algorithm":"AES-GCM-AAD-V1"}"#;
+    const TARGET: &[u8] = br#"{"ciphertext":"9GDXDoNXzvLHwClFUKu+r3apkmO+x94YVjtMfhKvFAGTwySZr7tzjGWZggILfgXtCw==","iv":"RERERERERERERERE","algorithm":"AES-GCM-AAD-V1"}"#;
+    let scope = |vault_id: &str| {
+        AttachmentBlobScope::new(vault_id.into(), "attachment-7".into(), "user-9".into())
+    };
+
+    let mut scanner = AttachmentEnvelopeScanner::new();
+    for chunk in SOURCE.chunks(7) {
+        scanner.push(chunk).unwrap();
+    }
+    let mut transcryptor = AttachmentMoveTranscryptor::new_with_test_iv_and_identity(
+        scanner.finish().unwrap(),
+        [0x11; 32],
+        scope("vault-source"),
+        [0x22; 32],
+        scope("vault-target"),
+        AttachmentPublicationIdentity::new(
+            "account-vector".into(),
+            "user-9".into(),
+            "operation-vector".into(),
+            "attachment-7".into(),
+        )
+        .unwrap(),
+        [0x44; 12],
+    )
+    .unwrap();
+    let mut target = Vec::new();
+    for chunk in SOURCE.chunks(11) {
+        target.extend(transcryptor.push(chunk).unwrap());
+    }
+    target.extend(transcryptor.finish().unwrap().final_chunk);
+
+    assert_eq!(target, TARGET);
+}
+
+#[test]
+fn attachment_upload_stream_preserves_the_existing_envelope_format() {
+    use core::attachment_move::{AttachmentBlobEncryptor, AttachmentBlobScope};
+
+    // Produced independently with Node's `crypto.createCipheriv("aes-256-gcm", ...)` over the
+    // historical Base64 plaintext representation.
+    const TARGET: &[u8] = br#"{"ciphertext":"8WLjUKtkpbLR4hxKQ5rmrXPnonCTyNFAYQZvS2uVNQ6UcvzhpW2US6fQn+aNZQm+a4Zbk4uY2QD49dBF3TdS8g==","iv":"RERERERERERERERE","algorithm":"AES-GCM-AAD-V1"}"#;
+    let plaintext = b"raw attachment bytes\0across chunks";
+    let mut encryptor = AttachmentBlobEncryptor::new_with_test_iv(
+        [0x22; 32],
+        AttachmentBlobScope::new(
+            "vault-target".into(),
+            "attachment-7".into(),
+            "user-9".into(),
+        ),
+        [0x44; 12],
+    )
+    .unwrap();
+    let mut target = encryptor.push(&plaintext[..5]).unwrap();
+    target.extend(encryptor.push(&plaintext[5..19]).unwrap());
+    target.extend(encryptor.push(&plaintext[19..]).unwrap());
+    target.extend(encryptor.finish().unwrap().final_chunk);
+    assert_eq!(target, TARGET);
+}
+
+#[test]
 fn srp_6a_api_and_core_complete_the_same_session() {
     let password = "correct horse battery staple";
     let registration = block_on(api::generate_srp_registration(password.into())).unwrap();
@@ -256,4 +324,28 @@ fn unwrap_key_requires_the_exact_authenticated_context() {
         )),
         Err(api::CryptoError::Decryption(_))
     ));
+}
+
+#[test]
+fn fixed_replica_recovery_v1_stream_vector_opens_and_authenticates_completion() {
+    // Produced independently with Node crypto.pbkdf2Sync/createCipheriv, not this encoder.
+    // No unrelated CryptoPort member is added: this persisted format is consumed by Rust Runtime.
+    let header = hex::decode("4254525245433031000927c0000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262700040000").unwrap();
+    let frame = hex::decode("0000002f0000000000be1fd89a4ea4af938a453846f0bcb9306706bd71e8423e6ba15c8cffdc75f4f6ace0f0486b637531197db5a976f8ac").unwrap();
+    let terminal =
+        hex::decode("0000001c0100000001619f9612016e8a11ec17c0575f1a7d9a3c655a80390008e056a63c02")
+            .unwrap();
+    let mut decoder =
+        core::replica_recovery::RecoveryDecryptor::new("independent vector password", &header)
+            .unwrap();
+    assert_eq!(
+        &*decoder.open_frame(&frame).unwrap().unwrap(),
+        b"encrypted recovery vector bytes"
+    );
+    assert!(
+        !decoder.finished(),
+        "an authenticated prefix is not a complete backup"
+    );
+    assert!(decoder.open_frame(&terminal).unwrap().is_none());
+    assert!(decoder.finished());
 }

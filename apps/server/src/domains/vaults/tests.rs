@@ -1,21 +1,1746 @@
 use super::{
     assert_item_write_access, attachment_quota_lock_key, base64_encoded_length,
-    encrypted_attachment_storage_size, pending_attachment_upload_expiry, toggle_vault_favorite,
-    ToggleFavoriteInput,
+    encrypted_attachment_storage_size, pending_attachment_upload_expiry,
 };
 use crate::db::enums::VaultRole;
 use crate::error::AppErrorCode;
+use crate::jobs::sql::{cleanup_attachment_move_staging, cleanup_vault_image_staging};
 use crate::test_support::{
-    assign_user_to_team, authenticated_json_headers, seed_item, seed_team, seed_user, seed_vault,
+    assign_user_to_team, authenticated_json_headers, install_attachment_move_preflight_hook,
+    install_vault_image_database_failpoint, seed_item, seed_team, seed_user, seed_vault,
     seed_vault_key, with_api_test_app, with_api_test_app_state, with_test_config,
+    RecordingObjectStorage, VaultImageDatabaseBoundary,
 };
 use axum::http::{
     header::{CONTENT_TYPE, ETAG, IF_MATCH},
     HeaderMap, HeaderValue, Method, StatusCode,
 };
 use serde_json::{json, Value};
-use sqlx::{query, query_scalar, PgPool};
+use sqlx::{postgres::PgPoolOptions, query, query_as, query_scalar, PgPool};
 use time::{Duration, OffsetDateTime};
+
+use std::sync::Arc;
+
+fn vault_image_binding(operation_id: &str) -> super::VaultImageStagingBinding {
+    super::VaultImageStagingBinding {
+        operation_id: operation_id.to_owned(),
+        vault_id: "vault_image_target".to_owned(),
+        raw_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+        raw_length: 2_097_152,
+        content_type: "image/png".to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn vault_image_exact_grant_replay_is_stable_and_consumes_quota_once() {
+    with_api_test_app("vault_image_exact_grant_replay", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_user",
+            "Vault Image User",
+            "vault-image@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let binding = vault_image_binding("vault_image_operation");
+
+        let first = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_user",
+            binding.clone(),
+        )
+        .await
+        .expect("first exact grant should bind");
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_user",
+            binding,
+        )
+        .await
+        .expect("exact replay should renew the same binding");
+
+        assert_eq!(first.object_key, "vaults/vault_image_user/vault_image_target/create/vault_image_operation-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(replay.object_key, first.object_key);
+        assert_eq!(replay.generation, first.generation);
+        assert!(replay.lease_expires_at >= first.lease_expires_at);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("quota row should count"),
+            1
+        );
+        assert_eq!(storage.upload_requests().len(), 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_exact_grant_replay_returns_the_database_persisted_rolling_lease() {
+    with_api_test_app("vault_image_grant_database_clock", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_grant_clock_user",
+            "Vault Image Grant Clock User",
+            "vault-image-grant-clock@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let binding = vault_image_binding("vault_image_grant_clock_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_grant_clock_user",
+            binding.clone(),
+        )
+        .await
+        .expect("initial grant should bind");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_grant_clock_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten");
+        query("CREATE FUNCTION normalize_vault_image_lease() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.lease_expires_at := date_trunc('second', NEW.lease_expires_at); NEW.updated_at := NEW.lease_expires_at - INTERVAL '24 hours'; RETURN NEW; END $$")
+            .execute(&app.pool)
+            .await
+            .expect("lease normalizer should create");
+        query("CREATE TRIGGER normalize_vault_image_lease BEFORE UPDATE ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION normalize_vault_image_lease()")
+            .execute(&app.pool)
+            .await
+            .expect("lease normalizer should install");
+
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_grant_clock_user",
+            binding,
+        )
+        .await
+        .expect("exact grant should renew");
+        let persisted = query_as::<_, (OffsetDateTime, OffsetDateTime)>(
+            "SELECT lease_expires_at, updated_at FROM vault_image_staging WHERE user_id = 'vault_image_grant_clock_user'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("renewed lease should load");
+
+        assert_eq!(replay.lease_expires_at, persisted.0);
+        assert_eq!(persisted.0 - persisted.1, Duration::hours(24));
+        assert!(persisted.0 > OffsetDateTime::now_utc() + Duration::hours(23));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_changed_binding_is_operation_id_reused_before_object_access() {
+    with_api_test_app("vault_image_changed_binding", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_reuse_user",
+            "Vault Image Reuse User",
+            "vault-image-reuse@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let binding = vault_image_binding("vault_image_reused_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_reuse_user",
+            binding.clone(),
+        )
+        .await
+        .expect("first binding should succeed");
+        let mut changed = binding;
+        changed.content_type = "image/webp".to_owned();
+
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_reuse_user",
+            changed,
+        )
+        .await
+        .expect_err("changed binding must be rejected");
+
+        assert_eq!(error.code, AppErrorCode::OperationIdReused);
+        assert_eq!(storage.upload_requests().len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_user_quota_is_inclusive_at_64_slots_and_128_mib() {
+    with_api_test_app("vault_image_quota_edges", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_quota_user",
+            "Vault Image Quota User",
+            "vault-image-quota@example.com",
+        )
+        .await;
+        query(
+            "INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_quota_user', 'quota_operation_' || value, repeat('b', 64), 1 FROM generate_series(1, 63) value",
+        )
+        .execute(&app.pool)
+        .await
+        .expect("quota generations should seed");
+        query(
+            "INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_quota_user', 'quota_operation_' || value, 'vault_image_target', 'vaults/vault_image_quota_user/vault_image_target/create/quota_operation_' || value || '-' || repeat('b', 64), repeat('b', 64), 2097152, 'image/png', 'unconfirmed', 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 63) value",
+        )
+        .execute(&app.pool)
+        .await
+        .expect("quota rows should seed");
+        let storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_quota_user",
+            vault_image_binding("quota_operation_64"),
+        )
+        .await
+        .expect("the inclusive 64th slot and 128 MiB byte should succeed");
+
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_quota_user",
+            vault_image_binding("quota_operation_65"),
+        )
+        .await
+        .expect_err("the 65th slot must fail before storage");
+
+        assert_eq!(error.code, AppErrorCode::VaultImageStagingQuotaExceeded);
+        assert_eq!(storage.upload_requests().len(), 1);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_quota_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should be readable"),
+            0,
+            "quota rejection is not a semantic Operation outcome"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_slot_quota_counts_cleanup_pending_even_with_one_byte_rows() {
+    with_api_test_app("vault_image_independent_quota_edges", |app| async move {
+        seed_user(&app.pool, "vault_image_slot_user", "Vault Image Quota User", "vault-image-slot@example.com").await;
+        query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_slot_user', 'slot_operation_' || value, repeat('b', 64), 1 FROM generate_series(1, 64) value")
+            .execute(&app.pool).await.expect("slot generations should seed");
+        query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_slot_user', 'slot_operation_' || value, 'vault_image_target', 'vaults/vault_image_slot_user/vault_image_target/create/slot_operation_' || value || '-' || repeat('b', 64), repeat('b', 64), 1, 'image/png', CASE WHEN value = 1 THEN 'cleanup_pending' ELSE 'unconfirmed' END, 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 64) value")
+            .execute(&app.pool).await.expect("slot rows should seed");
+
+        let storage = RecordingObjectStorage::succeeding(None);
+        let mut one_byte = vault_image_binding("slot_operation_65");
+        one_byte.raw_length = 1;
+        let slot_error = super::grant_vault_image_staging(
+            &app.pool, &storage, "vault_image_slot_user", one_byte,
+        ).await.expect_err("cleanup-pending row still consumes the 64th outstanding slot");
+        assert_eq!(slot_error.code, AppErrorCode::VaultImageStagingQuotaExceeded);
+
+        assert!(storage.calls().is_empty(), "quota rejects before object access");
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_concurrent_grants_serialize_at_the_inclusive_user_quota_boundary() {
+    with_api_test_app("vault_image_concurrent_quota", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_concurrent_quota_user",
+            "Vault Image Concurrent Quota User",
+            "vault-image-concurrent-quota@example.com",
+        )
+        .await;
+        query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_concurrent_quota_user', 'concurrent_quota_' || value, repeat('b', 64), 1 FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("quota generations should seed");
+        query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_concurrent_quota_user', 'concurrent_quota_' || value, 'vault_image_target', 'vaults/vault_image_concurrent_quota_user/vault_image_target/create/concurrent_quota_' || value || '-' || repeat('b', 64), repeat('b', 64), 2097152, 'image/png', 'unconfirmed', 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("quota rows should seed");
+
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let mut tasks = Vec::new();
+        for operation_id in ["concurrent_quota_64_a", "concurrent_quota_64_b"] {
+            let pool = app.pool.clone();
+            let storage = storage.clone();
+            let barrier = barrier.clone();
+            let binding = vault_image_binding(operation_id);
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                super::grant_vault_image_staging(
+                    &pool,
+                    storage.as_ref(),
+                    "vault_image_concurrent_quota_user",
+                    binding,
+                )
+                .await
+            }));
+        }
+        barrier.wait().await;
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.expect("concurrent grant should join"));
+        }
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter_map(|result| result.as_ref().err())
+                .map(|error| error.code)
+                .collect::<Vec<_>>(),
+            vec![AppErrorCode::VaultImageStagingQuotaExceeded]
+        );
+        assert_eq!(
+            query_as::<_, (i64, i64)>("SELECT COUNT(*)::bigint, SUM(raw_length)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_concurrent_quota_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("serialized quota should load"),
+            (64, 128 * 1024 * 1024)
+        );
+        assert_eq!(storage.upload_requests().len(), 1);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_concurrent_quota_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_concurrent_exact_grant_replays_keep_one_generation_and_quota_row() {
+    with_api_test_app("vault_image_concurrent_replay", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_concurrent_replay_user",
+            "Vault Image Concurrent Replay User",
+            "vault-image-concurrent-replay@example.com",
+        )
+        .await;
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        let binding = vault_image_binding("vault_image_concurrent_replay_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            storage.as_ref(),
+            "vault_image_concurrent_replay_user",
+            binding.clone(),
+        )
+        .await
+        .expect("initial grant should bind");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_concurrent_replay_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten");
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let pool = app.pool.clone();
+            let storage = storage.clone();
+            let binding = binding.clone();
+            let barrier = barrier.clone();
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                super::grant_vault_image_staging(
+                    &pool,
+                    storage.as_ref(),
+                    "vault_image_concurrent_replay_user",
+                    binding,
+                )
+                .await
+            }));
+        }
+        barrier.wait().await;
+        let first = tasks
+            .remove(0)
+            .await
+            .expect("first replay should join")
+            .expect("first replay should succeed");
+        let second = tasks
+            .remove(0)
+            .await
+            .expect("second replay should join")
+            .expect("second replay should succeed");
+
+        assert_eq!(first.generation, 1);
+        assert_eq!(second.generation, 1);
+        assert_eq!(first.object_key, second.object_key);
+        assert!(first.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        assert!(second.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        assert_eq!(
+            query_as::<_, (i64, i64, i64)>("SELECT COUNT(*)::bigint, SUM(raw_length)::bigint, MAX(generation)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_concurrent_replay_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("replay authority should load"),
+            (1, binding.raw_length, 1)
+        );
+        assert_eq!(storage.upload_requests().len(), 3);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_valid_row_bounds_make_byte_quota_equivalent_at_the_slot_boundary() {
+    with_api_test_app("vault_image_quota_equivalence", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_quota_equivalence_user",
+            "Vault Image Quota Equivalence User",
+            "vault-image-quota-equivalence@example.com",
+        )
+        .await;
+        query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) SELECT 'vault_image_quota_equivalence_user', 'quota_equivalence_' || value, repeat('b', 64), 1 FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("quota generations should seed");
+        query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) SELECT 'vault_image_quota_equivalence_user', 'quota_equivalence_' || value, 'vault_image_target', 'vaults/vault_image_quota_equivalence_user/vault_image_target/create/quota_equivalence_' || value || '-' || repeat('b', 64), repeat('b', 64), 2097152, 'image/png', 'unconfirmed', 1, NOW() + INTERVAL '24 hours' FROM generate_series(1, 63) value")
+            .execute(&app.pool)
+            .await
+            .expect("valid maximum-size rows should seed");
+
+        let (slots, bytes, maximum_valid_row) = query_as::<_, (i64, i64, i64)>(
+            "SELECT COUNT(*)::bigint, SUM(raw_length)::bigint, MAX(raw_length)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_quota_equivalence_user'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("valid row bounds should load");
+        // The database's 2 MiB row bound makes a byte-only overflow below 64 slots
+        // unreachable: 63 maximum rows total 126 MiB and the 64th reaches 128 MiB.
+        assert_eq!((slots, bytes, maximum_valid_row), (63, 126 * 1024 * 1024, 2 * 1024 * 1024));
+        assert_eq!(bytes + maximum_valid_row, 128 * 1024 * 1024);
+        assert!(slots < 64);
+        assert!(bytes + maximum_valid_row <= 128 * 1024 * 1024);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_binding_accepts_only_canonical_ids_bounds_digest_and_exact_mime_set() {
+    with_api_test_app("vault_image_binding_validation", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_validation_user",
+            "Vault Image Validation User",
+            "vault-image-validation@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        for (index, content_type) in [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif",
+            "image/avif",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut binding = vault_image_binding(&format!("validation_operation_{index}"));
+            binding.content_type = content_type.to_owned();
+            binding.raw_length = if index == 0 { 1 } else { 2_097_152 };
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_validation_user",
+                binding,
+            )
+            .await
+            .expect("every exact allowed MIME and inclusive byte bound should pass");
+        }
+
+        let mut invalid = Vec::new();
+        let mut value = vault_image_binding("validation_invalid_mime");
+        value.content_type = "image/png; charset=binary".to_owned();
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_alias");
+        value.content_type = "image/jpg".to_owned();
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_empty");
+        value.raw_length = 0;
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_large");
+        value.raw_length = 2_097_153;
+        invalid.push(value);
+        let mut value = vault_image_binding("validation_invalid_digest");
+        value.raw_sha256 = value.raw_sha256.to_ascii_uppercase();
+        invalid.push(value);
+        let mut value = vault_image_binding("short");
+        value.operation_id = "short".to_owned();
+        invalid.push(value);
+        for binding in invalid {
+            let error = super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_validation_user",
+                binding,
+            )
+            .await
+            .expect_err("non-canonical binding must fail before persistence and storage");
+            assert_eq!(error.code, AppErrorCode::BadRequest);
+        }
+        assert_eq!(storage.upload_requests().len(), 5);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_object_store_failures_preserve_exact_retry_authority() {
+    with_api_test_app("vault_image_object_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_object_failure_user",
+            "Vault Image Object Failure User",
+            "vault-image-object-failure@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_object_failure_operation");
+        let failing = RecordingObjectStorage::failing();
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &failing,
+            "vault_image_object_failure_user",
+            binding.clone(),
+        )
+        .await
+        .expect_err("credential failure should surface as infrastructure");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_as::<_, (String, i64)>("SELECT state, generation FROM vault_image_staging WHERE user_id = 'vault_image_object_failure_user'")
+                .fetch_one(&app.pool).await.expect("binding should remain durable"),
+            ("unconfirmed".to_owned(), 1)
+        );
+
+        let exact = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_object_failure_user",
+            binding.clone(),
+        )
+        .await
+        .expect("credential retry should replay generation one");
+        assert_eq!(replay.generation, 1);
+
+        let error = super::confirm_vault_image_staging(
+            &app.pool,
+            &failing,
+            "vault_image_object_failure_user",
+            &binding,
+        )
+        .await
+        .expect_err("HEAD failure should remain infrastructure");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_object_failure_user'")
+                .fetch_one(&app.pool).await.expect("state should survive"),
+            "unconfirmed"
+        );
+        let confirmed = super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_object_failure_user",
+            &binding,
+        )
+        .await
+        .expect("exact confirmation retry should converge");
+        assert_eq!(confirmed.state, super::VaultImageStagingState::Confirmed);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_object_failure_user'")
+                .fetch_one(&app.pool).await.expect("outcomes should load"),
+            0
+        );
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_wrong_credential_key_and_absent_head_preserve_exact_retry_authority() {
+    with_api_test_app("vault_image_object_boundary_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_object_boundary_user",
+            "Vault Image Object Boundary User",
+            "vault-image-object-boundary@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_object_boundary_operation");
+        let wrong_key = RecordingObjectStorage::succeeding_with_wrong_upload_key(
+            "vaults/foreign/vault/create/wrong-object",
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &wrong_key,
+            "vault_image_object_boundary_user",
+            binding.clone(),
+        )
+        .await
+        .expect_err("credential for a different key must fail closed");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_as::<_, (String, i64)>("SELECT state, generation FROM vault_image_staging WHERE user_id = 'vault_image_object_boundary_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("binding should survive wrong-key credentials"),
+            ("unconfirmed".to_owned(), 1)
+        );
+
+        let absent = RecordingObjectStorage::succeeding_with_absent_object();
+        let replay = super::grant_vault_image_staging(
+            &app.pool,
+            &absent,
+            "vault_image_object_boundary_user",
+            binding.clone(),
+        )
+        .await
+        .expect("exact credential retry should retain generation one");
+        assert_eq!(replay.generation, 1);
+        let lease_before_absent_head = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_object_boundary_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("lease should load");
+        let error = super::confirm_vault_image_staging(
+            &app.pool,
+            &absent,
+            "vault_image_object_boundary_user",
+            &binding,
+        )
+        .await
+        .expect_err("absent HEAD must not confirm");
+        assert_eq!(error.code, AppErrorCode::Conflict);
+        assert_eq!(
+            query_as::<_, (String, OffsetDateTime)>("SELECT state, lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_object_boundary_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("absent HEAD authority should survive"),
+            ("unconfirmed".to_owned(), lease_before_absent_head)
+        );
+
+        let exact = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        let confirmed = super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_object_boundary_user",
+            &binding,
+        )
+        .await
+        .expect("exact HEAD retry should confirm generation one");
+        assert_eq!(confirmed.generation, 1);
+        assert_eq!(confirmed.state, super::VaultImageStagingState::Confirmed);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_object_boundary_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_database_failures_precede_or_preserve_object_work_at_each_boundary() {
+    with_api_test_app("vault_image_database_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_database_failure_user",
+            "Vault Image Database Failure User",
+            "vault-image-database-failure@example.com",
+        )
+        .await;
+        query("CREATE FUNCTION fail_vault_image_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected insert failure'; END $$")
+            .execute(&app.pool).await.expect("insert failpoint should create");
+        query("CREATE TRIGGER fail_vault_image_insert BEFORE INSERT ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION fail_vault_image_insert()")
+            .execute(&app.pool).await.expect("insert trigger should create");
+        let binding = vault_image_binding("vault_image_database_failure_operation");
+        let storage = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool, &storage, "vault_image_database_failure_user", binding.clone(),
+        ).await.expect_err("database insert failure should abort before credentials");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert!(storage.calls().is_empty());
+        assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging_generation WHERE user_id = 'vault_image_database_failure_user'").fetch_one(&app.pool).await.expect("generation count should load"), 0);
+        query("DROP TRIGGER fail_vault_image_insert ON vault_image_staging")
+            .execute(&app.pool).await.expect("insert trigger should drop");
+        query("DROP FUNCTION fail_vault_image_insert()")
+            .execute(&app.pool).await.expect("insert function should drop");
+
+        super::grant_vault_image_staging(
+            &app.pool, &storage, "vault_image_database_failure_user", binding.clone(),
+        ).await.expect("binding should retry");
+        query("CREATE FUNCTION fail_vault_image_confirm() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.state = 'confirmed' THEN RAISE EXCEPTION 'injected confirmation failure'; END IF; RETURN NEW; END $$")
+            .execute(&app.pool).await.expect("confirm failpoint should create");
+        query("CREATE TRIGGER fail_vault_image_confirm BEFORE UPDATE ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION fail_vault_image_confirm()")
+            .execute(&app.pool).await.expect("confirm trigger should create");
+        let calls_before_confirm = storage.calls().len();
+        let error = super::confirm_vault_image_staging(
+            &app.pool, &storage, "vault_image_database_failure_user", &binding,
+        ).await.expect_err("database confirmation failure should leave the object retryable");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(storage.calls().len(), calls_before_confirm + 1, "HEAD precedes confirmation DB write");
+        assert_eq!(query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_database_failure_user'").fetch_one(&app.pool).await.expect("state should load"), "unconfirmed");
+        query("DROP TRIGGER fail_vault_image_confirm ON vault_image_staging")
+            .execute(&app.pool).await.expect("confirm trigger should drop");
+        query("DROP FUNCTION fail_vault_image_confirm()")
+            .execute(&app.pool).await.expect("confirm function should drop");
+
+        super::request_vault_image_staging_cleanup(
+            &app.pool, "vault_image_database_failure_user", &binding,
+        ).await.expect("cleanup should queue");
+        query("CREATE FUNCTION fail_vault_image_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected delete failure'; END $$")
+            .execute(&app.pool).await.expect("delete failpoint should create");
+        query("CREATE TRIGGER fail_vault_image_delete BEFORE DELETE ON vault_image_staging FOR EACH ROW EXECUTE FUNCTION fail_vault_image_delete()")
+            .execute(&app.pool).await.expect("delete trigger should create");
+        let calls_before_delete = storage.calls().len();
+        assert!(cleanup_vault_image_staging(&app.pool, &storage).await.is_err());
+        assert_eq!(storage.calls().len(), calls_before_delete + 1, "object delete precedes final DB deletion");
+        assert_eq!(query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_database_failure_user'").fetch_one(&app.pool).await.expect("cleanup state should survive"), "cleanup_pending");
+        query("DROP TRIGGER fail_vault_image_delete ON vault_image_staging")
+            .execute(&app.pool).await.expect("delete trigger should drop");
+        query("DROP FUNCTION fail_vault_image_delete()")
+            .execute(&app.pool).await.expect("delete function should drop");
+        assert_eq!(cleanup_vault_image_staging(&app.pool, &storage).await.expect("cleanup retry should converge"), 1);
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_deferred_commit_failures_roll_back_each_mutation_for_exact_retry() {
+    with_api_test_app("vault_image_deferred_commit_failures", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            "Vault Image Deferred Commit User",
+            "vault-image-deferred-commit@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_deferred_commit_operation");
+        let exact = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        query("CREATE FUNCTION fail_vault_image_deferred_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected deferred commit failure'; END $$")
+            .execute(&app.pool)
+            .await
+            .expect("deferred commit function should create");
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER INSERT ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("grant commit trigger should create");
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            binding.clone(),
+        )
+        .await
+        .expect_err("grant commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert!(exact.calls().is_empty(), "failed commit must precede credentials");
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging_generation WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back generation count should load"),
+            0
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("grant commit trigger should drop");
+        let grant = super::grant_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should retry");
+        assert_eq!(grant.generation, 1);
+
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_deferred_commit_user'")
+            .execute(&app.pool)
+            .await
+            .expect("status lease should shorten");
+        let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("shortened lease should load");
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER UPDATE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("status commit trigger should create");
+        let error = super::status_vault_image_staging(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect_err("status commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back status lease should load"),
+            shortened
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("status commit trigger should drop");
+        super::status_vault_image_staging(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect("status should retry")
+        .expect("status should remain present");
+
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER UPDATE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("confirmation commit trigger should create");
+        let error = super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect_err("confirmation commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back confirmation should load"),
+            "unconfirmed"
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("confirmation commit trigger should drop");
+        super::confirm_vault_image_staging(
+            &app.pool,
+            &exact,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect("confirmation should retry");
+
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER UPDATE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup request commit trigger should create");
+        let error = super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect_err("cleanup request commit failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back cleanup request should load"),
+            "confirmed"
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup request commit trigger should drop");
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_deferred_commit_user",
+            &binding,
+        )
+        .await
+        .expect("cleanup request should retry");
+
+        query("CREATE CONSTRAINT TRIGGER fail_vault_image_deferred_commit AFTER DELETE ON vault_image_staging DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup commit trigger should create");
+        let calls_before_cleanup = exact.calls().len();
+        assert!(cleanup_vault_image_staging(&app.pool, &exact).await.is_err());
+        assert_eq!(exact.calls().len(), calls_before_cleanup + 1);
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back final delete should load"),
+            "cleanup_pending"
+        );
+        query("DROP TRIGGER fail_vault_image_deferred_commit ON vault_image_staging")
+            .execute(&app.pool)
+            .await
+            .expect("cleanup commit trigger should drop");
+        query("DROP FUNCTION fail_vault_image_deferred_commit()")
+            .execute(&app.pool)
+            .await
+            .expect("deferred commit function should drop");
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &exact)
+                .await
+                .expect("final delete should retry"),
+            1
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_deferred_commit_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_grant_database_failpoints_roll_back_and_retry_without_generation_drift() {
+    with_api_test_app("vault_image_grant_failpoint_matrix", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_grant_failpoint_user",
+            "Vault Image Grant Failpoint User",
+            "vault-image-grant-failpoint@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::GenerationInsert,
+            VaultImageDatabaseBoundary::QuotaRead,
+            VaultImageDatabaseBoundary::QuotaAdmission,
+            VaultImageDatabaseBoundary::GrantCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_grant_failpoint_{index}"));
+            let storage_calls_before = storage.calls().len();
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let error = super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_grant_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect_err("injected grant database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging_generation WHERE user_id = 'vault_image_grant_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("generation count should load"),
+                0,
+                "{boundary:?} must roll back generation authority"
+            );
+            assert_eq!(
+                storage.calls().len(),
+                storage_calls_before,
+                "{boundary:?} must precede credentials"
+            );
+            let retry = super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_grant_failpoint_user",
+                binding,
+            )
+            .await
+            .expect("exact grant retry should succeed");
+            assert_eq!(retry.generation, 1, "{boundary:?}");
+        }
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_grant_failpoint_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_replay_and_generation_advance_failpoints_preserve_exact_retry() {
+    with_api_test_app("vault_image_replay_advance_failpoints", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_replay_failpoint_user",
+            "Vault Image Replay Failpoint User",
+            "vault-image-replay-failpoint@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let replay_binding = vault_image_binding("vault_image_replay_failpoint_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            replay_binding.clone(),
+        )
+        .await
+        .expect("initial replay binding should succeed");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+            .bind(&replay_binding.operation_id)
+            .execute(&app.pool)
+            .await
+            .expect("replay lease should shorten");
+        let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+            .bind(&replay_binding.operation_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("shortened lease should load");
+        install_vault_image_database_failpoint(
+            &replay_binding.operation_id,
+            VaultImageDatabaseBoundary::ReplayRenewal,
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            replay_binding.clone(),
+        )
+        .await
+        .expect_err("replay renewal failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+                .bind(&replay_binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("rolled-back lease should load"),
+            shortened
+        );
+        assert_eq!(
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_replay_failpoint_user",
+                replay_binding,
+            )
+            .await
+            .expect("replay renewal should retry")
+            .generation,
+            1
+        );
+
+        let advance_binding = vault_image_binding("vault_image_advance_failpoint_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            advance_binding.clone(),
+        )
+        .await
+        .expect("initial generation should bind");
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_replay_failpoint_user",
+            &advance_binding,
+        )
+        .await
+        .expect("cleanup should queue");
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &storage)
+                .await
+                .expect("initial generation should clean"),
+            1
+        );
+        install_vault_image_database_failpoint(
+            &advance_binding.operation_id,
+            VaultImageDatabaseBoundary::GenerationAdvance,
+        );
+        let error = super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_replay_failpoint_user",
+            advance_binding.clone(),
+        )
+        .await
+        .expect_err("generation advance failure should surface");
+        assert_eq!(error.code, AppErrorCode::InternalServerError);
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT generation FROM vault_image_staging_generation WHERE user_id = 'vault_image_replay_failpoint_user' AND operation_id = $1")
+                .bind(&advance_binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("generation should load"),
+            1
+        );
+        assert_eq!(
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_replay_failpoint_user",
+                advance_binding,
+            )
+            .await
+            .expect("generation advance should retry")
+            .generation,
+            2
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_status_confirmation_and_cleanup_failpoints_roll_back_for_exact_retry() {
+    with_api_test_app("vault_image_mutation_failpoint_matrix", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_mutation_failpoint_user",
+            "Vault Image Mutation Failpoint User",
+            "vault-image-mutation-failpoint@example.com",
+        )
+        .await;
+        let grant_storage = RecordingObjectStorage::succeeding(None);
+        let status_binding = vault_image_binding("vault_image_status_failpoint_operation");
+        super::grant_vault_image_staging(
+            &app.pool,
+            &grant_storage,
+            "vault_image_mutation_failpoint_user",
+            status_binding.clone(),
+        )
+        .await
+        .expect("status binding should stage");
+        for boundary in [
+            VaultImageDatabaseBoundary::StatusRenewal,
+            VaultImageDatabaseBoundary::StatusCommit,
+        ] {
+            query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&status_binding.operation_id)
+                .execute(&app.pool)
+                .await
+                .expect("status lease should shorten");
+            let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&status_binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("status lease should load");
+            install_vault_image_database_failpoint(&status_binding.operation_id, boundary);
+            let error = super::status_vault_image_staging(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &status_binding,
+            )
+            .await
+            .expect_err("status database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                    .bind(&status_binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("rolled-back status lease should load"),
+                shortened,
+                "{boundary:?}"
+            );
+            let retried = super::status_vault_image_staging(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &status_binding,
+            )
+            .await
+            .expect("status should retry")
+            .expect("status row should remain");
+            assert!(retried.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        }
+
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::Confirmation,
+            VaultImageDatabaseBoundary::ConfirmationCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_confirmation_failpoint_{index}"));
+            let storage = RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length,
+                &binding.content_type,
+                &binding.raw_sha256,
+            );
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_mutation_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect("confirmation binding should stage");
+            query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&binding.operation_id)
+                .execute(&app.pool)
+                .await
+                .expect("confirmation lease should shorten");
+            let shortened = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                .bind(&binding.operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("confirmation lease should load");
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let error = super::confirm_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_mutation_failpoint_user",
+                &binding,
+            )
+            .await
+            .expect_err("confirmation database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_as::<_, (String, OffsetDateTime)>("SELECT state, lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("rolled-back confirmation should load"),
+                ("unconfirmed".to_owned(), shortened),
+                "{boundary:?}"
+            );
+            assert_eq!(
+                super::confirm_vault_image_staging(
+                    &app.pool,
+                    &storage,
+                    "vault_image_mutation_failpoint_user",
+                    &binding,
+                )
+                .await
+                .expect("confirmation should retry")
+                .state,
+                super::VaultImageStagingState::Confirmed
+            );
+        }
+
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::CleanupRequest,
+            VaultImageDatabaseBoundary::CleanupRequestCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_cleanup_request_failpoint_{index}"));
+            super::grant_vault_image_staging(
+                &app.pool,
+                &grant_storage,
+                "vault_image_mutation_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect("cleanup binding should stage");
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let error = super::request_vault_image_staging_cleanup(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &binding,
+            )
+            .await
+            .expect_err("cleanup request database failure should surface");
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{boundary:?}");
+            assert_eq!(
+                query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_mutation_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("rolled-back cleanup state should load"),
+                "unconfirmed",
+                "{boundary:?}"
+            );
+            super::request_vault_image_staging_cleanup(
+                &app.pool,
+                "vault_image_mutation_failpoint_user",
+                &binding,
+            )
+            .await
+            .expect("cleanup request should retry");
+        }
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_mutation_failpoint_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_status_and_exact_confirmation_renew_and_confirm() {
+    with_api_test_app("vault_image_status_confirmation", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_confirm_user",
+            "Vault Image Confirm User",
+            "vault-image-confirm@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_confirm_operation");
+        let storage = RecordingObjectStorage::succeeding_exact_object(
+            binding.raw_length,
+            &binding.content_type,
+            &binding.raw_sha256,
+        );
+        super::grant_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_confirm_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should succeed");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_confirm_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten");
+
+        let status = super::status_vault_image_staging(
+            &app.pool,
+            "vault_image_confirm_user",
+            &binding,
+        )
+        .await
+        .expect("exact status should succeed")
+        .expect("binding should exist");
+        assert_eq!(status.state, super::VaultImageStagingState::Unconfirmed);
+        assert!(status.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = 'vault_image_confirm_user'")
+            .execute(&app.pool)
+            .await
+            .expect("lease should shorten again");
+        let confirmed = super::confirm_vault_image_staging(
+            &app.pool,
+            &storage,
+            "vault_image_confirm_user",
+            &binding,
+        )
+        .await
+        .expect("exact object confirmation should succeed");
+        assert_eq!(confirmed.state, super::VaultImageStagingState::Confirmed);
+        assert!(confirmed.lease_expires_at > OffsetDateTime::now_utc() + Duration::hours(23));
+        assert_eq!(
+            storage.calls().last().cloned(),
+            Some(format!("head:{}", confirmed.object_key))
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_confirmation_rejects_length_type_and_digest_mismatch() {
+    with_api_test_app("vault_image_confirmation_mismatch", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_mismatch_user",
+            "Vault Image Mismatch User",
+            "vault-image-mismatch@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_mismatch_operation");
+        let grant_storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &grant_storage,
+            "vault_image_mismatch_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should succeed");
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() + INTERVAL '2 hours' WHERE user_id = 'vault_image_mismatch_user'")
+            .execute(&app.pool)
+            .await
+            .expect("mismatch lease should fix");
+        let fixed_lease = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mismatch_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("fixed mismatch lease should load");
+
+        for storage in [
+            RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length - 1,
+                &binding.content_type,
+                &binding.raw_sha256,
+            ),
+            RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length,
+                "image/webp",
+                &binding.raw_sha256,
+            ),
+            RecordingObjectStorage::succeeding_exact_object(
+                binding.raw_length,
+                &binding.content_type,
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+        ] {
+            let error = super::confirm_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_mismatch_user",
+                &binding,
+            )
+            .await
+            .expect_err("non-exact object must not confirm");
+            assert_eq!(error.code, AppErrorCode::Conflict);
+            assert_eq!(
+                query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_mismatch_user'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("mismatched confirmation lease should load"),
+                fixed_lease,
+                "non-exact confirmation must not renew"
+            );
+        }
+        assert_eq!(
+            query_scalar::<_, String>("SELECT state FROM vault_image_staging WHERE user_id = 'vault_image_mismatch_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("state should load"),
+            "unconfirmed"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_cleanup_does_not_renew_and_is_idempotent_across_restart() {
+    with_api_test_app("vault_image_cleanup_restart", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_cleanup_user",
+            "Vault Image Cleanup User",
+            "vault-image-cleanup@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_cleanup_operation");
+        let grant_storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &grant_storage,
+            "vault_image_cleanup_user",
+            binding.clone(),
+        )
+        .await
+        .expect("grant should succeed");
+        let fixed_lease = OffsetDateTime::now_utc() + Duration::hours(3);
+        query("UPDATE vault_image_staging SET lease_expires_at = $1 WHERE user_id = 'vault_image_cleanup_user'")
+            .bind(fixed_lease)
+            .execute(&app.pool)
+            .await
+            .expect("lease should fix");
+        let fixed_lease = query_scalar::<_, OffsetDateTime>("SELECT lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("stored lease should load");
+
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_cleanup_user",
+            &binding,
+        )
+        .await
+        .expect("cleanup request should succeed");
+        super::request_vault_image_staging_cleanup(
+            &app.pool,
+            "vault_image_cleanup_user",
+            &binding,
+        )
+        .await
+        .expect("cleanup request replay should succeed");
+        let row = query_as::<_, (String, OffsetDateTime)>("SELECT state, lease_expires_at FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_user'")
+            .fetch_one(&app.pool)
+            .await
+            .expect("cleanup row should load");
+        assert_eq!(row.0, "cleanup_pending");
+        assert_eq!(row.1, fixed_lease, "cleanup must not renew the lease");
+
+        let failing = RecordingObjectStorage::failing_delete();
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &failing)
+                .await
+                .expect("storage failure remains a durable retry"),
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("pending row should survive"),
+            1
+        );
+
+        let succeeding = RecordingObjectStorage::succeeding(None);
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &succeeding)
+                .await
+                .expect("restart should converge"),
+            1
+        );
+        assert_eq!(cleanup_vault_image_staging(&app.pool, &succeeding).await.expect("cleanup replay should be a no-op"), 0);
+        assert_eq!(succeeding.calls().len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_cleanup_database_failpoints_preserve_generation_fenced_retry() {
+    with_api_test_app("vault_image_cleanup_failpoint_matrix", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_cleanup_failpoint_user",
+            "Vault Image Cleanup Failpoint User",
+            "vault-image-cleanup-failpoint@example.com",
+        )
+        .await;
+        for (index, boundary) in [
+            VaultImageDatabaseBoundary::ExpiryMark,
+            VaultImageDatabaseBoundary::CandidateSelection,
+            VaultImageDatabaseBoundary::RowSelection,
+            VaultImageDatabaseBoundary::FinalDelete,
+            VaultImageDatabaseBoundary::CleanupCommit,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let binding = vault_image_binding(&format!("vault_image_cleanup_failpoint_{index}"));
+            let grant_storage = RecordingObjectStorage::succeeding(None);
+            super::grant_vault_image_staging(
+                &app.pool,
+                &grant_storage,
+                "vault_image_cleanup_failpoint_user",
+                binding.clone(),
+            )
+            .await
+            .expect("cleanup failpoint binding should stage");
+            if boundary == VaultImageDatabaseBoundary::ExpiryMark {
+                query("UPDATE vault_image_staging SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE user_id = 'vault_image_cleanup_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .execute(&app.pool)
+                    .await
+                    .expect("lease should expire");
+            } else {
+                super::request_vault_image_staging_cleanup(
+                    &app.pool,
+                    "vault_image_cleanup_failpoint_user",
+                    &binding,
+                )
+                .await
+                .expect("cleanup should queue");
+            }
+            install_vault_image_database_failpoint(&binding.operation_id, boundary);
+            let storage = RecordingObjectStorage::succeeding(None);
+            let error = cleanup_vault_image_staging(&app.pool, &storage)
+                .await
+                .expect_err("cleanup database failpoint should surface");
+            assert!(
+                error.to_string().contains("injected Vault image database failure"),
+                "{boundary:?}: {error}"
+            );
+            assert_eq!(
+                query_as::<_, (String, i64)>("SELECT state, generation FROM vault_image_staging WHERE user_id = 'vault_image_cleanup_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("cleanup authority should survive"),
+                ("cleanup_pending".to_owned(), 1),
+                "{boundary:?}"
+            );
+            let delete_calls_after_failure = storage.calls().len();
+            assert_eq!(
+                delete_calls_after_failure,
+                usize::from(matches!(
+                    boundary,
+                    VaultImageDatabaseBoundary::FinalDelete
+                        | VaultImageDatabaseBoundary::CleanupCommit
+                )),
+                "{boundary:?}"
+            );
+            assert_eq!(
+                cleanup_vault_image_staging(&app.pool, &storage)
+                    .await
+                    .expect("cleanup should retry"),
+                1,
+                "{boundary:?}"
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM vault_image_staging_generation WHERE user_id = 'vault_image_cleanup_failpoint_user' AND operation_id = $1")
+                    .bind(&binding.operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("generation fence should survive"),
+                1,
+                "{boundary:?}"
+            );
+            let rebound = super::grant_vault_image_staging(
+                &app.pool,
+                &grant_storage,
+                "vault_image_cleanup_failpoint_user",
+                binding,
+            )
+            .await
+            .expect("cleaned binding should rebind");
+            assert_eq!(rebound.generation, 2, "{boundary:?}");
+        }
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = 'vault_image_cleanup_failpoint_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("outcomes should load"),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_sweep_expires_only_unconfirmed_bindings() {
+    with_api_test_app("vault_image_expiry_scope", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_expiry_user",
+            "Vault Image Expiry User",
+            "vault-image-expiry@example.com",
+        )
+        .await;
+        let storage = RecordingObjectStorage::succeeding(None);
+        let unconfirmed = vault_image_binding("vault_image_expired_unconfirmed");
+        let confirmed = vault_image_binding("vault_image_expired_confirmed");
+        for binding in [&unconfirmed, &confirmed] {
+            super::grant_vault_image_staging(
+                &app.pool,
+                &storage,
+                "vault_image_expiry_user",
+                binding.clone(),
+            )
+            .await
+            .expect("binding should stage");
+        }
+        query("UPDATE vault_image_staging SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE user_id = 'vault_image_expiry_user'")
+            .execute(&app.pool)
+            .await
+            .expect("leases should expire");
+        query("UPDATE vault_image_staging SET state = 'confirmed' WHERE operation_id = $1")
+            .bind(&confirmed.operation_id)
+            .execute(&app.pool)
+            .await
+            .expect("one row should confirm");
+
+        assert_eq!(
+            cleanup_vault_image_staging(&app.pool, &storage)
+                .await
+                .expect("expiry sweep should succeed"),
+            1
+        );
+        assert_eq!(
+            query_scalar::<_, Vec<String>>("SELECT ARRAY_AGG(operation_id ORDER BY operation_id) FROM vault_image_staging WHERE user_id = 'vault_image_expiry_user'")
+                .fetch_one(&app.pool)
+                .await
+                .expect("remaining operations should load"),
+            vec![confirmed.operation_id]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn vault_image_cleanup_delete_is_generation_fenced_before_rebind() {
+    with_api_test_app("vault_image_cleanup_generation_fence", |app| async move {
+        seed_user(
+            &app.pool,
+            "vault_image_fence_user",
+            "Vault Image Fence User",
+            "vault-image-fence@example.com",
+        )
+        .await;
+        let binding = vault_image_binding("vault_image_fence_operation");
+        let initial_storage = RecordingObjectStorage::succeeding(None);
+        super::grant_vault_image_staging(
+            &app.pool,
+            &initial_storage,
+            "vault_image_fence_user",
+            binding.clone(),
+        )
+        .await
+        .expect("first generation should stage");
+        super::request_vault_image_staging_cleanup(&app.pool, "vault_image_fence_user", &binding)
+            .await
+            .expect("cleanup should queue");
+
+        let delete_started = Arc::new(tokio::sync::Notify::new());
+        let delete_release = Arc::new(tokio::sync::Notify::new());
+        let cleanup_storage = Arc::new(RecordingObjectStorage::succeeding_with_delayed_delete(
+            binding.raw_length,
+            delete_started.clone(),
+            delete_release.clone(),
+        ));
+        let cleanup_pool = app.pool.clone();
+        let cleanup_storage_task = cleanup_storage.clone();
+        let cleanup = tokio::spawn(async move {
+            cleanup_vault_image_staging(&cleanup_pool, cleanup_storage_task.as_ref()).await
+        });
+        delete_started.notified().await;
+
+        let rebind_pool = app.pool.clone();
+        let rebind_binding = binding.clone();
+        let rebind = tokio::spawn(async move {
+            let storage = RecordingObjectStorage::succeeding(None);
+            super::grant_vault_image_staging(
+                &rebind_pool,
+                &storage,
+                "vault_image_fence_user",
+                rebind_binding,
+            )
+            .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !rebind.is_finished(),
+            "rebind must wait behind the deletion fence"
+        );
+        delete_release.notify_one();
+        assert_eq!(
+            cleanup
+                .await
+                .expect("cleanup task should join")
+                .expect("cleanup should succeed"),
+            1
+        );
+        let rebound = rebind
+            .await
+            .expect("rebind task should join")
+            .expect("rebind should succeed after cleanup");
+        assert_eq!(rebound.generation, 2);
+        assert_eq!(cleanup_storage.calls().len(), 1);
+    })
+    .await;
+}
 
 fn with_if_match(mut headers: HeaderMap, version: impl std::fmt::Display) -> HeaderMap {
     headers.insert(
@@ -60,6 +1785,145 @@ fn idempotency_headers(token: &str, key: &str) -> HeaderMap {
         HeaderValue::from_str(key).expect("idempotency key should be valid"),
     );
     headers
+}
+
+/// Asserts one applied Operation outcome: the kind the caller asked for, the Item it names, and
+/// the version the effect reached.
+fn assert_applied(body: &Value, kind: &str, item_id: &str, version: i32) {
+    assert_eq!(body["kind"], json!(kind), "unexpected outcome kind: {body}");
+    assert_eq!(
+        body["result"],
+        json!({ "status": "applied", "itemId": item_id, "version": version }),
+        "unexpected applied outcome: {body}"
+    );
+}
+
+/// Asserts one retained semantic rejection.
+fn assert_rejected(body: &Value, kind: &str, code: &str) {
+    assert_eq!(body["kind"], json!(kind), "unexpected outcome kind: {body}");
+    assert_eq!(
+        body["result"],
+        json!({ "status": "rejected", "code": code }),
+        "unexpected rejected outcome: {body}"
+    );
+}
+
+async fn assert_create_vault_rejection_history(
+    pool: &PgPool,
+    user_id: &str,
+    operation_id: &str,
+    vault_id: &str,
+    code: &str,
+    vault_must_be_absent: bool,
+) {
+    let outcome = query_as::<_, (String, String, Option<String>, Option<Value>)>(
+		"SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+	)
+	.bind(user_id)
+	.bind(operation_id)
+	.fetch_all(pool)
+	.await
+	.unwrap();
+    assert_eq!(
+        outcome,
+        vec![(
+            "create_vault".into(),
+            "rejected".into(),
+            Some(code.into()),
+            None,
+        )]
+    );
+    let audits = query_as::<_, (String, Option<String>, String, Option<Value>)>(
+		"SELECT action, entity_type, entity_id, metadata::jsonb FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+	)
+	.bind(user_id)
+	.bind(operation_id)
+	.fetch_all(pool)
+	.await
+	.unwrap();
+    assert_eq!(
+        audits,
+        vec![(
+            "vault_create_rejected".into(),
+            Some("operation".into()),
+            operation_id.into(),
+            Some(json!({ "code": code })),
+        )]
+    );
+    let events = query_as::<_, (String, Option<String>, String, String, Option<String>, i32, Option<String>)>(
+		"SELECT event_type::text, vault_id, entity_id, entity_type::text, client_id, version, metadata FROM sync_event WHERE user_id = $1 AND entity_id = $2",
+	)
+	.bind(user_id)
+	.bind(operation_id)
+	.fetch_all(pool)
+	.await
+	.unwrap();
+    assert_eq!(
+        events,
+        vec![(
+            "operation_resolved".into(),
+            None,
+            operation_id.into(),
+            "operation".into(),
+            Some("integration-test".into()),
+            1,
+            None,
+        )]
+    );
+    assert_eq!(
+		query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = $2 AND action = 'vault_created'",
+		)
+		.bind(user_id)
+		.bind(vault_id)
+		.fetch_one(pool)
+		.await
+		.unwrap(),
+		0
+	);
+    assert_eq!(
+		query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND entity_id = $2 AND event_type = 'vault_created'",
+		)
+		.bind(user_id)
+		.bind(vault_id)
+		.fetch_one(pool)
+		.await
+		.unwrap(),
+		0
+	);
+    assert_eq!(
+        query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+        )
+        .bind(vault_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+		query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2",
+		)
+		.bind(user_id)
+		.bind(operation_id)
+		.fetch_one(pool)
+		.await
+		.unwrap(),
+		0
+	);
+    if vault_must_be_absent {
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE id = $1")
+                .bind(vault_id)
+                .fetch_one(pool)
+                .await
+                .unwrap(),
+            0
+        );
+    }
 }
 
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
@@ -395,6 +2259,142 @@ async fn install_required_audit_failure_trigger(pool: &PgPool, action: &str) {
     .expect("audit failure trigger should install");
 }
 
+async fn install_operation_step_failure_trigger(pool: &PgPool, table: &str, when_clause: &str) {
+    query(
+        r#"CREATE FUNCTION reject_operation_step_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'Operation step rejected by test';
+        END;
+        $$"#,
+    )
+    .execute(pool)
+    .await
+    .expect("Operation failure function should install");
+    query(&format!(
+        "CREATE TRIGGER reject_operation_step_insert BEFORE INSERT ON {table} FOR EACH ROW {when_clause} EXECUTE FUNCTION reject_operation_step_insert()"
+    ))
+    .execute(pool)
+    .await
+    .expect("Operation failure trigger should install");
+}
+
+async fn install_attachment_move_failure_trigger(
+    pool: &PgPool,
+    table: &str,
+    event: &str,
+    when_clause: &str,
+) {
+    query(
+        r#"CREATE FUNCTION reject_attachment_move_step() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'Attachment Move step rejected by test';
+        END;
+        $$"#,
+    )
+    .execute(pool)
+    .await
+    .expect("Attachment Move failure function should install");
+    query(&format!(
+        "CREATE TRIGGER reject_attachment_move_step BEFORE {event} ON {table} FOR EACH ROW {when_clause} EXECUTE FUNCTION reject_attachment_move_step()"
+    ))
+    .execute(pool)
+    .await
+    .expect("Attachment Move failure trigger should install");
+}
+
+fn attachment_move_manifest_body(fixture: &VaultRouterFixture) -> Value {
+    json!({
+        "itemId": fixture.movable_item_id,
+        "sourceVaultId": fixture.main_vault_id,
+        "targetVaultId": fixture.target_vault_id,
+        "attachments": [{
+            "attachmentId": "move_attachment",
+            "envelopeVersion": 1,
+            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }]
+    })
+}
+
+#[tokio::test]
+async fn attachment_move_maintenance_queries_have_supporting_indexes() {
+    with_api_test_app("attachment_move_maintenance_indexes", |app| async move {
+        let index_names = query_scalar::<_, String>(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1) ORDER BY indexname",
+        )
+        .bind(vec![
+            "attachment_move_cleanup_claim_expiry_idx",
+            "attachment_move_cleanup_unclaimed_idx",
+            "attachment_move_manifest_expiry_idx",
+        ])
+        .fetch_all(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            index_names,
+            vec![
+                "attachment_move_cleanup_claim_expiry_idx".to_string(),
+                "attachment_move_cleanup_unclaimed_idx".to_string(),
+                "attachment_move_manifest_expiry_idx".to_string(),
+            ]
+        );
+        let mut transaction = app.pool.begin().await.unwrap();
+        query("SET LOCAL enable_seqscan = off")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        let expiry_plan = query_scalar::<_, String>(
+            "EXPLAIN (COSTS OFF) SELECT user_id, operation_id FROM attachment_move_manifest WHERE expires_at <= NOW() ORDER BY expires_at, user_id, operation_id LIMIT 100",
+        )
+        .fetch_all(&mut *transaction)
+        .await
+        .unwrap()
+        .join("\n");
+        assert!(
+            expiry_plan.contains("attachment_move_manifest_expiry_idx"),
+            "{expiry_plan}"
+        );
+        let cleanup_plan = query_scalar::<_, String>(
+            "EXPLAIN (COSTS OFF) SELECT id, user_id, operation_id, storage_key FROM (SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NULL UNION ALL SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NOT NULL AND claimed_at <= NOW() - INTERVAL '5 minutes') eligible ORDER BY id LIMIT 100",
+        )
+        .fetch_all(&mut *transaction)
+        .await
+        .unwrap()
+        .join("\n");
+        assert!(
+            cleanup_plan.contains("attachment_move_cleanup_unclaimed_idx"),
+            "{cleanup_plan}"
+        );
+        assert!(
+            cleanup_plan.contains("attachment_move_cleanup_claim_expiry_idx"),
+            "{cleanup_plan}"
+        );
+    })
+    .await;
+}
+
+fn attachment_move_final_body(fixture: &VaultRouterFixture) -> Value {
+    json!({
+        "mode": "prepared",
+        "sourceVaultId": fixture.main_vault_id,
+        "targetVaultId": fixture.target_vault_id,
+        "encryptedData": "target-item-ciphertext",
+        "encryptionIv": "target-item-iv",
+        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+        "attachments": [{
+            "attachmentId": "move_attachment",
+            "expectedEnvelopeVersion": 1,
+            "encryptedAttachmentKey": "target-wrapped-key",
+            "attachmentKeyIv": "target-key-iv",
+            "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+            "encryptedName": "target-name",
+            "encryptedContentType": "target-content-type",
+            "encryptionIv": "target-blob-iv",
+            "encryptedContentTypeIv": "target-type-iv",
+            "encryptionAlgorithm": "AES-GCM-AAD-V1"
+        }]
+    })
+}
+
 async fn seed_attachment(
     pool: &PgPool,
     attachment_id: &str,
@@ -425,6 +2425,2364 @@ async fn seed_attachment(
 		.execute(pool)
 		.await
 		.expect("attachment should seed");
+}
+
+async fn wait_for_advisory_waiters(pool: &PgPool, expected: i64) {
+    for _ in 0..200 {
+        let waiters = query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if waiters >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("expected {expected} advisory-lock waiters");
+}
+
+async fn acquire_test_item_attachment_writer_lock(
+    pool: &PgPool,
+    item_id: &str,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut transaction = pool.begin().await.unwrap();
+    query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(format!(
+            "item-attachment-writer:{}:{}",
+            item_id.len(),
+            item_id
+        ))
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_fixes_stable_operation_scoped_uploads() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    let observed_storage = storage.clone();
+    with_api_test_app_state(
+        "attachment_move_manifest_stable_uploads",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/move-with-attachments/attachment-move-manifest";
+            let body = json!({
+                "itemId": fixture.movable_item_id,
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "envelopeVersion": 1,
+                    "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }]
+            });
+
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(body.clone()),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            first.assert_contract_status();
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            assert_eq!(first.body["operationId"], json!("move-with-attachments"));
+            assert_eq!(
+                first.body["attachments"][0]["attachmentId"],
+                json!("move_attachment")
+            );
+            let stable_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .expect("manifest should return a storage key")
+                .to_string();
+
+            let second = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(body),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            second.assert_contract_status();
+            assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+            assert_eq!(
+                second.body["attachments"][0]["storageKey"],
+                json!(stable_key)
+            );
+            assert_eq!(
+                observed_storage.calls(),
+                vec![
+                    format!("presign_upload:{stable_key}"),
+                    format!("presign_upload:{stable_key}")
+                ]
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_rejects_malformed_ciphertext_sha256() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_bad_ciphertext_digest",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            for malformed in [
+                "abc",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            ] {
+                let response = app
+                    .api_json(
+                        Method::PUT,
+                        "/api/v1/operations/bad-ciphertext-digest/attachment-move-manifest",
+                        Some(json!({
+                            "itemId": fixture.movable_item_id,
+                            "sourceVaultId": fixture.main_vault_id,
+                            "targetVaultId": fixture.target_vault_id,
+                            "attachments": [{
+                                "attachmentId": "move_attachment",
+                                "envelopeVersion": 1,
+                                "ciphertextSha256": malformed
+                            }]
+                        })),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(
+                    response.status,
+                    StatusCode::BAD_REQUEST,
+                    "{}",
+                    response.body
+                );
+            }
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_does_not_require_plaintext_content_type() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_opaque_upload",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/opaque-upload/attachment-move-manifest",
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "envelopeVersion": 1,
+                            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_derives_current_encrypted_storage_size() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    let observed_storage = storage.clone();
+    with_api_test_app_state(
+        "attachment_move_manifest_derived_size",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/derived-size/attachment-move-manifest",
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "envelopeVersion": 1,
+                            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT storage_size::bigint FROM attachment_move_staging WHERE user_id = $1 AND operation_id = 'derived-size'")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                128
+            );
+            assert_eq!(
+                observed_storage.upload_requests(),
+                vec![(
+                    response.body["attachments"][0]["storageKey"]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
+                    "application/octet-stream".to_string(),
+                    Some(128),
+                    Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string())
+                )]
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_serializes_live_ownership_and_allows_expired_takeover() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_ownership",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let body = json!({
+                "itemId": fixture.movable_item_id,
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "envelopeVersion": 1,
+                    "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }]
+            });
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/first-owner/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            let busy = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/second-owner/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            busy.assert_contract_status();
+            assert_eq!(busy.status, StatusCode::CONFLICT, "{}", busy.body);
+            assert_eq!(busy.body["code"], json!("ATTACHMENT_STAGING_BUSY"));
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, "second-owner").await,
+                0
+            );
+
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'first-owner'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let takeover = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/second-owner/attachment-move-manifest",
+                    Some(body),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(takeover.status, StatusCode::OK, "{}", takeover.body);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = 'first-owner' AND storage_key = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(first_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, String>("SELECT operation_id FROM attachment_move_manifest WHERE user_id = $1")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                "second-owner"
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_resume_after_expired_cleanup_advances_physical_generation() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_generation_resume",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/generation-resume/attachment-move-manifest";
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'generation-resume'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            assert_eq!(
+                cleanup_attachment_move_staging(
+                    &app.pool,
+                    &RecordingObjectStorage::failing()
+                )
+                .await
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = 'generation-resume'")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+
+            let resumed = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(resumed.status, StatusCode::OK, "{}", resumed.body);
+            let resumed_key = resumed.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap();
+            assert_ne!(resumed_key, first_key);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE storage_key = $1")
+                    .bind(first_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn delayed_old_generation_delete_cannot_remove_resumed_attachment_move_upload() {
+    let delete_started = Arc::new(tokio::sync::Notify::new());
+    let delete_release = Arc::new(tokio::sync::Notify::new());
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_delayed_delete(
+        128,
+        delete_started.clone(),
+        delete_release.clone(),
+    ));
+    let cleanup_storage = storage.clone();
+    with_api_test_app_state(
+        "attachment_move_delayed_old_delete",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "delayed-generation-delete";
+            let path = format!(
+                "/api/v1/operations/{operation_id}/attachment-move-manifest"
+            );
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = $2")
+                .bind(&fixture.owner_user_id)
+                .bind(operation_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+
+            let cleanup_pool = app.pool.clone();
+            let cleanup = tokio::spawn(async move {
+                cleanup_attachment_move_staging(&cleanup_pool, cleanup_storage.as_ref()).await
+            });
+            delete_started.notified().await;
+
+            let resumed = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(resumed.status, StatusCode::OK, "{}", resumed.body);
+            let resumed_key = resumed.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert_ne!(resumed_key, first_key);
+
+            delete_release.notify_one();
+            assert_eq!(cleanup.await.unwrap().unwrap(), 1);
+            assert_eq!(
+                query_scalar::<_, String>("SELECT storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                resumed_key
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                2
+            );
+
+            let finalized = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(finalized.status, StatusCode::OK, "{}", finalized.body);
+            assert_applied(&finalized.body, "move_item", &fixture.movable_item_id, 2);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_generation_advance_failure_preserves_old_cleanup_and_generation() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_generation_advance_boundary",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/generation-boundary/attachment-move-manifest";
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'generation-boundary'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            cleanup_attachment_move_staging(&app.pool, &RecordingObjectStorage::failing())
+                .await
+                .unwrap();
+            install_attachment_move_failure_trigger(
+                &app.pool,
+                "attachment_move_staging_generation",
+                "UPDATE",
+                "",
+            )
+            .await;
+
+            let resumed = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(resumed.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT generation FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = 'generation-boundary'")
+                    .bind(&fixture.owner_user_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE operation_id = 'generation-boundary'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE operation_id = 'generation-boundary'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_does_not_reuse_staging_during_active_cleanup_claim() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_active_cleanup_claim",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let path = "/api/v1/operations/claimed-cleanup/attachment-move-manifest";
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let storage_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap();
+            query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key, claim_token, claimed_at) VALUES ($1, 'claimed-cleanup', $2, 'active-claim', NOW())")
+                .bind(&fixture.owner_user_id)
+                .bind(storage_key)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    path,
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_STAGING_BUSY"));
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn deleting_user_durably_queues_attachment_move_staging_cleanup() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_user_delete_cleanup",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            seed_vault_key(
+                &app.pool,
+                "vault_key_target_deleted_admin",
+                &fixture.target_vault_id,
+                &fixture.admin_user_id,
+                "target-admin-key",
+                "admin",
+            )
+            .await;
+            let session = app.issue_session(&fixture.admin_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/user-delete-cleanup/attachment-move-manifest",
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            let storage_key = response.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            query("DELETE FROM \"user\" WHERE id = $1")
+                .bind(&fixture.admin_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE operation_id = 'user-delete-cleanup'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE operation_id = 'user-delete-cleanup'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = 'user-delete-cleanup' AND storage_key = $2")
+                    .bind(&fixture.admin_user_id)
+                    .bind(storage_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_ownership_is_global_across_authorized_users() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_cross_user_ownership",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_vault_key(
+                &app.pool,
+                "vault_key_target_admin",
+                &fixture.target_vault_id,
+                &fixture.admin_user_id,
+                "target-admin-key",
+                "admin",
+            )
+            .await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let owner = app.issue_session(&fixture.owner_user_id).await;
+            let admin = app.issue_session(&fixture.admin_user_id).await;
+            let body = json!({
+                "itemId": fixture.movable_item_id,
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "envelopeVersion": 1,
+                    "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }]
+            });
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/owner-preparation/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&owner.token),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            let first_key = first.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            let busy = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/admin-preparation/attachment-move-manifest",
+                    Some(body.clone()),
+                    authenticated_json_headers(&admin.token),
+                )
+                .await;
+            busy.assert_contract_status();
+            assert_eq!(busy.status, StatusCode::CONFLICT, "{}", busy.body);
+            assert_eq!(busy.body["code"], json!("ATTACHMENT_STAGING_BUSY"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.admin_user_id, "admin-preparation").await,
+                0
+            );
+
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'owner-preparation'")
+                .bind(&fixture.owner_user_id)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let takeover = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/admin-preparation/attachment-move-manifest",
+                    Some(body),
+                    authenticated_json_headers(&admin.token),
+                )
+                .await;
+            assert_eq!(takeover.status, StatusCode::OK, "{}", takeover.body);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = 'owner-preparation' AND storage_key = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(first_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, String>("SELECT user_id FROM attachment_move_manifest WHERE operation_id = 'admin-preparation'")
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                fixture.admin_user_id
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_reports_pre_staging_stale_authority_without_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+    with_api_test_app_state(
+        "attachment_move_manifest_stale_authority",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            query("UPDATE item_attachment SET envelope_version = 2 WHERE id = 'move_attachment'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/operations/pre-staging-stale/attachment-move-manifest",
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_AUTHORITY_STALE"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, "pre-staging-stale")
+                    .await,
+                0
+            );
+
+            let rejection_body = json!({
+                "mode": "reject_stale_authority",
+                "sourceVaultId": fixture.main_vault_id,
+                "targetVaultId": fixture.target_vault_id,
+                "attachments": [{
+                    "attachmentId": "move_attachment",
+                    "expectedEnvelopeVersion": 1
+                }]
+            });
+            let rejected = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(rejection_body.clone()),
+                    idempotent_item_headers(&session.token, 1, "pre-staging-stale"),
+                )
+                .await;
+            rejected.assert_contract_status();
+            assert_eq!(rejected.status, StatusCode::OK, "{}", rejected.body);
+            assert_rejected(&rejected.body, "move_item", "attachment_state_conflict");
+            let replay = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(rejection_body),
+                    idempotent_item_headers(&session.token, 1, "pre-staging-stale"),
+                )
+                .await;
+            assert_eq!(replay.status, StatusCode::OK, "{}", replay.body);
+            assert_eq!(replay.body, rejected.body);
+            assert_eq!(
+                entity_event_count(&app.pool, "pre-staging-stale", "operation_resolved").await,
+                1
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &fixture.movable_item_id, "item_moved").await,
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_stale_rejection_probe_requires_preparation_when_authority_matches() {
+    with_api_test_app("attachment_move_false_stale_probe", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        seed_attachment(
+            &app.pool,
+            "move_attachment",
+            &fixture.movable_item_id,
+            &fixture.main_vault_id,
+            &fixture.owner_user_id,
+        )
+        .await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                Some(json!({
+                    "mode": "reject_stale_authority",
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "attachments": [{
+                        "attachmentId": "move_attachment",
+                        "expectedEnvelopeVersion": 1
+                    }]
+                })),
+                idempotent_item_headers(&session.token, 1, "false-stale-probe"),
+            )
+            .await;
+        response.assert_contract_status();
+        assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+        assert_eq!(
+            response.body["code"],
+            json!("ATTACHMENT_STAGING_INCOMPLETE")
+        );
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, "false-stale-probe").await,
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, String>("SELECT vault_id FROM item WHERE id = $1")
+                .bind(&fixture.movable_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+            fixture.main_vault_id
+        );
+
+        let semantic_rejection = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                Some(json!({
+                    "mode": "reject_stale_authority",
+                    "sourceVaultId": fixture.target_vault_id,
+                    "targetVaultId": fixture.main_vault_id,
+                    "attachments": [{
+                        "attachmentId": "move_attachment",
+                        "expectedEnvelopeVersion": 1
+                    }]
+                })),
+                idempotent_item_headers(&session.token, 1, "stale-probe-source-mismatch"),
+            )
+            .await;
+        assert_eq!(
+            semantic_rejection.status,
+            StatusCode::OK,
+            "{}",
+            semantic_rejection.body
+        );
+        assert_rejected(
+            &semantic_rejection.body,
+            "move_item",
+            "source_vault_mismatch",
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_treats_attachment_order_as_non_semantic() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_order_independent",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            for attachment_id in ["move_attachment_a", "move_attachment_b"] {
+                seed_attachment(
+                    &app.pool,
+                    attachment_id,
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+            }
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "order-independent-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [
+                            { "attachmentId": "move_attachment_a", "envelopeVersion": 1, "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+                            { "attachmentId": "move_attachment_b", "envelopeVersion": 1, "ciphertextSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+                        ]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let final_attachment = |attachment_id: &str| json!({
+                "attachmentId": attachment_id,
+                "expectedEnvelopeVersion": 1,
+                "encryptedAttachmentKey": format!("target-key-{attachment_id}"),
+                "attachmentKeyIv": "target-key-iv",
+                "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+                "encryptedName": "target-name",
+                "encryptedContentType": "target-content-type",
+                "encryptionIv": "target-blob-iv",
+                "encryptedContentTypeIv": "target-type-iv",
+                "encryptionAlgorithm": "AES-GCM-AAD-V1"
+            });
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "prepared",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "encryptedData": "target-item-ciphertext",
+                        "encryptionIv": "target-item-iv",
+                        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                        "attachments": [
+                            final_attachment("move_attachment_b"),
+                            final_attachment("move_attachment_a")
+                        ]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_applied(&response.body, "move_item", &fixture.movable_item_id, 2);
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item_attachment WHERE item_id = $1 AND vault_id = $2")
+                    .bind(&fixture.movable_item_id)
+                    .bind(&fixture.target_vault_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                2
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_switches_all_authority_and_retains_one_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_atomic_finalization",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "atomic-attachment-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(json!({
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "envelopeVersion": 1,
+                            "ciphertextSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }]
+                    })),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let staged_key = manifest.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "prepared",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "encryptedData": "target-item-ciphertext",
+                        "encryptionIv": "target-item-iv",
+                        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "expectedEnvelopeVersion": 1,
+                            "encryptedAttachmentKey": "target-wrapped-key",
+                            "attachmentKeyIv": "target-key-iv",
+                            "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+                            "encryptedName": "target-name",
+                            "encryptedContentType": "target-content-type",
+                            "encryptionIv": "target-blob-iv",
+                            "encryptedContentTypeIv": "target-type-iv",
+                            "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                        }]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_applied(&response.body, "move_item", &fixture.movable_item_id, 2);
+            let replay = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(replay.status, StatusCode::OK, "{}", replay.body);
+            assert_eq!(replay.body, response.body);
+
+            let authority = query_as::<_, (String, String, i32, String)>(
+                "SELECT vault_id, storage_key, envelope_version, encrypted_attachment_key FROM item_attachment WHERE id = 'move_attachment'",
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                authority,
+                (fixture.target_vault_id, staged_key, 2, "target-wrapped-key".into())
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = 'attachments/move_attachment'")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_identical_attachment_move_finalizers_both_replay_retained_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_concurrent_finalization",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "concurrent-attachment-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let headers = idempotent_item_headers(&session.token, 1, operation_id);
+            let body = attachment_move_final_body(&fixture);
+            let preflight = install_attachment_move_preflight_hook(operation_id);
+            let loser = app.api_json(Method::POST, &path, Some(body.clone()), headers.clone());
+            let winner_then_release = async {
+                preflight.wait_until_entered().await;
+                let winner = app.api_json(Method::POST, &path, Some(body), headers).await;
+                preflight.release();
+                winner
+            };
+            let (first, second) = tokio::join!(loser, winner_then_release);
+
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+            assert_eq!(first.body, second.body);
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn empty_prepared_attachment_set_mismatches_nonempty_manifest_without_consuming_staging() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_empty_prepared_set_mismatch",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "empty-prepared-set-mismatch";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let mut body = attachment_move_final_body(&fixture);
+            body["attachments"] = json!([]);
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(body),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_STAGING_MISMATCH"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn move_serializes_a_stale_source_attachment_update_without_aad_overwrite() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_serializes_update",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(&app.pool, "move_attachment", &fixture.movable_item_id, &fixture.main_vault_id, &fixture.owner_user_id).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-before-stale-update";
+            let manifest = app.api_json(Method::PUT, &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"), Some(attachment_move_manifest_body(&fixture)), authenticated_json_headers(&session.token)).await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let blocker = acquire_test_item_attachment_writer_lock(&app.pool, &fixture.movable_item_id).await;
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let move_request = app.api_json(Method::POST, &move_path, Some(attachment_move_final_body(&fixture)), idempotent_item_headers(&session.token, 1, operation_id));
+            let competing_done = Arc::new(tokio::sync::Notify::new());
+            let update_done = competing_done.clone();
+            let update_request = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                let response = app.api_json(Method::PATCH, "/api/v1/attachments/move_attachment", Some(json!({
+                    "encryptedName": "stale-source-name",
+                    "encryptionIv": "stale-source-iv",
+                    "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                })), authenticated_json_headers(&session.token)).await;
+                update_done.notify_one();
+                response
+            };
+            let release = async {
+                tokio::select! {
+                    () = wait_for_advisory_waiters(&app.pool, 2) => {}
+                    () = competing_done.notified() => {}
+                }
+                blocker.commit().await.unwrap();
+            };
+            let (moved, updated, ()) = tokio::join!(move_request, update_request, release);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_eq!(updated.status, StatusCode::CONFLICT, "{}", updated.body);
+            assert_eq!(query_as::<_, (String, String)>("SELECT vault_id, encrypted_name FROM item_attachment WHERE id = 'move_attachment'").fetch_one(&app.pool).await.unwrap(), (fixture.target_vault_id, "target-name".into()));
+        },
+    ).await;
+}
+
+#[tokio::test]
+async fn rename_committed_before_move_advances_item_revision_and_move_rejects() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_rename_before_move",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "rename-before-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let blocker = acquire_test_item_attachment_writer_lock(
+                &app.pool,
+                &fixture.movable_item_id,
+            )
+            .await;
+            let rename = app.api_json(
+                Method::PATCH,
+                "/api/v1/attachments/move_attachment",
+                Some(json!({
+                    "encryptedName": "newer-source-name",
+                    "encryptionIv": "newer-source-iv",
+                    "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                })),
+                authenticated_json_headers(&session.token),
+            );
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let finalize = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                app.api_json(
+                    Method::POST,
+                    &move_path,
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await
+            };
+            let release = async {
+                wait_for_advisory_waiters(&app.pool, 2).await;
+                blocker.commit().await.unwrap();
+            };
+            let (renamed, moved, ()) = tokio::join!(rename, finalize, release);
+
+            assert_eq!(renamed.status, StatusCode::OK, "{}", renamed.body);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_rejected(&moved.body, "move_item", "item_version_conflict");
+            assert_eq!(
+                query_as::<_, (String, i32, String, String)>(
+                    "SELECT vault_id, envelope_version, encrypted_name, encryption_iv FROM item_attachment WHERE id = 'move_attachment'",
+                )
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                (
+                    fixture.main_vault_id.clone(),
+                    1,
+                    "newer-source-name".into(),
+                    "newer-source-iv".into(),
+                )
+            );
+            assert_eq!(
+                query_as::<_, (i32, i32, String)>(
+                    "SELECT version, encryption_version, last_modified_by FROM item WHERE id = $1",
+                )
+                .bind(&fixture.movable_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                (2, 1, fixture.owner_user_id.clone()),
+                "Rename advances Item concurrency without changing its ciphertext AAD version",
+            );
+            let projection = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/items/{}/attachments", fixture.movable_item_id),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(projection.status, StatusCode::OK, "{}", projection.body);
+            assert_eq!(projection.body["items"][0]["envelopeVersion"], json!(1));
+            assert_eq!(
+                projection.body["items"][0]["encryptedName"],
+                json!("newer-source-name")
+            );
+            assert_eq!(
+                query_scalar::<_, i32>("SELECT version FROM sync_event WHERE event_type = 'item_updated'::sync_event_type AND entity_id = $1")
+                    .bind(&fixture.movable_item_id)
+                    .fetch_all(&app.pool)
+                    .await
+                    .unwrap(),
+                vec![2]
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn move_serializes_a_stale_source_attachment_delete_without_row_loss() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_serializes_delete",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(&app.pool, "move_attachment", &fixture.movable_item_id, &fixture.main_vault_id, &fixture.owner_user_id).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-before-stale-delete";
+            let manifest = app.api_json(Method::PUT, &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"), Some(attachment_move_manifest_body(&fixture)), authenticated_json_headers(&session.token)).await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let blocker = acquire_test_item_attachment_writer_lock(&app.pool, &fixture.movable_item_id).await;
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let move_request = app.api_json(Method::POST, &move_path, Some(attachment_move_final_body(&fixture)), idempotent_item_headers(&session.token, 1, operation_id));
+            let competing_done = Arc::new(tokio::sync::Notify::new());
+            let delete_done = competing_done.clone();
+            let delete_request = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                let response = app.api_json(Method::DELETE, "/api/v1/attachments/move_attachment", None, authenticated_json_headers(&session.token)).await;
+                delete_done.notify_one();
+                response
+            };
+            let release = async {
+                tokio::select! {
+                    () = wait_for_advisory_waiters(&app.pool, 2) => {}
+                    () = competing_done.notified() => {}
+                }
+                blocker.commit().await.unwrap();
+            };
+            let (moved, deleted, ()) = tokio::join!(move_request, delete_request, release);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_eq!(deleted.status, StatusCode::CONFLICT, "{}", deleted.body);
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item_attachment WHERE id = 'move_attachment' AND vault_id = $1").bind(&fixture.target_vault_id).fetch_one(&app.pool).await.unwrap(), 1);
+        },
+    ).await;
+}
+
+#[tokio::test]
+async fn move_serializes_a_concurrent_attachment_create_without_source_phantom() {
+    let storage_size = i64::from(encrypted_attachment_storage_size(16));
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(
+        storage_size,
+    ));
+    with_api_test_app_state(
+        "attachment_move_serializes_create",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(&app.pool, "move_attachment", &fixture.movable_item_id, &fixture.main_vault_id, &fixture.owner_user_id).await;
+            query("UPDATE item_attachment SET storage_size = $1 WHERE id = 'move_attachment'")
+                .bind(storage_size)
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let upload = app.api_json(Method::POST, &format!("/api/v1/items/{}/attachment-uploads", fixture.movable_item_id), Some(json!({"fileName":"new.enc","contentType":"application/octet-stream","fileSize":16})), authenticated_json_headers(&session.token)).await;
+            assert_eq!(upload.status, StatusCode::OK, "{}", upload.body);
+            let operation_id = "move-before-phantom-create";
+            let manifest = app.api_json(Method::PUT, &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"), Some(attachment_move_manifest_body(&fixture)), authenticated_json_headers(&session.token)).await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let blocker = acquire_test_item_attachment_writer_lock(&app.pool, &fixture.movable_item_id).await;
+            let move_path = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+            let move_request = app.api_json(Method::POST, &move_path, Some(attachment_move_final_body(&fixture)), idempotent_item_headers(&session.token, 1, operation_id));
+            let competing_done = Arc::new(tokio::sync::Notify::new());
+            let create_done = competing_done.clone();
+            let create_request = async {
+                wait_for_advisory_waiters(&app.pool, 1).await;
+                let response = app.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.movable_item_id), Some(json!({
+                    "attachmentId": upload.body["attachmentId"], "storageKey": upload.body["key"],
+                    "encryptedAttachmentKey":"new-key", "attachmentKeyIv":"new-key-iv", "attachmentKeyAlgorithm":"AES-GCM-AAD-V1",
+                    "envelopeVersion":1, "encryptedName":"new-name", "encryptedContentType":"new-type",
+                    "encryptionIv":"new-iv", "encryptedContentTypeIv":"new-type-iv", "encryptionAlgorithm":"AES-GCM-AAD-V1", "fileSize":16
+                })), authenticated_json_headers(&session.token)).await;
+                create_done.notify_one();
+                response
+            };
+            let release = async {
+                tokio::select! {
+                    () = wait_for_advisory_waiters(&app.pool, 2) => {}
+                    () = competing_done.notified() => {}
+                }
+                blocker.commit().await.unwrap();
+            };
+            let (moved, created, ()) = tokio::join!(move_request, create_request, release);
+            assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+            assert_eq!(created.status, StatusCode::CONFLICT, "{}", created.body);
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item_attachment WHERE item_id = $1 AND vault_id = $2").bind(&fixture.movable_item_id).bind(&fixture.main_vault_id).fetch_one(&app.pool).await.unwrap(), 0);
+        },
+    ).await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_preserves_server_file_size_without_client_input() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_preserves_file_size",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-preserves-file-size";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let mut body = attachment_move_final_body(&fixture);
+            body["attachments"][0]
+                .as_object_mut()
+                .expect("Attachment Finalize body should be an object")
+                .remove("fileSize");
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(body),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_eq!(
+                query_scalar::<_, i32>(
+                    "SELECT file_size FROM item_attachment WHERE id = 'move_attachment'"
+                )
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                128
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_finalization_rejects_manifest_intent_mismatch_without_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_manifest_mismatch",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "move-manifest-mismatch";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+
+            let mut body = attachment_move_final_body(&fixture);
+            body["targetVaultId"] = json!(fixture.main_vault_id);
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(body),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(response.body["code"], json!("ATTACHMENT_STAGING_MISMATCH"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn incomplete_attachment_move_staging_is_non_terminal_and_retains_no_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(1));
+    with_api_test_app_state(
+        "attachment_move_staging_incomplete",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "incomplete-attachment-move";
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "prepared",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "encryptedData": "target-item-ciphertext",
+                        "encryptionIv": "target-item-iv",
+                        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "expectedEnvelopeVersion": 1,
+                            "encryptedAttachmentKey": "target-wrapped-key",
+                            "attachmentKeyIv": "target-key-iv",
+                            "attachmentKeyAlgorithm": "AES-GCM-AAD-V1",
+                            "encryptedName": "target-name",
+                            "encryptedContentType": "target-content-type",
+                            "encryptionIv": "target-blob-iv",
+                            "encryptedContentTypeIv": "target-type-iv",
+                            "encryptionAlgorithm": "AES-GCM-AAD-V1"
+                        }]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::CONFLICT, "{}", response.body);
+            assert_eq!(
+                response.body["code"],
+                json!("ATTACHMENT_STAGING_INCOMPLETE")
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, String>("SELECT vault_id FROM item WHERE id = $1")
+                    .bind(&fixture.movable_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                fixture.main_vault_id
+            );
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let expired = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(expired.status, StatusCode::CONFLICT, "{}", expired.body);
+            assert_eq!(expired.body["code"], json!("ATTACHMENT_STAGING_INCOMPLETE"));
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+
+            let incomplete_operation = "incomplete-object-attachment-move";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{incomplete_operation}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let incomplete = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, incomplete_operation),
+                )
+                .await;
+            assert_eq!(
+                incomplete.status,
+                StatusCode::CONFLICT,
+                "{}",
+                incomplete.body
+            );
+            assert_eq!(
+                incomplete.body["code"],
+                json!("ATTACHMENT_STAGING_INCOMPLETE")
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, incomplete_operation)
+                    .await,
+                0
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_database_boundaries_leave_no_partial_authority() {
+    for (case, table, event, when_clause, during_manifest) in [
+        (
+            "generation_create",
+            "attachment_move_staging_generation",
+            "INSERT",
+            "",
+            true,
+        ),
+        ("manifest", "attachment_move_manifest", "INSERT", "", true),
+        ("staging", "attachment_move_staging", "INSERT", "", true),
+        ("item", "item", "UPDATE", "", false),
+        ("attachment", "item_attachment", "UPDATE", "", false),
+        ("cleanup", "attachment_move_cleanup", "INSERT", "", false),
+        (
+            "staging_consume",
+            "attachment_move_staging",
+            "DELETE",
+            "",
+            false,
+        ),
+        (
+            "manifest_close",
+            "attachment_move_manifest",
+            "DELETE",
+            "",
+            false,
+        ),
+        (
+            "generation_close",
+            "attachment_move_staging_generation",
+            "DELETE",
+            "",
+            false,
+        ),
+        (
+            "audit",
+            "audit_log",
+            "INSERT",
+            "WHEN (NEW.action = 'item_moved')",
+            false,
+        ),
+        (
+            "item_sync",
+            "sync_event",
+            "INSERT",
+            "WHEN (NEW.event_type = 'item_moved')",
+            false,
+        ),
+        (
+            "operation_sync",
+            "sync_event",
+            "INSERT",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+            false,
+        ),
+        ("outcome", "operation_outcome", "INSERT", "", false),
+    ] {
+        let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+        with_api_test_app_state(
+            &format!("attachment_move_boundary_{case}"),
+            move |state| state.with_object_storage(storage),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                seed_attachment(
+                    &app.pool,
+                    "move_attachment",
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let operation_id = format!("boundary-{case}");
+                if during_manifest {
+                    install_attachment_move_failure_trigger(&app.pool, table, event, when_clause).await;
+                }
+                let manifest = app
+                    .api_json(
+                        Method::PUT,
+                        &format!(
+                            "/api/v1/operations/{operation_id}/attachment-move-manifest"
+                        ),
+                        Some(attachment_move_manifest_body(&fixture)),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                if during_manifest {
+                    assert_eq!(manifest.status, StatusCode::INTERNAL_SERVER_ERROR);
+                    assert_eq!(
+                        query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest")
+                            .fetch_one(&app.pool)
+                            .await
+                            .unwrap(),
+                        0
+                    );
+                    assert_eq!(
+                        query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging")
+                            .fetch_one(&app.pool)
+                            .await
+                            .unwrap(),
+                        0
+                    );
+                    return;
+                }
+                assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+                install_attachment_move_failure_trigger(&app.pool, table, event, when_clause).await;
+                let response = app
+                    .api_json(
+                        Method::POST,
+                        &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                        Some(attachment_move_final_body(&fixture)),
+                        idempotent_item_headers(&session.token, 1, &operation_id),
+                    )
+                    .await;
+                assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(
+                    query_as::<_, (String, i32)>(
+                        "SELECT vault_id, version FROM item WHERE id = $1"
+                    )
+                    .bind(&fixture.movable_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                    (fixture.main_vault_id.clone(), 1)
+                );
+                assert_eq!(
+                    query_as::<_, (String, String, i32)>(
+                        "SELECT vault_id, storage_key, envelope_version FROM item_attachment WHERE id = 'move_attachment'"
+                    )
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                    (
+                        fixture.main_vault_id,
+                        "attachments/move_attachment".into(),
+                        1
+                    )
+                );
+                assert_eq!(
+                    retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                    0
+                );
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn attachment_move_manifest_renewal_boundaries_are_atomic() {
+    for (case, table, event, seed_obsolete_cleanup) in [
+        ("lease", "attachment_move_manifest", "UPDATE", false),
+        (
+            "obsolete_cleanup",
+            "attachment_move_cleanup",
+            "DELETE",
+            true,
+        ),
+    ] {
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        with_api_test_app_state(
+            &format!("attachment_move_renewal_boundary_{case}"),
+            move |state| state.with_object_storage(storage),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                seed_attachment(
+                    &app.pool,
+                    "move_attachment",
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let operation_id = format!("renewal-boundary-{case}");
+                let path = format!(
+                    "/api/v1/operations/{operation_id}/attachment-move-manifest"
+                );
+                let body = attachment_move_manifest_body(&fixture);
+                let first = app
+                    .api_json(
+                        Method::PUT,
+                        &path,
+                        Some(body.clone()),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+                let original_expiry: OffsetDateTime = query_scalar(
+                    "SELECT expires_at FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2",
+                )
+                .bind(&fixture.owner_user_id)
+                .bind(&operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap();
+                if seed_obsolete_cleanup {
+                    query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) SELECT user_id, operation_id, storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+                        .bind(&fixture.owner_user_id)
+                        .bind(&operation_id)
+                        .execute(&app.pool)
+                        .await
+                        .unwrap();
+                }
+                install_attachment_move_failure_trigger(&app.pool, table, event, "").await;
+                let renewal = app
+                    .api_json(
+                        Method::PUT,
+                        &path,
+                        Some(body),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(renewal.status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(
+                    query_scalar::<_, OffsetDateTime>("SELECT expires_at FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+                        .bind(&fixture.owner_user_id)
+                        .bind(&operation_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    original_expiry
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2")
+                        .bind(&fixture.owner_user_id)
+                        .bind(&operation_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    if seed_obsolete_cleanup { 1 } else { 0 }
+                );
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn attachment_move_final_lease_renewal_failure_retains_no_outcome() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_final_lease_boundary",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "final-lease-boundary";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            install_attachment_move_failure_trigger(
+                &app.pool,
+                "attachment_move_manifest",
+                "UPDATE",
+                "",
+            )
+            .await;
+            let final_response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(final_response.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                0
+            );
+            assert_eq!(
+                query_as::<_, (String, i32)>("SELECT vault_id, version FROM item WHERE id = $1")
+                    .bind(&fixture.movable_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                (fixture.main_vault_id, 1)
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_move_expired_takeover_boundaries_are_atomic() {
+    for (case, table, event) in [
+        ("queue", "attachment_move_cleanup", "INSERT"),
+        ("release", "attachment_move_manifest", "DELETE"),
+    ] {
+        let storage = Arc::new(RecordingObjectStorage::succeeding(None));
+        with_api_test_app_state(
+            &format!("attachment_move_takeover_boundary_{case}"),
+            move |state| state.with_object_storage(storage),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                seed_attachment(
+                    &app.pool,
+                    "move_attachment",
+                    &fixture.movable_item_id,
+                    &fixture.main_vault_id,
+                    &fixture.owner_user_id,
+                )
+                .await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let body = attachment_move_manifest_body(&fixture);
+                let first = app
+                    .api_json(
+                        Method::PUT,
+                        "/api/v1/operations/expired-owner/attachment-move-manifest",
+                        Some(body.clone()),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+                query("UPDATE attachment_move_manifest SET expires_at = NOW() - INTERVAL '1 second' WHERE user_id = $1 AND operation_id = 'expired-owner'")
+                    .bind(&fixture.owner_user_id)
+                    .execute(&app.pool)
+                    .await
+                    .unwrap();
+                install_attachment_move_failure_trigger(&app.pool, table, event, "").await;
+                let takeover = app
+                    .api_json(
+                        Method::PUT,
+                        "/api/v1/operations/new-owner/attachment-move-manifest",
+                        Some(body),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_eq!(takeover.status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = 'expired-owner'")
+                        .bind(&fixture.owner_user_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = 'new-owner'")
+                        .bind(&fixture.owner_user_id)
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    0
+                );
+                assert_eq!(
+                    query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup")
+                        .fetch_one(&app.pool)
+                        .await
+                        .unwrap(),
+                    0
+                );
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn stale_attachment_authority_is_terminal_and_queues_staging_cleanup() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_stale_authority",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "stale-attachment-authority";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let staged_key = manifest.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE item_attachment SET envelope_version = 2 WHERE id = 'move_attachment'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(attachment_move_final_body(&fixture)),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_rejected(&response.body, "move_item", "attachment_state_conflict");
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+                1
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = $3")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .bind(staged_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn reject_stale_authority_consumes_existing_staging_and_queues_its_key() {
+    let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(128));
+    with_api_test_app_state(
+        "attachment_move_reject_stale_cleans_existing_staging",
+        move |state| state.with_object_storage(storage),
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_attachment(
+                &app.pool,
+                "move_attachment",
+                &fixture.movable_item_id,
+                &fixture.main_vault_id,
+                &fixture.owner_user_id,
+            )
+            .await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let operation_id = "reject-stale-cleans-preparation";
+            let manifest = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/operations/{operation_id}/attachment-move-manifest"),
+                    Some(attachment_move_manifest_body(&fixture)),
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(manifest.status, StatusCode::OK, "{}", manifest.body);
+            let staged_key = manifest.body["attachments"][0]["storageKey"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            query("UPDATE item_attachment SET envelope_version = 2 WHERE id = 'move_attachment'")
+                .execute(&app.pool)
+                .await
+                .unwrap();
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/moves", fixture.movable_item_id),
+                    Some(json!({
+                        "mode": "reject_stale_authority",
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "attachments": [{
+                            "attachmentId": "move_attachment",
+                            "expectedEnvelopeVersion": 1
+                        }]
+                    })),
+                    idempotent_item_headers(&session.token, 1, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_rejected(&response.body, "move_item", "attachment_state_conflict");
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = $3")
+                    .bind(&fixture.owner_user_id)
+                    .bind(operation_id)
+                    .bind(staged_key)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        },
+    )
+    .await;
 }
 
 async fn mark_item_deleted(pool: &PgPool, item_id: &str) {
@@ -1088,6 +5446,7 @@ async fn vault_create_audit_failure_rolls_back_mutation() {
         install_required_audit_failure_trigger(&app.pool, "vault_created").await;
         let session = app.issue_session(&fixture.solo_user_id).await;
         let vault_id = "vault_rejected_audit";
+		let operation_id = "vault-create-audit-rollback";
 
         let response = app
             .api_json(
@@ -1096,9 +5455,11 @@ async fn vault_create_audit_failure_rolls_back_mutation() {
                 Some(json!({
                     "name": "Atomic Audit Vault",
                     "vaultType": "personal",
-                    "encryptedVaultKey": "atomic-audit-key"
+					"encryptedVaultKey": "atomic-audit-key",
+					"icon": "lock",
+					"imageKey": null
                 })),
-                authenticated_json_headers(&session.token),
+				idempotency_headers(&session.token, operation_id),
             )
             .await;
 
@@ -1124,6 +5485,16 @@ async fn vault_create_audit_failure_rolls_back_mutation() {
             sync_event_count, 0,
             "vault sync event must roll back with its audit"
         );
+		assert_eq!(
+			retained_outcome_count(&app.pool, &fixture.solo_user_id, operation_id).await,
+			0,
+			"failed audit must roll back the retained outcome"
+		);
+		assert_eq!(
+			entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+			0,
+			"failed audit must roll back operation resolution"
+		);
     })
     .await;
 }
@@ -1149,7 +5520,7 @@ async fn item_create_audit_failure_rolls_back_mutation() {
                     "encryptionIv": "atomic-audit-iv",
                     "encryptionAlgorithm": "aes-gcm"
                 })),
-                authenticated_json_headers(&session.token),
+                idempotency_headers(&session.token, "item-create-audit-failure"),
             )
             .await;
 
@@ -1177,28 +5548,100 @@ async fn item_create_audit_failure_rolls_back_mutation() {
 }
 
 #[tokio::test]
+async fn create_item_rolls_back_when_a_late_operation_step_fails() {
+    for (test_name, table, when_clause) in [
+        (
+            "item_create_item_event_failure",
+            "sync_event",
+            "WHEN (NEW.event_type = 'item_created')",
+        ),
+        ("item_create_outcome_failure", "operation_outcome", ""),
+        (
+            "item_create_operation_event_failure",
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        ),
+    ] {
+        with_api_test_app(test_name, |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            install_operation_step_failure_trigger(&app.pool, table, when_clause).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let item_id = format!("{test_name}_item");
+            let operation_id = format!("{test_name}_operation");
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    &format!(
+                        "/api/v1/vaults/{}/items/{item_id}",
+                        fixture.owner_personal_vault_id
+                    ),
+                    Some(json!({
+                        "category": "login",
+                        "encryptedData": "atomic-ciphertext",
+                        "encryptionIv": "atomic-iv",
+                        "encryptionAlgorithm": "aes-gcm"
+                    })),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+            let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+                .bind(&item_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("Item count should load");
+            let audit_count: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = 'item_created'",
+            )
+            .bind(&item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("audit count should load");
+            let event_count: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 OR entity_id = $2",
+            )
+            .bind(&item_id)
+            .bind(&operation_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("event count should load");
+            let outcome_count: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind(&operation_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("outcome count should load");
+            assert_eq!((item_count, audit_count, event_count, outcome_count), (0, 0, 0, 0));
+        })
+        .await;
+    }
+}
+
+#[tokio::test]
 async fn vault_item_mutation_handlers_manage_item_lifecycle() {
     with_api_test_app(
         "vault_item_mutation_handlers_manage_item_lifecycle",
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
             let owner_session = app.issue_session(&fixture.owner_user_id).await;
-            let owner_headers = authenticated_json_headers(&owner_session.token);
             let created_item_id = "vault_created_item";
             let imported_item_a = "vault_import_item_a";
             let imported_item_b = "vault_import_item_b";
 
             let empty_import_response = app
-                .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [] })), owner_headers.clone())
+                .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [] })), idempotency_headers(&owner_session.token, "lifecycle-empty-import"))
                 .await;
             empty_import_response.assert_contract_status();
-            assert_eq!(empty_import_response.body["importedCount"], json!(0));
+            assert_eq!(empty_import_response.body["kind"], json!("import_items"));
+            assert_eq!(empty_import_response.body["result"]["importedCount"], json!(0));
 
             let create_item_response = app
-                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.owner_personal_vault_id, created_item_id), Some(json!({ "category": "login", "encryptedData": "created-encrypted-data", "encryptionIv": "created-iv", "encryptionAlgorithm": "aes-gcm" })), owner_headers.clone())
+                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.owner_personal_vault_id, created_item_id), Some(json!({ "category": "login", "encryptedData": "created-encrypted-data", "encryptionIv": "created-iv", "encryptionAlgorithm": "aes-gcm" })), idempotency_headers(&owner_session.token, "lifecycle-create-item"))
                 .await;
             create_item_response.assert_contract_status();
-            assert_eq!(create_item_response.body["itemId"], json!(created_item_id));
+            assert_eq!(create_item_response.body["result"]["itemId"], json!(created_item_id));
 
             let bulk_import_response = app
                 .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [
@@ -1217,10 +5660,11 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                                 "encryptionIv": "imported-b-iv",
                                 "encryptionAlgorithm": "aes-gcm"
                             }
-                        ] })), owner_headers.clone())
+                        ] })), idempotency_headers(&owner_session.token, "lifecycle-bulk-import"))
                 .await;
             bulk_import_response.assert_contract_status();
-            assert_eq!(bulk_import_response.body["importedCount"], json!(2));
+            assert_eq!(bulk_import_response.body["kind"], json!("import_items"));
+            assert_eq!(bulk_import_response.body["result"]["importedCount"], json!(2));
 
             let current_version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
                 .bind(&fixture.active_item_id)
@@ -1228,10 +5672,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                 .await
                 .expect("active item version should load");
             let update_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "active-encrypted-data-updated", "encryptionIv": "active-iv-updated" })), with_if_match(owner_headers.clone(), current_version))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "active-encrypted-data-updated", "encryptionIv": "active-iv-updated" })), idempotent_item_headers(&owner_session.token, current_version, "lifecycle-update-item"))
                 .await;
             update_response.assert_contract_status();
-            assert_eq!(update_response.body["version"], json!(current_version + 1));
+            assert_applied(&update_response.body, "update_item", &fixture.active_item_id, current_version + 1);
             let updated_data: String =
                 query_scalar("SELECT encrypted_data FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1241,9 +5685,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(updated_data, "active-encrypted-data-updated");
 
             let toggle_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}/favorite", fixture.active_item_id), Some(json!({ "favorite": true })), with_if_match(owner_headers.clone(), current_version + 1))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}/favorite", fixture.active_item_id), Some(json!({ "favorite": true })), idempotent_item_headers(&owner_session.token, current_version + 1, "lifecycle-favorite-item"))
                 .await;
             toggle_response.assert_contract_status();
+            assert_applied(&toggle_response.body, "set_item_favorite", &fixture.active_item_id, current_version + 2);
             let favorite: bool = query_scalar("SELECT favorite FROM item WHERE id = $1")
                 .bind(&fixture.active_item_id)
                 .fetch_one(&app.pool)
@@ -1252,9 +5697,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(favorite);
 
             let delete_response = app
-                .api_json(Method::DELETE, &format!("/api/v1/items/{}", imported_item_a), None, with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::DELETE, &format!("/api/v1/items/{}", imported_item_a), None, idempotent_item_headers(&owner_session.token, 1, "lifecycle-trash-item"))
                 .await;
             delete_response.assert_contract_status();
+            assert_applied(&delete_response.body, "trash_item", imported_item_a, 2);
             let deleted_at: Option<OffsetDateTime> =
                 query_scalar("SELECT deleted_at FROM item WHERE id = $1")
                     .bind(imported_item_a)
@@ -1264,9 +5710,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(deleted_at.is_some());
 
             let restore_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.deleted_item_id), None, with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.deleted_item_id), None, idempotent_item_headers(&owner_session.token, 1, "lifecycle-restore-item"))
                 .await;
             restore_response.assert_contract_status();
+            assert_applied(&restore_response.body, "restore_item", &fixture.deleted_item_id, 2);
             let restored_deleted_at: Option<OffsetDateTime> =
                 query_scalar("SELECT deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.deleted_item_id)
@@ -1276,9 +5723,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(restored_deleted_at.is_none());
 
             let move_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "mode": "prepared", "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "lifecycle-move-item"))
                 .await;
             move_response.assert_contract_status();
+            assert_applied(&move_response.body, "move_item", &fixture.movable_item_id, 2);
             let moved_vault_id: String = query_scalar("SELECT vault_id FROM item WHERE id = $1")
                 .bind(&fixture.movable_item_id)
                 .fetch_one(&app.pool)
@@ -1287,9 +5735,10 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(moved_vault_id, fixture.target_vault_id);
 
             let permanent_delete_response = app
-                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", imported_item_a), None, with_if_match(owner_headers, 2))
+                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", imported_item_a), None, idempotent_item_headers(&owner_session.token, 2, "lifecycle-permanent-delete-item"))
                 .await;
             permanent_delete_response.assert_contract_status();
+            assert_applied(&permanent_delete_response.body, "permanently_delete_item", imported_item_a, 3);
             let remaining_rows: i64 =
                 query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
                     .bind(imported_item_a)
@@ -1334,25 +5783,46 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                 .await;
             assert_eq!(missing_delete.status, StatusCode::PRECONDITION_REQUIRED);
 
-            let mut stale_headers = headers.clone();
-            stale_headers.insert(IF_MATCH, HeaderValue::from_static("\"99\""));
+            // A well-formed precondition without a stable Operation ID is still malformed
+            // transport, and it must not reach semantic execution.
+            let missing_operation_id = app
+                .api_json(
+                    Method::PATCH,
+                    &item_uri,
+                    Some(json!({ "encryptedData": "must-not-write" })),
+                    with_if_match(headers.clone(), 1),
+                )
+                .await;
+            assert_eq!(missing_operation_id.status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                missing_operation_id.body["code"],
+                json!("INVALID_OPERATION_ID")
+            );
+
             let stale = app
                 .api_json(
                     Method::PATCH,
                     &item_uri,
                     Some(json!({ "encryptedData": "stale-write" })),
-                    stale_headers,
+                    idempotent_item_headers(
+                        &owner_session.token,
+                        99,
+                        "strong-version-stale-update",
+                    ),
                 )
                 .await;
-            assert_eq!(stale.status, StatusCode::PRECONDITION_FAILED);
-            assert_eq!(stale.body["code"], json!("VERSION_CONFLICT"));
-            let mut stale_delete_headers = headers.clone();
-            stale_delete_headers.insert(IF_MATCH, HeaderValue::from_static("\"99\""));
+            stale.assert_contract_status();
+            assert_rejected(&stale.body, "update_item", "item_version_conflict");
             let stale_delete = app
-                .api_json(Method::DELETE, &item_uri, None, stale_delete_headers)
+                .api_json(
+                    Method::DELETE,
+                    &item_uri,
+                    None,
+                    idempotent_item_headers(&owner_session.token, 99, "strong-version-stale-trash"),
+                )
                 .await;
-            assert_eq!(stale_delete.status, StatusCode::PRECONDITION_FAILED);
-            assert_eq!(stale_delete.body["code"], json!("VERSION_CONFLICT"));
+            stale_delete.assert_contract_status();
+            assert_rejected(&stale_delete.body, "trash_item", "item_version_conflict");
             let unchanged: (String, i32, bool, Option<OffsetDateTime>) = sqlx::query_as(
                 "SELECT encrypted_data, version, favorite, deleted_at FROM item WHERE id = $1",
             )
@@ -1365,30 +5835,32 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                 ("active-encrypted-data".to_string(), 1, false, None)
             );
 
-            let mut version_headers = headers.clone();
-            version_headers.insert(IF_MATCH, HeaderValue::from_static("\"1\""));
             let updated = app
                 .api_json(
                     Method::PATCH,
                     &item_uri,
                     Some(json!({ "encryptedData": "version-two" })),
-                    version_headers,
+                    idempotent_item_headers(&owner_session.token, 1, "strong-version-update"),
                 )
                 .await;
             updated.assert_contract_status();
-            assert_eq!(updated.headers.get(ETAG).unwrap(), "\"2\"");
+            assert_applied(&updated.body, "update_item", &fixture.active_item_id, 2);
 
-            let mut favorite_headers = headers.clone();
-            favorite_headers.insert(IF_MATCH, HeaderValue::from_static("\"2\""));
             let favorite = app
                 .api_json(
                     Method::PATCH,
                     &format!("{item_uri}/favorite"),
                     Some(json!({ "favorite": true })),
-                    favorite_headers,
+                    idempotent_item_headers(&owner_session.token, 2, "strong-version-favorite"),
                 )
                 .await;
             favorite.assert_contract_status();
+            assert_applied(
+                &favorite.body,
+                "set_item_favorite",
+                &fixture.active_item_id,
+                3,
+            );
             let after_favorite: (i32, bool) =
                 sqlx::query_as("SELECT version, favorite FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1397,12 +5869,16 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                     .unwrap();
             assert_eq!(after_favorite, (3, true));
 
-            let mut trash_headers = headers.clone();
-            trash_headers.insert(IF_MATCH, HeaderValue::from_static("\"3\""));
             let trashed = app
-                .api_json(Method::DELETE, &item_uri, None, trash_headers)
+                .api_json(
+                    Method::DELETE,
+                    &item_uri,
+                    None,
+                    idempotent_item_headers(&owner_session.token, 3, "strong-version-trash"),
+                )
                 .await;
             trashed.assert_contract_status();
+            assert_applied(&trashed.body, "trash_item", &fixture.active_item_id, 4);
             let after_trash: (i32, Option<OffsetDateTime>) =
                 sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1412,17 +5888,16 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
             assert_eq!(after_trash.0, 4);
             assert!(after_trash.1.is_some());
 
-            let mut restore_headers = headers;
-            restore_headers.insert(IF_MATCH, HeaderValue::from_static("\"4\""));
             let restored = app
                 .api_json(
                     Method::POST,
                     &format!("{item_uri}/restore"),
                     None,
-                    restore_headers,
+                    idempotent_item_headers(&owner_session.token, 4, "strong-version-restore"),
                 )
                 .await;
             restored.assert_contract_status();
+            assert_applied(&restored.body, "restore_item", &fixture.active_item_id, 5);
             let after_restore: (i32, Option<OffsetDateTime>) =
                 sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1439,18 +5914,21 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
 async fn favorite_service_advances_item_version() {
     with_api_test_app("favorite_service_advances_item_version", |app| async move {
         let fixture = build_vault_router_fixture(&app.pool).await;
-        toggle_vault_favorite(
-            &app.pool,
-            &fixture.owner_user_id,
-            ToggleFavoriteInput {
-                item_id: fixture.active_item_id.clone(),
-                favorite: true,
-                expected_version: None,
-                client_id: Some("favorite-service-client".to_string()),
-            },
-        )
-        .await
-        .expect("favorite mutation should succeed");
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let response = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/items/{}/favorite", fixture.active_item_id),
+                Some(json!({ "favorite": true })),
+                idempotent_item_headers(&session.token, 1, "favorite-service-operation"),
+            )
+            .await;
+        assert_applied(
+            &response.body,
+            "set_item_favorite",
+            &fixture.active_item_id,
+            2,
+        );
 
         let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
             .bind(&fixture.active_item_id)
@@ -1475,7 +5953,8 @@ async fn favorite_event_retains_the_request_client_id_and_encryption_context() {
         .await
         .unwrap();
         let session = app.issue_session(&fixture.owner_user_id).await;
-        let mut headers = with_if_match(authenticated_json_headers(&session.token), 1);
+        let mut headers =
+            idempotent_item_headers(&session.token, 1, "favorite-client-id-operation");
         headers.insert(
             "bittery-client-id",
             HeaderValue::from_static("favorite-regression-client"),
@@ -1490,8 +5969,12 @@ async fn favorite_event_retains_the_request_client_id_and_encryption_context() {
             )
             .await;
 
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(response.headers.get(ETAG).unwrap(), "\"2\"");
+        assert_applied(
+            &response.body,
+            "set_item_favorite",
+            &fixture.active_item_id,
+            2,
+        );
         let event: (Option<String>, String) = sqlx::query_as(
             "SELECT client_id, entity_id FROM sync_event WHERE event_type = 'item_updated'::sync_event_type ORDER BY created_at DESC LIMIT 1",
         )
@@ -1562,7 +6045,7 @@ async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
                     "encryptionIv": "created-iv",
                     "encryptionAlgorithm": "aes-gcm"
                 })),
-                authenticated_json_headers(&owner_session.token),
+                idempotency_headers(&owner_session.token, "encryption-context-create"),
             )
             .await;
         assert_eq!(created.status, StatusCode::OK);
@@ -1583,28 +6066,28 @@ async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
                 Method::PATCH,
                 &format!("{item_uri}/favorite"),
                 Some(json!({ "favorite": true })),
-                with_if_match(authenticated_json_headers(&owner_session.token), 1),
+                idempotent_item_headers(&owner_session.token, 1, "encryption-context-favorite"),
             )
             .await;
-        assert_eq!(favorite.status, StatusCode::OK);
+        assert_applied(&favorite.body, "set_item_favorite", item_id, 2);
         let trashed = app
             .api_json(
                 Method::DELETE,
                 &item_uri,
                 None,
-                with_if_match(authenticated_json_headers(&member_session.token), 2),
+                idempotent_item_headers(&member_session.token, 2, "encryption-context-trash"),
             )
             .await;
-        assert_eq!(trashed.status, StatusCode::OK);
+        assert_applied(&trashed.body, "trash_item", item_id, 3);
         let restored = app
             .api_json(
                 Method::POST,
                 &format!("{item_uri}/restore"),
                 None,
-                with_if_match(authenticated_json_headers(&member_session.token), 3),
+                idempotent_item_headers(&member_session.token, 3, "encryption-context-restore"),
             )
             .await;
-        assert_eq!(restored.status, StatusCode::OK);
+        assert_applied(&restored.body, "restore_item", item_id, 4);
         let after_metadata: (i32, Option<i32>, Option<String>, Option<String>) =
             sqlx::query_as(
                 "SELECT version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE id = $1",
@@ -1626,10 +6109,10 @@ async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
                     "encryptedData": "member-ciphertext",
                     "encryptionIv": "member-iv"
                 })),
-                with_if_match(authenticated_json_headers(&member_session.token), 4),
+                idempotent_item_headers(&member_session.token, 4, "encryption-context-update"),
             )
             .await;
-        assert_eq!(updated.status, StatusCode::OK);
+        assert_applied(&updated.body, "update_item", item_id, 5);
         let after_content: (i32, Option<i32>, Option<String>) = sqlx::query_as(
             "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
         )
@@ -1663,77 +6146,17 @@ async fn move_item_requires_source_vault_write_access() {
             let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
 
             let response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(authenticated_json_headers(&readonly_session.token), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "mode": "prepared", "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&readonly_session.token, 1, "move-readonly-source"))
                 .await;
 
             response.assert_contract_status();
-            assert_handler_error(
-                &response.body,
-                "FORBIDDEN",
-                "Cannot move items from a read-only vault",
-            );
+            assert_rejected(&response.body, "move_item", "vault_read_only");
             let vault_id: String = query_scalar("SELECT vault_id FROM item WHERE id = $1")
                 .bind(&fixture.movable_item_id)
                 .fetch_one(&app.pool)
                 .await
                 .expect("item vault should load");
             assert_eq!(vault_id, fixture.main_vault_id);
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn item_update_idempotency_replays_without_a_second_mutation() {
-    with_api_test_app(
-        "item_update_idempotency_replay",
-        |app| async move {
-            let fixture = build_vault_router_fixture(&app.pool).await;
-            let session = app.issue_session(&fixture.owner_user_id).await;
-            let body = json!({
-                "encryptedData": "idempotent-encrypted-data",
-                "encryptionIv": "idempotent-iv"
-            });
-
-            let first = app
-                .api_json(
-                    Method::PATCH,
-                    &format!("/api/v1/items/{}", fixture.active_item_id),
-                    Some(body.clone()),
-                    idempotent_item_headers(&session.token, 1, "update-replay-key"),
-                )
-                .await;
-            let replay = app
-                .api_json(
-                    Method::PATCH,
-                    &format!("/api/v1/items/{}", fixture.active_item_id),
-                    Some(body),
-                    idempotent_item_headers(&session.token, 1, "update-replay-key"),
-                )
-                .await;
-
-            assert_eq!(first.status, StatusCode::OK);
-            assert_eq!(replay.status, first.status);
-            assert_eq!(replay.body, first.body);
-            assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
-            assert_eq!(
-                replay.headers.get("idempotency-replayed"),
-                Some(&HeaderValue::from_static("true")),
-            );
-            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-                .bind(&fixture.active_item_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("item version should load");
-            let events: i64 = query_scalar(
-                "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_updated'::sync_event_type",
-            )
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("sync event count should load");
-            assert_eq!(version, 2);
-            assert_eq!(events, 1);
         },
     )
     .await;
@@ -1755,6 +6178,11 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
             "encryptionIv": "queued-create-iv",
             "encryptionAlgorithm": "aes-gcm"
         });
+		let (mut sync_notifications, _control_notifications) = app
+			.state
+			.sync_pubsub
+			.subscribe(&fixture.owner_user_id)
+			.await;
 
         let first = app
             .api_json(
@@ -1764,6 +6192,13 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
                 idempotency_headers(&session.token, "queued-create-key"),
             )
             .await;
+		tokio::time::timeout(
+			std::time::Duration::from_secs(1),
+			sync_notifications.recv(),
+		)
+		.await
+		.expect("a newly committed outcome should wake Sync")
+		.expect("Sync notification channel should stay open");
         let replay = app
             .api_json(
                 Method::PUT,
@@ -1772,16 +6207,96 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
                 idempotency_headers(&session.token, "queued-create-key"),
             )
             .await;
+		assert!(
+			tokio::time::timeout(
+				std::time::Duration::from_millis(50),
+				sync_notifications.recv(),
+			)
+			.await
+			.is_err(),
+			"a retained replay must not emit another Sync wake",
+		);
 
-        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(first.status, StatusCode::OK, "{}", first.body);
         assert_eq!(replay.status, first.status);
         assert_eq!(replay.body, first.body);
-        assert_eq!(first.headers.get(ETAG), Some(&HeaderValue::from_static("\"1\"")));
-        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
         assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true")),
+            first.body,
+            json!({
+                "operationId": "queued-create-key",
+                "kind": "create_item",
+                "result": {
+                    "status": "applied",
+                    "itemId": item_id,
+                    "version": 1
+                }
+            })
         );
+        let lookup = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/queued-create-key",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(lookup.status, StatusCode::OK);
+        assert_eq!(lookup.body, first.body);
+        query("UPDATE operation_outcome SET resolved_at = NOW() - INTERVAL '10 years' WHERE user_id = $1 AND operation_id = $2")
+            .bind(&fixture.owner_user_id)
+            .bind("queued-create-key")
+            .execute(&app.pool)
+            .await
+            .expect("outcome age should be adjustable for retention test");
+        let renewed_session = app.issue_session(&fixture.owner_user_id).await;
+        let retained = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/queued-create-key",
+                None,
+                authenticated_json_headers(&renewed_session.token),
+            )
+            .await;
+        assert_eq!(retained.status, StatusCode::OK);
+        assert_eq!(retained.body, first.body);
+        let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
+        let isolated = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/queued-create-key",
+                None,
+                authenticated_json_headers(&outsider_session.token),
+            )
+            .await;
+        assert_eq!(isolated.status, StatusCode::NOT_FOUND);
+        assert_eq!(isolated.body["code"], "OPERATION_OUTCOME_NOT_FOUND");
+        let changes = app
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/changes",
+                None,
+                authenticated_json_headers(&renewed_session.token),
+            )
+            .await;
+        changes.assert_contract_status();
+        assert!(changes.body["events"]
+            .as_array()
+            .expect("changes events should be an array")
+            .iter()
+            .any(|event| {
+                event["type"] == "operation_resolved"
+                    && event["entityId"] == "queued-create-key"
+            }));
+        let bootstrap = app
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/bootstrap",
+                None,
+                authenticated_json_headers(&renewed_session.token),
+            )
+            .await;
+        bootstrap.assert_contract_status();
+        assert!(!bootstrap.body.to_string().contains("queued-create-key"));
         let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
             .bind(item_id)
             .fetch_one(&app.pool)
@@ -1794,157 +6309,164 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
         .fetch_one(&app.pool)
         .await
         .expect("created event count should load");
+        let outcome_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind("queued-create-key")
+        .fetch_one(&app.pool)
+        .await
+        .expect("operation outcome count should load");
+        let operation_event_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND entity_id = $2 AND event_type = 'operation_resolved'::sync_event_type",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind("queued-create-key")
+        .fetch_one(&app.pool)
+        .await
+        .expect("operation event count should load");
         assert_eq!(item_count, 1);
         assert_eq!(event_count, 1);
+        assert_eq!(outcome_count, 1);
+        assert_eq!(operation_event_count, 1);
     })
     .await;
 }
 
 #[tokio::test]
-async fn queued_item_trash_replays_a_lost_success_without_advancing_twice() {
-    with_api_test_app("queued_item_trash_replay", |app| async move {
+async fn create_item_retains_a_semantic_rejection_even_after_authorization_changes() {
+    with_api_test_app("create_item_retained_rejection", |app| async move {
         let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
-        let headers = || idempotent_item_headers(&session.token, 1, "queued-trash-key");
+        let session = app.issue_session(&fixture.readonly_user_id).await;
+        let item_id = "item_retained_rejection";
+        let uri = format!("/api/v1/vaults/{}/items/{item_id}", fixture.main_vault_id);
+        let body = json!({
+            "category": "login",
+            "encryptedData": "rejected-ciphertext",
+            "encryptionIv": "rejected-iv",
+            "encryptionAlgorithm": "aes-gcm"
+        });
 
-        let first = app.api_json(Method::DELETE, &uri, None, headers()).await;
-        let replay = app.api_json(Method::DELETE, &uri, None, headers()).await;
-
+        let first = app
+            .api_json(
+                Method::PUT,
+                &uri,
+                Some(body.clone()),
+                idempotency_headers(&session.token, "retained-rejection-key"),
+            )
+            .await;
         assert_eq!(first.status, StatusCode::OK);
-        assert_eq!(replay.status, first.status);
-        assert_eq!(replay.body, first.body);
-        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
-        assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true")),
-        );
-        let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
+        assert_eq!(first.body["result"]["status"], "rejected");
+        assert_eq!(first.body["result"]["code"], "vault_read_only");
+
+        query("UPDATE vault_key SET role = 'member' WHERE vault_id = $1 AND user_id = $2")
+            .bind(&fixture.main_vault_id)
+            .bind(&fixture.readonly_user_id)
+            .execute(&app.pool)
             .await
-            .expect("trashed item version should load");
-        let events: i64 = query_scalar(
-            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_deleted'::sync_event_type",
-        )
-        .bind(&fixture.active_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("trash event count should load");
-        assert_eq!(version, 2);
-        assert_eq!(events, 1);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn queued_item_permanent_delete_replays_a_lost_success_without_second_delete() {
-    with_api_test_app("queued_item_permanent_delete_replay", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!(
-            "/api/v1/items/{}/permanent",
-            fixture.deleted_item_id
-        );
-        let headers = || {
-            idempotent_item_headers(&session.token, 1, "queued-permanent-delete-key")
-        };
-
-        let first = app.api_json(Method::DELETE, &uri, None, headers()).await;
-        let replay = app.api_json(Method::DELETE, &uri, None, headers()).await;
-
-        assert_eq!(first.status, StatusCode::OK);
-        assert_eq!(replay.status, first.status);
+            .expect("test authorization should change");
+        let replay = app
+            .api_json(
+                Method::PUT,
+                &uri,
+                Some(body),
+                idempotency_headers(&session.token, "retained-rejection-key"),
+            )
+            .await;
+        assert_eq!(replay.status, StatusCode::OK);
         assert_eq!(replay.body, first.body);
-        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
-        assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true")),
-        );
+
         let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
-            .bind(&fixture.deleted_item_id)
+            .bind(item_id)
             .fetch_one(&app.pool)
             .await
-            .expect("permanently deleted item count should load");
-        let events: i64 = query_scalar(
-            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_permanently_deleted'::sync_event_type",
+            .expect("rejected item count should load");
+        let rejection_audits: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = $2 AND action = 'item_create_rejected'",
         )
-        .bind(&fixture.deleted_item_id)
+        .bind(&fixture.readonly_user_id)
+        .bind(item_id)
         .fetch_one(&app.pool)
         .await
-        .expect("permanent delete event count should load");
+        .expect("rejection audit count should load");
+        let operation_events: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND entity_id = $2 AND event_type = 'operation_resolved'::sync_event_type",
+        )
+        .bind(&fixture.readonly_user_id)
+        .bind("retained-rejection-key")
+        .fetch_one(&app.pool)
+        .await
+        .expect("rejection Operation event count should load");
         assert_eq!(item_count, 0);
-        assert_eq!(events, 1);
+        assert_eq!(rejection_audits, 1);
+        assert_eq!(operation_events, 1);
     })
     .await;
 }
 
 #[tokio::test]
-async fn queued_item_idempotency_rejects_changed_bodies_and_preconditions() {
-    with_api_test_app("queued_item_idempotency_mismatch", |app| async move {
+async fn create_item_requires_an_operation_id_before_semantic_execution() {
+    with_api_test_app("create_item_requires_operation_id", |app| async move {
         let fixture = build_vault_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
-        let create_uri = format!(
-            "/api/v1/vaults/{}/items/item_queued_mismatch",
-            fixture.main_vault_id
-        );
-        let create_headers = || idempotency_headers(&session.token, "queued-create-mismatch");
-        let first = app
+        let item_id = "item_without_operation_id";
+        let response = app
             .api_json(
                 Method::PUT,
-                &create_uri,
+                &format!("/api/v1/vaults/{}/items/{item_id}", fixture.main_vault_id),
                 Some(json!({
                     "category": "login",
-                    "encryptedData": "first",
+                    "encryptedData": "ciphertext",
                     "encryptionIv": "iv",
                     "encryptionAlgorithm": "aes-gcm"
                 })),
-                create_headers(),
+                authenticated_json_headers(&session.token),
             )
             .await;
-        assert_eq!(first.status, StatusCode::OK);
-        let body_mismatch = app
-            .api_json(
-                Method::PUT,
-                &create_uri,
-                Some(json!({
-                    "category": "login",
-                    "encryptedData": "second",
-                    "encryptionIv": "iv",
-                    "encryptionAlgorithm": "aes-gcm"
-                })),
-                create_headers(),
-            )
-            .await;
-        assert_eq!(body_mismatch.status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body_mismatch.body["code"], json!("IDEMPOTENCY_KEY_REUSED"));
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert_eq!(response.body["code"], "INVALID_OPERATION_ID");
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("Item count should load");
+        assert_eq!(item_count, 0);
+    })
+    .await;
+}
 
-        let trash_uri = format!("/api/v1/items/{}", fixture.active_item_id);
-        let first = app
-            .api_json(
-                Method::DELETE,
-                &trash_uri,
-                None,
-                idempotent_item_headers(&session.token, 1, "queued-trash-mismatch"),
-            )
-            .await;
-        assert_eq!(first.status, StatusCode::OK);
-        let precondition_mismatch = app
-            .api_json(
-                Method::DELETE,
-                &trash_uri,
-                None,
-                idempotent_item_headers(&session.token, 2, "queued-trash-mismatch"),
-            )
-            .await;
-        assert_eq!(
-            precondition_mismatch.status,
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
-        assert_eq!(
-            precondition_mismatch.body["code"],
-            json!("IDEMPOTENCY_KEY_REUSED")
-        );
+#[tokio::test]
+async fn deleting_a_user_cascades_retained_operation_outcomes() {
+    with_api_test_app("operation_outcome_user_cascade", |app| async move {
+        let user_id = "operation_outcome_cascade_user";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Outcome Cascade",
+            "operation-outcome-cascade@example.com",
+        )
+        .await;
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'cascade-operation', 'create_item', $2, 'rejected', 'vault_access_denied')",
+        )
+        .bind(user_id)
+        .bind(vec![7_u8; 32])
+        .execute(&app.pool)
+        .await
+        .expect("outcome fixture should insert");
+        query("DELETE FROM \"user\" WHERE id = $1")
+            .bind(user_id)
+            .execute(&app.pool)
+            .await
+            .expect("standalone User should delete");
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("outcome count should load");
+        assert_eq!(count, 0);
     })
     .await;
 }
@@ -1978,15 +6500,9 @@ async fn concurrent_queued_item_create_executes_once_and_then_replays() {
             idempotency_headers(&session.token, "concurrent-create-key"),
         );
         let (first, second) = tokio::join!(first, second);
-        assert!(matches!(
-            first.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(matches!(
-            second.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(first.status == StatusCode::OK || second.status == StatusCode::OK);
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(second.status, StatusCode::OK);
+        assert_eq!(first.body, second.body);
 
         let replay = app
             .api_json(
@@ -1997,10 +6513,7 @@ async fn concurrent_queued_item_create_executes_once_and_then_replays() {
             )
             .await;
         assert_eq!(replay.status, StatusCode::OK);
-        assert_eq!(
-            replay.headers.get("idempotency-replayed"),
-            Some(&HeaderValue::from_static("true"))
-        );
+        assert_eq!(replay.body, first.body);
         let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
             .bind(item_id)
             .fetch_one(&app.pool)
@@ -2020,278 +6533,61 @@ async fn concurrent_queued_item_create_executes_once_and_then_replays() {
 }
 
 #[tokio::test]
-async fn stale_idempotency_claims_fail_closed_and_completed_records_are_cleaned() {
-    use crate::shared::idempotency::{claim, Claim, RequestScope};
-
-    with_api_test_app("idempotency_claim_lifecycle", |app| async move {
-        let fingerprint = [7_u8; 32];
-        let scope = RequestScope {
-            principal_id: "user_idempotency_lifecycle",
-            method: "DELETE",
-            route_target: "/api/v1/items/item_stale",
-            key: "stale-key",
-        };
-        assert!(matches!(
-            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
-            Claim::Execute
-        ));
-        query(
-            "UPDATE idempotency_record SET claim_expires_at = NOW() - INTERVAL '1 second' WHERE idempotency_key = $1",
-        )
-        .bind(scope.key)
-        .execute(&app.pool)
-        .await
-        .expect("claim should become stale");
-        assert!(matches!(
-            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
-            Claim::Indeterminate
-        ));
-        assert!(matches!(
-            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
-            Claim::Indeterminate
-        ));
-
-        query(
-            "INSERT INTO idempotency_record (principal_id, method, route_target, idempotency_key, request_fingerprint, state, response_status, response_content_type, response_body, expires_at) VALUES ($1, 'PATCH', '/api/v1/items/expired', 'expired-key', $2, 'completed', 200, 'application/json', $3, NOW() - INTERVAL '1 second')",
-        )
-        .bind(scope.principal_id)
-        .bind(fingerprint.as_slice())
-        .bind(b"{}".as_slice())
-        .execute(&app.pool)
-        .await
-        .expect("expired completed record should insert");
-        let maintenance_scope = RequestScope {
-            principal_id: scope.principal_id,
-            method: "POST",
-            route_target: "/api/v1/items/maintenance",
-            key: "maintenance-key",
-        };
-        assert!(matches!(
-            claim(&app.pool, &maintenance_scope, &[8_u8; 32])
-                .await
-                .unwrap(),
-            Claim::Execute
-        ));
-        let expired_count: i64 = query_scalar(
-            "SELECT COUNT(*)::bigint FROM idempotency_record WHERE idempotency_key = 'expired-key'",
-        )
-        .fetch_one(&app.pool)
-        .await
-        .expect("expired record count should load");
-        let stale_state: String = query_scalar(
-            "SELECT state FROM idempotency_record WHERE idempotency_key = 'stale-key'",
-        )
-        .fetch_one(&app.pool)
-        .await
-        .expect("stale record should remain terminal");
-        assert_eq!(expired_count, 0);
-        assert_eq!(stale_state, "indeterminate");
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn concurrent_item_update_idempotency_executes_once() {
-    with_api_test_app("concurrent_item_update_idempotency", |app| async move {
+async fn different_operations_racing_for_one_item_retain_applied_and_rejected_outcomes() {
+    with_api_test_app("different_create_operations_race", |app| async move {
         let fixture = build_vault_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
+        let item_id = "item_different_operation_race";
+        let uri = format!("/api/v1/vaults/{}/items/{item_id}", fixture.main_vault_id);
         let body = json!({
-            "encryptedData": "concurrent-encrypted-data",
-            "encryptionIv": "concurrent-iv"
-        });
-        let request_a = app.api_json(
-            Method::PATCH,
-            &uri,
-            Some(body.clone()),
-            idempotent_item_headers(&session.token, 1, "concurrent-update-key"),
-        );
-        let request_b = app.api_json(
-            Method::PATCH,
-            &uri,
-            Some(body),
-            idempotent_item_headers(&session.token, 1, "concurrent-update-key"),
-        );
-
-        let (first, second) = tokio::join!(request_a, request_b);
-        assert!(matches!(
-            first.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(matches!(
-            second.status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert!(first.status == StatusCode::OK || second.status == StatusCode::OK);
-        let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-            .bind(&fixture.active_item_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("item version should load");
-        assert_eq!(version, 2);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn item_update_idempotency_rejects_body_mismatch() {
-    with_api_test_app("item_update_idempotency_mismatch", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
-        let headers = || idempotent_item_headers(&session.token, 1, "mismatch-key");
-        let first = app
-            .api_json(
-                Method::PATCH,
-                &uri,
-                Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
-                headers(),
-            )
-            .await;
-        assert_eq!(first.status, StatusCode::OK);
-
-        let mismatch = app
-            .api_json(
-                Method::PATCH,
-                &uri,
-                Some(json!({ "encryptedData": "second", "encryptionIv": "iv" })),
-                headers(),
-            )
-            .await;
-        assert_eq!(mismatch.status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_handler_error(
-            &mismatch.body,
-            "IDEMPOTENCY_KEY_REUSED",
-            "The idempotency key was already used for a different request.",
-        );
-
-        let precondition_mismatch = app
-            .api_json(
-                Method::PATCH,
-                &uri,
-                Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
-                idempotent_item_headers(&session.token, 2, "mismatch-key"),
-            )
-            .await;
-        assert_eq!(
-            precondition_mismatch.status,
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
-        assert_eq!(
-            precondition_mismatch.body["code"],
-            json!("IDEMPOTENCY_KEY_REUSED")
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn completed_item_idempotency_records_expire_after_twenty_four_hours() {
-    with_api_test_app(
-        "completed_item_idempotency_expiry",
-        |app| async move {
-            let fixture = build_vault_router_fixture(&app.pool).await;
-            let session = app.issue_session(&fixture.owner_user_id).await;
-            let uri = format!("/api/v1/items/{}", fixture.active_item_id);
-            let first = app
-                .api_json(
-                    Method::PATCH,
-                    &uri,
-                    Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
-                    idempotent_item_headers(&session.token, 1, "expiry-key"),
-                )
-                .await;
-            assert_eq!(first.status, StatusCode::OK);
-            query("UPDATE idempotency_record SET expires_at = NOW() - INTERVAL '1 second' WHERE idempotency_key = $1")
-                .bind("expiry-key")
-                .execute(&app.pool)
-                .await
-                .expect("idempotency record should expire");
-
-            let after_expiry = app
-                .api_json(
-                    Method::PATCH,
-                    &uri,
-                    Some(json!({ "encryptedData": "second", "encryptionIv": "iv-2" })),
-                    idempotent_item_headers(&session.token, 2, "expiry-key"),
-                )
-                .await;
-            assert_eq!(after_expiry.status, StatusCode::OK);
-            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-                .bind(&fixture.active_item_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("item version should load");
-            assert_eq!(version, 3);
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn restore_move_and_favorite_commands_replay_idempotently() {
-    with_api_test_app("restore_move_favorite_idempotency", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-
-        let restore_uri = format!("/api/v1/items/{}/restore", fixture.deleted_item_id);
-        for _ in 0..2 {
-            let response = app
-                .api_json(
-                    Method::POST,
-                    &restore_uri,
-                    None,
-                    idempotent_item_headers(&session.token, 1, "restore-command-key"),
-                )
-                .await;
-            assert_eq!(response.status, StatusCode::OK);
-        }
-
-        let favorite_uri = format!("/api/v1/items/{}/favorite", fixture.active_item_id);
-        for _ in 0..2 {
-            let response = app
-                .api_json(
-                    Method::PATCH,
-                    &favorite_uri,
-                    Some(json!({ "favorite": true })),
-                    idempotent_item_headers(&session.token, 1, "favorite-command-key"),
-                )
-                .await;
-            assert_eq!(response.status, StatusCode::OK);
-        }
-
-        let move_uri = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
-        let move_body = json!({
-            "sourceVaultId": fixture.main_vault_id,
-            "targetVaultId": fixture.target_vault_id,
-            "encryptedData": "moved-idempotently",
-            "encryptionIv": "moved-iv",
+            "category": "login",
+            "encryptedData": "race-ciphertext",
+            "encryptionIv": "race-iv",
             "encryptionAlgorithm": "aes-gcm"
         });
-        for _ in 0..2 {
-            let response = app
-                .api_json(
-                    Method::POST,
-                    &move_uri,
-                    Some(move_body.clone()),
-                    idempotent_item_headers(&session.token, 1, "move-command-key"),
-                )
-                .await;
-            assert_eq!(response.status, StatusCode::OK);
-        }
+        let first = app.api_json(
+            Method::PUT,
+            &uri,
+            Some(body.clone()),
+            idempotency_headers(&session.token, "race-operation-a"),
+        );
+        let second = app.api_json(
+            Method::PUT,
+            &uri,
+            Some(body),
+            idempotency_headers(&session.token, "race-operation-b"),
+        );
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(second.status, StatusCode::OK);
+        let statuses = [
+            first.body["result"]["status"].as_str().unwrap(),
+            second.body["result"]["status"].as_str().unwrap(),
+        ];
+        assert!(statuses.contains(&"applied"));
+        assert!(statuses.contains(&"rejected"));
+        let rejected = if first.body["result"]["status"] == "rejected" {
+            &first.body
+        } else {
+            &second.body
+        };
+        assert_eq!(rejected["result"]["code"], "item_id_conflict");
 
-        for item_id in [
-            fixture.deleted_item_id,
-            fixture.active_item_id,
-            fixture.movable_item_id,
-        ] {
-            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
-                .bind(item_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("item version should load");
-            assert_eq!(version, 2);
-        }
+        let outcome_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = ANY($2)",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind(vec!["race-operation-a", "race-operation-b"])
+        .fetch_one(&app.pool)
+        .await
+        .expect("racing outcomes should load");
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("racing Item count should load");
+        assert_eq!(outcome_count, 2);
+        assert_eq!(item_count, 1);
     })
     .await;
 }
@@ -2304,24 +6600,26 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let fixture = build_vault_router_fixture(&app.pool).await;
             let owner_session = app.issue_session(&fixture.owner_user_id).await;
             let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
-            let owner_headers = authenticated_json_headers(&owner_session.token);
-            let readonly_headers = authenticated_json_headers(&readonly_session.token);
 
             let readonly_create_response = app
-                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), readonly_headers.clone())
+                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotency_headers(&readonly_session.token, "readonly-create-item"))
                 .await;
             readonly_create_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &readonly_create_response.body,
-                "FORBIDDEN",
-                "Read-only access cannot create items",
+                "create_item",
+                "vault_read_only",
             );
 
             let readonly_update_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "enc" })), with_if_match(readonly_headers, 1))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "enc" })), idempotent_item_headers(&readonly_session.token, 1, "readonly-update-item"))
                 .await;
             readonly_update_response.assert_contract_status();
-            assert_handler_error(&readonly_update_response.body, "FORBIDDEN", "Access denied");
+            assert_rejected(
+                &readonly_update_response.body,
+                "update_item",
+                "vault_read_only",
+            );
 
             let duplicate_import_response = app
                 .api_json(Method::POST, &format!("/api/v1/vaults/{}/item-imports", fixture.owner_personal_vault_id), Some(json!({ "items": [
@@ -2339,56 +6637,2628 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                                 "encryptionIv": "duplicate-b-iv",
                                 "encryptionAlgorithm": "aes-gcm"
                             }
-                        ] })), owner_headers.clone())
+                        ] })), idempotency_headers(&owner_session.token, "duplicate-import"))
                 .await;
             duplicate_import_response.assert_contract_status();
-            assert_handler_error(
+            // A repeated identity inside one body is the same collision as an identity that
+            // already exists, so it is one retained decision rather than a request error.
+            assert_rejected(
                 &duplicate_import_response.body,
-                "BAD_REQUEST",
-                "Duplicate item IDs in import payload",
+                "import_items",
+                "item_id_conflict",
             );
 
             let stale_update_response = app
-                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "stale-update" })), with_if_match(owner_headers.clone(), 99))
+                .api_json(Method::PATCH, &format!("/api/v1/items/{}", fixture.active_item_id), Some(json!({ "encryptedData": "stale-update" })), idempotent_item_headers(&owner_session.token, 99, "stale-update-item"))
                 .await;
             stale_update_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &stale_update_response.body,
-                "VERSION_CONFLICT",
-                "Item has been modified by another client",
+                "update_item",
+                "item_version_conflict",
             );
 
             let restore_active_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.active_item_id), None, with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/restore", fixture.active_item_id), None, idempotent_item_headers(&owner_session.token, 1, "restore-active-item"))
                 .await;
             restore_active_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &restore_active_response.body,
-                "BAD_REQUEST",
-                "Item is not deleted",
+                "restore_item",
+                "item_not_trashed",
             );
 
             let wrong_source_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "mode": "prepared", "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), idempotent_item_headers(&owner_session.token, 1, "move-wrong-source"))
                 .await;
             wrong_source_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &wrong_source_response.body,
-                "BAD_REQUEST",
-                "Item does not belong to the source vault",
+                "move_item",
+                "source_vault_mismatch",
             );
 
             let permanent_delete_active_response = app
-                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", fixture.active_item_id), None, with_if_match(owner_headers, 1))
+                .api_json(Method::DELETE, &format!("/api/v1/items/{}/permanent", fixture.active_item_id), None, idempotent_item_headers(&owner_session.token, 1, "permanent-delete-active-item"))
                 .await;
             permanent_delete_active_response.assert_contract_status();
-            assert_handler_error(
+            assert_rejected(
                 &permanent_delete_active_response.body,
-                "BAD_REQUEST",
-                "Can only permanently delete items in trash",
+                "permanently_delete_item",
+                "item_not_trashed",
             );
+
+            // Every one of those rejections is retained, and none of them wrote.
+            let unchanged: (String, i32, Option<OffsetDateTime>) = sqlx::query_as(
+                "SELECT encrypted_data, version, deleted_at FROM item WHERE id = $1",
+            )
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+            assert_eq!(unchanged, ("active-encrypted-data".to_string(), 1, None));
+            let retained: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM operation_outcome WHERE result_status = 'rejected'::operation_outcome_status AND operation_id = ANY($1)",
+            )
+            .bind(vec![
+                "readonly-create-item",
+                "readonly-update-item",
+                "stale-update-item",
+                "restore-active-item",
+                "move-wrong-source",
+                "permanent-delete-active-item",
+            ])
+            .fetch_one(&app.pool)
+            .await
+            .expect("retained rejection count should load");
+            assert_eq!(retained, 6);
         },
     )
+    .await;
+}
+
+/// One Item Operation, described once so every contract test can drive all six routes.
+struct ItemOperationCase {
+    kind: &'static str,
+    method: Method,
+    path: String,
+    body: Option<Value>,
+    /// The same Operation with one byte or one precondition changed. Sending it under the first
+    /// Operation ID is identity reuse, and the Server must refuse rather than answer.
+    other_bytes: Option<Value>,
+    other_precondition: i32,
+    item_id: String,
+    expected_version: i32,
+    applied_version: i32,
+    event_type: &'static str,
+    /// The audit action an applied Operation writes, where the Domain writes one.
+    applied_audit: Option<&'static str>,
+}
+
+/// Seeds one Item per case so the six Operations never contend for the same row.
+async fn item_operation_cases(
+    pool: &PgPool,
+    fixture: &VaultRouterFixture,
+) -> Vec<ItemOperationCase> {
+    for (item_id, trashed) in [
+        ("case_update_item", false),
+        ("case_favorite_item", false),
+        ("case_trash_item", false),
+        ("case_restore_item", true),
+        ("case_move_item", false),
+        ("case_permanent_item", true),
+    ] {
+        seed_item(
+            pool,
+            item_id,
+            &fixture.main_vault_id,
+            "login",
+            "case-ciphertext",
+            "case-iv",
+            &fixture.owner_user_id,
+        )
+        .await;
+        if trashed {
+            query("UPDATE item SET deleted_at = NOW() WHERE id = $1")
+                .bind(item_id)
+                .execute(pool)
+                .await
+                .expect("case item should trash");
+        }
+    }
+    let move_body = |ciphertext: &str| {
+        json!({
+            "mode": "prepared",
+            "sourceVaultId": fixture.main_vault_id,
+            "targetVaultId": fixture.target_vault_id,
+            "encryptedData": ciphertext,
+            "encryptionIv": "case-iv",
+            "encryptionAlgorithm": "aes-gcm"
+        })
+    };
+    vec![
+        ItemOperationCase {
+            kind: "update_item",
+            method: Method::PATCH,
+            path: "/api/v1/items/case_update_item".into(),
+            body: Some(json!({ "encryptedData": "case-updated", "encryptionIv": "case-iv" })),
+            other_bytes: Some(json!({ "encryptedData": "case-other", "encryptionIv": "case-iv" })),
+            other_precondition: 2,
+            item_id: "case_update_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_updated",
+            applied_audit: None,
+        },
+        ItemOperationCase {
+            kind: "set_item_favorite",
+            method: Method::PATCH,
+            path: "/api/v1/items/case_favorite_item/favorite".into(),
+            body: Some(json!({ "favorite": true })),
+            other_bytes: Some(json!({ "favorite": false })),
+            other_precondition: 2,
+            item_id: "case_favorite_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_updated",
+            applied_audit: None,
+        },
+        ItemOperationCase {
+            kind: "trash_item",
+            method: Method::DELETE,
+            path: "/api/v1/items/case_trash_item".into(),
+            body: None,
+            other_bytes: None,
+            other_precondition: 2,
+            item_id: "case_trash_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_deleted",
+            applied_audit: Some("item_deleted"),
+        },
+        ItemOperationCase {
+            kind: "restore_item",
+            method: Method::POST,
+            path: "/api/v1/items/case_restore_item/restore".into(),
+            body: None,
+            other_bytes: None,
+            other_precondition: 2,
+            item_id: "case_restore_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_restored",
+            applied_audit: Some("item_restored"),
+        },
+        ItemOperationCase {
+            kind: "move_item",
+            method: Method::POST,
+            path: "/api/v1/items/case_move_item/moves".into(),
+            body: Some(move_body("case-moved")),
+            other_bytes: Some(move_body("case-moved-differently")),
+            other_precondition: 2,
+            item_id: "case_move_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_moved",
+            applied_audit: Some("item_moved"),
+        },
+        ItemOperationCase {
+            kind: "permanently_delete_item",
+            method: Method::DELETE,
+            path: "/api/v1/items/case_permanent_item/permanent".into(),
+            body: None,
+            other_bytes: None,
+            other_precondition: 2,
+            item_id: "case_permanent_item".into(),
+            expected_version: 1,
+            applied_version: 2,
+            event_type: "item_permanently_deleted",
+            applied_audit: Some("item_permanently_deleted"),
+        },
+    ]
+}
+
+async fn entity_event_count(pool: &PgPool, entity_id: &str, event_type: &str) -> i64 {
+    query_scalar(
+        "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type::text = $2",
+    )
+    .bind(entity_id)
+    .bind(event_type)
+    .fetch_one(pool)
+    .await
+    .expect("entity event count should load")
+}
+
+async fn retained_outcome_count(pool: &PgPool, user_id: &str, operation_id: &str) -> i64 {
+    query_scalar(
+        "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .fetch_one(pool)
+    .await
+    .expect("retained outcome count should load")
+}
+
+#[tokio::test]
+async fn create_share_outcome_schema_keeps_payload_and_rejection_sets_closed() {
+    with_api_test_app("create_share_outcome_schema", |app| async move {
+        let user_id = "share_outcome_schema_user";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Share Outcome Schema User",
+            "share-outcome-schema@example.com",
+        )
+        .await;
+
+        let missing_payload = query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'missing-share-payload', 'create_share', $2, 'applied', NULL)",
+        )
+        .bind(user_id)
+        .bind(vec![0_u8; 32])
+        .execute(&app.pool)
+        .await;
+        assert!(missing_payload.is_err());
+
+        for (index, payload) in [
+            Value::Null,
+            json!({
+                "shareLinkId": "share_link_1",
+                "baseShareUrl": "https://app.example/share/"
+            }),
+            json!({
+                "shareLinkId": "share_link_1",
+                "baseShareUrl": "https://app.example/share/",
+                "expiresAt": "2026-08-27T00:00:00Z",
+                "token": "must-never-be-retained"
+            }),
+            json!({
+                "shareLinkId": 1,
+                "baseShareUrl": "https://app.example/share/",
+                "expiresAt": "2026-08-27T00:00:00Z"
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let result = query(
+                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, $2, 'create_share', $3, 'applied', $4)",
+            )
+            .bind(user_id)
+            .bind(format!("invalid-share-payload-{index}"))
+            .bind(vec![index as u8; 32])
+            .bind(payload)
+            .execute(&app.pool)
+            .await;
+            assert!(result.is_err(), "invalid applied payload {index} was retained");
+        }
+
+        for (index, code) in [
+            "item_not_found",
+            "vault_read_only",
+            "share_entitlement_denied",
+            "share_limit_reached",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            query(
+                "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, 'create_share', $3, 'rejected', $4::operation_rejection_code)",
+            )
+            .bind(user_id)
+            .bind(format!("valid-share-rejection-{index}"))
+            .bind(vec![index as u8; 32])
+            .bind(code)
+            .execute(&app.pool)
+            .await
+            .expect("each decided Share rejection should be retained");
+        }
+
+        let foreign_share_rejection = query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'foreign-share-rejection', 'create_share', $2, 'rejected', 'item_version_conflict')",
+        )
+        .bind(user_id)
+        .bind(vec![8_u8; 32])
+        .execute(&app.pool)
+        .await;
+        assert!(foreign_share_rejection.is_err());
+
+        let share_only_item_rejection = query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'share-only-item-rejection', 'update_item', $2, 'rejected', 'share_limit_reached')",
+        )
+        .bind(user_id)
+        .bind(vec![9_u8; 32])
+        .execute(&app.pool)
+        .await;
+        assert!(share_only_item_rejection.is_err());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn operation_lookup_reads_preseeded_applied_and_rejected_share_outcomes() {
+    with_api_test_app("create_share_outcome_lookup", |app| async move {
+        let user_id = "share_outcome_lookup_user";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Share Outcome Lookup User",
+            "share-outcome-lookup@example.com",
+        )
+        .await;
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, 'share-applied', 'create_share', $2, 'applied', $3)",
+        )
+        .bind(user_id)
+        .bind(vec![1_u8; 32])
+        .bind(json!({
+            "shareLinkId": "share_link_1",
+            "baseShareUrl": "https://app.example/share/",
+            "expiresAt": "2026-08-27T00:00:00Z"
+        }))
+        .execute(&app.pool)
+        .await
+        .expect("applied Share outcome should seed");
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, 'share-rejected', 'create_share', $2, 'rejected', 'share_limit_reached')",
+        )
+        .bind(user_id)
+        .bind(vec![2_u8; 32])
+        .execute(&app.pool)
+        .await
+        .expect("rejected Share outcome should seed");
+        let session = app.issue_session(user_id).await;
+
+        let applied = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/share-applied",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        applied.assert_contract_status();
+        assert_eq!(
+            applied.body,
+            json!({
+                "kind": "create_share",
+                "operationId": "share-applied",
+                "result": {
+                    "status": "applied",
+                    "shareLinkId": "share_link_1",
+                    "baseShareUrl": "https://app.example/share/",
+                    "expiresAt": "2026-08-27T00:00:00Z"
+                }
+            })
+        );
+
+        let rejected = app
+            .api_json(
+                Method::GET,
+                "/api/v1/operations/share-rejected",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        rejected.assert_contract_status();
+        assert_eq!(
+            rejected.body,
+            json!({
+                "kind": "create_share",
+                "operationId": "share-rejected",
+                "result": { "status": "rejected", "code": "share_limit_reached" }
+            })
+        );
+    })
+    .await;
+}
+
+/// An identical retry answers the retained outcome, and a lost response is recoverable by lookup.
+#[tokio::test]
+async fn every_item_operation_replays_one_retained_outcome() {
+    with_api_test_app("item_operation_replay", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("replay-{}", case.kind);
+            let headers =
+                || idempotent_item_headers(&session.token, case.expected_version, &operation_id);
+            let first = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers(),
+                )
+                .await;
+            first.assert_contract_status();
+            assert_applied(&first.body, case.kind, &case.item_id, case.applied_version);
+
+            let replay = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers(),
+                )
+                .await;
+            assert_eq!(replay.status, first.status);
+            assert_eq!(replay.body, first.body, "{} must replay", case.kind);
+
+            // The response the client lost is recoverable without replaying the effect, and a
+            // renewed Session reads the same answer because identity is `(User, Operation ID)`.
+            let renewed = app.issue_session(&fixture.owner_user_id).await;
+            let lookup = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&renewed.token),
+                )
+                .await;
+            lookup.assert_contract_status();
+            assert_eq!(lookup.body, first.body);
+
+            let isolated = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&outsider.token),
+                )
+                .await;
+            assert_eq!(isolated.status, StatusCode::NOT_FOUND);
+            assert_eq!(isolated.body["code"], json!("OPERATION_OUTCOME_NOT_FOUND"));
+
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                1,
+                "{} must emit exactly one entity event",
+                case.kind
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                1,
+                "{} must resolve exactly once",
+                case.kind
+            );
+            if let Some(action) = case.applied_audit {
+                let audits: i64 = query_scalar(
+                    "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = $2",
+                )
+                .bind(&case.item_id)
+                .bind(action)
+                .fetch_one(&app.pool)
+                .await
+                .expect("audit count should load");
+                assert_eq!(audits, 1, "{} must audit exactly once", case.kind);
+            }
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_put_replays_one_retained_operation_outcome() {
+    with_api_test_app("create_vault_operation_replay", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "create-vault-operation-replay";
+        let path = "/api/v1/vaults/runtime-created-vault";
+        let body = Some(json!({
+            "name": "Runtime created",
+            "vaultType": "personal",
+            "encryptedVaultKey": "runtime-owner-key",
+            "icon": "lock",
+            "imageKey": null
+        }));
+        let headers = || {
+            let mut headers = authenticated_json_headers(&session.token);
+            headers.insert("idempotency-key", operation_id.parse().unwrap());
+            headers
+        };
+        let first = app
+            .api_json(Method::PUT, path, body.clone(), headers())
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(first.body["kind"], json!("create_vault"));
+        assert_eq!(first.body["operationId"], json!(operation_id));
+        assert_eq!(first.body["result"]["status"], json!("applied"));
+        assert_eq!(
+            first.body["result"]["vaultId"],
+            json!("runtime-created-vault")
+        );
+        let replay = app.api_json(Method::PUT, path, body, headers()).await;
+        assert_eq!(replay.body, first.body);
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+            1
+        );
+        assert_eq!(
+            entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+            1
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_rejects_every_malformed_intent_before_domain_history() {
+    with_api_test_app("create_vault_intent_validation", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let valid = json!({
+            "name": "Valid Vault",
+            "vaultType": "personal",
+            "encryptedVaultKey": "wrapped",
+            "icon": "lock",
+            "imageKey": null
+        });
+        let mut cases = Vec::new();
+        for (label, vault_id, field, value) in [
+            (
+                "short-id",
+                "short-id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            (
+                "dot-id",
+                "invalid.vault.id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            (
+                "tilde-id",
+                "invalid~vault~id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            (
+                "unsafe-id",
+                "unsafe%20id".to_string(),
+                "name",
+                json!("Valid Vault"),
+            ),
+            ("long-id", "a".repeat(65), "name", json!("Valid Vault")),
+            (
+                "short-name",
+                "invalid-short-name".into(),
+                "name",
+                json!("x"),
+            ),
+            (
+                "trim-name",
+                "invalid-trim-name".into(),
+                "name",
+                json!(" Valid"),
+            ),
+            (
+                "long-name",
+                "invalid-long-name".into(),
+                "name",
+                json!("n".repeat(201)),
+            ),
+            ("blank-icon", "invalid-blank-icon".into(), "icon", json!("")),
+            (
+                "trim-icon",
+                "invalid-trim-icon".into(),
+                "icon",
+                json!(" lock"),
+            ),
+            (
+                "long-icon",
+                "invalid-long-icon".into(),
+                "icon",
+                json!("i".repeat(129)),
+            ),
+            (
+                "blank-key",
+                "invalid-blank-key".into(),
+                "encryptedVaultKey",
+                json!("   "),
+            ),
+            (
+                "long-key",
+                "invalid-long-key".into(),
+                "encryptedVaultKey",
+                json!("k".repeat(super::key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1)),
+            ),
+        ] {
+            let mut body = valid.clone();
+            body[field] = value;
+            cases.push((label, vault_id, body));
+        }
+        let mut missing_icon = valid.clone();
+        missing_icon.as_object_mut().unwrap().remove("icon");
+        cases.push(("missing-icon", "invalid-missing-icon".into(), missing_icon));
+
+		for (label, vault_id, body) in cases {
+            let operation_id = format!("invalid-create-vault-{label}");
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/vaults/{vault_id}"),
+                    Some(body),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert!(
+                response.status.is_client_error(),
+                "{label}: {}",
+                response.body
+            );
+            if matches!(
+                label,
+                "short-id" | "dot-id" | "tilde-id" | "unsafe-id" | "long-id"
+            ) {
+                assert_transport_error(&response.body, "BAD_REQUEST", "Invalid params");
+            }
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                0,
+                "{label} retained an outcome"
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                0
+            );
+			assert_eq!(
+				query_scalar::<_, i64>(
+					"SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1"
+                )
+                .bind(&operation_id)
+                .fetch_one(&app.pool)
+                .await
+				.unwrap(),
+				0
+			);
+			assert_eq!(
+				query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE id = $1")
+					.bind(&vault_id)
+					.fetch_one(&app.pool)
+					.await
+					.unwrap(),
+				0,
+				"{label} created a Vault"
+			);
+			assert_eq!(
+				query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1")
+					.bind(&vault_id)
+					.fetch_one(&app.pool)
+					.await
+					.unwrap(),
+				0,
+				"{label} created a Vault key"
+			);
+			assert_eq!(
+				query_scalar::<_, i64>(
+					"SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'vault_created'",
+				)
+				.bind(&vault_id)
+				.fetch_one(&app.pool)
+				.await
+				.unwrap(),
+				0,
+				"{label} emitted a success event"
+			);
+			assert_eq!(
+				query_scalar::<_, i64>(
+					"SELECT COUNT(*)::bigint FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2",
+				)
+				.bind(&fixture.owner_user_id)
+				.bind(&operation_id)
+				.fetch_one(&app.pool)
+				.await
+				.unwrap(),
+				0,
+				"{label} contaminated image staging"
+			);
+		}
+
+		let pre_domain_operation = "invalid-create-vault-enum";
+		let pre_domain_vault = "invalid-create-vault-enum-target";
+		let pre_domain = app
+			.api_json(
+				Method::PUT,
+				&format!("/api/v1/vaults/{pre_domain_vault}"),
+				Some(json!({
+					"name": "Invalid enum",
+					"vaultType": "organization",
+					"encryptedVaultKey": "wrapped",
+					"icon": "lock",
+					"imageKey": null
+				})),
+				idempotency_headers(&session.token, pre_domain_operation),
+			)
+			.await;
+		assert!(pre_domain.status.is_client_error(), "{}", pre_domain.body);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+			)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+			)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND (entity_id = $2 OR entity_id = $3)",
+			)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.bind(pre_domain_vault)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT (SELECT COUNT(*) FROM vault WHERE id = $1) + (SELECT COUNT(*) FROM vault_key WHERE vault_id = $1) + (SELECT COUNT(*) FROM vault_image_staging WHERE user_id = $2 AND operation_id = $3)",
+			)
+			.bind(pre_domain_vault)
+			.bind(&fixture.owner_user_id)
+			.bind(pre_domain_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			0
+		);
+
+			let boundary_id = "A0_-".repeat(16);
+        let boundary = app
+            .api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{boundary_id}"),
+                Some(json!({
+                    "name": "nn",
+                    "vaultType": "personal",
+                    "encryptedVaultKey": "k".repeat(super::key::ENCRYPTED_VAULT_KEY_MAX_BYTES),
+                    "icon": "i".repeat(super::VAULT_ICON_MAX_CHARS),
+                    "imageKey": null
+                })),
+                idempotency_headers(&session.token, "valid-create-vault-boundaries"),
+            )
+            .await;
+        assert_eq!(boundary.status, StatusCode::OK, "{}", boundary.body);
+        assert_eq!(boundary.body["result"]["status"], json!("applied"));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_accepts_canonical_uuid_and_boundary_slug_ids() {
+    with_api_test_app("create_vault_canonical_ids", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        for (label, vault_id) in [
+            ("uuid", "550e8400-e29b-41d4-a716-446655440000".to_owned()),
+            ("slug-min", "aB0_-z9_Xy".to_owned()),
+            ("slug-max", "A0_-".repeat(16)),
+        ] {
+            let operation_id = format!("canonical-create-vault-{label}");
+            let path = format!("/api/v1/vaults/{vault_id}");
+            let body = json!({
+                "name": "Canonical Vault",
+                "vaultType": "personal",
+                "encryptedVaultKey": "wrapped",
+                "icon": "lock",
+                "imageKey": null
+            });
+            let expected_fingerprint = crate::domains::operations::create_vault_operation_fingerprint(
+                &vault_id,
+                body.to_string().as_bytes(),
+            );
+            let first = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(body.clone()),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK, "{label}: {}", first.body);
+            assert_eq!(first.body["kind"], json!("create_vault"));
+            assert_eq!(
+                first.body["result"],
+                json!({ "status": "applied", "vaultId": vault_id })
+            );
+
+            let replay = app
+                .api_json(
+                    Method::PUT,
+                    &path,
+                    Some(body),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(replay.body, first.body, "{label} must replay exactly");
+            assert_eq!(
+                query_as::<_, (String, String, Vec<u8>, Option<Value>)>(
+                    "SELECT operation_kind::text, result_status::text, request_fingerprint, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+                )
+                .bind(&fixture.owner_user_id)
+                .bind(&operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+                (
+                    "create_vault".into(),
+                    "applied".into(),
+                    expected_fingerprint.to_vec(),
+                    Some(json!({ "vaultId": vault_id })),
+                )
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                1
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &vault_id, "vault_created").await,
+                1
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_operation_commits_every_history_once_and_rejects_identity_reuse() {
+    with_api_test_app("create_vault_complete_history", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "create-vault-complete-history";
+        let path = "/api/v1/vaults/runtime-history-vault";
+        let body = json!({
+            "name": "History Vault",
+            "vaultType": "team",
+            "encryptedVaultKey": "runtime-owner-key",
+            "icon": "users",
+            "imageKey": null
+        });
+        let headers = || {
+            let mut headers = authenticated_json_headers(&session.token);
+            headers.insert("idempotency-key", operation_id.parse().unwrap());
+            headers
+        };
+
+        let first = app
+            .api_json(Method::PUT, path, Some(body.clone()), headers())
+            .await;
+        assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+        assert_eq!(first.body["result"]["status"], json!("applied"));
+        let replay = app
+            .api_json(Method::PUT, path, Some(body.clone()), headers())
+            .await;
+        assert_eq!(replay.body, first.body);
+        let mut changed_body = body;
+        changed_body["name"] = json!("Other");
+        let reused = app
+            .api_json(
+                Method::PUT,
+                path,
+                Some(changed_body),
+                headers(),
+            )
+            .await;
+        assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+
+		let vault = query_as::<_, (String, String, String, Option<String>, Option<String>, String)>(
+			"SELECT id, name, type::text, icon, team_id, created_by_id FROM vault WHERE id = $1",
+		)
+		.bind("runtime-history-vault")
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			vault,
+			(
+				"runtime-history-vault".into(),
+				"History Vault".into(),
+				"team".into(),
+				Some("users".into()),
+				Some(fixture.paid_team_id.clone()),
+				fixture.owner_user_id.clone(),
+			)
+		);
+		let owner_key = query_as::<_, (String, String)>(
+			"SELECT role::text, encrypted_vault_key FROM vault_key WHERE vault_id = $1 AND user_id = $2",
+		)
+		.bind("runtime-history-vault")
+		.bind(&fixture.owner_user_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(owner_key, ("owner".into(), "runtime-owner-key".into()));
+		let audit = query_as::<_, (String, Option<String>, String, Option<String>)>(
+			"SELECT action, entity_type, entity_id, metadata FROM audit_log WHERE entity_id = $1",
+		)
+		.bind("runtime-history-vault")
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			audit,
+			(
+				"vault_created".into(),
+				Some("vault".into()),
+				"runtime-history-vault".into(),
+				None,
+			)
+		);
+		let events = query_as::<_, (String, Option<String>, String, String, Option<String>, i32, Option<String>)>(
+			"SELECT event_type::text, vault_id, entity_id, entity_type::text, client_id, version, metadata FROM sync_event WHERE user_id = $1 AND (entity_id = $2 OR entity_id = $3) ORDER BY event_type::text",
+		)
+		.bind(&fixture.owner_user_id)
+		.bind("runtime-history-vault")
+		.bind(operation_id)
+		.fetch_all(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			events,
+			vec![
+				(
+					"operation_resolved".into(),
+					None,
+					operation_id.into(),
+					"operation".into(),
+					Some("integration-test".into()),
+					1,
+					None,
+				),
+				(
+					"vault_created".into(),
+					Some("runtime-history-vault".into()),
+					"runtime-history-vault".into(),
+					"vault".into(),
+					Some("integration-test".into()),
+					1,
+					None,
+				),
+			],
+		);
+		let outcome = query_as::<_, (String, String, Option<String>, Option<Value>)>(
+			"SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+		)
+		.bind(&fixture.owner_user_id)
+		.bind(operation_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		assert_eq!(
+			outcome,
+			(
+				"create_vault".into(),
+				"applied".into(),
+				None,
+				Some(json!({ "vaultId": "runtime-history-vault" })),
+			)
+		);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_operation_rolls_back_effect_outcome_audit_and_events_together() {
+    with_api_test_app("create_vault_atomic_rollback", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        install_operation_step_failure_trigger(
+            &app.pool,
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        )
+        .await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "create-vault-atomic-rollback";
+        let mut headers = authenticated_json_headers(&session.token);
+        headers.insert("idempotency-key", operation_id.parse().unwrap());
+        let response = app
+            .api_json(
+                Method::PUT,
+                "/api/v1/vaults/runtime-rollback-vault",
+                Some(json!({
+                    "name": "Rollback Vault",
+                    "vaultType": "personal",
+                    "encryptedVaultKey": "runtime-owner-key",
+                    "icon": "lock",
+                    "imageKey": null
+                })),
+                headers,
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM vault WHERE id = 'runtime-rollback-vault'"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+            0
+        );
+        assert_eq!(
+            entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+            0
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = 'runtime-rollback-vault'"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_team_authority_is_read_after_the_user_lock() {
+    with_api_test_app("create_vault_locked_team_authority", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+		let mut blocker = app.pool.begin().await.unwrap();
+        query("SELECT id FROM \"user\" WHERE id = $1 FOR UPDATE")
+            .bind(&fixture.owner_user_id)
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+
+		let request_pool = app.pool.clone();
+		let request_user_id = fixture.owner_user_id.clone();
+		let request = tokio::spawn(async move {
+			super::execute_create_vault_operation(
+				&request_pool,
+				crate::config::DeploymentMode::Cloud,
+				&request_user_id,
+				super::CreateVaultOperationInput {
+					operation_id: "locked-team-authority".into(),
+					raw_body: br#"{"name":"Locked authority","vaultType":"team","encryptedVaultKey":"runtime-owner-key","icon":"users","imageKey":null}"#.to_vec(),
+					vault: super::CreateVaultInput {
+						vault_id: Some("locked-team-vault".into()),
+						name: "Locked authority".into(),
+						vault_type: crate::db::enums::VaultType::Team,
+						encrypted_vault_key: "runtime-owner-key".into(),
+						icon: Some("users".into()),
+						image_key: None,
+						client_id: Some("integration-test".into()),
+					},
+				},
+			)
+			.await
+		});
+		let mut observed_lock_wait = false;
+		for _ in 0..200 {
+			let waiting = query_scalar::<_, bool>(
+				"SELECT EXISTS(SELECT 1 FROM pg_stat_activity activity WHERE activity.datname = current_database() AND pg_backend_pid() = ANY(pg_blocking_pids(activity.pid)))",
+            )
+			.fetch_one(&mut *blocker)
+			.await
+			.unwrap();
+			if waiting {
+				observed_lock_wait = true;
+				break;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		}
+		assert!(observed_lock_wait, "create-Vault request never waited on locked User authority");
+        query("UPDATE \"user\" SET team_id = NULL WHERE id = $1")
+            .bind(&fixture.owner_user_id)
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        blocker.commit().await.unwrap();
+		let resolution = request.await.unwrap().unwrap();
+		let response = match resolution {
+			crate::domains::operations::OperationResolution::Outcome { outcome, .. } =>
+				serde_json::to_value(outcome).unwrap(),
+			crate::domains::operations::OperationResolution::IdReused =>
+				panic!("fresh Operation ID was reused"),
+		};
+		assert_eq!(response["result"]["status"], json!("rejected"));
+		assert_eq!(response["result"]["code"], json!("team_membership_required"));
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE id = 'locked-team-vault'")
+                .fetch_one(&app.pool).await.unwrap(),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_holds_team_billing_authority_through_its_authorized_commit() {
+    with_api_test_app("create_vault_team_billing_contention", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        set_team_billing(&app.pool, &fixture.paid_team_id, "family", "active").await;
+        query(
+            r#"CREATE FUNCTION test_hold_team_billing_create() RETURNS trigger AS $$
+               BEGIN
+                 PERFORM pg_advisory_xact_lock(hashtext('test-team-billing-create'));
+                 RETURN NEW;
+               END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        query(
+            "CREATE TRIGGER test_hold_team_billing_create BEFORE INSERT ON vault FOR EACH ROW WHEN (NEW.id = 'team-billing-authorized-vault') EXECUTE FUNCTION test_hold_team_billing_create()",
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+
+        let mut barrier = app.pool.begin().await.unwrap();
+        query("SELECT pg_advisory_xact_lock(hashtext('test-team-billing-create'))")
+            .execute(&mut *barrier)
+            .await
+            .unwrap();
+        let create_pool = app.pool.clone();
+        let create_user_id = fixture.owner_user_id.clone();
+        let create = tokio::spawn(async move {
+            super::execute_create_vault_operation(
+                &create_pool,
+                crate::config::DeploymentMode::Cloud,
+                &create_user_id,
+                super::CreateVaultOperationInput {
+                    operation_id: "team-billing-authorized-operation".into(),
+                    raw_body: br#"{"name":"Authorized before downgrade","vaultType":"team","encryptedVaultKey":"team-billing-owner-key","icon":"users","imageKey":null}"#.to_vec(),
+                    vault: super::CreateVaultInput {
+                        vault_id: Some("team-billing-authorized-vault".into()),
+                        name: "Authorized before downgrade".into(),
+                        vault_type: crate::db::enums::VaultType::Team,
+                        encrypted_vault_key: "team-billing-owner-key".into(),
+                        icon: Some("users".into()),
+                        image_key: None,
+                        client_id: Some("integration-test".into()),
+                    },
+                },
+            )
+            .await
+        });
+        wait_for_advisory_waiters(&app.pool, 1).await;
+
+        let billing_pool = app.pool.clone();
+        let billing_team_id = fixture.paid_team_id.clone();
+        let billing = tokio::spawn(async move {
+            query("UPDATE team SET billing_plan = 'free', billing_status = 'active' WHERE id = $1")
+                .bind(billing_team_id)
+                .execute(&billing_pool)
+                .await
+        });
+        let mut billing_waited = false;
+        for _ in 0..200 {
+            query("SELECT pg_stat_clear_snapshot()")
+                .execute(&mut *barrier)
+                .await
+                .unwrap();
+            let blocked = query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM pg_stat_activity activity WHERE activity.datname = current_database() AND cardinality(pg_blocking_pids(activity.pid)) > 0",
+            )
+            .fetch_one(&mut *barrier)
+            .await
+            .unwrap();
+            if blocked >= 2 {
+                billing_waited = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            billing_waited,
+            "the billing writer did not wait for create-Vault Team authority"
+        );
+        assert_eq!(
+            retained_outcome_count(
+                &app.pool,
+                &fixture.owner_user_id,
+                "team-billing-authorized-operation",
+            )
+            .await,
+            0,
+            "no semantic history may publish before the authorized transaction commits",
+        );
+
+        barrier.commit().await.unwrap();
+        let resolution = create.await.unwrap().unwrap();
+        billing.await.unwrap().unwrap();
+        let outcome = match resolution {
+            crate::domains::operations::OperationResolution::Outcome {
+                outcome,
+                newly_committed,
+            } => {
+                assert!(newly_committed);
+                serde_json::to_value(outcome).unwrap()
+            }
+            crate::domains::operations::OperationResolution::IdReused => {
+                panic!("fresh Operation identity was reused")
+            }
+        };
+        assert_eq!(outcome["result"]["status"], json!("applied"));
+        assert_eq!(
+            outcome["result"]["vaultId"],
+            json!("team-billing-authorized-vault")
+        );
+        assert_eq!(
+            query_as::<_, (String, String, Option<String>, String)>(
+                "SELECT v.type::text, v.created_by_id, v.team_id, vk.encrypted_vault_key FROM vault v JOIN vault_key vk ON vk.vault_id = v.id AND vk.user_id = $1 WHERE v.id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-vault")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![(
+                "team".into(),
+                fixture.owner_user_id.clone(),
+                Some(fixture.paid_team_id.clone()),
+                "team-billing-owner-key".into(),
+            )]
+        );
+        assert_eq!(
+            query_as::<_, (String, String, Option<String>, Option<Value>)>(
+                "SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-operation")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![(
+                "create_vault".into(),
+                "applied".into(),
+                None,
+                Some(json!({ "vaultId": "team-billing-authorized-vault" })),
+            )]
+        );
+        assert_eq!(
+            query_as::<_, (String, Option<String>, String, Option<Value>)>(
+                "SELECT action, entity_type, entity_id, metadata::jsonb FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-vault")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![(
+                "vault_created".into(),
+                Some("vault".into()),
+                "team-billing-authorized-vault".into(),
+                None,
+            )]
+        );
+        assert_eq!(
+            query_as::<_, (String, Option<String>, String, String, Option<String>, i32, Option<String>)>(
+                "SELECT event_type::text, vault_id, entity_id, entity_type::text, client_id, version, metadata FROM sync_event WHERE user_id = $1 AND (entity_id = $2 OR entity_id = $3) ORDER BY event_type::text",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind("team-billing-authorized-vault")
+            .bind("team-billing-authorized-operation")
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![
+                (
+                    "operation_resolved".into(),
+                    None,
+                    "team-billing-authorized-operation".into(),
+                    "operation".into(),
+                    Some("integration-test".into()),
+                    1,
+                    None,
+                ),
+                (
+                    "vault_created".into(),
+                    Some("team-billing-authorized-vault".into()),
+                    "team-billing-authorized-vault".into(),
+                    "vault".into(),
+                    Some("integration-test".into()),
+                    1,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            query_as::<_, (String, String)>(
+                "SELECT billing_plan::text, billing_status::text FROM team WHERE id = $1",
+            )
+            .bind(&fixture.paid_team_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            ("free".into(), "active".into()),
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_route_retains_shared_vault_limit_reached() {
+    with_api_test_app("create_vault_shared_limit", |app| async move {
+		let fixture = build_vault_router_fixture(&app.pool).await;
+		set_team_billing(&app.pool, &fixture.paid_team_id, "family", "active").await;
+		let existing = query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
+		)
+		.bind(&fixture.paid_team_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		for index in existing..5 {
+			query("INSERT INTO vault (id, name, type, created_by_id, team_id) VALUES ($1, $2, 'team'::vault_type, $3, $4)")
+				.bind(format!("shared-limit-existing-{index}"))
+				.bind(format!("Existing {index}"))
+				.bind(&fixture.owner_user_id)
+				.bind(&fixture.paid_team_id)
+				.execute(&app.pool)
+				.await
+				.unwrap();
+		}
+		let session = app.issue_session(&fixture.owner_user_id).await;
+		let operation_id = "create-vault-shared-limit";
+		let response = app
+			.api_json(
+				Method::PUT,
+				"/api/v1/vaults/shared-limit-new",
+				Some(json!({
+					"name": "At limit",
+					"vaultType": "team",
+					"encryptedVaultKey": "wrapped",
+					"icon": "users",
+					"imageKey": null
+				})),
+				idempotency_headers(&session.token, operation_id),
+			)
+			.await;
+		assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+		assert_rejected(&response.body, "create_vault", "shared_vault_limit_reached");
+		assert_eq!(
+			retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+			1
+		);
+		assert_eq!(
+			entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+			1
+		);
+		assert_create_vault_rejection_history(
+			&app.pool,
+			&fixture.owner_user_id,
+			operation_id,
+			"shared-limit-new",
+			"shared_vault_limit_reached",
+			true,
+		)
+		.await;
+	})
+	.await;
+}
+
+#[tokio::test]
+async fn create_vault_semantic_rejections_have_exact_uncontaminated_history() {
+    with_api_test_app("create_vault_rejection_matrix", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        seed_vault(
+            &app.pool,
+            "conflicting-vault-id",
+            "Existing identity",
+            "personal",
+            &fixture.outsider_user_id,
+            None,
+        )
+        .await;
+
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let solo_session = app.issue_session(&fixture.solo_user_id).await;
+        let cases = [
+            (
+                &owner_session.token,
+                fixture.owner_user_id.as_str(),
+                "reject-vault-id-conflict",
+                "conflicting-vault-id",
+                "personal",
+                "vault_id_conflict",
+                false,
+            ),
+            (
+                &solo_session.token,
+                fixture.solo_user_id.as_str(),
+                "reject-team-membership",
+                "missing-team-vault",
+                "team",
+                "team_membership_required",
+                true,
+            ),
+        ];
+        for (token, user_id, operation_id, vault_id, vault_type, code, absent) in cases {
+            let response = app
+                .api_json(
+                    Method::PUT,
+                    &format!("/api/v1/vaults/{vault_id}"),
+                    Some(json!({
+                        "name": "Rejected Vault",
+                        "vaultType": vault_type,
+                        "encryptedVaultKey": "rejected-wrapped-key",
+                        "icon": "lock",
+                        "imageKey": null
+                    })),
+                    idempotency_headers(token, operation_id),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_rejected(&response.body, "create_vault", code);
+            assert_create_vault_rejection_history(
+                &app.pool,
+                user_id,
+                operation_id,
+                vault_id,
+                code,
+                absent,
+            )
+            .await;
+        }
+
+        set_team_billing(&app.pool, &fixture.paid_team_id, "free", "active").await;
+        let operation_id = "reject-sharing-entitlement";
+        let vault_id = "entitlement-rejected-vault";
+        let denied = app
+            .api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{vault_id}"),
+                Some(json!({
+                    "name": "Denied Vault",
+                    "vaultType": "team",
+                    "encryptedVaultKey": "denied-wrapped-key",
+                    "icon": "users",
+                    "imageKey": null
+                })),
+                idempotency_headers(&owner_session.token, operation_id),
+            )
+            .await;
+        assert_rejected(
+            &denied.body,
+            "create_vault",
+            "vault_sharing_entitlement_denied",
+        );
+        assert_create_vault_rejection_history(
+            &app.pool,
+            &fixture.owner_user_id,
+            operation_id,
+            vault_id,
+            "vault_sharing_entitlement_denied",
+            true,
+        )
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_cross_user_shared_vault_admission_serializes_at_the_inclusive_limit() {
+    with_api_test_app("create_vault_concurrent_shared_limit", |app| async move {
+		let fixture = build_vault_router_fixture(&app.pool).await;
+		set_team_billing(&app.pool, &fixture.paid_team_id, "family", "active").await;
+		let existing = query_scalar::<_, i64>(
+			"SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
+		)
+		.bind(&fixture.paid_team_id)
+		.fetch_one(&app.pool)
+		.await
+		.unwrap();
+		for index in existing..4 {
+			query("INSERT INTO vault (id, name, type, created_by_id, team_id) VALUES ($1, $2, 'team'::vault_type, $3, $4)")
+				.bind(format!("concurrent-existing-{index}"))
+				.bind(format!("Existing {index}"))
+				.bind(&fixture.owner_user_id)
+				.bind(&fixture.paid_team_id)
+				.execute(&app.pool)
+				.await
+				.unwrap();
+		}
+
+		let mut barrier = app.pool.begin().await.unwrap();
+		crate::shared::transaction::acquire_team_authority_lock(
+			&mut *barrier,
+			&fixture.paid_team_id,
+			"test barrier",
+		)
+		.await
+		.unwrap();
+		let concurrency_pool = PgPoolOptions::new()
+			.max_connections(3)
+			.connect_with(app.pool.connect_options().as_ref().clone())
+			.await
+			.unwrap();
+		let spawn = |user_id: String, operation_id: &'static str, vault_id: &'static str| {
+			let pool = concurrency_pool.clone();
+			tokio::spawn(async move {
+				super::execute_create_vault_operation(
+					&pool,
+					crate::config::DeploymentMode::Cloud,
+					&user_id,
+					super::CreateVaultOperationInput {
+						operation_id: operation_id.into(),
+						raw_body: format!(r#"{{"name":"Concurrent","vaultType":"team","encryptedVaultKey":"{operation_id}-key","icon":"users","imageKey":null}}"#).into_bytes(),
+						vault: super::CreateVaultInput {
+							vault_id: Some(vault_id.into()),
+							name: "Concurrent".into(),
+							vault_type: crate::db::enums::VaultType::Team,
+							encrypted_vault_key: format!("{operation_id}-key"),
+							icon: Some("users".into()),
+							image_key: None,
+							client_id: Some("integration-test".into()),
+						},
+					},
+				)
+				.await
+			})
+		};
+		let first = spawn(
+			fixture.owner_user_id.clone(),
+			"concurrent-owner-operation",
+			"concurrent-owner-vault",
+		);
+		let mut first_reached_team_barrier = false;
+		for _ in 0..200 {
+			query("SELECT pg_stat_clear_snapshot()")
+				.execute(&mut *barrier)
+				.await
+				.unwrap();
+			let waiting = query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM pg_stat_activity activity WHERE activity.datname = current_database() AND cardinality(pg_blocking_pids(activity.pid)) > 0",
+			)
+			.fetch_one(&mut *barrier)
+			.await
+			.unwrap();
+			if waiting >= 1 {
+				first_reached_team_barrier = true;
+				break;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		}
+		assert!(
+			first_reached_team_barrier,
+			"first admission did not reach the held Team authority lock"
+		);
+		let second = spawn(
+			fixture.admin_user_id.clone(),
+			"concurrent-admin-operation",
+			"concurrent-admin-vault",
+		);
+		let mut both_admissions_blocked = false;
+		for _ in 0..200 {
+			query("SELECT pg_stat_clear_snapshot()")
+				.execute(&mut *barrier)
+				.await
+				.unwrap();
+			let waiting = query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM pg_stat_activity activity WHERE activity.datname = current_database() AND cardinality(pg_blocking_pids(activity.pid)) > 0",
+			)
+			.fetch_one(&mut *barrier)
+			.await
+			.unwrap();
+			if waiting >= 2 {
+				both_admissions_blocked = true;
+				break;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		}
+		assert!(
+			both_admissions_blocked,
+			"second admission did not contend behind the blocked first admission"
+		);
+		barrier.commit().await.unwrap();
+
+		let outcomes = [first.await.unwrap().unwrap(), second.await.unwrap().unwrap()]
+			.into_iter()
+			.map(|resolution| match resolution {
+				crate::domains::operations::OperationResolution::Outcome { outcome, .. } =>
+					serde_json::to_value(outcome).unwrap(),
+				crate::domains::operations::OperationResolution::IdReused =>
+					panic!("fresh concurrent Operation ID was reused"),
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(
+			outcomes
+				.iter()
+				.filter(|outcome| outcome["result"]["status"] == "applied")
+				.count(),
+			1
+		);
+		let rejected = outcomes
+			.iter()
+			.find(|outcome| outcome["result"]["status"] == "rejected")
+			.expect("one admission must be rejected");
+		assert_eq!(rejected["result"]["code"], json!("shared_vault_limit_reached"));
+		let applied = outcomes
+			.iter()
+			.find(|outcome| outcome["result"]["status"] == "applied")
+			.expect("one admission must apply");
+		let (applied_user, applied_operation, applied_vault) =
+			if applied["operationId"] == "concurrent-owner-operation" {
+				(&fixture.owner_user_id, "concurrent-owner-operation", "concurrent-owner-vault")
+			} else {
+				(&fixture.admin_user_id, "concurrent-admin-operation", "concurrent-admin-vault")
+			};
+		assert_eq!(applied["result"]["vaultId"], json!(applied_vault));
+		assert_eq!(
+			query_as::<_, (String, String, String, Option<String>, String)>(
+				"SELECT v.name, v.type::text, v.created_by_id, v.team_id, vk.encrypted_vault_key FROM vault v JOIN vault_key vk ON vk.vault_id = v.id AND vk.user_id = $1 WHERE v.id = $2",
+			)
+			.bind(applied_user)
+			.bind(applied_vault)
+			.fetch_all(&app.pool)
+			.await
+			.unwrap(),
+			vec![(
+				"Concurrent".into(),
+				"team".into(),
+				applied_user.to_string(),
+				Some(fixture.paid_team_id.clone()),
+				format!("{applied_operation}-key"),
+			)]
+		);
+		assert_eq!(
+			query_as::<_, (String, String, Option<String>, Option<Value>)>(
+				"SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+			)
+			.bind(applied_user)
+			.bind(applied_operation)
+			.fetch_all(&app.pool)
+			.await
+			.unwrap(),
+			vec![(
+				"create_vault".into(),
+				"applied".into(),
+				None,
+				Some(json!({ "vaultId": applied_vault })),
+			)]
+		);
+		assert_eq!(
+			query_as::<_, (String, Option<String>, String, Option<Value>)>(
+				"SELECT action, entity_type, entity_id, metadata::jsonb FROM audit_log WHERE user_id = $1 AND entity_id = $2",
+			)
+			.bind(applied_user)
+			.bind(applied_vault)
+			.fetch_all(&app.pool)
+			.await
+			.unwrap(),
+			vec![(
+				"vault_created".into(),
+				Some("vault".into()),
+				applied_vault.into(),
+				None,
+			)]
+		);
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND ((entity_id = $2 AND event_type = 'vault_created') OR (entity_id = $3 AND event_type = 'operation_resolved'))",
+			)
+			.bind(applied_user)
+			.bind(applied_vault)
+			.bind(applied_operation)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			2
+		);
+		let (rejected_user, rejected_operation, rejected_vault) =
+			if rejected["operationId"] == "concurrent-owner-operation" {
+				(&fixture.owner_user_id, "concurrent-owner-operation", "concurrent-owner-vault")
+			} else {
+				(&fixture.admin_user_id, "concurrent-admin-operation", "concurrent-admin-vault")
+			};
+		assert_create_vault_rejection_history(
+			&app.pool,
+			rejected_user,
+			rejected_operation,
+			rejected_vault,
+			"shared_vault_limit_reached",
+			true,
+		)
+		.await;
+		assert_eq!(
+			query_scalar::<_, i64>(
+				"SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1 AND type = 'team'",
+			)
+			.bind(&fixture.paid_team_id)
+			.fetch_one(&app.pool)
+			.await
+			.unwrap(),
+			5
+		);
+		concurrency_pool.close().await;
+	})
+	.await;
+}
+
+#[tokio::test]
+async fn concurrent_distinct_operations_for_one_fresh_vault_id_resolve_apply_then_conflict() {
+    with_api_test_app("create_vault_concurrent_same_id", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        query(
+            r#"CREATE FUNCTION test_hold_same_vault_insert() RETURNS trigger AS $$
+               BEGIN
+                 PERFORM pg_advisory_xact_lock(hashtext('test-create-same-vault-insert'));
+                 RETURN NEW;
+               END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        query(
+            "CREATE TRIGGER test_hold_same_vault_insert BEFORE INSERT ON vault FOR EACH ROW WHEN (NEW.id = 'concurrent-same-vault') EXECUTE FUNCTION test_hold_same_vault_insert()",
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        let mut barrier = app.pool.begin().await.unwrap();
+        query("SELECT pg_advisory_xact_lock(hashtext('test-create-same-vault-insert'))")
+            .execute(&mut *barrier)
+            .await
+            .unwrap();
+        let concurrency_pool = PgPoolOptions::new()
+            .max_connections(3)
+            .connect_with(app.pool.connect_options().as_ref().clone())
+            .await
+            .unwrap();
+        let spawn = |user_id: String, operation_id: &'static str| {
+            let pool = concurrency_pool.clone();
+            tokio::spawn(async move {
+                super::execute_create_vault_operation(
+                    &pool,
+                    crate::config::DeploymentMode::Cloud,
+                    &user_id,
+                    super::CreateVaultOperationInput {
+                        operation_id: operation_id.into(),
+                        raw_body: format!(r#"{{"name":"Same Vault","vaultType":"personal","encryptedVaultKey":"{operation_id}-key","icon":"lock","imageKey":null}}"#).into_bytes(),
+                        vault: super::CreateVaultInput {
+                            vault_id: Some("concurrent-same-vault".into()),
+                            name: "Same Vault".into(),
+                            vault_type: crate::db::enums::VaultType::Personal,
+                            encrypted_vault_key: format!("{operation_id}-key"),
+                            icon: Some("lock".into()),
+                            image_key: None,
+                            client_id: Some("integration-test".into()),
+                        },
+                    },
+                )
+                .await
+            })
+        };
+        let first = spawn(fixture.owner_user_id.clone(), "concurrent-same-first");
+        wait_for_advisory_waiters(&app.pool, 1).await;
+        let second = spawn(fixture.admin_user_id.clone(), "concurrent-same-second");
+        wait_for_advisory_waiters(&app.pool, 2).await;
+        assert!(
+            !query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock(hashtext($1))")
+            .bind("create-vault-id:concurrent-same-vault")
+            .fetch_one(&mut *barrier)
+            .await
+            .unwrap(),
+            "the loser must wait on the global candidate Vault-ID authority",
+        );
+        barrier.commit().await.unwrap();
+
+        let resolutions = [first.await.unwrap(), second.await.unwrap()];
+        assert!(resolutions.iter().all(Result::is_ok));
+        let outcomes = resolutions
+            .into_iter()
+            .map(|resolution| match resolution.unwrap() {
+                crate::domains::operations::OperationResolution::Outcome { outcome, .. } => {
+                    serde_json::to_value(outcome).unwrap()
+                }
+                crate::domains::operations::OperationResolution::IdReused => {
+                    panic!("fresh Operation identity was reused")
+                }
+            })
+            .collect::<Vec<_>>();
+        let applied = outcomes
+            .iter()
+            .find(|outcome| outcome["result"]["status"] == "applied")
+            .expect("one Operation must apply");
+        let rejected = outcomes
+            .iter()
+            .find(|outcome| outcome["result"]["status"] == "rejected")
+            .expect("one Operation must reject");
+        assert_eq!(applied["result"]["vaultId"], json!("concurrent-same-vault"));
+        assert_eq!(rejected["result"]["code"], json!("vault_id_conflict"));
+        let applied_operation = applied["operationId"].as_str().unwrap();
+        let rejected_operation = rejected["operationId"].as_str().unwrap();
+        let applied_user = if applied_operation == "concurrent-same-first" {
+            &fixture.owner_user_id
+        } else {
+            &fixture.admin_user_id
+        };
+        let rejected_user = if rejected_operation == "concurrent-same-first" {
+            &fixture.owner_user_id
+        } else {
+            &fixture.admin_user_id
+        };
+        assert_eq!(
+            query_as::<_, (String, String, Option<String>, Option<Value>)>(
+                "SELECT operation_kind::text, result_status::text, rejection_code::text, applied_payload FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(applied_user)
+            .bind(applied_operation)
+            .fetch_all(&app.pool)
+            .await
+            .unwrap(),
+            vec![("create_vault".into(), "applied".into(), None, Some(json!({ "vaultId": "concurrent-same-vault" })))],
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND entity_id = 'concurrent-same-vault' AND action = 'vault_created'")
+                .bind(applied_user)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+            1,
+        );
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM sync_event WHERE user_id = $1 AND ((entity_id = 'concurrent-same-vault' AND event_type = 'vault_created') OR (entity_id = $2 AND event_type = 'operation_resolved'))")
+                .bind(applied_user)
+                .bind(applied_operation)
+                .fetch_one(&app.pool)
+                .await
+                .unwrap(),
+            2,
+        );
+        assert_create_vault_rejection_history(
+            &app.pool,
+            rejected_user,
+            rejected_operation,
+            "concurrent-same-vault",
+            "vault_id_conflict",
+            false,
+        )
+        .await;
+
+        for outcome in outcomes {
+            let operation_id = outcome["operationId"].as_str().unwrap();
+            let user_id = if operation_id == "concurrent-same-first" {
+                &fixture.owner_user_id
+            } else {
+                &fixture.admin_user_id
+            };
+            let replay = super::execute_create_vault_operation(
+                &app.pool,
+                crate::config::DeploymentMode::Cloud,
+                user_id,
+                super::CreateVaultOperationInput {
+                    operation_id: operation_id.into(),
+                    raw_body: format!(r#"{{"name":"Same Vault","vaultType":"personal","encryptedVaultKey":"{operation_id}-key","icon":"lock","imageKey":null}}"#).into_bytes(),
+                    vault: super::CreateVaultInput {
+                        vault_id: Some("concurrent-same-vault".into()),
+                        name: "Same Vault".into(),
+                        vault_type: crate::db::enums::VaultType::Personal,
+                        encrypted_vault_key: format!("{operation_id}-key"),
+                        icon: Some("lock".into()),
+                        image_key: None,
+                        client_id: Some("integration-test".into()),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+            let replay = match replay {
+                crate::domains::operations::OperationResolution::Outcome { outcome, newly_committed } => {
+                    assert!(!newly_committed);
+                    serde_json::to_value(outcome).unwrap()
+                }
+                crate::domains::operations::OperationResolution::IdReused => panic!("replay changed identity"),
+            };
+            assert_eq!(replay, outcome);
+        }
+        concurrency_pool.close().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_corrupt_billing_is_internal_and_retains_no_semantic_rejection() {
+    with_api_test_app("create_vault_corrupt_billing", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        query("ALTER TABLE team ALTER COLUMN billing_plan DROP NOT NULL")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query("UPDATE team SET billing_plan = NULL WHERE id = $1")
+            .bind(&fixture.paid_team_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "corrupt-team-billing";
+        let mut headers = authenticated_json_headers(&session.token);
+        headers.insert("idempotency-key", operation_id.parse().unwrap());
+        let response = app
+            .api_json(
+                Method::PUT,
+                "/api/v1/vaults/corrupt-team-vault",
+                Some(json!({
+                    "name": "Corrupt billing",
+                    "vaultType": "team",
+                    "encryptedVaultKey": "runtime-owner-key",
+                    "icon": "users",
+                    "imageKey": null
+                })),
+                headers,
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            retained_outcome_count(&app.pool, &fixture.owner_user_id, operation_id).await,
+            0
+        );
+        assert_eq!(
+            entity_event_count(&app.pool, operation_id, "operation_resolved").await,
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_vault_image_staging_promotes_on_apply_and_marks_cleanup_on_rejection() {
+    with_api_test_app("create_vault_image_decisions", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        for (operation_id, vault_id, expected_status) in [
+            ("image-create-applied", "image-created-vault", "applied"),
+            (
+                "image-create-rejected",
+                fixture.main_vault_id.as_str(),
+                "rejected",
+            ),
+        ] {
+            let sha256 = "a".repeat(64);
+            let object_key = format!(
+                "vaults/{}/{vault_id}/create/{operation_id}-{sha256}",
+                fixture.owner_user_id
+            );
+            let fingerprint = super::vault_image_staging::binding_fingerprint_for_test(
+                &super::VaultImageStagingBinding {
+                    operation_id: operation_id.to_owned(),
+                    vault_id: vault_id.to_owned(),
+                    raw_sha256: sha256.clone(),
+                    raw_length: 1,
+                    content_type: "image/png".to_owned(),
+                },
+            );
+            query("INSERT INTO vault_image_staging_generation (user_id, operation_id, binding_fingerprint, generation) VALUES ($1, $2, $3, 1)")
+                .bind(&fixture.owner_user_id).bind(operation_id).bind(fingerprint)
+                .execute(&app.pool).await.unwrap();
+            query("INSERT INTO vault_image_staging (user_id, operation_id, vault_id, object_key, raw_sha256, raw_length, content_type, state, generation, lease_expires_at) VALUES ($1, $2, $3, $4, $5, 1, 'image/png', 'confirmed', 1, NOW() + INTERVAL '24 hours')")
+                .bind(&fixture.owner_user_id).bind(operation_id).bind(vault_id).bind(&object_key).bind(&sha256)
+                .execute(&app.pool).await.unwrap();
+            let mut headers = authenticated_json_headers(&session.token);
+            headers.insert("idempotency-key", operation_id.parse().unwrap());
+            let response = app.api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{vault_id}"),
+                Some(json!({
+                    "name": "Image decision",
+                    "vaultType": "personal",
+                    "encryptedVaultKey": "runtime-owner-key",
+                    "icon": "image",
+                    "imageKey": object_key
+                })),
+                headers,
+            ).await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+            assert_eq!(response.body["result"]["status"], json!(expected_status));
+            let staging_state: Option<String> = query_scalar(
+                "SELECT state::text FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2",
+            )
+            .bind(&fixture.owner_user_id)
+            .bind(operation_id)
+            .fetch_optional(&app.pool)
+            .await
+            .unwrap();
+            if expected_status == "applied" {
+                assert!(staging_state.is_none());
+                assert_eq!(
+                    query_scalar::<_, Option<String>>("SELECT image_key FROM vault WHERE id = $1")
+                        .bind(vault_id).fetch_one(&app.pool).await.unwrap().as_deref(),
+                    Some(object_key.as_str())
+                );
+            } else {
+                assert_eq!(staging_state.as_deref(), Some("cleanup_pending"));
+            }
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn vault_image_staging_grant_is_public_and_exactly_bound() {
+    with_api_test_app_state(
+        "vault_image_staging_public_grant",
+        |state| {
+            state.with_object_storage(Arc::new(RecordingObjectStorage::succeeding(None)))
+        },
+        |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "public-vault-image-operation";
+        let sha256 = "a".repeat(64);
+        let object_key = format!(
+            "vaults/{}/public-vault/create/{operation_id}-{sha256}",
+            fixture.owner_user_id
+        );
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/operations/{operation_id}/vault-image-staging/grants"),
+                Some(json!({
+                    "vaultId": "public-vault",
+                    "byteLength": 1,
+                    "contentType": "image/png",
+                    "sha256": sha256
+                })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(
+            response.status,
+            StatusCode::OK,
+            "unexpected grant response: {}",
+            response.body
+        );
+        assert_eq!(response.body["objectKey"], json!(object_key));
+        assert_eq!(response.body["generation"], json!(1));
+        assert!(response.body["uploadUrl"].is_string());
+        assert_eq!(
+            response.body["uploadHeaders"],
+            json!([
+                { "name": "Content-Length", "value": "1" },
+                { "name": "Content-Type", "value": "image/png" },
+                { "name": "x-amz-content-sha256", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+                { "name": "x-amz-checksum-sha256", "value": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo=" }
+            ])
+        );
+        },
+    )
+    .await;
+}
+
+/// The same Operation ID with other immutable bytes is identity reuse, never a second answer.
+#[tokio::test]
+async fn every_item_operation_refuses_a_reused_id_with_other_bytes() {
+    with_api_test_app("item_operation_id_reuse", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("reuse-{}", case.kind);
+            let first = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    idempotent_item_headers(&session.token, case.expected_version, &operation_id),
+                )
+                .await;
+            assert_applied(&first.body, case.kind, &case.item_id, case.applied_version);
+
+            // Body routes change one byte; the bodyless routes change the normalized precondition.
+            let (changed_body, changed_version) = match case.other_bytes.clone() {
+                Some(body) => (Some(body), case.expected_version),
+                None => (case.body.clone(), case.other_precondition),
+            };
+            let reused = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    changed_body,
+                    idempotent_item_headers(&session.token, changed_version, &operation_id),
+                )
+                .await;
+            assert_eq!(
+                reused.status,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{} must refuse a reused Operation ID: {}",
+                case.kind,
+                reused.body
+            );
+            assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+
+            let lookup = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(
+                lookup.body, first.body,
+                "{} must leave the original outcome untouched",
+                case.kind
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                1
+            );
+        }
+    })
+    .await;
+}
+
+/// Two identical requests in flight at once resolve to one effect and one shared answer.
+#[tokio::test]
+async fn concurrent_duplicate_item_operations_execute_once() {
+    with_api_test_app("item_operation_concurrency", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("concurrent-{}", case.kind);
+            let headers =
+                || idempotent_item_headers(&session.token, case.expected_version, &operation_id);
+            let (first, second) = tokio::join!(
+                app.api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers()
+                ),
+                app.api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    headers()
+                ),
+            );
+            assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+            assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+            assert_eq!(first.body, second.body);
+            assert_applied(&first.body, case.kind, &case.item_id, case.applied_version);
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                1,
+                "{} must apply exactly once",
+                case.kind
+            );
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                1
+            );
+        }
+    })
+    .await;
+}
+
+/// Malformed transport and failed authentication are refused before semantic execution, so they
+/// retain nothing a later lookup could mistake for a decision.
+#[tokio::test]
+async fn item_operations_retain_nothing_for_malformed_or_unauthenticated_requests() {
+    with_api_test_app("item_operation_no_retention", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let cases = item_operation_cases(&app.pool, &fixture).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        for case in cases {
+            let operation_id = format!("unretained-{}", case.kind);
+            let without_operation_id = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    with_if_match(
+                        authenticated_json_headers(&session.token),
+                        case.expected_version,
+                    ),
+                )
+                .await;
+            assert_eq!(without_operation_id.status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                without_operation_id.body["code"],
+                json!("INVALID_OPERATION_ID")
+            );
+
+            let without_precondition = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    idempotency_headers(&session.token, &operation_id),
+                )
+                .await;
+            assert_eq!(
+                without_precondition.status,
+                StatusCode::PRECONDITION_REQUIRED
+            );
+
+            let mut unauthenticated = unauthenticated_json_headers();
+            unauthenticated.insert(
+                IF_MATCH,
+                HeaderValue::from_str(&format!("\"{}\"", case.expected_version)).unwrap(),
+            );
+            unauthenticated.insert(
+                "idempotency-key",
+                HeaderValue::from_str(&operation_id).unwrap(),
+            );
+            let unauthorized = app
+                .api_json(
+                    case.method.clone(),
+                    &case.path,
+                    case.body.clone(),
+                    unauthenticated,
+                )
+                .await;
+            assert_eq!(unauthorized.status, StatusCode::UNAUTHORIZED);
+
+            assert_eq!(
+                retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                0,
+                "{} must retain nothing for refused transport",
+                case.kind
+            );
+            assert_eq!(
+                entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                0
+            );
+            let lookup = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/operations/{operation_id}"),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            assert_eq!(lookup.status, StatusCode::NOT_FOUND);
+        }
+    })
+    .await;
+}
+
+/// The effect, its audit, its entity Sync event, the retained outcome and `operation_resolved` all
+/// commit together or not at all.
+#[tokio::test]
+async fn item_operations_roll_back_every_step_together() {
+    for (kind, table, when_clause) in [
+        ("update_item", "operation_outcome", ""),
+        (
+            "set_item_favorite",
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        ),
+        (
+            "trash_item",
+            "audit_log",
+            "WHEN (NEW.action = 'item_deleted')",
+        ),
+        (
+            "restore_item",
+            "sync_event",
+            "WHEN (NEW.event_type = 'item_restored')",
+        ),
+        ("move_item", "operation_outcome", ""),
+        (
+            "permanently_delete_item",
+            "sync_event",
+            "WHEN (NEW.event_type = 'operation_resolved')",
+        ),
+    ] {
+        with_api_test_app(
+            &format!("item_operation_atomicity_{kind}"),
+            |app| async move {
+                let fixture = build_vault_router_fixture(&app.pool).await;
+                let cases = item_operation_cases(&app.pool, &fixture).await;
+                let case = cases
+                    .into_iter()
+                    .find(|case| case.kind == kind)
+                    .expect("every kind has a case");
+                install_operation_step_failure_trigger(&app.pool, table, when_clause).await;
+                let session = app.issue_session(&fixture.owner_user_id).await;
+                let operation_id = format!("atomic-{kind}");
+
+                let response = app
+                    .api_json(
+                        case.method.clone(),
+                        &case.path,
+                        case.body.clone(),
+                        idempotent_item_headers(
+                            &session.token,
+                            case.expected_version,
+                            &operation_id,
+                        ),
+                    )
+                    .await;
+                assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+                let version: Option<i32> = query_scalar("SELECT version FROM item WHERE id = $1")
+                    .bind(&case.item_id)
+                    .fetch_optional(&app.pool)
+                    .await
+                    .expect("case item version should load");
+                assert_eq!(
+                    version,
+                    Some(case.expected_version),
+                    "{kind} must leave the Item exactly where it was"
+                );
+                assert_eq!(
+                    entity_event_count(&app.pool, &case.item_id, case.event_type).await,
+                    0
+                );
+                assert_eq!(
+                    entity_event_count(&app.pool, &operation_id, "operation_resolved").await,
+                    0
+                );
+                assert_eq!(
+                    retained_outcome_count(&app.pool, &fixture.owner_user_id, &operation_id).await,
+                    0
+                );
+                if let Some(action) = case.applied_audit {
+                    let audits: i64 = query_scalar(
+                    "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = $2",
+                )
+                .bind(&case.item_id)
+                .bind(action)
+                .fetch_one(&app.pool)
+                .await
+                .expect("audit count should load");
+                    assert_eq!(audits, 0, "{kind} must roll its audit back too");
+                }
+            },
+        )
+        .await;
+    }
+}
+
+/// Every Item kind proves its own closed rejection set, and one fact keeps one name across kinds.
+#[tokio::test]
+async fn item_operations_prove_their_closed_rejection_sets() {
+    with_api_test_app("item_operation_rejection_sets", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let readonly = app.issue_session(&fixture.readonly_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let missing = "item_that_never_existed";
+
+        // `item_not_found` is the same fact for all five Operations that address an existing Item.
+        for (index, (method, path, body, kind)) in [
+            (
+                Method::PATCH,
+                format!("/api/v1/items/{missing}"),
+                Some(json!({ "encryptedData": "enc" })),
+                "update_item",
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v1/items/{missing}/favorite"),
+                Some(json!({ "favorite": true })),
+                "set_item_favorite",
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v1/items/{missing}"),
+                None,
+                "trash_item",
+            ),
+            (
+                Method::POST,
+                format!("/api/v1/items/{missing}/restore"),
+                None,
+                "restore_item",
+            ),
+            (
+                Method::POST,
+                format!("/api/v1/items/{missing}/moves"),
+                Some(json!({
+                    "mode": "prepared",
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                "move_item",
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v1/items/{missing}/permanent"),
+                None,
+                "permanently_delete_item",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let response = app
+                .api_json(
+                    method,
+                    &path,
+                    body,
+                    idempotent_item_headers(&owner.token, 1, &format!("missing-item-{index}")),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_rejected(&response.body, kind, "item_not_found");
+        }
+
+        // `vault_access_denied` and `vault_read_only` likewise keep one name for every kind.
+        for (index, (token, code)) in [
+            (&outsider.token, "vault_access_denied"),
+            (&readonly.token, "vault_read_only"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let favorite = app
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/items/{}/favorite", fixture.active_item_id),
+                    Some(json!({ "favorite": true })),
+                    idempotent_item_headers(token, 1, &format!("favorite-access-{index}")),
+                )
+                .await;
+            favorite.assert_contract_status();
+            assert_rejected(&favorite.body, "set_item_favorite", code);
+
+            let trash = app
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/items/{}", fixture.active_item_id),
+                    None,
+                    idempotent_item_headers(token, 1, &format!("trash-access-{index}")),
+                )
+                .await;
+            trash.assert_contract_status();
+            assert_rejected(&trash.body, "trash_item", code);
+
+            let restore = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/restore", fixture.deleted_item_id),
+                    None,
+                    idempotent_item_headers(token, 1, &format!("restore-access-{index}")),
+                )
+                .await;
+            restore.assert_contract_status();
+            assert_rejected(&restore.body, "restore_item", code);
+
+            let permanent = app
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/items/{}/permanent", fixture.deleted_item_id),
+                    None,
+                    idempotent_item_headers(token, 1, &format!("permanent-access-{index}")),
+                )
+                .await;
+            permanent.assert_contract_status();
+            assert_rejected(&permanent.body, "permanently_delete_item", code);
+        }
+
+        // A move carries two Vaults, so the destination keeps its own two codes.
+        seed_vault_key(
+            &app.pool,
+            "vault_key_member_readonly_target",
+            &fixture.target_vault_id,
+            &fixture.member_user_id,
+            "target-readonly-key",
+            "read-only",
+        )
+        .await;
+        let member = app.issue_session(&fixture.member_user_id).await;
+        let readonly_target = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.active_item_id),
+                Some(json!({
+                    "mode": "prepared",
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&member.token, 1, "move-target-read-only"),
+            )
+            .await;
+        readonly_target.assert_contract_status();
+        assert_rejected(&readonly_target.body, "move_item", "target_vault_read_only");
+
+        let denied_target = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.active_item_id),
+                Some(json!({
+                    "mode": "prepared",
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.owner_personal_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&member.token, 1, "move-target-unreadable"),
+            )
+            .await;
+        denied_target.assert_contract_status();
+        assert_rejected(
+            &denied_target.body,
+            "move_item",
+            "target_vault_access_denied",
+        );
+
+        // A trashed Item cannot move; that is the exact inverse of `item_not_trashed`.
+        let trashed_move = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.deleted_item_id),
+                Some(json!({
+                    "mode": "prepared",
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": "enc",
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&owner.token, 1, "move-trashed-item"),
+            )
+            .await;
+        trashed_move.assert_contract_status();
+        assert_rejected(&trashed_move.body, "move_item", "item_trashed");
+
+        // Oversized ciphertext is a retained semantic rejection on the two kinds that carry one.
+        let oversized = "x".repeat(1_048_577);
+        let oversized_update = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/items/{}", fixture.active_item_id),
+                Some(json!({ "encryptedData": oversized })),
+                idempotent_item_headers(&owner.token, 1, "oversized-update"),
+            )
+            .await;
+        oversized_update.assert_contract_status();
+        assert_rejected(&oversized_update.body, "update_item", "invalid_ciphertext");
+
+        let oversized_move = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/moves", fixture.active_item_id),
+                Some(json!({
+                    "mode": "prepared",
+                    "sourceVaultId": fixture.main_vault_id,
+                    "targetVaultId": fixture.target_vault_id,
+                    "encryptedData": oversized,
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
+                })),
+                idempotent_item_headers(&owner.token, 1, "oversized-move"),
+            )
+            .await;
+        oversized_move.assert_contract_status();
+        assert_rejected(&oversized_move.body, "move_item", "invalid_ciphertext");
+    })
     .await;
 }
 
@@ -2408,7 +9278,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 let created_team_vault_id = "vault_created_team";
 
                 let create_personal_response = app
-                    .api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_personal_vault_id), Some(json!({ "name": "Created Personal Vault", "vaultType": "personal", "encryptedVaultKey": "created-personal-key" })), solo_headers.clone())
+					.api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_personal_vault_id), Some(json!({ "name": "Created Personal Vault", "vaultType": "personal", "encryptedVaultKey": "created-personal-key", "icon": "lock" })), idempotency_headers(&solo_session.token, "legacy-create-personal-vault"))
                     .await;
                 create_personal_response.assert_contract_status();
                 let created_personal_type: String =
@@ -2427,7 +9297,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 assert!(created_personal_team_id.is_none());
 
                 let create_team_response = app
-                    .api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_team_vault_id), Some(json!({ "name": "Created Team Vault", "vaultType": "team", "encryptedVaultKey": "created-team-key" })), owner_headers.clone())
+					.api_json(Method::PUT, &format!("/api/v1/vaults/{}", created_team_vault_id), Some(json!({ "name": "Created Team Vault", "vaultType": "team", "encryptedVaultKey": "created-team-key", "icon": "users" })), idempotency_headers(&owner_session.token, "legacy-create-team-vault"))
                     .await;
                 create_team_response.assert_contract_status();
                 let created_team_type: String =
@@ -2555,16 +9425,15 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			let owner_headers = authenticated_json_headers(&owner_session.token);
 			let admin_headers = authenticated_json_headers(&admin_session.token);
 			let member_headers = authenticated_json_headers(&member_session.token);
-			let solo_headers = authenticated_json_headers(&solo_session.token);
 
 			let solo_team_create_response = app
-				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "No Team Vault", "vaultType": "team", "encryptedVaultKey": "wrapped" })), solo_headers)
+				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "No Team Vault", "vaultType": "team", "encryptedVaultKey": "wrapped", "icon": "users" })), idempotency_headers(&solo_session.token, "legacy-no-team-create-vault"))
 				.await;
 			solo_team_create_response.assert_contract_status();
-			assert_handler_error(
+			assert_rejected(
 				&solo_team_create_response.body,
-				"BAD_REQUEST",
-				"You must belong to a team to create a team vault",
+				"create_vault",
+				"team_membership_required",
 			);
 
 			let blank_update_response = app
@@ -2611,13 +9480,13 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 
 			set_team_billing(&app.pool, &fixture.paid_team_id, "free", "active").await;
 			let plan_forbidden_create_response = app
-				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key" })), owner_headers)
+				.api_json(Method::PUT, &format!("/api/v1/vaults/{}", "vault_explicit_request"), Some(json!({ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key", "icon": "users" })), idempotency_headers(&owner_session.token, "legacy-blocked-team-create-vault"))
 				.await;
 			plan_forbidden_create_response.assert_contract_status();
-			assert_handler_error(
+			assert_rejected(
 				&plan_forbidden_create_response.body,
-				"FORBIDDEN",
-				"Shared vaults are only available on Family or Team plans with active billing.",
+				"create_vault",
+				"vault_sharing_entitlement_denied",
 			);
 		})
 		.await;
@@ -2635,7 +9504,8 @@ async fn vault_key_write_routes_reject_oversized_keys() {
             (
                 Method::PUT,
                 "/api/v1/vaults/vault_oversized_key".to_string(),
-                json!({ "name": "Oversized", "vaultType": "personal", "encryptedVaultKey": oversized.clone() }),
+                json!({ "name": "Oversized", "vaultType": "personal", "encryptedVaultKey": oversized.clone(), "icon": "folder" }),
+                idempotency_headers(&session.token, "oversized-vault-key"),
             ),
             (
                 Method::PUT,
@@ -2644,6 +9514,7 @@ async fn vault_key_write_routes_reject_oversized_keys() {
                     fixture.main_vault_id, fixture.addable_user_id
                 ),
                 json!({ "role": "member", "encryptedVaultKey": oversized.clone() }),
+                headers.clone(),
             ),
             (
                 Method::POST,
@@ -2652,11 +9523,12 @@ async fn vault_key_write_routes_reject_oversized_keys() {
                     fixture.main_vault_id
                 ),
                 json!({ "targetType": "personal", "personalEncryptedVaultKey": oversized.clone() }),
+                headers,
             ),
         ];
-        for (method, path, body) in requests {
+        for (method, path, body, headers) in requests {
             let response = app
-                .api_json(method, &path, Some(body), headers.clone())
+                .api_json(method, &path, Some(body), headers)
                 .await;
             assert_eq!(response.status, axum::http::StatusCode::BAD_REQUEST);
             assert_eq!(response.body["code"], json!("BAD_REQUEST"));
@@ -2787,24 +9659,63 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert!(download_url.contains("storage.example.invalid"));
 				assert_eq!(download_response.body["fileSize"], json!(128));
 
+				let original_authority: (String, String, String, i32, String, String, String) = query_as(
+					"SELECT encrypted_name, encryption_iv, encryption_algorithm, envelope_version, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm FROM item_attachment WHERE id = $1",
+				)
+				.bind(&fixture.attachment_id)
+				.fetch_one(&app.pool)
+				.await
+				.expect("original Attachment key authority should load");
+
 				let update_attachment_response = app
-					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "updated-encrypted-name", "encryptionIv": "updated-attachment-iv", "encryptionAlgorithm": "aes-gcm" })), owner_headers.clone())
+					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "first-renamed-encrypted-name", "encryptionIv": "first-renamed-attachment-iv", "encryptionAlgorithm": "first-rename-algorithm" })), owner_headers.clone())
 					.await;
 				update_attachment_response.assert_contract_status();
-				let updated_attachment_name: String =
-					query_scalar("SELECT encrypted_name FROM item_attachment WHERE id = $1")
-						.bind(&fixture.attachment_id)
-						.fetch_one(&app.pool)
-						.await
-						.expect("updated attachment name should load");
-				let updated_attachment_iv: String =
-					query_scalar("SELECT encryption_iv FROM item_attachment WHERE id = $1")
-						.bind(&fixture.attachment_id)
-						.fetch_one(&app.pool)
-						.await
-						.expect("updated attachment iv should load");
-				assert_eq!(updated_attachment_name, "updated-encrypted-name");
-				assert_eq!(updated_attachment_iv, "updated-attachment-iv");
+				let first_renamed_authority: (String, String, String, i32, String, String, String) = query_as(
+					"SELECT encrypted_name, encryption_iv, encryption_algorithm, envelope_version, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm FROM item_attachment WHERE id = $1",
+				)
+				.bind(&fixture.attachment_id)
+				.fetch_one(&app.pool)
+				.await
+				.expect("first renamed Attachment authority should load");
+				assert_eq!(first_renamed_authority.0, "first-renamed-encrypted-name");
+				assert_eq!(first_renamed_authority.1, "first-renamed-attachment-iv");
+				assert_eq!(first_renamed_authority.2, "first-rename-algorithm");
+				assert_ne!(first_renamed_authority.0, original_authority.0);
+				assert_ne!(first_renamed_authority.1, original_authority.1);
+				assert_ne!(first_renamed_authority.2, original_authority.2);
+				assert_eq!(first_renamed_authority.3, original_authority.3);
+				assert_eq!(
+					(&first_renamed_authority.4, &first_renamed_authority.5, &first_renamed_authority.6),
+					(&original_authority.4, &original_authority.5, &original_authority.6),
+					"first Rename must not replace Attachment key-envelope authority",
+				);
+				let second_update_attachment_response = app
+					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "second-renamed-encrypted-name", "encryptionIv": "second-renamed-attachment-iv", "encryptionAlgorithm": "second-rename-algorithm" })), owner_headers.clone())
+					.await;
+				second_update_attachment_response.assert_contract_status();
+				let renamed_authority: (String, String, String, i32, String, String, String) = query_as(
+					"SELECT encrypted_name, encryption_iv, encryption_algorithm, envelope_version, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm FROM item_attachment WHERE id = $1",
+				)
+				.bind(&fixture.attachment_id)
+				.fetch_one(&app.pool)
+				.await
+				.expect("renamed Attachment authority should load");
+				assert_eq!(renamed_authority.0, "second-renamed-encrypted-name");
+				assert_eq!(renamed_authority.1, "second-renamed-attachment-iv");
+				assert_eq!(renamed_authority.2, "second-rename-algorithm");
+				assert_ne!(renamed_authority.0, first_renamed_authority.0);
+				assert_ne!(renamed_authority.1, first_renamed_authority.1);
+				assert_ne!(renamed_authority.2, first_renamed_authority.2);
+				assert_ne!(renamed_authority.0, original_authority.0);
+				assert_ne!(renamed_authority.1, original_authority.1);
+				assert_ne!(renamed_authority.2, original_authority.2);
+				assert_eq!(renamed_authority.3, original_authority.3);
+				assert_eq!(
+					(&renamed_authority.4, &renamed_authority.5, &renamed_authority.6),
+					(&original_authority.4, &original_authority.5, &original_authority.6),
+					"second Rename must not replace Attachment key-envelope authority",
+				);
 
 				let blocked_delete_response = app
 					.api_json(Method::DELETE, &format!("/api/v1/attachments/{}", fixture.attachment_id), None, member_headers)
@@ -2815,6 +9726,73 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 					"FORBIDDEN",
 					"You can only delete your own attachments",
 				);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_download_grant_returns_the_presigned_row_authority() {
+    with_api_test_app_state(
+        "attachment_download_grant_returns_the_presigned_row_authority",
+        |state| {
+            with_test_config(
+                state,
+                &[
+                    (
+                        "BITTERY_STORAGE_ENDPOINT",
+                        "https://storage.example.invalid",
+                    ),
+                    ("BITTERY_STORAGE_BUCKET", "bittery-test"),
+                    ("BITTERY_STORAGE_ACCESS_KEY_ID", "test-access-key"),
+                    ("BITTERY_STORAGE_SECRET_ACCESS_KEY", "test-secret-key"),
+                    ("BITTERY_STORAGE_REGION", "auto"),
+                ],
+            )
+        },
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!(
+                        "/api/v1/attachments/{}/download-urls",
+                        fixture.attachment_id
+                    ),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+
+            response.assert_contract_status();
+            assert_eq!(response.status, StatusCode::OK);
+            assert_eq!(
+                response.body,
+                json!({
+                    "attachmentId": fixture.attachment_id,
+                    "itemId": fixture.active_item_id,
+                    "vaultId": fixture.main_vault_id,
+                    "storageKey": "attachments/vault_main_attachment",
+                    "envelopeVersion": 1,
+                    "uploadedBy": fixture.owner_user_id,
+                    "downloadUrl": response.body["downloadUrl"],
+                    "encryptedName": "encrypted-attachment-name",
+                    "encryptedContentType": "encrypted-content-type",
+                    "encryptionIv": "attachment-iv",
+                    "encryptedContentTypeIv": "attachment-content-type-iv",
+                    "encryptionAlgorithm": "AES-GCM-AAD-V1",
+                    "fileSize": 128,
+                })
+            );
+            let download_url = response.body["downloadUrl"]
+                .as_str()
+                .expect("download URL should exist");
+            let parsed = url::Url::parse(download_url).expect("download URL should parse");
+            assert_eq!(
+                parsed.path(),
+                "/bittery-test/attachments/vault_main_attachment"
+            );
         },
     )
     .await;
@@ -3020,4 +9998,1038 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
         },
     )
     .await;
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 57 — Import is one Operation, and one paged authority read serves it.
+// ---------------------------------------------------------------------------
+
+/// Every wire category an Import batch may carry, in the spelling the closed set publishes.
+const IMPORT_CATEGORIES: [&str; 5] = ["login", "secure-note", "credit-card", "identity", "totp"];
+
+fn import_item(item_id: &str, category: &str, favorite: bool, ciphertext: &str) -> Value {
+    json!({
+        "itemId": item_id,
+        "category": category,
+        "favorite": favorite,
+        "encryptedData": ciphertext,
+        "encryptionIv": "import-iv",
+        "encryptionAlgorithm": "AES-GCM-AAD-V1",
+    })
+}
+
+/// Everything one Import batch may have written, counted from the persistence seam.
+#[derive(Debug, PartialEq, Eq)]
+struct ImportFootprint {
+    items: i64,
+    audit: i64,
+    vault_updated: i64,
+    outcome: i64,
+    resolved: i64,
+}
+
+async fn import_footprint(
+    pool: &PgPool,
+    user_id: &str,
+    vault_id: &str,
+    operation_id: &str,
+) -> ImportFootprint {
+    let scalar = |sql: &'static str, first: String, second: String| async move {
+        query_scalar::<_, i64>(sql)
+            .bind(first)
+            .bind(second)
+            .fetch_one(pool)
+            .await
+            .expect("Import footprint should load")
+    };
+    ImportFootprint {
+        items: scalar(
+            "SELECT COUNT(*)::bigint FROM item WHERE vault_id = $1 AND encryption_iv = $2",
+            vault_id.to_owned(),
+            "import-iv".to_owned(),
+        )
+        .await,
+        audit: scalar(
+            "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = $2",
+            vault_id.to_owned(),
+            "vault_updated".to_owned(),
+        )
+        .await,
+        vault_updated: scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type::text = $2",
+            vault_id.to_owned(),
+            "vault_updated".to_owned(),
+        )
+        .await,
+        outcome: scalar(
+            "SELECT COUNT(*)::bigint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+            user_id.to_owned(),
+            operation_id.to_owned(),
+        )
+        .await,
+        resolved: scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type::text = $2",
+            operation_id.to_owned(),
+            "operation_resolved".to_owned(),
+        )
+        .await,
+    }
+}
+
+/// An empty applied batch is a decision, not a no-op — and it must leave nothing else behind.
+#[tokio::test]
+async fn import_items_applies_an_empty_batch_without_audit_or_vault_event() {
+    with_api_test_app("import_items_empty_batch", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let operation_id = "import-empty-batch";
+
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [] })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        response.assert_contract_status();
+        assert_eq!(
+            response.body,
+            json!({
+                "kind": "import_items",
+                "operationId": operation_id,
+                "result": { "status": "applied", "vaultId": vault_id, "importedCount": 0 }
+            })
+        );
+        let footprint =
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await;
+        assert_eq!(
+            footprint,
+            ImportFootprint {
+                items: 0,
+                audit: 0,
+                vault_updated: 0,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+        let operation_audit: i64 =
+            query_scalar("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1")
+                .bind(operation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("Operation audit count should load");
+        assert_eq!(
+            operation_audit, 0,
+            "an applied empty batch decided nothing to audit"
+        );
+
+        // The exact same empty bytes again: the retained answer, and not one new row anywhere.
+        let replay = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [] })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        replay.assert_contract_status();
+        assert_eq!(replay.body, response.body);
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            footprint
+        );
+
+        // A different body under the same Operation ID is still the one structured refusal.
+        let reused = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(
+                    json!({ "items": [import_item("import_empty_reuse", "login", false, "enc")] }),
+                ),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            footprint
+        );
+    })
+    .await;
+}
+
+/// One nonempty batch commits every Item, exactly one Vault event and exactly one audit row.
+#[tokio::test]
+async fn import_items_applies_one_nonempty_batch_atomically() {
+    with_api_test_app("import_items_nonempty_batch", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let operation_id = "import-nonempty-batch";
+        // One Item per category, because the executor encodes the category as text into a
+        // `text[]` and casts it back to `item_category`. A login-only batch cannot see a
+        // mis-encoded category; five can.
+        let items: Vec<Value> = IMPORT_CATEGORIES
+            .iter()
+            .enumerate()
+            .map(|(index, category)| {
+                import_item(
+                    &format!("import_batch_item_{index}"),
+                    category,
+                    index % 2 == 0,
+                    &format!("import-{index}"),
+                )
+            })
+            .collect();
+        let body = json!({ "items": items });
+
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(body.clone()),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        response.assert_contract_status();
+        assert_eq!(
+            response.body,
+            json!({
+                "kind": "import_items",
+                "operationId": operation_id,
+                "result": { "status": "applied", "vaultId": vault_id, "importedCount": 5 }
+            })
+        );
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 5,
+                audit: 1,
+                vault_updated: 1,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+        let rows = query_as::<_, (String, String, bool, i32, i32)>(
+            "SELECT id, category::text, favorite, version, encryption_version FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv' ORDER BY id",
+        )
+        .bind(&vault_id)
+        .fetch_all(&app.pool)
+        .await
+        .expect("imported rows should load");
+        assert_eq!(
+            rows,
+            IMPORT_CATEGORIES
+                .iter()
+                .enumerate()
+                .map(|(index, category)| (
+                    format!("import_batch_item_{index}"),
+                    (*category).to_owned(),
+                    index % 2 == 0,
+                    1,
+                    1
+                ))
+                .collect::<Vec<_>>(),
+            "every category must survive the text[] round trip unchanged"
+        );
+
+        // The exact bytes again: the retained answer, and not one new row anywhere.
+        let replay = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(body),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        replay.assert_contract_status();
+        assert_eq!(replay.body, response.body);
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 5,
+                audit: 1,
+                vault_updated: 1,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+
+        // The same Operation ID with different bytes is the one structured refusal.
+        let reused = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [import_item("import_batch_item_c", "login", false, "import-c")] })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(reused.body["code"], json!("OPERATION_ID_REUSED"));
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 5,
+                audit: 1,
+                vault_updated: 1,
+                outcome: 1,
+                resolved: 1
+            }
+        );
+    })
+    .await;
+}
+
+/// The Operation ID is the batch's identity; without it there is nothing to retain an answer for.
+#[tokio::test]
+async fn import_items_requires_a_stable_operation_id() {
+    with_api_test_app("import_items_requires_operation_id", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": [import_item("import_headerless_item", "login", false, "x")] })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert_eq!(response.body["code"], json!("INVALID_OPERATION_ID"));
+        let items: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv'",
+        )
+        .bind(&vault_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("item count should load");
+        assert_eq!(items, 0);
+    })
+    .await;
+}
+
+/// Every refusal Import can reach is terminal, retained and replayable.
+#[tokio::test]
+async fn import_items_rejections_are_terminal_and_replayable() {
+    with_api_test_app("import_items_rejections", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let readonly = app.issue_session(&fixture.readonly_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let oversized = "o".repeat(1_048_577);
+
+        for (name, token, vault_id, items, code) in [
+            (
+                "read-only",
+                readonly.token.clone(),
+                fixture.main_vault_id.clone(),
+                json!([import_item("import_reject_readonly", "login", false, "enc")]),
+                "vault_read_only",
+            ),
+            (
+                "no-access",
+                outsider.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([import_item("import_reject_outsider", "login", false, "enc")]),
+                "vault_access_denied",
+            ),
+            (
+                "existing-identity",
+                owner.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([
+                    import_item("import_reject_fresh", "login", false, "enc"),
+                    import_item(&fixture.active_item_id, "login", false, "enc"),
+                ]),
+                "item_id_conflict",
+            ),
+            (
+                "duplicate-identity",
+                owner.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([
+                    import_item("import_reject_duplicate", "login", false, "enc-a"),
+                    import_item("import_reject_duplicate", "login", false, "enc-b"),
+                ]),
+                "item_id_conflict",
+            ),
+            (
+                "oversized-ciphertext",
+                owner.token.clone(),
+                fixture.owner_personal_vault_id.clone(),
+                json!([import_item("import_reject_oversized", "login", false, &oversized)]),
+                "invalid_ciphertext",
+            ),
+        ] {
+            let operation_id = format!("import-reject-{name}");
+            let body = json!({ "items": items });
+            let expected = json!({
+                "kind": "import_items",
+                "operationId": operation_id,
+                "result": { "status": "rejected", "code": code }
+            });
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                    Some(body.clone()),
+                    idempotency_headers(&token, &operation_id),
+                )
+                .await;
+            response.assert_contract_status();
+            assert_eq!(response.body, expected, "{name} was not rejected");
+
+            let footprint =
+                import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, &operation_id).await;
+            assert_eq!(footprint.items, 0, "{name} left Items behind");
+            assert_eq!(footprint.audit, 0, "{name} wrote a bulk audit row");
+            assert_eq!(footprint.vault_updated, 0, "{name} emitted vault_updated");
+            assert_eq!(
+                footprint.resolved, 1,
+                "{name} did not resolve its Operation"
+            );
+            // The rejection audit row every sibling Operation writes, on the Operation rather
+            // than the Vault so it can never be mistaken for an applied batch.
+            let rejected_audit: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM audit_log WHERE entity_type = 'operation' AND entity_id = $1 AND action = 'item_import_rejected' AND metadata::jsonb->>'code' = $2",
+            )
+            .bind(&operation_id)
+            .bind(code)
+            .fetch_one(&app.pool)
+            .await
+            .expect("rejection audit count should load");
+            assert_eq!(rejected_audit, 1, "{name} wrote no rejection audit row");
+
+            let replay = app
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                    Some(body),
+                    idempotency_headers(&token, &operation_id),
+                )
+                .await;
+            replay.assert_contract_status();
+            assert_eq!(replay.body, expected, "{name} did not replay its rejection");
+        }
+    })
+    .await;
+}
+
+/// A batch beyond the published Item bound is a malformed request, not a retained decision.
+///
+/// No closed Import rejection code describes it, and no Runtime can produce one: acceptance
+/// enforces the same 200 before an Operation exists.
+#[tokio::test]
+async fn import_items_refuses_a_batch_beyond_its_item_bound() {
+    with_api_test_app("import_items_item_bound", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let operation_id = "import-over-bound";
+
+        let over: Vec<Value> = (0..201)
+            .map(|index| import_item(&format!("import_bound_item_{index}"), "login", false, "enc"))
+            .collect();
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": over })),
+                idempotency_headers(&session.token, operation_id),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, operation_id).await,
+            ImportFootprint {
+                items: 0,
+                audit: 0,
+                vault_updated: 0,
+                outcome: 0,
+                resolved: 0
+            }
+        );
+
+        let at_bound: Vec<Value> = (0..200)
+            .map(|index| import_item(&format!("import_bound_item_{index}"), "login", false, "enc"))
+            .collect();
+        let accepted = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": at_bound })),
+                idempotency_headers(&session.token, "import-at-bound"),
+            )
+            .await;
+        accepted.assert_contract_status();
+        assert_eq!(accepted.body["result"]["importedCount"], json!(200));
+    })
+    .await;
+}
+
+/// The Item authority page answers exactly the identities asked for, and pages them.
+#[tokio::test]
+async fn vault_item_authority_pages_answer_the_requested_identities_only() {
+    with_api_test_app("vault_item_authority_pages", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let vault_id = fixture.owner_personal_vault_id.clone();
+        let authority_path = format!("/api/v1/vaults/{vault_id}/item-authority-pages");
+        let ids = ["authority_item_a", "authority_item_b", "authority_item_c"];
+
+        let imported = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({ "items": ids
+                    .iter()
+                    .map(|id| import_item(id, "login", false, "enc"))
+                    .collect::<Vec<_>>() })),
+                idempotency_headers(&owner.token, "authority-seed-import"),
+            )
+            .await;
+        imported.assert_contract_status();
+
+        // One complete page: exactly the requested identities, in a body that is a bare array.
+        let complete = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_c", "authority_item_a", "authority_item_b"] })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        complete.assert_contract_status();
+        let returned: Vec<String> = complete
+            .body
+            .as_array()
+            .expect("the authority page is a bare Item array")
+            .iter()
+            .map(|item| item["id"].as_str().expect("id").to_owned())
+            .collect();
+        assert_eq!(
+            returned,
+            vec!["authority_item_a", "authority_item_b", "authority_item_c"]
+        );
+        assert!(
+            complete.body[0].get("attachments").is_none(),
+            "the authority page must carry the attachment-free Item shape"
+        );
+        assert_eq!(complete.body[0]["vaultId"], json!(vault_id));
+        assert_eq!(complete.body[0]["version"], json!(1));
+        assert!(
+            complete.headers.get("bittery-next-cursor").is_none(),
+            "a complete page may not offer another"
+        );
+
+        // Paged: every page carries Items, and the cursor strictly advances.
+        let mut cursor: Option<String> = None;
+        let mut paged = Vec::new();
+        for _ in 0..3 {
+            let mut request = json!({ "itemIds": ids, "limit": 1 });
+            if let Some(cursor) = cursor.as_deref() {
+                request["cursor"] = json!(cursor);
+            }
+            let page = app
+                .api_json(
+                    Method::POST,
+                    &authority_path,
+                    Some(request),
+                    authenticated_json_headers(&owner.token),
+                )
+                .await;
+            page.assert_contract_status();
+            let values = page.body.as_array().expect("page array").clone();
+            assert_eq!(values.len(), 1);
+            paged.push(values[0]["id"].as_str().expect("id").to_owned());
+            cursor = page
+                .headers
+                .get("bittery-next-cursor")
+                .map(|value| value.to_str().expect("cursor is ASCII").to_owned());
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            paged,
+            vec!["authority_item_a", "authority_item_b", "authority_item_c"]
+        );
+        assert!(cursor.is_none(), "the last page may not offer another");
+
+        // A cursor that cannot advance is refused rather than answered with an empty page.
+        let exhausted = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"], "limit": 1 })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        exhausted.assert_contract_status();
+        assert!(exhausted.headers.get("bittery-next-cursor").is_none());
+
+        let stale = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"], "limit": 1, "cursor": "not-a-cursor" })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(stale.status, StatusCode::BAD_REQUEST);
+
+        let first = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ids, "limit": 1 })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        let issued = first
+            .headers
+            .get("bittery-next-cursor")
+            .expect("a truncated page offers a cursor")
+            .to_str()
+            .expect("cursor is ASCII")
+            .to_owned();
+        let non_advancing = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"], "limit": 1, "cursor": issued })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(non_advancing.status, StatusCode::BAD_REQUEST);
+        assert_eq!(non_advancing.body["code"], json!("INVALID_CURSOR"));
+
+        // Identities outside the Vault, and Vaults outside the caller's access, stay invisible.
+        let foreign = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": [fixture.active_item_id, "authority_item_a"] })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        foreign.assert_contract_status();
+        assert_eq!(
+            foreign.body.as_array().expect("array").len(),
+            1,
+            "an Item in another Vault must not answer this Vault's authority page"
+        );
+
+        let denied = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ["authority_item_a"] })),
+                authenticated_json_headers(&outsider.token),
+            )
+            .await;
+        assert_eq!(denied.status, StatusCode::FORBIDDEN);
+
+        // The published `maxItems` is the bound a request actually hits.
+        let over_bound: Vec<String> = (0..=200).map(|index| format!("bulk_{index}")).collect();
+        let too_many = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": over_bound })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(too_many.status, StatusCode::BAD_REQUEST);
+        assert_eq!(too_many.body["code"], json!("INVALID_REQUEST"));
+
+        let at_bound: Vec<String> = (0..200).map(|index| format!("bulk_{index}")).collect();
+        let bounded = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": at_bound })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        bounded.assert_contract_status();
+
+        // A cursor names one identity set. Replayed against another it must not advance past
+        // Items the second caller asked for, so the cursor's filters carry the set.
+        let issued_for_three = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({ "itemIds": ids, "limit": 1 })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        let cursor = issued_for_three
+            .headers
+            .get("bittery-next-cursor")
+            .expect("a truncated page offers a cursor")
+            .to_str()
+            .expect("cursor is ASCII")
+            .to_owned();
+        let foreign_set = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({
+                    "itemIds": ["authority_item_a", "authority_item_b"],
+                    "limit": 1,
+                    "cursor": cursor,
+                })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(foreign_set.status, StatusCode::BAD_REQUEST);
+        assert_eq!(foreign_set.body["code"], json!("INVALID_CURSOR"));
+
+        // The same set in a different order is the same set, so its cursor still works.
+        let reordered = app
+            .api_json(
+                Method::POST,
+                &authority_path,
+                Some(json!({
+                    "itemIds": ["authority_item_c", "authority_item_b", "authority_item_a"],
+                    "limit": 1,
+                    "cursor": cursor,
+                })),
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        reordered.assert_contract_status();
+        assert_eq!(reordered.body[0]["id"], json!("authority_item_b"));
+    })
+    .await;
+}
+
+/// The ciphertext bound is a byte bound, and inclusive at the published limit.
+///
+/// It used to be a transport check on the Import route. It is now the one predicate every Item
+/// write and the Import executor share, so the property is pinned where it lives.
+#[test]
+fn item_ciphertext_limit_is_byte_based_and_inclusive() {
+    use super::oversized;
+
+    let limit = crate::http::dto::ITEM_CIPHERTEXT_BYTES as usize;
+    assert!(!oversized(Some(&"a".repeat(1_048_576)), limit));
+    assert!(oversized(Some(&"a".repeat(1_048_577)), limit));
+    assert!(!oversized(Some(&"é".repeat(524_288)), limit));
+    assert!(oversized(Some(&format!("{}a", "é".repeat(524_288))), limit));
+    assert!(!oversized(None, limit));
+}
+
+fn import_executor_input(
+    operation_id: &str,
+    vault_id: &str,
+    items: &[Value],
+) -> super::ImportItemsOperationInput {
+    super::ImportItemsOperationInput {
+        operation_id: operation_id.into(),
+        vault_id: vault_id.into(),
+        client_id: Some("import-acceptance-test".into()),
+        raw_body: serde_json::to_vec(&json!({ "items": items })).unwrap(),
+        items: items
+            .iter()
+            .map(|item| serde_json::from_value(item.clone()).unwrap())
+            .collect(),
+        ciphertext_limit: 1024 * 1024,
+    }
+}
+
+fn import_resolution_value(
+    resolution: crate::domains::operations::OperationResolution,
+) -> (Value, bool) {
+    match resolution {
+        crate::domains::operations::OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => (serde_json::to_value(outcome).unwrap(), newly_committed),
+        crate::domains::operations::OperationResolution::IdReused => {
+            panic!("exact Import bytes cannot reuse an Operation identity")
+        }
+    }
+}
+
+/// PostgreSQL AFTER-row triggers fail the real executor after its prospective write. A sequence
+/// survives rollback and proves the selected boundary fired, including a deferred commit error.
+/// Import inserts all Items in one statement, so row triggers exercise each Item of that statement
+/// without changing production into a per-Item loop merely to expose a test seam.
+#[tokio::test]
+async fn import_executor_rolls_back_every_applied_write_and_commit_boundary() {
+    with_api_test_app("import_executor_write_faults", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let vault_id = &fixture.owner_personal_vault_id;
+        query("CREATE SEQUENCE import_fault_hit")
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        query(
+            "CREATE FUNCTION fail_import_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('import_fault_hit'); RAISE EXCEPTION 'injected Import prospective write failure'; END $$",
+        )
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        for (case, table, predicate, deferred) in [
+            ("first_item", "item", "NEW.id = 'import-fault-first_item-0'", false),
+            ("middle_item", "item", "NEW.id = 'import-fault-middle_item-1'", false),
+            ("last_item", "item", "NEW.id = 'import-fault-last_item-2'", false),
+            ("vault_sync", "sync_event", "NEW.event_type = 'vault_updated'", false),
+            ("bulk_audit", "audit_log", "NEW.action = 'vault_updated'", false),
+            ("outcome", "operation_outcome", "NEW.operation_kind = 'import_items'", false),
+            ("resolved", "sync_event", "NEW.event_type = 'operation_resolved'", false),
+            ("commit", "operation_outcome", "NEW.operation_kind = 'import_items'", true),
+        ] {
+            let operation_id = format!("import-fault-{case}");
+            let items = (0..3).map(|index| import_item(
+                &format!("{operation_id}-{index}"), IMPORT_CATEGORIES[index], index == 1, "fault-ciphertext",
+            )).collect::<Vec<_>>();
+            let before = import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await;
+            query("SELECT setval('import_fault_hit', 1, false)")
+                .execute(&app.pool).await.unwrap();
+            let kind = if deferred { "CONSTRAINT TRIGGER" } else { "TRIGGER" };
+            let deferral = if deferred { "DEFERRABLE INITIALLY DEFERRED" } else { "" };
+            query(&format!("CREATE {kind} fail_import_write AFTER INSERT ON {table} {deferral} FOR EACH ROW WHEN ({predicate}) EXECUTE FUNCTION fail_import_write()"))
+                .execute(&app.pool).await.unwrap();
+            let result = super::execute_import_items_operation(
+                &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items),
+            ).await;
+            let error = match result { Err(error) => error, Ok(_) => panic!("{case} must fail") };
+            assert_eq!(error.code, AppErrorCode::InternalServerError, "{case}: {error:?}");
+            assert!(query_scalar::<_, bool>("SELECT is_called FROM import_fault_hit")
+                .fetch_one(&app.pool).await.unwrap(), "{case} failed before reaching its selected write boundary");
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, before,
+                "{case} must roll back Items, bulk audit, Vault Sync, outcome and resolution together");
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1")
+                .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), 0, "failed transport must not leave a rejection audit");
+            assert!(crate::domains::operations::get_operation_outcome(&app.pool, &fixture.owner_user_id, &operation_id)
+                .await.unwrap().is_none(), "{case} left a false terminal answer");
+            query(&format!("DROP TRIGGER fail_import_write ON {table}"))
+                .execute(&app.pool).await.unwrap();
+            let (outcome, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items),
+            ).await.unwrap());
+            assert!(newly_committed, "{case} exact retry must execute the rolled-back work");
+            assert_eq!(outcome["result"], json!({"status": "applied", "vaultId": vault_id, "importedCount": 3}));
+            let applied = ImportFootprint {items: before.items + 3, audit: before.audit + 1,
+                vault_updated: before.vault_updated + 1, outcome: 1, resolved: 1};
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, applied);
+            let (replayed, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items),
+            ).await.unwrap());
+            assert!(!newly_committed);
+            assert_eq!(replayed, outcome);
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, applied);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn import_executor_empty_and_rejected_decisions_roll_back_at_every_write_boundary() {
+    with_api_test_app("import_executor_terminal_faults", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let vault_id = &fixture.owner_personal_vault_id;
+        query("CREATE SEQUENCE import_fault_hit").execute(&app.pool).await.unwrap();
+        query("CREATE FUNCTION fail_import_terminal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('import_fault_hit'); RAISE EXCEPTION 'injected Import terminal write failure'; END $$")
+            .execute(&app.pool).await.unwrap();
+        for rejected in [false, true] {
+            for (case, table, predicate, deferred) in [
+                ("audit", "audit_log", "NEW.action = 'item_import_rejected'", false),
+                ("outcome", "operation_outcome", "NEW.operation_kind = 'import_items'", false),
+                ("resolved", "sync_event", "NEW.event_type = 'operation_resolved'", false),
+                ("commit", "operation_outcome", "NEW.operation_kind = 'import_items'", true),
+            ] {
+                if !rejected && case == "audit" { continue; }
+                let operation_id = format!("import-terminal-{rejected}-{case}");
+                // A fresh sibling is provisionally inserted alongside the conflicting Item;
+                // the rejected batch must leave neither it nor any false terminal progress.
+                let items = if rejected { vec![
+                    import_item(&format!("{operation_id}-fresh"), "login", false, "fresh"),
+                    import_item(&fixture.active_item_id, "login", false, "conflict"),
+                ] } else { vec![] };
+                let before = import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await;
+                query("SELECT setval('import_fault_hit', 1, false)").execute(&app.pool).await.unwrap();
+                let kind = if deferred { "CONSTRAINT TRIGGER" } else { "TRIGGER" };
+                let deferral = if deferred { "DEFERRABLE INITIALLY DEFERRED" } else { "" };
+                query(&format!("CREATE {kind} fail_import_terminal AFTER INSERT ON {table} {deferral} FOR EACH ROW WHEN ({predicate}) EXECUTE FUNCTION fail_import_terminal()"))
+                    .execute(&app.pool).await.unwrap();
+                assert!(super::execute_import_items_operation(&app.pool, &fixture.owner_user_id,
+                    import_executor_input(&operation_id, vault_id, &items)).await.is_err());
+                assert!(query_scalar::<_, bool>("SELECT is_called FROM import_fault_hit").fetch_one(&app.pool).await.unwrap());
+                assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, before);
+                assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1")
+                    .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), 0);
+                query(&format!("DROP TRIGGER fail_import_terminal ON {table}"))
+                    .execute(&app.pool).await.unwrap();
+                let (outcome, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                    &app.pool, &fixture.owner_user_id, import_executor_input(&operation_id, vault_id, &items)).await.unwrap());
+                assert!(newly_committed);
+                let expected = if rejected {json!({"status": "rejected", "code": "item_id_conflict"})}
+                    else {json!({"status": "applied", "vaultId": vault_id, "importedCount": 0})};
+                assert_eq!(outcome["result"], expected);
+                assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await,
+                    ImportFootprint {items: before.items, audit: before.audit, vault_updated: before.vault_updated, outcome: 1, resolved: 1});
+                assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM audit_log WHERE entity_id = $1 AND action = 'item_import_rejected'")
+                    .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), i64::from(rejected));
+            }
+        }
+    }).await;
+}
+
+/// The first writer is held after entering the actual Item insert, while the second is verified
+/// blocked inside the executor. This tests overlapping calls, not sequential replay disguised by
+/// an async join. The production Sync commit-order lock deliberately serializes the two writers.
+#[tokio::test]
+async fn import_executor_concurrent_duplicate_and_conflicting_batches_resolve_atomically() {
+    for duplicate in [true, false] {
+        with_api_test_app(if duplicate {"import_executor_duplicate"} else {"import_executor_conflict"}, move |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let vault_id = fixture.owner_personal_vault_id.clone();
+            query("CREATE FUNCTION hold_import_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('test-hold-import-insert')); RETURN NEW; END $$")
+                .execute(&app.pool).await.unwrap();
+            query("CREATE TRIGGER hold_import_insert BEFORE INSERT ON item FOR EACH ROW WHEN (NEW.id = 'import-race-shared') EXECUTE FUNCTION hold_import_insert()")
+                .execute(&app.pool).await.unwrap();
+            let mut barrier = app.pool.begin().await.unwrap();
+            query("SELECT pg_advisory_xact_lock(hashtext('test-hold-import-insert'))")
+                .execute(&mut *barrier).await.unwrap();
+            let pool = PgPoolOptions::new().max_connections(3)
+                .connect_with(app.pool.connect_options().as_ref().clone()).await.unwrap();
+            let first_items = vec![import_item("import-race-shared", "login", true, "winner"),
+                import_item("import-race-first", "secure-note", false, "winner-sibling")];
+            let second_items = if duplicate {first_items.clone()} else {vec![
+                import_item("import-race-second", "credit-card", false, "loser-sibling"),
+                import_item("import-race-shared", "identity", false, "loser"),
+            ]};
+            let second_operation = if duplicate {"import-race-first-op"} else {"import-race-second-op"};
+            let spawn = |operation_id: &'static str, items: Vec<Value>| {
+                let pool = pool.clone();
+                let user_id = fixture.owner_user_id.clone();
+                let input = import_executor_input(operation_id, &vault_id, &items);
+                tokio::spawn(async move {super::execute_import_items_operation(&pool, &user_id, input).await})
+            };
+            let first = spawn("import-race-first-op", first_items.clone());
+            wait_for_advisory_waiters(&app.pool, 1).await;
+            let second = spawn(second_operation, second_items.clone());
+            wait_for_advisory_waiters(&app.pool, 2).await;
+            barrier.commit().await.unwrap();
+            let (first_outcome, first_new) = import_resolution_value(first.await.unwrap().unwrap());
+            let (second_outcome, second_new) = import_resolution_value(second.await.unwrap().unwrap());
+            assert!(first_new);
+            assert_eq!(first_outcome["result"], json!({"status": "applied", "vaultId": vault_id, "importedCount": 2}));
+            if duplicate {
+                assert!(!second_new);
+                assert_eq!(second_outcome, first_outcome);
+            } else {
+                assert!(second_new);
+                assert_eq!(second_outcome["result"], json!({"status": "rejected", "code": "item_id_conflict"}));
+                assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item WHERE id = 'import-race-second'")
+                    .fetch_one(&app.pool).await.unwrap(), 0, "the losing batch cannot keep its otherwise valid sibling");
+            }
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, &vault_id, "import-race-first-op").await,
+                ImportFootprint {items: 2, audit: 1, vault_updated: 1, outcome: 1, resolved: 1});
+            assert_eq!(query_as::<_, (String, String, bool, String)>("SELECT id, category::text, favorite, encrypted_data FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv' ORDER BY id")
+                .bind(&vault_id).fetch_all(&app.pool).await.unwrap(), vec![
+                    ("import-race-first".into(), "secure-note".into(), false, "winner-sibling".into()),
+                    ("import-race-shared".into(), "login".into(), true, "winner".into()),
+                ], "the losing batch cannot alter the winner's category, favorite or ciphertext");
+            let retained = query_as::<_, (String, Vec<u8>, String)>("SELECT operation_id, request_fingerprint, result_status::text FROM operation_outcome WHERE user_id = $1 ORDER BY operation_id")
+                .bind(&fixture.owner_user_id).fetch_all(&app.pool).await.unwrap();
+            assert_eq!(retained.len(), if duplicate {1} else {2});
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM sync_event WHERE event_type = 'operation_resolved'")
+                .fetch_one(&app.pool).await.unwrap(), if duplicate {1} else {2});
+            // Later authority cannot change either historical outcome: an applied replay does
+            // not recreate a deleted Item, and a rejected replay cannot seize the freed ID.
+            query("DELETE FROM item WHERE id = 'import-race-shared'").execute(&app.pool).await.unwrap();
+            for (operation_id, items, expected) in [
+                ("import-race-first-op", first_items, first_outcome),
+                (second_operation, second_items, second_outcome),
+            ] {
+                let (replayed, newly_committed) = import_resolution_value(super::execute_import_items_operation(
+                    &app.pool, &fixture.owner_user_id, import_executor_input(operation_id, &vault_id, &items)).await.unwrap());
+                assert!(!newly_committed);
+                assert_eq!(replayed, expected);
+            }
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item WHERE vault_id = $1 AND encryption_iv = 'import-iv'")
+                .bind(&vault_id).fetch_one(&app.pool).await.unwrap(), 1);
+            assert_eq!(query_as::<_, (String, Vec<u8>, String)>("SELECT operation_id, request_fingerprint, result_status::text FROM operation_outcome WHERE user_id = $1 ORDER BY operation_id")
+                .bind(&fixture.owner_user_id).fetch_all(&app.pool).await.unwrap(), retained);
+            pool.close().await;
+        }).await;
+    }
+}
+
+#[tokio::test]
+async fn import_executor_lost_response_is_recovered_after_session_renewal_and_is_user_scoped() {
+    with_api_test_app("import_executor_response_loss", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let mut current_token = session.token.clone();
+        let outsider = app.issue_session(&fixture.outsider_user_id).await;
+        let vault_id = &fixture.owner_personal_vault_id;
+        for (case, items, expected_result) in [
+            ("applied", vec![
+                import_item("import-lost-first", "login", true, "first"),
+                import_item("import-lost-second", "credit-card", false, "second"),
+            ], json!({"status": "applied", "vaultId": vault_id, "importedCount": 2})),
+            ("empty", vec![], json!({"status": "applied", "vaultId": vault_id, "importedCount": 0})),
+            ("rejected", vec![import_item(&fixture.active_item_id, "login", false, "conflict")],
+                json!({"status": "rejected", "code": "item_id_conflict"})),
+        ] {
+            let operation_id = format!("import-lost-{case}");
+            // The Server commits, but no caller consumes its response. A later authenticated
+            // lookup must recover the durable semantic answer independently of that response.
+            drop(super::execute_import_items_operation(&app.pool, &fixture.owner_user_id,
+                import_executor_input(&operation_id, vault_id, &items)).await.unwrap());
+            let expected = json!({"kind": "import_items", "operationId": operation_id, "result": expected_result});
+            let footprint = import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await;
+            let refreshed = app.api_json(Method::POST, "/api/v1/sessions/current/refresh", None,
+                authenticated_json_headers(&current_token)).await;
+            assert_eq!(refreshed.status, StatusCode::OK, "{}", refreshed.body);
+            let renewed_token = refreshed.body["token"].as_str().expect("renewed Session token");
+            assert_ne!(renewed_token, current_token, "the lookup must use an actually renewed credential");
+            current_token = renewed_token.to_owned();
+            let lookup = app.api_json(Method::GET, &format!("/api/v1/operations/{operation_id}"), None,
+                authenticated_json_headers(renewed_token)).await;
+            lookup.assert_contract_status();
+            assert_eq!(lookup.body, expected);
+            let replay = app.api_json(Method::POST, &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({"items": items})), idempotency_headers(renewed_token, &operation_id)).await;
+            replay.assert_contract_status();
+            assert_eq!(replay.body, expected);
+            assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, footprint);
+            if items.len() > 1 {
+                let mut reordered = items.clone();
+                reordered.reverse();
+                let changed = app.api_json(Method::POST, &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                    Some(json!({"items": reordered})), idempotency_headers(renewed_token, &operation_id)).await;
+                assert_eq!(changed.status, StatusCode::UNPROCESSABLE_ENTITY);
+                assert_eq!(changed.body["code"], json!("OPERATION_ID_REUSED"), "ordered Import bytes cannot change on replay");
+                assert_eq!(import_footprint(&app.pool, &fixture.owner_user_id, vault_id, &operation_id).await, footprint);
+            }
+            let isolated = app.api_json(Method::GET, &format!("/api/v1/operations/{operation_id}"), None,
+                authenticated_json_headers(&outsider.token)).await;
+            assert_eq!(isolated.status, StatusCode::NOT_FOUND);
+            assert_eq!(isolated.body["code"], json!("OPERATION_OUTCOME_NOT_FOUND"));
+            // The same identity belongs to an independent Operation for another User. Their
+            // retained access rejection cannot replace or reveal the original User's answer.
+            let outsider_result = app.api_json(Method::POST, &format!("/api/v1/vaults/{vault_id}/item-imports"),
+                Some(json!({"items": items})), idempotency_headers(&outsider.token, &operation_id)).await;
+            outsider_result.assert_contract_status();
+            assert_eq!(outsider_result.body["result"], json!({"status": "rejected", "code": "vault_access_denied"}));
+            let owner_again = app.api_json(Method::GET, &format!("/api/v1/operations/{operation_id}"), None,
+                authenticated_json_headers(renewed_token)).await;
+            assert_eq!(owner_again.body, expected);
+            assert_eq!(query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM operation_outcome WHERE operation_id = $1")
+                .bind(&operation_id).fetch_one(&app.pool).await.unwrap(), 2);
+        }
+    }).await;
 }

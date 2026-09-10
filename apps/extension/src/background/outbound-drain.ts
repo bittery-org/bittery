@@ -1,10 +1,11 @@
 // The worker owns durability and account-scoped transport; popup projections
 // are leased so no command becomes drainable before its local view is ready.
 
+import type { CreateItemOperationOutcome } from "@bittery/api-contract";
 import { createStoredAccountApiClient } from "@bittery/core/services/account-resolver";
 import { CrossAccountItemCommandExecutor } from "@bittery/core/services/cross-account-item-command-executor";
 import { ItemSyncEngine, type SyncCommandSummary } from "@bittery/sync";
-import type { ItemSyncCommand } from "@bittery/types";
+import type { CreateItemRejectionCode, ItemSyncCommand } from "@bittery/types";
 import { crypto } from "../lib/crypto";
 import { storage } from "../lib/storage";
 import { ChromeSyncStorage } from "../lib/sync-storage";
@@ -44,6 +45,8 @@ function getQueue(): Promise<ItemSyncEngine> {
 					semanticExecutor.executeSemanticItemCommand(command),
 				preserveConflict: (command) =>
 					vaultRepository.preserveItemConflict(command),
+				reject: (command, code: CreateItemRejectionCode) =>
+					vaultRepository.rejectItemCommand(command, code),
 				reconcileAuthoritative: (command, item) =>
 					vaultRepository.reconcileAuthoritative(command, item),
 				acknowledge: async (command, acknowledgement) => {
@@ -73,6 +76,13 @@ function getQueue(): Promise<ItemSyncEngine> {
 
 export async function getOutboundCommandSummary(): Promise<SyncCommandSummary> {
 	return (await getQueue()).getCommandSummary();
+}
+
+export async function reconcileOutboundOperationOutcome(
+	accountId: string,
+	outcome: CreateItemOperationOutcome,
+): Promise<void> {
+	await (await getQueue()).reconcileCreateItemOutcome(accountId, outcome);
 }
 
 export async function enqueueOutboundCommand(

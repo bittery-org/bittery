@@ -1,0 +1,11 @@
+{
+	"extends": "@bittery/config/tsconfig.base.json",
+	"compilerOptions": {
+		/* Referenced projects must be composite, and composite forbids both
+		   `noEmit` and `allowImportingTsExtensions`. Nothing ever builds this
+		   project — it exists so editors type-check vite.config.ts. */
+		"composite": true,
+		"allowImportingTsExtensions": false
+	},
+	"include": ["vite.config.ts"]
+}

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { AccountMetadata } from "@bittery/storage/types";
+import {
+	accountMetadata,
+	createTestAccountStore,
+	createTestItemCache,
+	seedAccountWithSession,
+} from "../testing/account-store-harness";
 import { NO_CREDENTIAL_MIRROR } from "./account-lifecycle";
 import type { DefaultApiClient } from "./account-resolver";
 import { createAccountSync } from "./account-sync";
@@ -45,6 +51,58 @@ function makeDependencies(activeAccount: string | null = alice.accountId) {
 }
 
 describe("account-aware Sync assembly", () => {
+	test("invalidates the known account when two servers reuse a session id", async () => {
+		const harness = await createTestAccountStore();
+		const { cache } = await createTestItemCache();
+		const first = accountMetadata({
+			accountId: "account_first",
+			email: "first@example.com",
+			serverUrl: "https://first.example",
+		});
+		const second = accountMetadata({
+			accountId: "account_second",
+			email: "second@example.com",
+			serverUrl: "https://second.example",
+		});
+		for (const account of [first, second]) {
+			await seedAccountWithSession(harness, account);
+			await harness.store.updateStoredSessionMetadata(account.accountId, {
+				sessionId: "shared-session-id",
+				expiresAt: Date.now() + 60_000,
+			});
+		}
+		await harness.store.setActiveAccount(first.accountId);
+		const sync = createAccountSync({
+			...semanticDeps,
+			vaultRepository: {
+				openAccounts: async () => undefined,
+			} as unknown as VaultRepository,
+			lifecycle: {
+				storage: harness.store,
+				itemCache: cache,
+				credentialMirror: NO_CREDENTIAL_MIRROR,
+			},
+			clientFactory: async () => null,
+		});
+
+		const outcome = await sync.invalidateSession({
+			sessionId: "shared-session-id",
+			accountId: second.accountId,
+		});
+
+		expect(outcome.affected.map((account) => account.accountId)).toEqual([
+			second.accountId,
+		]);
+		expect(await harness.store.getAuthToken(first.accountId)).toBe(
+			`token-${first.accountId}`,
+		);
+		expect(await harness.store.getAuthToken(second.accountId)).toBeNull();
+		expect(
+			await harness.store.getMasterUnlockKey(first.accountId),
+		).not.toBeNull();
+		expect(await harness.store.getMasterUnlockKey(second.accountId)).toBeNull();
+	});
+
 	test("disables Sync when no account is active", async () => {
 		const { storage, itemCache, vaultRepository } = makeDependencies(null);
 		const sync = createAccountSync({

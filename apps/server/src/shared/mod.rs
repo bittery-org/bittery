@@ -1,6 +1,5 @@
 pub(crate) mod connection_registry;
 pub mod error;
-pub(crate) mod idempotency;
 pub(crate) mod rate_limit;
 pub(crate) mod redis;
 pub(crate) mod shapes;

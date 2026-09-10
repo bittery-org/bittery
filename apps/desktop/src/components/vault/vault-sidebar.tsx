@@ -52,7 +52,7 @@ interface VaultSidebarProps {
 	/** Omitted while items load, so counts appear only once they are real. */
 	itemCounts?: VaultItemCounts;
 	currentVaultId?: string;
-	onNewVault: () => void;
+	onNewVault?: () => void;
 	onEditVault: (vault: {
 		id: string;
 		name: string;
@@ -348,7 +348,7 @@ export function VaultSidebar({
 						title={m.nav_item_vaults()}
 						storageKey="vaults"
 						defaultOpen={true}
-						onAdd={onNewVault}
+						{...(onNewVault ? { onAdd: onNewVault } : {})}
 					>
 						{vaults.map(renderVaultEntry)}
 					</SidebarSection>

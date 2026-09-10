@@ -1,5 +1,5 @@
 import { isUnauthorizedApiError } from "@bittery/api-contract";
-import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
+import { lockInvalidSession } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
@@ -9,6 +9,7 @@ import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
+import { reauthenticateDesktopSession } from "./session-reauth";
 
 const discoveryPolicy = { operatorEnabled: true, accountConfirmed: true };
 
@@ -25,40 +26,38 @@ const fallbackServerUrl = resolveFallbackServerUrl();
 
 let isHandlingAuthError = false;
 
-function handleUnauthorizedError() {
+function handleUnauthorizedError(originAccountId: string | null) {
 	if (isHandlingAuthError) return;
 
 	const path = window.location.pathname;
 	if (path === "/login" || path === "/unlock") return;
+	if (!originAccountId) {
+		toast.error(m.toast_auth_session_lock_failed());
+		return;
+	}
 
 	isHandlingAuthError = true;
 
-	void invalidateAccountSession("active", lifecycleDeps)
-		.then((outcome) => {
-			queryClient.clear();
-			toast.error(m.toast_auth_session_expired());
-
-			// A 401 with no active account still has to leave the screen that produced
-			// it: staying put swallows the error and strands the user on a dead view.
-			const prefillEmail = outcome.wasActive
-				? outcome.affected[0]?.email
-				: undefined;
-			if (prefillEmail) {
-				window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
-			} else {
-				window.location.href = "/";
-			}
-		})
-		.catch(() => {
-			isHandlingAuthError = false;
-		});
+	void reauthenticateDesktopSession(
+		originAccountId,
+		(accountId) => lockInvalidSession({ accountId }, lifecycleDeps),
+		{
+			clearQueries: () => queryClient.clear(),
+			notify: () => toast.error(m.toast_auth_session_expired()),
+			navigateToUnlock: () => {
+				window.location.href = "/unlock";
+			},
+		},
+	).catch(() => {
+		toast.error(m.toast_auth_session_lock_failed());
+		isHandlingAuthError = false;
+	});
 }
 
 const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
 				return;
 			}
 			toast.error(error.message, {
@@ -74,7 +73,7 @@ const queryClient = new QueryClient({
 	mutationCache: new MutationCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
+				return;
 			}
 		},
 	}),
@@ -100,6 +99,7 @@ export async function createDesktopApiClient() {
 		defaultServerUrl: serverUrl,
 		clientPlatform: "desktop",
 		clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
+		onUnauthorized: handleUnauthorizedError,
 		getAccountSnapshot: async (originAccountId) => {
 			const activeAccount =
 				originAccountId ?? (await storage.getActiveAccount());

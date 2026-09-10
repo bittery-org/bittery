@@ -67,6 +67,10 @@ pub enum ErrorCode {
     InvalidItemState,
     /// An email address exceeds the documented length.
     InvalidEmail,
+    /// The supplied email did not confirm Account deletion.
+    AccountDeletionConfirmationMismatch,
+    /// Account deletion is blocked by surviving Team ownership.
+    AccountDeletionBlocked,
     /// A JSON Merge Patch set a field to `null` that cannot be cleared.
     FieldCannotBeCleared,
     /// The audit search term exceeds the documented length.
@@ -77,16 +81,20 @@ pub enum ErrorCode {
     // Idempotency codes.
     /// `Idempotency-Key` is not 1 to 255 visible ASCII characters.
     InvalidIdempotencyKey,
-    /// `Idempotency-Key` was already used for a request with different bytes.
-    IdempotencyKeyReused,
     /// `Idempotency-Key` is not accepted because the response carries a one-time secret.
     IdempotencyNotAllowed,
-    /// An identical idempotent request is still executing.
-    IdempotencyRequestInProgress,
-    /// A claim outlived its execution lease; the outcome needs operator recovery.
-    IdempotencyOutcomeIndeterminate,
-    /// The outcome could not be stored or replayed.
-    IdempotencyResponseUnavailable,
+    /// The stable Operation ID is missing or malformed.
+    InvalidOperationId,
+    /// An Operation ID was already bound to different immutable request bytes.
+    OperationIdReused,
+    /// No retained outcome exists for this User and Operation ID.
+    OperationOutcomeNotFound,
+    AttachmentStagingIncomplete,
+    AttachmentStagingMismatch,
+    AttachmentStagingBusy,
+    AttachmentAuthorityStale,
+    /// 403 — the Team's Attachment storage quota cannot admit another upload.
+    AttachmentQuotaExceeded,
     RotationStaleVaultVersion,
     RotationStaleMemberSet,
     RotationStaleItemState,
@@ -120,15 +128,21 @@ impl ErrorCode {
         Self::InvalidVersion,
         Self::InvalidItemState,
         Self::InvalidEmail,
+        Self::AccountDeletionConfirmationMismatch,
+        Self::AccountDeletionBlocked,
         Self::FieldCannotBeCleared,
         Self::SearchTooLong,
         Self::TooManyHiddenVaults,
         Self::InvalidIdempotencyKey,
-        Self::IdempotencyKeyReused,
         Self::IdempotencyNotAllowed,
-        Self::IdempotencyRequestInProgress,
-        Self::IdempotencyOutcomeIndeterminate,
-        Self::IdempotencyResponseUnavailable,
+        Self::InvalidOperationId,
+        Self::OperationIdReused,
+        Self::OperationOutcomeNotFound,
+        Self::AttachmentStagingIncomplete,
+        Self::AttachmentStagingMismatch,
+        Self::AttachmentStagingBusy,
+        Self::AttachmentAuthorityStale,
+        Self::AttachmentQuotaExceeded,
         Self::RotationStaleVaultVersion,
         Self::RotationStaleMemberSet,
         Self::RotationStaleItemState,
@@ -160,15 +174,21 @@ impl ErrorCode {
             Self::InvalidVersion => "INVALID_VERSION",
             Self::InvalidItemState => "INVALID_ITEM_STATE",
             Self::InvalidEmail => "INVALID_EMAIL",
+            Self::AccountDeletionConfirmationMismatch => "ACCOUNT_DELETION_CONFIRMATION_MISMATCH",
+            Self::AccountDeletionBlocked => "ACCOUNT_DELETION_BLOCKED",
             Self::FieldCannotBeCleared => "FIELD_CANNOT_BE_CLEARED",
             Self::SearchTooLong => "SEARCH_TOO_LONG",
             Self::TooManyHiddenVaults => "TOO_MANY_HIDDEN_VAULTS",
             Self::InvalidIdempotencyKey => "INVALID_IDEMPOTENCY_KEY",
-            Self::IdempotencyKeyReused => "IDEMPOTENCY_KEY_REUSED",
             Self::IdempotencyNotAllowed => "IDEMPOTENCY_NOT_ALLOWED",
-            Self::IdempotencyRequestInProgress => "IDEMPOTENCY_REQUEST_IN_PROGRESS",
-            Self::IdempotencyOutcomeIndeterminate => "IDEMPOTENCY_OUTCOME_INDETERMINATE",
-            Self::IdempotencyResponseUnavailable => "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+            Self::InvalidOperationId => "INVALID_OPERATION_ID",
+            Self::OperationIdReused => "OPERATION_ID_REUSED",
+            Self::OperationOutcomeNotFound => "OPERATION_OUTCOME_NOT_FOUND",
+            Self::AttachmentStagingIncomplete => "ATTACHMENT_STAGING_INCOMPLETE",
+            Self::AttachmentStagingMismatch => "ATTACHMENT_STAGING_MISMATCH",
+            Self::AttachmentStagingBusy => "ATTACHMENT_STAGING_BUSY",
+            Self::AttachmentAuthorityStale => "ATTACHMENT_AUTHORITY_STALE",
+            Self::AttachmentQuotaExceeded => "ATTACHMENT_QUOTA_EXCEEDED",
             Self::RotationStaleVaultVersion => "ROTATION_STALE_VAULT_VERSION",
             Self::RotationStaleMemberSet => "ROTATION_STALE_MEMBER_SET",
             Self::RotationStaleItemState => "ROTATION_STALE_ITEM_STATE",

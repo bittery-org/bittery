@@ -419,11 +419,16 @@ mod tests {
         let mut tampered = cursor.as_str().as_bytes().to_vec();
         tampered[0] = if tampered[0] == b'a' { b'b' } else { b'a' };
         let tampered = PageCursor::new(String::from_utf8(tampered).unwrap());
+        // `filters` carries everything besides the principal and the scope that decides which
+        // rows a page covers. A composite value — an Item authority page binds its Vault and a
+        // digest of the identities it was issued for — is one string here, and any change to it
+        // invalidates the cursor exactly like a changed state filter does.
         for (candidate, principal, scope, filters) in [
             (tampered, "user-a", "items", "active"),
             (cursor.clone(), "user-b", "items", "active"),
             (cursor.clone(), "user-a", "vaults", "active"),
-            (cursor, "user-a", "items", "trashed"),
+            (cursor.clone(), "user-a", "items", "trashed"),
+            (cursor, "user-a", "items", "active\0digest"),
         ] {
             let error = page_values(
                 rows(),

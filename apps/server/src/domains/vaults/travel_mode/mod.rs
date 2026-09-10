@@ -10,7 +10,7 @@ use repo::{fetch_user_travel_mode, upsert_user_travel_mode, validate_vault_acces
 use crate::{
     config::format_timestamp,
     db::enums::{SyncEntityType, SyncEventType},
-    db::events::insert_user_sync_event,
+    db::events::{begin_sync_event_transaction, insert_user_sync_event},
     error::AppError,
     shared::transaction::database_error,
 };
@@ -56,8 +56,8 @@ fn default_travel_mode_response() -> TravelModeResponse {
     }
 }
 
-async fn insert_travel_mode_sync_event<'e>(
-    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+async fn insert_travel_mode_sync_event(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: &str,
     client_id: Option<&str>,
     enabled: bool,
@@ -69,7 +69,7 @@ async fn insert_travel_mode_sync_event<'e>(
     });
 
     insert_user_sync_event(
-        executor,
+        transaction,
         SyncEventType::TravelModeUpdated,
         user_id,
         SyncEntityType::User,
@@ -96,8 +96,7 @@ async fn persist_travel_mode_with_sync_event(
     hidden_vault_ids: &[String],
     enabled_at: Option<OffsetDateTime>,
 ) -> Result<TravelModeResponse, AppError> {
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to save travel mode config"))?;
 
@@ -111,7 +110,7 @@ async fn persist_travel_mode_with_sync_event(
     .await?;
 
     insert_travel_mode_sync_event(
-        &mut *transaction,
+        &mut transaction,
         user_id,
         client_id,
         enabled,

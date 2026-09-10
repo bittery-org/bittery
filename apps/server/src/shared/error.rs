@@ -16,6 +16,13 @@ pub enum AppErrorCode {
     Conflict,
     #[serde(rename = "CONFLICT")]
     RetryableConflict,
+    AttachmentStagingBusy,
+    AttachmentStagingIncomplete,
+    AttachmentStagingMismatch,
+    AttachmentAuthorityStale,
+    AttachmentQuotaExceeded,
+    OperationIdReused,
+    VaultImageStagingQuotaExceeded,
     #[serde(rename = "TOO_MANY_REQUESTS")]
     TooManyRequests,
     #[serde(rename = "PAYLOAD_TOO_LARGE")]
@@ -82,6 +89,56 @@ impl AppError {
         }
     }
 
+    pub(crate) fn attachment_staging_busy(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentStagingBusy,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_staging_incomplete(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentStagingIncomplete,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_staging_mismatch(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentStagingMismatch,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_authority_stale(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentAuthorityStale,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn attachment_quota_exceeded(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::AttachmentQuotaExceeded,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn operation_id_reused(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::OperationIdReused,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn vault_image_staging_quota_exceeded(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::VaultImageStagingQuotaExceeded,
+            message: message.into(),
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn rotation_stale(reason: crate::db::enums::VaultKeyRotationStaleReason) -> Self {
         use crate::db::enums::VaultKeyRotationStaleReason::*;
         Self {

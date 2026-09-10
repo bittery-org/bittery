@@ -160,8 +160,17 @@ pub(crate) async fn sync_events(
             // Heartbeat
             if last_heartbeat_at.elapsed() >= heartbeat_interval {
                 // Verify session is still valid
-                if sessions.verify_token(&session_token).await.is_none() {
-                    break;
+                match sessions.verify_token(&session_token).await {
+                    Ok(Some(_)) => {}
+                    Ok(None) => break,
+                    Err(error) => {
+                        warn!(
+                            session_id = %session_id,
+                            error = %error,
+                            "failed to verify SSE session"
+                        );
+                        break;
+                    }
                 }
 
                 match sse_heartbeat_event() {

@@ -1,0 +1,1718 @@
+use super::*;
+use crate::{
+    http_transport::{HttpHeader, HttpMethod},
+    replica::{
+        attachment_move_intent_fingerprint,
+        item_operation_fingerprint as shared_item_operation_fingerprint,
+        AttachmentMovePreparationRecord, AttachmentMoveProgress, AuthorityItemCategory,
+        AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType, ImmutableHttpRequest,
+        OperationKind, OperationSchedulingState, ProtectedShareCapabilityRecord, ReplicaSnapshot,
+        ReplicaState, ResourceRef, Sha256Fingerprint,
+    },
+    server_contract::{CreateItemBody, FavoriteBody, ItemCategory, MoveItemBody, UpdateItemBody},
+    CreateShareDraft, ItemDraft, ItemProjection, ShareAccessMode,
+};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use bittery_crypto_core::{
+    decrypt_vault_key_with_muk, decrypt_with_aad, encrypt, encrypt_share_capability,
+    encrypt_with_aad, generate_encryption_key, AadContext, EncryptedData,
+    ShareCapabilityAadContext, WrappedVaultKeyData,
+};
+use serde::Serialize;
+use sha2::Digest;
+use zeroize::{Zeroize, Zeroizing};
+
+const UPDATE_ITEM_ROUTE: &str = "PATCH /api/v1/items/{itemId}";
+const FAVORITE_ITEM_ROUTE: &str = "PATCH /api/v1/items/{itemId}/favorite";
+const TRASH_ITEM_ROUTE: &str = "DELETE /api/v1/items/{itemId}";
+const RESTORE_ITEM_ROUTE: &str = "POST /api/v1/items/{itemId}/restore";
+const MOVE_ITEM_ROUTE: &str = "POST /api/v1/items/{itemId}/moves";
+const PERMANENTLY_DELETE_ITEM_ROUTE: &str = "DELETE /api/v1/items/{itemId}/permanent";
+
+/// Preserve the existing Login history policy at the Core acceptance boundary.
+fn apply_login_password_history(
+    login: &mut crate::LoginItemData,
+    previous_password: Option<&str>,
+    changed_at: &str,
+) {
+    let mut candidates = std::mem::take(&mut login.password_history);
+    if let Some(previous) = previous_password
+        .filter(|password| !password.is_empty() && Some(*password) != login.password.as_deref())
+    {
+        candidates.insert(
+            0,
+            crate::PasswordHistoryEntry {
+                password: previous.to_owned(),
+                changed_at: changed_at.to_owned(),
+            },
+        );
+    }
+    for mut entry in candidates {
+        if !entry.password.is_empty()
+            && !entry.changed_at.is_empty()
+            && Some(entry.password.as_str()) != login.password.as_deref()
+            && login.password_history.len() < 10
+            && !login
+                .password_history
+                .iter()
+                .any(|kept| kept.password == entry.password)
+        {
+            login.password_history.push(entry);
+        } else {
+            entry.password.zeroize();
+            entry.changed_at.zeroize();
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateShareOperationBody {
+    token_hash: String,
+    access_mode: crate::ShareAccessMode,
+    expires_in: crate::ShareExpiration,
+    is_one_time_use: bool,
+    allowed_emails: Option<Vec<String>>,
+    encrypted_item_data: String,
+    encryption_iv: String,
+    encrypted_share_key: String,
+    share_key_iv: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShareCapabilityPlaintext<'a> {
+    token: &'a str,
+    share_key: &'a str,
+}
+
+pub(super) struct ZeroizingJsonValue(serde_json::Value);
+
+impl ZeroizingJsonValue {
+    pub(super) fn new(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+
+    pub(super) fn as_value(&self) -> &serde_json::Value {
+        &self.0
+    }
+
+    #[cfg(test)]
+    pub(super) fn wipe_now_for_test(&mut self) -> Vec<usize> {
+        let mut wiped_lengths = Vec::new();
+        wipe_json_value(&mut self.0, &mut |value| wiped_lengths.push(value.len()));
+        wiped_lengths
+    }
+}
+
+impl Drop for ZeroizingJsonValue {
+    fn drop(&mut self) {
+        wipe_json_value(&mut self.0, &mut |_| {});
+    }
+}
+
+fn wipe_json_value(value: &mut serde_json::Value, wiped: &mut impl FnMut(&str)) {
+    match value {
+        serde_json::Value::String(secret) => {
+            secret.zeroize();
+            wiped(secret);
+        }
+        serde_json::Value::Array(values) => {
+            for value in values.iter_mut() {
+                wipe_json_value(value, wiped);
+            }
+            values.clear();
+        }
+        serde_json::Value::Object(values) => {
+            for (mut key, mut value) in std::mem::take(values) {
+                key.zeroize();
+                wiped(&key);
+                wipe_json_value(&mut value, wiped);
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+    *value = serde_json::Value::Null;
+}
+
+/// A newly created Item is version one, and its ciphertext is bound to that revision.
+const CREATE_ITEM_ENCRYPTION_VERSION: i32 = 1;
+
+/// The concrete route a create Operation will always send to.
+pub(crate) fn create_item_path(vault_id: &str, item_id: &str) -> String {
+    format!("/api/v1/vaults/{vault_id}/items/{item_id}")
+}
+
+pub(crate) use crate::replica::{create_item_fingerprint, share_operation_fingerprint};
+
+pub(super) fn item_operation_fingerprint(
+    kind: OperationKind,
+    route: &str,
+    item_id: &str,
+    body: &[u8],
+    expected_version: i32,
+) -> Sha256Fingerprint {
+    shared_item_operation_fingerprint(kind, route, item_id, body, expected_version)
+}
+
+/// Everything one accepted create owes, computed before any durable write.
+struct PreparedCreate {
+    operation: OperationRecord,
+    overlay: ReplicaItemRecord,
+    projection: ItemProjection,
+}
+
+pub(super) enum ExistingItemIntent {
+    Update(Box<ItemDraft>),
+    SetFavorite(bool),
+    Trash,
+    Restore,
+    Move { target_vault_id: String },
+    PermanentlyDelete,
+}
+
+enum PreparedExistingItemOperation {
+    Ready {
+        operation: OperationRecord,
+        overlay: ReplicaItemRecord,
+    },
+    AttachmentMove {
+        preparation: AttachmentMovePreparationRecord,
+        overlay: ReplicaItemRecord,
+    },
+}
+
+impl Runtime {
+    pub(super) async fn accept_create_share(
+        &self,
+        account_id: AccountId,
+        item_id: String,
+        draft: CreateShareDraft,
+        cancellation: RequestCancellation,
+        accepted: impl FnOnce(),
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.ensure_open()?;
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled before durable acceptance",
+            ));
+        }
+        // Share acceptance participates in the same global Item-writer order as every other
+        // existing-Item mutation: Item writer first, then the Account execution fence. This owns
+        // the complete atomic Operation/capability acceptance, so foreground Attachment authority
+        // cannot be admitted against a snapshot that is about to gain a Share owner.
+        let item_lock = self.item_mutation_lock(&account_id, &item_id);
+        let _item_guard = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "caller cancelled before durable acceptance",
+                ));
+            }
+            guard = item_lock.lock() => guard,
+        };
+        let execution_lock = self.account_execution_lock(&account_id)?;
+        let _execution_guard = execution_lock.lock().await;
+        self.ensure_open()?;
+        if self.account_access_retirement_is_pending(&account_id) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lifecycle retirement is pending",
+            ));
+        }
+        let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        if snapshot.failure.is_some() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountFailed,
+                "the selected Account module has failed",
+            ));
+        }
+        if snapshot.lock_epoch == u64::MAX {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lock epoch is exhausted",
+            ));
+        }
+        if snapshot.bootstrap.state != ReplicaState::Ready {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Share acceptance requires ready authoritative Item state",
+            ));
+        }
+        if self
+            .account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .get(&account_id)
+            != Some(&AccountAccessState::Unlocked)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "the selected Account is signed out or locked",
+            ));
+        }
+        if self
+            .lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .contains_key(&account_id)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Account lock epoch persistence is pending",
+            ));
+        }
+        let lock_epoch = *self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .entry(account_id.clone())
+            .or_insert(snapshot.lock_epoch);
+        validate_share_draft(&draft)?;
+        let generation = snapshot
+            .bootstrap
+            .active_generation
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "a ready Replica has no active Bootstrap generation",
+                )
+            })?;
+        let item = snapshot
+            .bootstrap
+            .items
+            .get(&(generation.clone(), item_id.clone()))
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item is not authoritative in this Replica",
+                )
+            })?;
+        let vault = snapshot
+            .bootstrap
+            .vaults
+            .get(&(generation, item.vault_id.clone()))
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item's Vault is not visible in this Replica",
+                )
+            })?;
+        if vault.role == AuthorityVaultRole::ReadOnly {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the selected Item's Vault is read only",
+            ));
+        }
+        let master_unlock_key = self
+            .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationRequired,
+                    "the selected Account is signed out or locked",
+                )
+            })?;
+        let vault_key = Zeroizing::new(unwrap_vault_key(
+            vault,
+            &snapshot.user_id,
+            &master_unlock_key,
+        )?);
+        let decrypted_plaintext = Zeroizing::new(
+            decrypt_with_aad(
+                &EncryptedData {
+                    ciphertext: item.encrypted_data.clone(),
+                    iv: item.encryption_iv.clone(),
+                    algorithm: item.encryption_algorithm.clone(),
+                },
+                &vault_key,
+                &AadContext {
+                    vault_id: item.vault_id.clone(),
+                    entity_id: item.id.clone(),
+                    entity_type: "item".into(),
+                    version: item.encryption_version as u64,
+                    user_id: item.encrypted_by_user_id.clone(),
+                },
+            )
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item ciphertext could not be opened",
+                )
+            })?,
+        );
+        let typed = super::bootstrap::decode_item_plaintext(&decrypted_plaintext, &item.category)?;
+        let payload = ZeroizingJsonValue::new(
+            serde_json::from_str(&item_plaintext(&typed).map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item plaintext is invalid",
+                )
+            })?)
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item plaintext is invalid",
+                )
+            })?,
+        );
+        let shared_payload =
+            ZeroizingJsonValue::new(build_shared_payload(payload.as_value(), &item.category)?);
+        let shared_plaintext = Zeroizing::new(
+            serde_json::to_string(shared_payload.as_value()).map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the shared Item payload could not be serialized",
+                )
+            })?,
+        );
+
+        let operation_id = bittery_crypto_core::generate_uuid();
+        let token = Zeroizing::new(generate_share_token());
+        let share_key = Zeroizing::new(generate_encryption_key());
+        let share_key_base64 = Zeroizing::new(BASE64.encode(share_key.as_slice()));
+        let encrypted_item = encrypt(&shared_plaintext, share_key.as_slice()).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the shared Item payload could not be encrypted",
+            )
+        })?;
+        let encrypted_share_key =
+            encrypt(&share_key_base64, share_key.as_slice()).map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the Share key could not be protected for delivery",
+                )
+            })?;
+        let capability_plaintext = Zeroizing::new(
+            serde_json::to_string(&ShareCapabilityPlaintext {
+                token: &token,
+                share_key: &share_key_base64,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the Share capability could not be serialized",
+                )
+            })?,
+        );
+        let capability_context =
+            ShareCapabilityAadContext::new(account_id.as_str().to_owned(), operation_id.clone())
+                .map_err(|_| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "the Share capability scope is invalid",
+                    )
+                })?;
+        let protected_capability = encrypt_share_capability(
+            &capability_plaintext,
+            master_unlock_key.as_slice(),
+            &capability_context,
+        )
+        .map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the Share capability could not be protected",
+            )
+        })?;
+        let token_hash = format!("{:x}", sha2::Sha256::digest(token.as_bytes()));
+        let body = serde_json::to_vec(&CreateShareOperationBody {
+            token_hash,
+            access_mode: draft.access_mode,
+            expires_in: draft.expires_in,
+            is_one_time_use: draft.is_one_time_use,
+            allowed_emails: match draft.access_mode {
+                ShareAccessMode::Anyone => None,
+                ShareAccessMode::EmailRestricted => Some(draft.allowed_emails),
+            },
+            encrypted_item_data: encrypted_item.ciphertext,
+            encryption_iv: encrypted_item.iv,
+            encrypted_share_key: encrypted_share_key.ciphertext,
+            share_key_iv: encrypted_share_key.iv,
+        })
+        .map_err(|_| operation_serialization_error())?;
+        let operation = OperationRecord {
+            operation_id: operation_id.clone(),
+            kind: OperationKind::CreateShare,
+            target: ResourceRef::Item {
+                item_id: item_id.clone(),
+                vault_id: item.vault_id.clone(),
+            },
+            request: ImmutableHttpRequest {
+                method: HttpMethod::Post,
+                path: format!("/api/v1/items/{item_id}/share-links"),
+                headers: vec![content_type("application/json")],
+                body: body.clone(),
+            },
+            request_fingerprint: share_operation_fingerprint(&item_id, &body),
+            attachment_move_recovery: None,
+            create_vault: None,
+            scheduling: OperationSchedulingState::default(),
+        };
+        let result = self
+            .replica
+            .execute_recomputing(GuardedCommitPlan::new(
+                account_id.clone(),
+                snapshot.incarnation,
+                snapshot.revision,
+                lock_epoch,
+                vec![
+                    PlanMutation::AcceptOperation(operation),
+                    PlanMutation::PutProtectedShareCapability(ProtectedShareCapabilityRecord {
+                        account_id: account_id.clone(),
+                        operation_id: operation_id.clone(),
+                        ciphertext: protected_capability.ciphertext,
+                        iv: protected_capability.iv,
+                        algorithm: protected_capability.algorithm,
+                        result: None,
+                    }),
+                ],
+            ))
+            .await?;
+        let (replica_revision, next_snapshot) = match result {
+            RecomputedPlanResult::Applied { snapshot } => (snapshot.revision, snapshot),
+            RecomputedPlanResult::Fenced { snapshot } => {
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                let invalidated_delivery = self.invalidate_delivery(&account_id);
+                self.replica.cache(snapshot.clone());
+                self.unlocked_items
+                    .lock()
+                    .expect("unlocked projection lock poisoned")
+                    .remove(&account_id);
+                self.clear_live_master_unlock_keys_for_account(&account_id);
+                self.account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .insert(account_id.clone(), AccountAccessState::Locked);
+                self.account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned")
+                    .insert(account_id.clone(), snapshot.lock_epoch);
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(_publication);
+                drop(_execution_guard);
+                if let Some(token) = invalidated_delivery {
+                    token.wait_for_other_threads();
+                }
+                self.publish_all();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationRequired,
+                    "Account was locked while accepting work",
+                ));
+            }
+            RecomputedPlanResult::Missing => {
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                self.replica.remove_cached(&account_id);
+                self.recovery_accounts
+                    .lock()
+                    .expect("recovery Account lock poisoned")
+                    .remove(&account_id);
+                self.unlocked_items
+                    .lock()
+                    .expect("unlocked projection lock poisoned")
+                    .remove(&account_id);
+                self.clear_live_master_unlock_keys_for_account(&account_id);
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(_publication);
+                drop(_execution_guard);
+                self.publish_all();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AccountMissing,
+                    "account was removed during durable acceptance",
+                ));
+            }
+        };
+        self.replica.cache(next_snapshot);
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        accepted();
+        drop(_execution_guard);
+        self.wake_dispatch();
+        self.publish_all();
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled after durable acceptance",
+            ));
+        }
+        Ok(RuntimeResponse::Accepted {
+            operation_id,
+            item_id,
+            replica_revision,
+        })
+    }
+
+    pub(super) async fn accept_create_login_item(
+        &self,
+        account_id: AccountId,
+        vault_id: String,
+        draft: ItemDraft,
+        cancellation: RequestCancellation,
+        accepted: impl FnOnce(),
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.ensure_open()?;
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled before durable acceptance",
+            ));
+        }
+        let execution_lock = self.account_execution_lock(&account_id)?;
+        let _execution_guard = execution_lock.lock().await;
+        self.ensure_open()?;
+        if self.account_access_retirement_is_pending(&account_id) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lifecycle retirement is pending",
+            ));
+        }
+        let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        if snapshot.failure.is_some() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountFailed,
+                "the selected Account module has failed",
+            ));
+        }
+        if snapshot.lock_epoch == u64::MAX {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lock epoch is exhausted",
+            ));
+        }
+        if self
+            .account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .get(&account_id)
+            != Some(&AccountAccessState::Unlocked)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "the selected Account is signed out or locked",
+            ));
+        }
+        if self
+            .lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .contains_key(&account_id)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Account lock epoch persistence is pending",
+            ));
+        }
+        let lock_epoch = *self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .entry(account_id.clone())
+            .or_insert(0);
+
+        // One instant stamps the Operation's Item, so the overlay and the projection can never
+        // disagree about when this Device accepted it.
+        let accepted_at = rfc3339(self.clock.now_ms()?)?;
+        let prepared = self.prepare_create(&snapshot, &vault_id, draft, &accepted_at)?;
+        let PreparedCreate {
+            operation,
+            overlay,
+            projection,
+        } = prepared;
+        let operation_id = operation.operation_id.clone();
+        let item_id = operation.item_id().to_owned();
+
+        // One transaction carries the Operation, its immutable bytes and fingerprint, its
+        // scheduling state, and the encrypted overlay. `Accepted` is answered only after it
+        // commits, so a partial write can never be reported as accepted work.
+        let result = self
+            .replica
+            .execute_recomputing(GuardedCommitPlan::new(
+                account_id.clone(),
+                snapshot.incarnation,
+                snapshot.revision,
+                lock_epoch,
+                vec![
+                    PlanMutation::AcceptOperation(operation),
+                    PlanMutation::PutOptimisticItem(overlay),
+                ],
+            ))
+            .await?;
+        let (replica_revision, next_snapshot) = match result {
+            RecomputedPlanResult::Applied { snapshot } => (snapshot.revision, snapshot),
+            RecomputedPlanResult::Fenced { snapshot } => {
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                let invalidated_delivery = self.invalidate_delivery(&account_id);
+                self.replica.cache(snapshot.clone());
+                self.unlocked_items
+                    .lock()
+                    .expect("unlocked projection lock poisoned")
+                    .remove(&account_id);
+                self.clear_live_master_unlock_keys_for_account(&account_id);
+                self.account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .insert(account_id.clone(), AccountAccessState::Locked);
+                self.account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned")
+                    .insert(account_id.clone(), snapshot.lock_epoch);
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(_publication);
+                drop(_execution_guard);
+                if let Some(token) = invalidated_delivery {
+                    token.wait_for_other_threads();
+                }
+                self.publish_all();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationRequired,
+                    "Account was locked while accepting work",
+                ));
+            }
+            RecomputedPlanResult::Missing => {
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                self.replica.remove_cached(&account_id);
+                self.recovery_accounts
+                    .lock()
+                    .expect("recovery Account lock poisoned")
+                    .remove(&account_id);
+                self.unlocked_items
+                    .lock()
+                    .expect("unlocked projection lock poisoned")
+                    .remove(&account_id);
+                self.clear_live_master_unlock_keys_for_account(&account_id);
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(_publication);
+                drop(_execution_guard);
+                self.publish_all();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AccountMissing,
+                    "account was removed during durable acceptance",
+                ));
+            }
+        };
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        self.replica.cache(next_snapshot);
+        if self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .get(&account_id)
+            == Some(&lock_epoch)
+        {
+            self.unlocked_items
+                .lock()
+                .expect("unlocked projection lock poisoned")
+                .entry(account_id)
+                .or_default()
+                .push(projection);
+        }
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        drop(_publication);
+        accepted();
+        drop(_execution_guard);
+        // The Operation is durable, so the dispatcher may start owing it immediately.
+        self.wake_dispatch();
+        self.publish_all();
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled after durable acceptance",
+            ));
+        }
+        Ok(RuntimeResponse::Accepted {
+            operation_id,
+            item_id,
+            replica_revision,
+        })
+    }
+
+    pub(super) async fn accept_existing_item_operation(
+        &self,
+        account_id: AccountId,
+        item_id: String,
+        intent: ExistingItemIntent,
+        cancellation: RequestCancellation,
+        accepted: impl FnOnce(),
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.ensure_open()?;
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled before durable acceptance",
+            ));
+        }
+        // Existing-Item Operations and foreground Attachment mutations share this writer. The
+        // writer is acquired before the Account execution fence in both paths: once Rename has
+        // admitted an Item, no optimistic owner can appear behind its authority snapshot, and an
+        // already-durable owner makes Rename fail immediately instead of waiting for reconciliation.
+        let item_lock = self.item_mutation_lock(&account_id, &item_id);
+        let _item_guard = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "caller cancelled before durable acceptance",
+                ));
+            }
+            guard = item_lock.lock() => guard,
+        };
+        let execution_lock = self.account_execution_lock(&account_id)?;
+        let _execution_guard = execution_lock.lock().await;
+        self.ensure_open()?;
+        if self.account_access_retirement_is_pending(&account_id) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lifecycle retirement is pending",
+            ));
+        }
+        let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
+        })?;
+        if snapshot.failure.is_some() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountFailed,
+                "the selected Account module has failed",
+            ));
+        }
+        if snapshot.lock_epoch == u64::MAX {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Account lock epoch is exhausted",
+            ));
+        }
+        if self
+            .account_access
+            .lock()
+            .expect("Account access lock poisoned")
+            .get(&account_id)
+            != Some(&AccountAccessState::Unlocked)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "the selected Account is signed out or locked",
+            ));
+        }
+        if self
+            .lock_epoch_pending
+            .lock()
+            .expect("pending lock epoch lock poisoned")
+            .contains_key(&account_id)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Account lock epoch persistence is pending",
+            ));
+        }
+        let lock_epoch = *self
+            .account_lock_epochs
+            .lock()
+            .expect("Account lock epoch lock poisoned")
+            .entry(account_id.clone())
+            .or_insert(0);
+        let accepted_at = rfc3339(self.clock.now_ms()?)?;
+        let prepared =
+            self.prepare_existing_item_operation(&snapshot, &item_id, intent, &accepted_at)?;
+        let (operation_id, mutations) = match prepared {
+            PreparedExistingItemOperation::Ready { operation, overlay } => (
+                operation.operation_id.clone(),
+                vec![
+                    PlanMutation::AcceptOperation(operation),
+                    PlanMutation::PutOptimisticItem(overlay),
+                ],
+            ),
+            PreparedExistingItemOperation::AttachmentMove {
+                preparation,
+                overlay,
+            } => (
+                preparation.operation_id.clone(),
+                vec![
+                    PlanMutation::AcceptAttachmentMovePreparation(preparation),
+                    PlanMutation::PutOptimisticItem(overlay),
+                ],
+            ),
+        };
+        let result = self
+            .replica
+            .execute_recomputing(GuardedCommitPlan::new(
+                account_id.clone(),
+                snapshot.incarnation,
+                snapshot.revision,
+                lock_epoch,
+                mutations,
+            ))
+            .await?;
+        let (replica_revision, next_snapshot) = match result {
+            RecomputedPlanResult::Applied { snapshot } => (snapshot.revision, snapshot),
+            RecomputedPlanResult::Fenced { snapshot } => {
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                let invalidated_delivery = self.invalidate_delivery(&account_id);
+                self.replica.cache(snapshot.clone());
+                self.unlocked_items
+                    .lock()
+                    .expect("unlocked projection lock poisoned")
+                    .remove(&account_id);
+                self.account_access
+                    .lock()
+                    .expect("Account access lock poisoned")
+                    .insert(account_id.clone(), AccountAccessState::Locked);
+                self.clear_live_master_unlock_keys_for_account(&account_id);
+                self.account_lock_epochs
+                    .lock()
+                    .expect("Account lock epoch lock poisoned")
+                    .insert(account_id.clone(), snapshot.lock_epoch);
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(_publication);
+                drop(_execution_guard);
+                if let Some(token) = invalidated_delivery {
+                    token.wait_for_other_threads();
+                }
+                self.publish_all();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationRequired,
+                    "Account was locked while accepting work",
+                ));
+            }
+            RecomputedPlanResult::Missing => {
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                self.replica.remove_cached(&account_id);
+                self.recovery_accounts
+                    .lock()
+                    .expect("recovery Account lock poisoned")
+                    .remove(&account_id);
+                self.unlocked_items
+                    .lock()
+                    .expect("unlocked projection lock poisoned")
+                    .remove(&account_id);
+                self.clear_live_master_unlock_keys_for_account(&account_id);
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(_publication);
+                drop(_execution_guard);
+                self.publish_all();
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AccountMissing,
+                    "account was removed during durable acceptance",
+                ));
+            }
+        };
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        self.replica.cache(next_snapshot);
+        drop(_publication);
+        self.decrypt_visible_items(&account_id)?;
+        accepted();
+        drop(_execution_guard);
+        self.wake_dispatch();
+        self.publish_all();
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled after durable acceptance",
+            ));
+        }
+        Ok(RuntimeResponse::Accepted {
+            operation_id,
+            item_id,
+            replica_revision,
+        })
+    }
+
+    /// Leaves the in-memory test Runtime as ready for local writes as a real Bootstrap would.
+    #[cfg(test)]
+    pub(crate) fn seed_ready_personal_vault_in_memory(&self, account_id: &AccountId) {
+        let persistence = self
+            .test_persistence
+            .as_ref()
+            .expect("in-memory seeding requires in-memory persistence");
+        crate::test_fixtures::seed_ready_personal_vault(persistence, account_id)
+            .expect("the seeded Vault promotes");
+        self.replica.cache(
+            persistence
+                .snapshot(account_id)
+                .expect("seeded Account has a snapshot"),
+        );
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Mints the final Item ID, seals the draft under the existing Item AAD, and builds the exact
+    /// bytes the Operation will replay. Nothing here writes; a failure leaves no durable trace.
+    fn prepare_create(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        vault_id: &str,
+        draft: ItemDraft,
+        accepted_at: &str,
+    ) -> Result<PreparedCreate, RuntimeError> {
+        if snapshot.bootstrap.state != ReplicaState::Ready {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the Replica is not ready for local writes",
+            ));
+        }
+        let generation = snapshot
+            .bootstrap
+            .active_generation
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "a ready Replica has no active Bootstrap generation",
+                )
+            })?;
+        let vault = snapshot
+            .bootstrap
+            .vaults
+            .get(&(generation, vault_id.to_owned()))
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Vault is not visible in this Replica",
+                )
+            })?;
+        if vault.vault_type != AuthorityVaultType::Personal {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the first create slice writes only to a personal Vault",
+            ));
+        }
+        if vault.role == AuthorityVaultRole::ReadOnly {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the selected Vault is read only",
+            ));
+        }
+        let master_unlock_key = self
+            .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationRequired,
+                    "the selected Account is signed out or locked",
+                )
+            })?;
+
+        // Rust mints the final Item ID before encryption. The same value binds the AAD, the route
+        // path, the overlay, the Server row, and reconciliation, so no remapping ever exists.
+        let item_id = bittery_crypto_core::generate_uuid();
+        let operation_id = bittery_crypto_core::generate_uuid();
+
+        let vault_key = Zeroizing::new(unwrap_vault_key(
+            vault,
+            &snapshot.user_id,
+            &master_unlock_key,
+        )?);
+        drop(master_unlock_key);
+        let plaintext = Zeroizing::new(item_plaintext(&draft).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Login draft could not be serialized",
+            )
+        })?);
+        let sealed = encrypt_with_aad(
+            &plaintext,
+            &vault_key,
+            &AadContext {
+                vault_id: vault_id.to_owned(),
+                entity_id: item_id.clone(),
+                entity_type: "item".into(),
+                version: CREATE_ITEM_ENCRYPTION_VERSION as u64,
+                user_id: snapshot.user_id.clone(),
+            },
+        )
+        .map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "Login draft could not be encrypted",
+            )
+        })?;
+        drop(plaintext);
+        drop(vault_key);
+
+        let body = serde_json::to_vec(&CreateItemBody {
+            category: server_item_category(draft.category()),
+            encrypted_data: sealed.ciphertext.clone(),
+            encryption_algorithm: sealed.algorithm.clone(),
+            encryption_iv: sealed.iv.clone(),
+        })
+        .map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "create Item request body could not be serialized",
+            )
+        })?;
+        let path = create_item_path(vault_id, &item_id);
+        let request_fingerprint = create_item_fingerprint(vault_id, &item_id, &body);
+
+        Ok(PreparedCreate {
+            operation: OperationRecord {
+                operation_id: operation_id.clone(),
+                kind: OperationKind::CreateItem,
+                target: ResourceRef::Item {
+                    item_id: item_id.clone(),
+                    vault_id: vault_id.to_owned(),
+                },
+                request: ImmutableHttpRequest {
+                    method: HttpMethod::Put,
+                    path,
+                    // Content headers only. Authorization arrives from the current Session at
+                    // dispatch, and the Idempotency-Key is this Operation's own stored ID.
+                    headers: vec![HttpHeader {
+                        name: "Content-Type".to_owned(),
+                        value: "application/json".to_owned(),
+                    }],
+                    body,
+                },
+                request_fingerprint,
+                attachment_move_recovery: None,
+                create_vault: None,
+                scheduling: OperationSchedulingState::default(),
+            },
+            overlay: ReplicaItemRecord {
+                account_id: snapshot.account_id.clone(),
+                item_id: item_id.clone(),
+                vault_id: vault_id.to_owned(),
+                operation_id,
+                category: authority_item_category(draft.category()),
+                encrypted_data: sealed.ciphertext,
+                encryption_iv: sealed.iv,
+                encryption_algorithm: sealed.algorithm,
+                encryption_version: CREATE_ITEM_ENCRYPTION_VERSION,
+                encrypted_by_user_id: snapshot.user_id.clone(),
+                favorite: false,
+                version: 1,
+                created_at: accepted_at.to_owned(),
+                updated_at: accepted_at.to_owned(),
+                deleted_at: None,
+                attachments: Vec::new(),
+                permanently_deleted: false,
+            },
+            projection: ItemProjection {
+                account_id: snapshot.account_id.clone(),
+                item_id,
+                vault_id: vault_id.to_owned(),
+                data: draft,
+                favorite: false,
+                deleted_at: None,
+                attachments: Vec::new(),
+                // Nothing has changed this Item since this Device wrote it, so the two dates are
+                // the same one. The Server's own dates arrive with authority at reconciliation.
+                created_at: accepted_at.to_owned(),
+                updated_at: accepted_at.to_owned(),
+                status: ItemProjectionStatus::Pending,
+            },
+        })
+    }
+
+    fn prepare_existing_item_operation(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        item_id: &str,
+        intent: ExistingItemIntent,
+        accepted_at: &str,
+    ) -> Result<PreparedExistingItemOperation, RuntimeError> {
+        if snapshot.bootstrap.state != ReplicaState::Ready {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the Replica is not ready for local writes",
+            ));
+        }
+        let generation = snapshot
+            .bootstrap
+            .active_generation
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "a ready Replica has no active Bootstrap generation",
+                )
+            })?;
+        let item = snapshot
+            .bootstrap
+            .items
+            .get(&(generation.clone(), item_id.to_owned()))
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item is not authoritative in this Replica",
+                )
+            })?;
+        if item.version <= 0 {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the selected Item cannot use the Item operation contract",
+            ));
+        }
+        let source_vault = snapshot
+            .bootstrap
+            .vaults
+            .get(&(generation.clone(), item.vault_id.clone()))
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "the selected Item's Vault is not visible in this Replica",
+                )
+            })?;
+        if source_vault.role == AuthorityVaultRole::ReadOnly {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the selected Item's Vault is read only",
+            ));
+        }
+        let master_unlock_key = self
+            .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationRequired,
+                    "the selected Account is signed out or locked",
+                )
+            })?;
+        let operation_id = bittery_crypto_core::generate_uuid();
+        let mut overlay = ReplicaItemRecord {
+            account_id: snapshot.account_id.clone(),
+            item_id: item.id.clone(),
+            vault_id: item.vault_id.clone(),
+            operation_id: operation_id.clone(),
+            category: item.category.clone(),
+            encrypted_data: item.encrypted_data.clone(),
+            encryption_iv: item.encryption_iv.clone(),
+            encryption_algorithm: item.encryption_algorithm.clone(),
+            encryption_version: item.encryption_version,
+            encrypted_by_user_id: item.encrypted_by_user_id.clone(),
+            favorite: item.favorite,
+            version: item.version.checked_add(1).ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "Item version overflowed",
+                )
+            })?,
+            created_at: item.created_at.clone(),
+            updated_at: accepted_at.to_owned(),
+            deleted_at: item.deleted_at.clone(),
+            attachments: item.attachments.clone(),
+            permanently_deleted: false,
+        };
+        let expected_version = item.version;
+        let if_match = HttpHeader {
+            name: "If-Match".into(),
+            value: format!("\"{expected_version}\""),
+        };
+        let (kind, method, route, path, mut headers, body, operation_vault_id) = match intent {
+            ExistingItemIntent::Update(mut draft) => {
+                if authority_item_category(draft.category()) != item.category {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "an Item update cannot change its category",
+                    ));
+                }
+                let vault_key = Zeroizing::new(unwrap_vault_key(
+                    source_vault,
+                    &snapshot.user_id,
+                    &master_unlock_key,
+                )?);
+                if let ItemDraft::Login(login) = draft.as_mut() {
+                    let previous_plaintext = Zeroizing::new(
+                        decrypt_with_aad(
+                            &EncryptedData {
+                                ciphertext: item.encrypted_data.clone(),
+                                iv: item.encryption_iv.clone(),
+                                algorithm: item.encryption_algorithm.clone(),
+                            },
+                            &vault_key,
+                            &AadContext {
+                                vault_id: item.vault_id.clone(),
+                                entity_id: item.id.clone(),
+                                entity_type: "item".into(),
+                                version: item.encryption_version as u64,
+                                user_id: item.encrypted_by_user_id.clone(),
+                            },
+                        )
+                        .map_err(|_| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the selected Item ciphertext could not be opened",
+                            )
+                        })?,
+                    );
+                    let previous = ZeroizingJsonValue::new(
+                        serde_json::from_str(&previous_plaintext).map_err(|_| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the selected Login plaintext is invalid",
+                            )
+                        })?,
+                    );
+                    let password = match previous.0.get("password") {
+                        None | Some(serde_json::Value::Null) => None,
+                        Some(serde_json::Value::String(value)) => Some(value.as_str()),
+                        _ => {
+                            return Err(RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the selected Login password is invalid",
+                            ))
+                        }
+                    };
+                    apply_login_password_history(login, password, accepted_at);
+                }
+                let plaintext = Zeroizing::new(item_plaintext(&draft).map_err(|_| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "Login draft could not be serialized",
+                    )
+                })?);
+                let sealed = encrypt_with_aad(
+                    &plaintext,
+                    &vault_key,
+                    &AadContext {
+                        vault_id: item.vault_id.clone(),
+                        entity_id: item.id.clone(),
+                        entity_type: "item".into(),
+                        version: overlay.version as u64,
+                        user_id: snapshot.user_id.clone(),
+                    },
+                )
+                .map_err(|_| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "Login draft could not be encrypted",
+                    )
+                })?;
+                overlay.encrypted_data = sealed.ciphertext.clone();
+                overlay.encryption_iv = sealed.iv.clone();
+                overlay.encryption_algorithm = sealed.algorithm.clone();
+                overlay.encryption_version = overlay.version;
+                overlay.encrypted_by_user_id = snapshot.user_id.clone();
+                let body = serde_json::to_vec(&UpdateItemBody {
+                    encrypted_data: Some(sealed.ciphertext),
+                    encryption_algorithm: Some(sealed.algorithm),
+                    encryption_iv: Some(sealed.iv),
+                })
+                .map_err(|_| operation_serialization_error())?;
+                (
+                    OperationKind::UpdateItem,
+                    HttpMethod::Patch,
+                    UPDATE_ITEM_ROUTE,
+                    format!("/api/v1/items/{item_id}"),
+                    vec![content_type("application/merge-patch+json")],
+                    body,
+                    item.vault_id.clone(),
+                )
+            }
+            ExistingItemIntent::SetFavorite(favorite) => {
+                overlay.favorite = favorite;
+                (
+                    OperationKind::SetItemFavorite,
+                    HttpMethod::Patch,
+                    FAVORITE_ITEM_ROUTE,
+                    format!("/api/v1/items/{item_id}/favorite"),
+                    vec![content_type("application/merge-patch+json")],
+                    serde_json::to_vec(&FavoriteBody { favorite })
+                        .map_err(|_| operation_serialization_error())?,
+                    item.vault_id.clone(),
+                )
+            }
+            ExistingItemIntent::Trash => {
+                overlay.deleted_at = Some(accepted_at.to_owned());
+                (
+                    OperationKind::TrashItem,
+                    HttpMethod::Delete,
+                    TRASH_ITEM_ROUTE,
+                    format!("/api/v1/items/{item_id}"),
+                    Vec::new(),
+                    Vec::new(),
+                    item.vault_id.clone(),
+                )
+            }
+            ExistingItemIntent::Restore => {
+                overlay.deleted_at = None;
+                (
+                    OperationKind::RestoreItem,
+                    HttpMethod::Post,
+                    RESTORE_ITEM_ROUTE,
+                    format!("/api/v1/items/{item_id}/restore"),
+                    Vec::new(),
+                    Vec::new(),
+                    item.vault_id.clone(),
+                )
+            }
+            ExistingItemIntent::Move { target_vault_id } => {
+                let target_vault = snapshot
+                    .bootstrap
+                    .vaults
+                    .get(&(generation, target_vault_id.clone()))
+                    .ok_or_else(|| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            "the target Vault is not visible in this Replica",
+                        )
+                    })?;
+                if target_vault.role == AuthorityVaultRole::ReadOnly {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "the target Vault is read only",
+                    ));
+                }
+                let source_key = Zeroizing::new(unwrap_vault_key(
+                    source_vault,
+                    &snapshot.user_id,
+                    &master_unlock_key,
+                )?);
+                let plaintext = Zeroizing::new(
+                    decrypt_with_aad(
+                        &EncryptedData {
+                            ciphertext: item.encrypted_data.clone(),
+                            iv: item.encryption_iv.clone(),
+                            algorithm: item.encryption_algorithm.clone(),
+                        },
+                        &source_key,
+                        &AadContext {
+                            vault_id: item.vault_id.clone(),
+                            entity_id: item.id.clone(),
+                            entity_type: "item".into(),
+                            version: item.encryption_version as u64,
+                            user_id: item.encrypted_by_user_id.clone(),
+                        },
+                    )
+                    .map_err(|_| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::InvariantViolation,
+                            "the selected Item ciphertext could not be opened",
+                        )
+                    })?,
+                );
+                super::bootstrap::decode_item_plaintext(&plaintext, &item.category)?;
+                let target_key = Zeroizing::new(unwrap_vault_key(
+                    target_vault,
+                    &snapshot.user_id,
+                    &master_unlock_key,
+                )?);
+                let sealed = encrypt_with_aad(
+                    &plaintext,
+                    &target_key,
+                    &AadContext {
+                        vault_id: target_vault_id.clone(),
+                        entity_id: item.id.clone(),
+                        entity_type: "item".into(),
+                        version: overlay.version as u64,
+                        user_id: snapshot.user_id.clone(),
+                    },
+                )
+                .map_err(|_| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "the selected Item could not be sealed for its target Vault",
+                    )
+                })?;
+                overlay.vault_id = target_vault_id.clone();
+                overlay.encrypted_data = sealed.ciphertext.clone();
+                overlay.encryption_iv = sealed.iv.clone();
+                overlay.encryption_algorithm = sealed.algorithm.clone();
+                overlay.encryption_version = overlay.version;
+                overlay.encrypted_by_user_id = snapshot.user_id.clone();
+                if !item.attachments.is_empty() {
+                    let mut source_attachments = item.attachments.clone();
+                    source_attachments.sort_by(|left, right| left.id.cmp(&right.id));
+                    let progress = source_attachments
+                        .iter()
+                        .map(|attachment| AttachmentMoveProgress::Pending {
+                            attachment_id: attachment.id.clone(),
+                            expected_envelope_version: attachment.envelope_version,
+                        })
+                        .collect();
+                    let mut preparation = AttachmentMovePreparationRecord {
+                        account_id: snapshot.account_id.clone(),
+                        operation_id: operation_id.clone(),
+                        item_id: item.id.clone(),
+                        source_vault_id: item.vault_id.clone(),
+                        target_vault_id: target_vault_id.clone(),
+                        expected_item_version: expected_version,
+                        target_encrypted_data: sealed.ciphertext,
+                        target_encryption_algorithm: sealed.algorithm,
+                        target_encryption_iv: sealed.iv,
+                        source_attachments,
+                        progress,
+                        intent_fingerprint: Sha256Fingerprint([0; 32]),
+                        scheduling: OperationSchedulingState::default(),
+                    };
+                    preparation.intent_fingerprint =
+                        attachment_move_intent_fingerprint(&preparation)?;
+                    drop(master_unlock_key);
+                    return Ok(PreparedExistingItemOperation::AttachmentMove {
+                        preparation,
+                        overlay,
+                    });
+                }
+                let body = serde_json::to_vec(&MoveItemBody::Prepared {
+                    attachments: Some(Vec::new()),
+                    encrypted_data: sealed.ciphertext,
+                    encryption_algorithm: sealed.algorithm,
+                    encryption_iv: sealed.iv,
+                    source_vault_id: item.vault_id.clone(),
+                    target_vault_id: target_vault_id.clone(),
+                })
+                .map_err(|_| operation_serialization_error())?;
+                (
+                    OperationKind::MoveItem,
+                    HttpMethod::Post,
+                    MOVE_ITEM_ROUTE,
+                    format!("/api/v1/items/{item_id}/moves"),
+                    vec![content_type("application/json")],
+                    body,
+                    target_vault_id,
+                )
+            }
+            ExistingItemIntent::PermanentlyDelete => {
+                overlay.permanently_deleted = true;
+                (
+                    OperationKind::PermanentlyDeleteItem,
+                    HttpMethod::Delete,
+                    PERMANENTLY_DELETE_ITEM_ROUTE,
+                    format!("/api/v1/items/{item_id}/permanent"),
+                    Vec::new(),
+                    Vec::new(),
+                    item.vault_id.clone(),
+                )
+            }
+        };
+        drop(master_unlock_key);
+        headers.push(if_match);
+        let request_fingerprint =
+            item_operation_fingerprint(kind, route, item_id, &body, expected_version);
+        Ok(PreparedExistingItemOperation::Ready {
+            operation: OperationRecord {
+                operation_id,
+                kind,
+                target: ResourceRef::Item {
+                    item_id: item_id.to_owned(),
+                    vault_id: operation_vault_id,
+                },
+                request: ImmutableHttpRequest {
+                    method,
+                    path,
+                    headers,
+                    body,
+                },
+                request_fingerprint,
+                attachment_move_recovery: None,
+                create_vault: None,
+                scheduling: OperationSchedulingState::default(),
+            },
+            overlay,
+        })
+    }
+}
+
+pub(super) fn item_plaintext(draft: &ItemDraft) -> Result<String, serde_json::Error> {
+    match draft {
+        ItemDraft::Login(value) => serde_json::to_string(value),
+        ItemDraft::SecureNote(value) => serde_json::to_string(value),
+        ItemDraft::CreditCard(value) => serde_json::to_string(value),
+        ItemDraft::Identity(value) => serde_json::to_string(value),
+        ItemDraft::Authenticator(value) => serde_json::to_string(value),
+    }
+}
+
+fn authority_item_category(category: crate::ItemCategory) -> AuthorityItemCategory {
+    match category {
+        crate::ItemCategory::Login => AuthorityItemCategory::Login,
+        crate::ItemCategory::SecureNote => AuthorityItemCategory::SecureNote,
+        crate::ItemCategory::CreditCard => AuthorityItemCategory::CreditCard,
+        crate::ItemCategory::Identity => AuthorityItemCategory::Identity,
+        crate::ItemCategory::Authenticator => AuthorityItemCategory::Totp,
+    }
+}
+
+pub(super) fn server_item_category(category: crate::ItemCategory) -> ItemCategory {
+    match category {
+        crate::ItemCategory::Login => ItemCategory::Login,
+        crate::ItemCategory::SecureNote => ItemCategory::SecureNote,
+        crate::ItemCategory::CreditCard => ItemCategory::CreditCard,
+        crate::ItemCategory::Identity => ItemCategory::Identity,
+        crate::ItemCategory::Authenticator => ItemCategory::Totp,
+    }
+}
+
+fn validate_share_draft(draft: &CreateShareDraft) -> Result<(), RuntimeError> {
+    let valid = match draft.access_mode {
+        ShareAccessMode::Anyone => draft.allowed_emails.is_empty(),
+        ShareAccessMode::EmailRestricted => {
+            !draft.allowed_emails.is_empty()
+                && draft.allowed_emails.len() <= 100
+                && draft.allowed_emails.iter().all(|email| {
+                    email.len() <= 320
+                        && !email.chars().any(char::is_whitespace)
+                        && email.split_once('@').is_some_and(|(local, domain)| {
+                            !local.is_empty()
+                                && !local.contains('@')
+                                && !domain.contains('@')
+                                && domain.split_once('.').is_some_and(|(left, right)| {
+                                    !left.is_empty() && !right.is_empty()
+                                })
+                        })
+                })
+        }
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            "the Share access controls are invalid",
+        ))
+    }
+}
+
+fn generate_share_token() -> String {
+    const ALPHABET: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    const UNBIASED_LIMIT: u8 = 248;
+    let mut token = String::with_capacity(32);
+    while token.len() < 32 {
+        let entropy = Zeroizing::new(generate_encryption_key());
+        for byte in entropy
+            .iter()
+            .copied()
+            .filter(|byte| *byte < UNBIASED_LIMIT)
+        {
+            token.push(ALPHABET[usize::from(byte % 62)] as char);
+            if token.len() == 32 {
+                break;
+            }
+        }
+    }
+    token
+}
+
+fn build_shared_payload(
+    plaintext: &serde_json::Value,
+    category: &AuthorityItemCategory,
+) -> Result<serde_json::Value, RuntimeError> {
+    let source = plaintext.as_object().ok_or_else(|| {
+        RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            "the selected Item plaintext is not an object",
+        )
+    })?;
+    if !source
+        .get("title")
+        .is_some_and(serde_json::Value::is_string)
+    {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            "the selected Item plaintext has no title",
+        ));
+    }
+    let mut shared = serde_json::Map::new();
+    for field in [
+        "title",
+        "url",
+        "urls",
+        "username",
+        "password",
+        "notes",
+        "note",
+        "customFields",
+        "cardholderName",
+        "cardNumber",
+        "cvv",
+        "expiryDate",
+        "billingAddress",
+        "firstName",
+        "middleName",
+        "lastName",
+        "email",
+        "addresses",
+        "phoneNumbers",
+        "ssn",
+        "passportNumber",
+        "driversLicense",
+        "dateOfBirth",
+        "totpSecret",
+        "totpIssuer",
+        "totpAccountName",
+        "totpAlgorithm",
+        "totpDigits",
+        "totpPeriod",
+    ] {
+        if let Some(value) = source.get(field) {
+            shared.insert(field.into(), value.clone());
+        }
+    }
+    let category = match category {
+        AuthorityItemCategory::Login => "login",
+        AuthorityItemCategory::SecureNote => "secure-note",
+        AuthorityItemCategory::CreditCard => "credit-card",
+        AuthorityItemCategory::Identity => "identity",
+        AuthorityItemCategory::Totp => "totp",
+    };
+    shared.insert(
+        "category".into(),
+        serde_json::Value::String(category.into()),
+    );
+    Ok(serde_json::Value::Object(shared))
+}
+
+fn content_type(value: &str) -> HttpHeader {
+    HttpHeader {
+        name: "Content-Type".into(),
+        value: value.into(),
+    }
+}
+
+fn operation_serialization_error() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::InvariantViolation,
+        "Item Operation request body could not be serialized",
+    )
+}
+
+/// Spells a Device instant the way the Server spells its own dates, so one list can sort both.
+fn rfc3339(now_ms: u64) -> Result<String, RuntimeError> {
+    let nanoseconds = i128::from(now_ms) * 1_000_000;
+    time::OffsetDateTime::from_unix_timestamp_nanos(nanoseconds)
+        .ok()
+        .and_then(|instant| {
+            instant
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "the Device clock is outside the supported range",
+            )
+        })
+}
+
+/// Opens the Vault key exactly the way the Bootstrap read path opens it, including the wrap-context
+/// equality that stops another Vault's or another User's key from being accepted.
+pub(super) fn unwrap_vault_key(
+    vault: &AuthorityVaultRecord,
+    user_id: &str,
+    master_unlock_key: &[u8; 32],
+) -> Result<Vec<u8>, RuntimeError> {
+    let wrapped: WrappedVaultKeyData =
+        serde_json::from_str(&vault.encrypted_vault_key).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "wrapped Vault key is invalid",
+            )
+        })?;
+    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != user_id {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            "wrapped Vault key context does not match",
+        ));
+    }
+    decrypt_vault_key_with_muk(
+        &vault.encrypted_vault_key,
+        master_unlock_key,
+        &wrapped.context,
+    )
+    .map_err(|_| {
+        RuntimeError::new(
+            RuntimeErrorCode::AuthenticationRequired,
+            "Vault key could not be unwrapped",
+        )
+    })
+}

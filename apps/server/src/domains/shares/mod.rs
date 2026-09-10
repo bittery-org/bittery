@@ -14,20 +14,16 @@ use crate::{
     },
     domains::billing::entitlements::{load_team_billing_entitlement, resolve_share_links_policy},
     domains::shares::records::{
-        consume_share_link_access, count_active_share_links, load_allowed_emails_for_links,
-        load_public_share_link_by_token, load_share_access_logs, load_share_links_for_item,
-        log_share_access,
+        consume_share_link_access, load_allowed_emails_for_links, load_public_share_link_by_token,
+        load_share_access_logs, load_share_links_for_item, log_share_access,
     },
     error::AppError,
     shapes::{
-        allowed_email_shape, create_share_link_shape, email_verification_shape,
-        public_share_access_shape, public_share_info_shape, share_access_log_shape,
-        share_link_list_entry_shape, share_link_list_shape,
+        allowed_email_shape, email_verification_shape, public_share_access_shape,
+        public_share_info_shape, share_access_log_shape, share_link_list_entry_shape,
+        share_link_list_shape,
     },
-    shared::{
-        generate_secure_token, rate_limit,
-        transaction::{acquire_advisory_lock, database_error},
-    },
+    shared::{rate_limit, transaction::database_error},
     AppState,
 };
 
@@ -53,10 +49,7 @@ pub struct LinkIdInput {
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateShareLinkInput {
-    pub item_id: String,
     pub access_mode: ShareLinkAccessMode,
-    #[serde(default)]
-    pub is_one_time_use: bool,
     pub expires_in: String,
     pub allowed_emails: Option<Vec<String>>,
     pub encrypted_item_data: String,
@@ -64,12 +57,6 @@ pub struct CreateShareLinkInput {
     pub encrypted_share_key: String,
     pub share_key_iv: String,
 }
-
-create_share_link_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateShareLinkResponse
-});
 
 allowed_email_shape!(service_struct {
     #[derive(Debug, Clone, Serialize)]
@@ -154,123 +141,6 @@ struct PublicShareLinkDetails {
 
 struct ShareLinksAccess {
     enabled: bool,
-    max_active_links: Option<i64>,
-    team_id: Option<String>,
-}
-
-pub(crate) async fn create_share_link(
-    app_state: &AppState,
-    user_id: &str,
-    input: CreateShareLinkInput,
-) -> Result<CreateShareLinkResponse, AppError> {
-    let pool = &app_state.db_pool;
-    let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
-    let Some(scoped_item) = scoped_item else {
-        return Err(AppError::not_found("Item not found"));
-    };
-
-    if !scoped_item.role.can_write() {
-        return Err(AppError::forbidden("Read-only users cannot share items"));
-    }
-
-    let share_links_access =
-        assert_share_links_entitlement(pool, app_state.config.server.mode, user_id).await?;
-    validate_create_share_input(&input)?;
-    if app_state
-        .rate_limiter
-        .check_and_increment(
-            rate_limit::SCOPE_SHARE_CREATE_DAILY,
-            user_id,
-            app_state.config.rate_limit.share_link_daily,
-            rate_limit::share_create_daily_limit(&app_state.config.rate_limit).window,
-        )
-        .await?
-        .is_limited()
-    {
-        return Err(AppError::too_many_requests(
-            "Daily share link limit reached",
-        ));
-    }
-
-    let expires_at = calculate_expiration(&input.expires_in)?;
-    let token = generate_secure_token();
-    let share_link_id = generate_resource_id("share_link");
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Failed to create share link transaction"))?;
-
-    if let Some(max_active_links) = share_links_access.max_active_links {
-        let lock_scope = share_links_access.team_id.as_deref().unwrap_or(user_id);
-        acquire_advisory_lock(
-            &mut *transaction,
-            &format!("share-links:{lock_scope}"),
-            "Failed to lock share link scope",
-        )
-        .await?;
-
-        let active_share_links = count_active_share_links(
-            &mut transaction,
-            share_links_access.team_id.as_deref(),
-            user_id,
-            time::OffsetDateTime::now_utc(),
-        )
-        .await?;
-        if active_share_links >= max_active_links {
-            return Err(AppError::forbidden(format!(
-				"Your plan allows up to {max_active_links} active share links. Revoke a link or upgrade to continue.",
-			)));
-        }
-    }
-
-    // Only the SHA-256 digest is persisted; the raw token leaves the process once,
-    // in this call's response, and is never recoverable from the database.
-    query(
-		"INSERT INTO share_link (id, item_id, created_by_id, token_hash, access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, max_access_count, expires_at) VALUES ($1, $2, $3, $4, $5::share_link_access_mode, $6, $7, $8, $9, $10, $11, $12)",
-	)
-	.bind(&share_link_id)
-	.bind(&scoped_item.item_id)
-	.bind(user_id)
-	.bind(hash_token(&token))
-	.bind(input.access_mode)
-	.bind(input.is_one_time_use)
-	.bind(&input.encrypted_item_data)
-	.bind(&input.encryption_iv)
-	.bind(&input.encrypted_share_key)
-	.bind(&input.share_key_iv)
-	.bind(if input.is_one_time_use { Some(1_i32) } else { None })
-	.bind(expires_at)
-	.execute(&mut *transaction)
-	.await
-	.map_err(|error| database_error(error, "Failed to insert share link"))?;
-
-    if input.access_mode == ShareLinkAccessMode::EmailRestricted {
-        for email in input.allowed_emails.as_ref().into_iter().flatten() {
-            query(
-				"INSERT INTO share_link_allowed_email (id, share_link_id, email) VALUES ($1, $2, $3)",
-			)
-			.bind(generate_resource_id("share_email"))
-			.bind(&share_link_id)
-			.bind(email.to_ascii_lowercase())
-			.execute(&mut *transaction)
-			.await
-			.map_err(|error| database_error(error, "Failed to insert share link allowed email"))?;
-        }
-    }
-
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit share link transaction"))?;
-
-    record_share_audit_event(pool, user_id, "share_created", &share_link_id).await?;
-
-    Ok(CreateShareLinkResponse {
-        id: share_link_id,
-        token,
-        expires_at: format_timestamp(expires_at),
-        base_share_url: base_share_url(&app_state.config.server),
-    })
 }
 
 pub(crate) async fn list_share_links_by_item(
@@ -873,11 +743,7 @@ async fn resolve_share_links_access(
 ) -> Result<ShareLinksAccess, AppError> {
     let mode = deployment_mode.as_str();
     if deployment_mode.is_self_hosted() {
-        return Ok(ShareLinksAccess {
-            enabled: true,
-            max_active_links: None,
-            team_id: None,
-        });
+        return Ok(ShareLinksAccess { enabled: true });
     }
 
     let actor =
@@ -885,28 +751,18 @@ async fn resolve_share_links_access(
             .await?;
 
     let Some(actor) = actor else {
-        return Ok(ShareLinksAccess {
-            enabled: false,
-            max_active_links: Some(0),
-            team_id: None,
-        });
+        return Ok(ShareLinksAccess { enabled: false });
     };
 
     let policy = resolve_share_links_policy(mode, actor.billing_plan, actor.billing_status);
     let team_id = actor.team_id;
 
     if team_id.is_none() {
-        return Ok(ShareLinksAccess {
-            enabled: false,
-            max_active_links: Some(0),
-            team_id: None,
-        });
+        return Ok(ShareLinksAccess { enabled: false });
     }
 
     Ok(ShareLinksAccess {
         enabled: policy.enabled,
-        max_active_links: policy.max_active_links,
-        team_id,
     })
 }
 
@@ -966,7 +822,7 @@ async fn get_public_share_state(
     })
 }
 
-fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), AppError> {
+pub(crate) fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), AppError> {
     if input.encrypted_item_data.is_empty()
         || input.encryption_iv.is_empty()
         || input.encrypted_share_key.is_empty()
@@ -996,7 +852,7 @@ fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), AppEr
     Ok(())
 }
 
-fn calculate_expiration(expires_in: &str) -> Result<time::OffsetDateTime, AppError> {
+pub(crate) fn calculate_expiration(expires_in: &str) -> Result<time::OffsetDateTime, AppError> {
     let duration = match expires_in {
         "1hour" => time::Duration::hours(1),
         "1day" => time::Duration::days(1),

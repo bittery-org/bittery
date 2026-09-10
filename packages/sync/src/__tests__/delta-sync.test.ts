@@ -17,6 +17,11 @@ function serverVault() {
 
 function client(): DeltaSyncApiClient {
 	return {
+		operations: {
+			get: async () => {
+				throw new Error("not used");
+			},
+		},
 		items: {
 			get: async () => {
 				throw new Error("not used");
@@ -174,6 +179,148 @@ describe("performDeltaSync vault mapping", () => {
 });
 
 describe("performDeltaSync Item encryption context", () => {
+	it("fetches and applies the authoritative Item for an applied Operation outcome", async () => {
+		const api = client();
+		const fetchedOperations: string[] = [];
+		api.operations.get = async (operationId) => {
+			fetchedOperations.push(operationId);
+			return {
+				data: {
+					operationId,
+					kind: "create_item",
+					result: { status: "applied", itemId: "item_1", version: 4 },
+				},
+			} as never;
+		};
+		api.items.get = async () => ({ data: serverItem() }) as never;
+		const { cache, items } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(fetchedOperations).toEqual(["operation_1"]);
+		expect(items[0]?.id).toBe("item_1");
+		expect(outcome?.result.status).toBe("applied");
+	});
+
+	it("returns a retained rejection without deleting its optimistic Item", async () => {
+		const api = client();
+		api.operations.get = async (operationId) =>
+			({
+				data: {
+					operationId,
+					kind: "create_item",
+					result: { status: "rejected", code: "vault_read_only" },
+				},
+			}) as never;
+		const { cache, removedItems } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(outcome?.result).toEqual({
+			status: "rejected",
+			code: "vault_read_only",
+		});
+		expect(removedItems).toEqual([]);
+	});
+
+	it("does not fetch an Item or return a Create Item result for an applied Share outcome", async () => {
+		const api = client();
+		const fetchedItems: unknown[] = [];
+		api.operations.get = async (operationId) =>
+			({
+				data: {
+					operationId,
+					kind: "create_share",
+					result: {
+						status: "applied",
+						shareLinkId: "share_link_1",
+						baseShareUrl: "https://app.example/share/",
+						expiresAt: "2026-08-27T00:00:00Z",
+					},
+				},
+			}) as never;
+		api.items.get = async (itemId) => {
+			fetchedItems.push(itemId);
+			return { data: serverItem() } as never;
+		};
+		const { cache, items } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "share_operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(fetchedItems).toEqual([]);
+		expect(items).toEqual([]);
+		expect(outcome).toBeUndefined();
+	});
+
+	it("does not project an applied Import outcome into Item sync", async () => {
+		const api = client();
+		const fetchedItems: unknown[] = [];
+		api.operations.get = async (operationId) =>
+			({
+				data: {
+					operationId,
+					kind: "import_items",
+					result: {
+						status: "applied",
+						vaultId: "vault_1",
+						importedCount: 2,
+					},
+				},
+			}) as never;
+		api.items.get = async (itemId) => {
+			fetchedItems.push(itemId);
+			return { data: serverItem() } as never;
+		};
+		const { cache, items, removedItems } = recordingCache();
+
+		const outcome = await performDeltaSync(
+			api,
+			cache,
+			event({
+				type: "operation_resolved",
+				entityId: "import_operation_1",
+				entityType: "operation",
+				vaultId: null,
+			}),
+			"acc_1",
+		);
+
+		expect(fetchedItems).toEqual([]);
+		expect(items).toEqual([]);
+		expect(removedItems).toEqual([]);
+		expect(outcome).toBeUndefined();
+	});
+
 	it.each([
 		"item_created",
 		"item_updated",

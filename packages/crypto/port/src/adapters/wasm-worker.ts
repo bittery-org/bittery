@@ -1,5 +1,16 @@
+import {
+	createSharedWorkerOwner,
+	type SharedWorkerHandle,
+	type SharedWorkerOwner,
+	type WorkerRpcChannel,
+	type WorkerRpcError,
+} from "@bittery/client-runtime/worker";
 import type { CryptoPort, KeyRef } from "../crypto-port";
-import { CryptoPortError, type CryptoPortErrorCode } from "../errors";
+import {
+	CRYPTO_PORT_ERROR_CODES,
+	CryptoPortError,
+	type CryptoPortErrorCode,
+} from "../errors";
 import { createKeyRefTable } from "../key-ref";
 import { CRYPTO_PORT_MEMBERS } from "../port-members";
 
@@ -30,15 +41,9 @@ export type WasmWorkerBackend = {
 
 /** One outbound call. `args` is already in wire form. */
 export interface CryptoPortCall {
-	id: number;
 	method: keyof CryptoPort;
 	args: readonly unknown[];
 }
-
-/** Errors cross as data because structured cloning thrown values varies by engine. */
-export type CryptoPortReply =
-	| { id: number; ok: true; value: unknown }
-	| { id: number; ok: false; code: CryptoPortErrorCode; message: string };
 
 type UnforwardedMember = Exclude<
 	keyof CryptoPort,
@@ -110,15 +115,15 @@ export type OnlyExportKeyCrossesWithBytes = [MemberCrossingWithBytes] extends [
 export const onlyExportKeyCrossesWithBytes: OnlyExportKeyCrossesWithBytes = true;
 
 /** A structural Worker slice lets tests supply an in-process double. */
-export interface CryptoWorkerHandle {
-	postMessage(message: unknown): void;
-	onmessage: ((event: MessageEvent) => void) | null;
-	onerror: ((event: ErrorEvent) => void) | null;
-}
+export interface CryptoWorkerHandle extends SharedWorkerHandle {}
 
 /** How the worker is obtained. `wasm-worker-test-doubles.ts` passes an in-process one. */
 export interface WasmWorkerDeps {
 	createWorker: () => CryptoWorkerHandle;
+	handleHostRequest?: (
+		payload: unknown,
+		signal: AbortSignal,
+	) => Promise<unknown>;
 }
 
 const DEFAULT_DEPS: WasmWorkerDeps = {
@@ -127,6 +132,12 @@ const DEFAULT_DEPS: WasmWorkerDeps = {
 			type: "module",
 		}),
 };
+
+export function createWasmWorkerOwner(
+	deps: WasmWorkerDeps = DEFAULT_DEPS,
+): SharedWorkerOwner {
+	return createSharedWorkerOwner(deps);
+}
 
 function isPlainObject(value: object): boolean {
 	const prototype = Object.getPrototypeOf(value) as object | null;
@@ -141,65 +152,19 @@ function isWorkerKeyToken(value: object): value is WorkerKeyToken {
 	);
 }
 
-interface PendingCall {
-	resolve: (value: unknown) => void;
-	reject: (error: CryptoPortError) => void;
+function isWorkerRpcChannel(
+	value: WasmWorkerDeps | WorkerRpcChannel,
+): value is WorkerRpcChannel {
+	return "request" in value && typeof value.request === "function";
 }
 
 export function createWasmWorkerCryptoPort(
-	deps: WasmWorkerDeps = DEFAULT_DEPS,
+	channelOrDeps: WorkerRpcChannel | WasmWorkerDeps = DEFAULT_DEPS,
 ): CryptoPort {
 	const keys = createKeyRefTable<WorkerKeyToken>();
-	const pending = new Map<number, PendingCall>();
-	let worker: CryptoWorkerHandle | null = null;
-	let backendFailure: CryptoPortError | null = null;
-	let nextId = 0;
-
-	function settle(event: MessageEvent): void {
-		const reply = event.data as CryptoPortReply;
-		const call = pending.get(reply.id);
-		if (call === undefined) {
-			return;
-		}
-		pending.delete(reply.id);
-		if (reply.ok) {
-			call.resolve(reply.value);
-			return;
-		}
-		call.reject(new CryptoPortError(reply.code, reply.message));
-	}
-
-	function abandon(event: ErrorEvent): void {
-		// A worker that died takes every key handle with it, so there is nothing to salvage
-		// and no call that can still be answered.
-		const failure = new CryptoPortError(
-			"backend-failure",
-			event.message.length > 0 ? event.message : "The crypto worker failed.",
-		);
-		const failedWorker = worker;
-		worker = null;
-		backendFailure = failure;
-		if (failedWorker) {
-			failedWorker.onmessage = null;
-			failedWorker.onerror = null;
-		}
-		for (const call of pending.values()) {
-			call.reject(failure);
-		}
-		pending.clear();
-	}
-
-	function ensureWorker(): CryptoWorkerHandle {
-		if (backendFailure) {
-			throw backendFailure;
-		}
-		if (worker === null) {
-			worker = deps.createWorker();
-			worker.onmessage = settle;
-			worker.onerror = abandon;
-		}
-		return worker;
-	}
+	const channel = isWorkerRpcChannel(channelOrDeps)
+		? channelOrDeps
+		: createWasmWorkerOwner(channelOrDeps).channel("crypto");
 
 	function toWire(value: unknown): unknown {
 		if (typeof value !== "object" || value === null) {
@@ -242,17 +207,27 @@ export function createWasmWorkerCryptoPort(
 		method: keyof CryptoPort,
 		args: readonly unknown[],
 	): Promise<unknown> {
-		const target = ensureWorker();
 		const wire = args.map(toWire);
-		const id = nextId;
-		nextId += 1;
-
-		const answer = new Promise<unknown>((resolve, reject) => {
-			pending.set(id, { resolve, reject });
-		});
-		target.postMessage({ id, method, args: wire } satisfies CryptoPortCall);
-
-		return fromWire(await answer);
+		try {
+			return fromWire(
+				await channel.request({
+					method,
+					args: wire,
+				} satisfies CryptoPortCall),
+			);
+		} catch (error) {
+			const rpcError = error as WorkerRpcError;
+			const code = CRYPTO_PORT_ERROR_CODES.includes(
+				rpcError.code as CryptoPortErrorCode,
+			)
+				? (rpcError.code as CryptoPortErrorCode)
+				: "backend-failure";
+			throw new CryptoPortError(
+				code,
+				error instanceof Error ? error.message : "The crypto worker failed.",
+				{ cause: error },
+			);
+		}
 	}
 
 	const forwarded = Object.fromEntries(

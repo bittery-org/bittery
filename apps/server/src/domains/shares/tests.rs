@@ -1,12 +1,15 @@
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, StatusCode};
 use serde_json::{json, Value};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{query, query_as, query_scalar, FromRow};
+use std::time::Duration;
 
 use super::*;
 use crate::config::Config;
 use crate::db::enums::{ShareLinkAccessMode, ShareLinkStatus};
 use crate::domains::auth::email::emailed_code_capture;
 use crate::error::AppErrorCode;
+use crate::shared::generate_secure_token;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_item, seed_team, seed_user, seed_vault,
     seed_vault_key, with_api_test_app, with_api_test_app_state, with_test_config,
@@ -42,12 +45,17 @@ const FIXTURE_ENCRYPTED_ITEM_DATA: &str = "fixture-encrypted-item-data";
 const FIXTURE_ENCRYPTION_IV: &str = "fixture-item-iv";
 const FIXTURE_ENCRYPTED_SHARE_KEY: &str = "fixture-encrypted-share-key";
 const FIXTURE_SHARE_KEY_IV: &str = "fixture-share-key-iv";
+const FIXTURE_RAW_SHARE_TOKEN: &str = "RuntimeOwnsThisToken1234567890ab";
+
+fn share_operation_headers(token: &str, operation_id: &'static str) -> HeaderMap {
+    let mut headers = authenticated_json_headers(token);
+    headers.insert("idempotency-key", HeaderValue::from_static(operation_id));
+    headers
+}
 
 fn sample_create_share_input() -> CreateShareLinkInput {
     CreateShareLinkInput {
-        item_id: "item_123".to_string(),
         access_mode: ShareLinkAccessMode::Anyone,
-        is_one_time_use: false,
         expires_in: "1day".to_string(),
         allowed_emails: None,
         encrypted_item_data: "encrypted-item-data".to_string(),
@@ -358,6 +366,7 @@ async fn create_share_via_api_rejects_read_only_users() {
                 &format!("/api/v1/items/{}/share-links", fixture.item_id),
                 Some(json!({
 
+                    "tokenHash": hash_token(FIXTURE_RAW_SHARE_TOKEN),
                     "accessMode": "anyone",
                     "isOneTimeUse": false,
                     "expiresIn": "1day",
@@ -367,16 +376,22 @@ async fn create_share_via_api_rejects_read_only_users() {
                     "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
                     "shareKeyIv": FIXTURE_SHARE_KEY_IV
                 })),
-                authenticated_json_headers(&session.token),
+                share_operation_headers(&session.token, "share-read-only"),
             )
             .await;
 
         response.assert_contract_status();
-        assert_handler_error(
-            &response.body,
-            "FORBIDDEN",
-            "Read-only users cannot share items",
-        );
+        assert_eq!(response.body["kind"], json!("create_share"));
+        assert_eq!(response.body["result"]["status"], json!("rejected"));
+        assert_eq!(response.body["result"]["code"], json!("vault_read_only"));
+        let rejection_audits: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND action = 'share_create_rejected' AND entity_type = 'operation' AND (metadata::jsonb)->>'code' = 'vault_read_only'",
+        )
+        .bind(&fixture.read_only_user_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("Share rejection audit should load");
+        assert_eq!(rejection_audits, 1);
 
         let share_link_count = query_scalar::<_, i64>(
             "SELECT COUNT(*)::bigint FROM share_link WHERE created_by_id = $1",
@@ -971,6 +986,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
 fn sample_create_share_params() -> Value {
     json!({
+        "tokenHash": hash_token(FIXTURE_RAW_SHARE_TOKEN),
         "accessMode": "anyone",
         "isOneTimeUse": false,
         "expiresIn": "1day",
@@ -1001,26 +1017,22 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
         assert_eq!(seeded, hash_token(&fixture.one_time_token));
         assert_eq!(seeded.len(), 64);
 
-        // A server-generated token is persisted the same way.
+        // Runtime supplies the digest and keeps the raw token; the Server returns neither.
         let session = app.issue_session(&fixture.owner_user_id).await;
         let created = app
             .api_json(
                 Method::POST,
                 &format!("/api/v1/items/{}/share-links", fixture.item_id),
                 Some(sample_create_share_params()),
-                authenticated_json_headers(&session.token),
+                share_operation_headers(&session.token, "share-hash-resolution"),
             )
             .await;
         created.assert_contract_status();
-        let created_link_id = created.body["id"]
+        let created_link_id = created.body["result"]["shareLinkId"]
             .as_str()
             .expect("create should return a link id")
             .to_string();
-        let created_token = created.body["token"]
-            .as_str()
-            .expect("create should return the raw token exactly once")
-            .to_string();
-        assert_eq!(created_token.len(), 32);
+        assert!(created.body.get("token").is_none());
 
         let stored =
             query_scalar::<_, String>("SELECT token_hash FROM share_link WHERE id = $1 LIMIT 1")
@@ -1028,8 +1040,8 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
                 .fetch_one(&app.pool)
                 .await
                 .expect("created share link should load");
-        assert_ne!(stored, created_token);
-        assert_eq!(stored, hash_token(&created_token));
+        assert_ne!(stored, FIXTURE_RAW_SHARE_TOKEN);
+        assert_eq!(stored, hash_token(FIXTURE_RAW_SHARE_TOKEN));
         assert_eq!(stored.len(), 64);
         assert!(stored.chars().all(|ch| ch.is_ascii_hexdigit()));
 
@@ -1037,7 +1049,7 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
         let info = app
             .api_json(
                 Method::GET,
-                &format!("/api/v1/public/share-links/{}", created_token.clone()),
+                &format!("/api/v1/public/share-links/{FIXTURE_RAW_SHARE_TOKEN}"),
                 None,
                 unauthenticated_json_headers(),
             )
@@ -1051,7 +1063,7 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
                 Method::POST,
                 &format!(
                     "/api/v1/public/share-links/{}/accesses",
-                    created_token.clone()
+                    FIXTURE_RAW_SHARE_TOKEN
                 ),
                 None,
                 unauthenticated_json_headers(),
@@ -1158,40 +1170,146 @@ async fn list_by_item_and_get_do_not_expose_share_tokens() {
     .await;
 }
 
-/// The create response is the single legitimate disclosure of the raw token. It is
-/// copy-once: nothing afterwards can return it.
 #[tokio::test]
-async fn create_share_returns_token_exactly_once() {
-    with_api_test_app("share_create_token_once", |app| async move {
+async fn create_share_retains_a_hash_only_operation_outcome_for_exact_replay() {
+    with_api_test_app("share_create_operation_replay", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
+        let operation_id = "share-operation-replay";
+        let token_hash = "07ef5131b9c182e8ae8a0c135e43ad2f5df86a07020f897bf7d4ee312f765a54";
+        let payload = json!({
+            "tokenHash": token_hash,
+            "accessMode": "anyone",
+            "isOneTimeUse": false,
+            "expiresIn": "1day",
+            "allowedEmails": null,
+            "encryptedItemData": FIXTURE_ENCRYPTED_ITEM_DATA,
+            "encryptionIv": FIXTURE_ENCRYPTION_IV,
+            "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
+            "shareKeyIv": FIXTURE_SHARE_KEY_IV
+        });
+        let mut headers = authenticated_json_headers(&session.token);
+        headers.insert("idempotency-key", HeaderValue::from_static(operation_id));
 
         let created = app
             .api_json(
                 Method::POST,
                 &format!("/api/v1/items/{}/share-links", fixture.item_id),
-                Some(sample_create_share_params()),
-                authenticated_json_headers(&session.token),
+                Some(payload.clone()),
+                headers.clone(),
             )
             .await;
         created.assert_contract_status();
-        let created_link_id = created.body["id"]
+        assert_eq!(created.body["operationId"], json!(operation_id));
+        assert_eq!(created.body["kind"], json!("create_share"));
+        assert_eq!(created.body["result"]["status"], json!("applied"));
+        assert!(created.body.get("token").is_none());
+        let created_link_id = created.body["result"]["shareLinkId"]
             .as_str()
             .expect("create should return a link id")
             .to_string();
-        let created_token = created.body["token"]
-            .as_str()
-            .expect("create should return the raw token")
-            .to_string();
-        assert_eq!(created_token.len(), 32);
 
         let stored_token_hash: String =
             query_scalar("SELECT token_hash FROM share_link WHERE id = $1")
-                .bind(created_link_id)
+                .bind(&created_link_id)
                 .fetch_one(&app.pool)
                 .await
                 .expect("created share token hash should load");
-        assert_ne!(stored_token_hash, created_token);
+        assert_eq!(stored_token_hash, token_hash);
+        let sync_events = query_scalar::<_, String>(
+            "SELECT event_type::text FROM sync_event WHERE user_id = $1 AND entity_id = ANY($2) ORDER BY seq ASC",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind(vec![fixture.item_id.clone(), operation_id.to_string()])
+        .fetch_all(&app.pool)
+        .await
+        .expect("Share Operation Sync events should load");
+        assert_eq!(sync_events, vec!["item_updated", "operation_resolved"]);
+
+        let replayed = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(payload),
+                headers,
+            )
+            .await;
+        replayed.assert_contract_status();
+        assert_eq!(replayed.body, created.body);
+        let link_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM share_link WHERE id = $1")
+            .bind(&created_link_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("created share count should load");
+        assert_eq!(link_count, 1);
+        let applied_audit_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND action = 'share_created' AND entity_type = 'share_link' AND entity_id = $2",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind(&created_link_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("applied Share audit count should load");
+        assert_eq!(applied_audit_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_share_entitlement_lookup_reuses_the_operation_transaction_connection() {
+    with_api_test_app("share_create_single_connection", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+        let one_connection_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(app.pool.connect_options().as_ref().clone())
+            .await
+            .expect("single-connection Share pool should connect");
+        let operation_id = "share-single-connection".to_string();
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            crate::domains::operations::execute_create_share_operation(
+                &one_connection_pool,
+                crate::domains::operations::CreateShareOperationInput {
+                    operation_id: operation_id.clone(),
+                    user_id: fixture.owner_user_id,
+                    item_id: fixture.item_id,
+                    raw_body: br#"{"tokenHash":"single-connection"}"#.to_vec(),
+                    token_hash: "10ef5131b9c182e8ae8a0c135e43ad2f5df86a07020f897bf7d4ee312f765a54"
+                        .to_string(),
+                    access_mode: ShareLinkAccessMode::Anyone,
+                    is_one_time_use: false,
+                    expires_at: time::OffsetDateTime::now_utc() + time::Duration::days(1),
+                    allowed_emails: None,
+                    encrypted_item_data: FIXTURE_ENCRYPTED_ITEM_DATA.to_string(),
+                    encryption_iv: FIXTURE_ENCRYPTION_IV.to_string(),
+                    encrypted_share_key: FIXTURE_ENCRYPTED_SHARE_KEY.to_string(),
+                    share_key_iv: FIXTURE_SHARE_KEY_IV.to_string(),
+                    client_id: Some("share-single-connection-client".to_string()),
+                    deployment_mode: crate::config::DeploymentMode::Cloud,
+                    base_share_url: "https://share.example.test/share/".to_string(),
+                },
+            ),
+        )
+        .await
+        .expect("Share creation must not wait for a second pool connection")
+        .expect("Share creation should resolve");
+        match result {
+            crate::domains::operations::OperationResolution::Outcome {
+                outcome,
+                newly_committed,
+            } => {
+                assert!(newly_committed);
+                assert_eq!(
+                    serde_json::to_value(outcome).expect("Share outcome should encode")
+                        ["operationId"],
+                    json!(operation_id),
+                );
+            }
+            crate::domains::operations::OperationResolution::IdReused => {
+                panic!("fresh Share Operation ID cannot be reused")
+            }
+        }
+        one_connection_pool.close().await;
     })
     .await;
 }
@@ -1374,6 +1492,7 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 			let response = app
 				.api_json(Method::POST, &format!("/api/v1/items/{}/share-links", fixture.item_id), Some(json!({
 
+						"tokenHash": hash_token(FIXTURE_RAW_SHARE_TOKEN),
 						"accessMode": "email-restricted",
 						"isOneTimeUse": true,
 						"expiresIn": "1day",
@@ -1382,13 +1501,13 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 						"encryptionIv": "item-iv",
 						"encryptedShareKey": "encrypted-share-key",
 						"shareKeyIv": "share-key-iv"
-					})), authenticated_json_headers(&session.token))
+					})), share_operation_headers(&session.token, "share-email-operation"))
 				.await;
 
 			response.assert_contract_status();
-			assert_eq!(response.body["baseShareUrl"], json!(expected_base_share_url));
+			assert_eq!(response.body["result"]["baseShareUrl"], json!(expected_base_share_url));
 
-			let link_id = response.body["id"]
+			let link_id = response.body["result"]["shareLinkId"]
 				.as_str()
 				.expect("share link id should be present");
 
@@ -1420,30 +1539,29 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 }
 
 #[tokio::test]
-async fn create_share_rejects_idempotency_keys_before_disclosing_a_secret() {
-    with_api_test_app("share_create_rejects_idempotency", |app| async move {
+async fn create_share_rejects_reused_operation_identity_with_different_bytes() {
+    with_api_test_app("share_create_rejects_identity_reuse", |app| async move {
         let fixture = build_share_actor_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.user_id).await;
-        let mut headers = authenticated_json_headers(&session.token);
-        headers.insert(
-            "idempotency-key",
-            HeaderValue::from_static("share-secret-key"),
-        );
+        let headers = share_operation_headers(&session.token, "share-reused-identity");
+        let first = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(sample_create_share_params()),
+                headers.clone(),
+            )
+            .await;
+        first.assert_contract_status();
 
+        let mut changed = sample_create_share_params();
+        changed["tokenHash"] =
+            json!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let response = app
             .api_json(
                 Method::POST,
                 &format!("/api/v1/items/{}/share-links", fixture.item_id),
-                Some(json!({
-
-                    "accessMode": "anyone",
-                    "isOneTimeUse": true,
-                    "expiresIn": "1day",
-                    "encryptedItemData": "encrypted-item-data",
-                    "encryptionIv": "item-iv",
-                    "encryptedShareKey": "encrypted-share-key",
-                    "shareKeyIv": "share-key-iv"
-                })),
+                Some(changed),
                 headers,
             )
             .await;
@@ -1451,8 +1569,8 @@ async fn create_share_rejects_idempotency_keys_before_disclosing_a_secret() {
         assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_handler_error(
             &response.body,
-            "IDEMPOTENCY_NOT_ALLOWED",
-            "Idempotency keys are not accepted for operations that return one-time secrets.",
+            "OPERATION_ID_REUSED",
+            "The Operation ID was already used for different immutable request bytes.",
         );
         let created: i64 = query_scalar(
             "SELECT COUNT(*)::bigint FROM share_link WHERE item_id = $1 AND created_by_id = $2",
@@ -1462,7 +1580,7 @@ async fn create_share_rejects_idempotency_keys_before_disclosing_a_secret() {
         .fetch_one(&app.pool)
         .await
         .expect("share link count should load");
-        assert_eq!(created, 0);
+        assert_eq!(created, 1);
     })
     .await;
 }
@@ -2021,9 +2139,9 @@ async fn create_share_via_api_is_daily_rate_limited() {
         |app| async move {
             let fixture = build_share_router_fixture(&app.pool).await;
             let session = app.issue_session(&fixture.owner_user_id).await;
-            let headers = authenticated_json_headers(&session.token);
 
             let params = json!({
+                "tokenHash": hash_token(FIXTURE_RAW_SHARE_TOKEN),
                 "accessMode": "anyone",
                 "isOneTimeUse": false,
                 "expiresIn": "1day",
@@ -2034,13 +2152,19 @@ async fn create_share_via_api_is_daily_rate_limited() {
                 "shareKeyIv": FIXTURE_SHARE_KEY_IV
             });
 
-            for _ in 0..2 {
+            for index in 0..2 {
+                let mut headers = authenticated_json_headers(&session.token);
+                headers.insert(
+                    "idempotency-key",
+                    HeaderValue::from_str(&format!("share-rate-{index}"))
+                        .expect("test Operation ID should be a header"),
+                );
                 let response = app
                     .api_json(
                         Method::POST,
                         &format!("/api/v1/items/{}/share-links", fixture.item_id),
                         Some(params.clone()),
-                        headers.clone(),
+                        headers,
                     )
                     .await;
                 response.assert_contract_status();
@@ -2052,7 +2176,7 @@ async fn create_share_via_api_is_daily_rate_limited() {
                     Method::POST,
                     &format!("/api/v1/items/{}/share-links", fixture.item_id),
                     Some(params.clone()),
-                    headers.clone(),
+                    share_operation_headers(&session.token, "share-rate-blocked"),
                 )
                 .await;
             blocked.assert_contract_status();

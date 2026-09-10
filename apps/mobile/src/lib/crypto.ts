@@ -1,10 +1,8 @@
-/**
- * One CryptoPort for this React Native JavaScript process.
- *
- * AccountStore, sync, and the UI must share this closure because a KeyRef belongs only to
- * the port that minted it.
- */
+import { createWasmWorkerCryptoPort } from "@bittery/crypto-port/adapters/wasm-worker";
 
-import { createReactNativeCryptoPort } from "@bittery/crypto-port/adapters/react-native";
+export const crypto = createWasmWorkerCryptoPort();
 
-export const crypto = createReactNativeCryptoPort();
+// Preloading avoids delaying the first sign-in; failed initialization remains retryable.
+if (typeof window !== "undefined") {
+	void crypto.initialize().catch(() => undefined);
+}

@@ -1,0 +1,3906 @@
+use crate::{
+    http_transport::{
+        HttpByteStream, HttpDispatch, HttpHeader, HttpMethod, HttpResponse, HttpStreamOpening,
+        HttpTransport,
+    },
+    replica::ImmutableHttpRequest,
+    server_contract::{
+        AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, DeleteAccountRequest,
+        DeleteAccountResponse, ErrorCode, FinishLoginRequest, FinishLoginResponse,
+        LoginAttemptResponse, ProblemDetails, StartLoginRequest, TravelModeResponse,
+        VaultDetailsResponseDto, VaultImageStagingBody, VaultImageStagingGrantResponse,
+        VaultImageStagingStatusResponse,
+    },
+    RequestCancellation, RuntimeError, RuntimeErrorCode,
+};
+use serde::{de::DeserializeOwned, Serialize};
+use std::collections::HashSet;
+use url::{Host, Url};
+
+const SMALL_AUTH_RESPONSE_BYTES: u32 = 64 * 1024;
+// The Server accepts a roughly 1.1 MiB manifest request and returns one storage identity plus an
+// expanded presigned credential for every entry. Keep that amplification finite while allowing
+// about fifteen times the maximum request size for duplicated identities and signed URL material.
+const ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES: u32 = 16 * 1024 * 1024;
+// One grant contains one bounded Attachment authority document and one invocation-scoped signed
+// URL. Leave ample room for object-store credential expansion without accepting an entity page.
+const ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES: u32 = 256 * 1024;
+const ATTACHMENT_AUTHORITY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
+// Keep one Item's paginated Attachment authority inside the same aggregate envelope already used
+// for authenticated Vault-key authority, and the same page bound as bounded Bootstrap.
+const MAX_ATTACHMENT_AUTHORITY_PAGES: usize = 4_096;
+const MAX_ATTACHMENT_AUTHORITY_ITEMS: usize = MAX_AUTH_VAULT_KEYS;
+const MAX_ATTACHMENT_AUTHORITY_BYTES: usize = MAX_AUTH_VAULT_KEY_BYTES;
+/// One Operation outcome is a small closed document, never an entity page.
+const OPERATION_OUTCOME_RESPONSE_BYTES: u32 = 64 * 1024;
+const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
+const VAULT_IMAGE_STAGING_RESPONSE_BYTES: u32 = 256 * 1024;
+
+pub(crate) fn decode_sha256_hex(value: &str) -> Option<[u8; 32]> {
+    if value.len() != 64 {
+        return None;
+    }
+    let mut decoded = [0_u8; 32];
+    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        let digit = |byte: u8| match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            _ => None,
+        };
+        decoded[index] = digit(pair[0])?
+            .checked_mul(16)?
+            .checked_add(digit(pair[1])?)?;
+    }
+    Some(decoded)
+}
+
+pub(crate) enum AuthenticatedOutcome<T> {
+    Ok(T),
+    ReauthenticationRequired,
+    Transient,
+}
+
+pub(crate) enum ServerAccountDeletionAnswer {
+    Deleted { request_id: String },
+    ConfirmationEmailMismatch { request_id: String },
+    Blocked { request_id: String },
+}
+
+impl<T> AuthenticatedOutcome<T> {
+    pub(crate) fn map<U>(self, map: impl FnOnce(T) -> U) -> AuthenticatedOutcome<U> {
+        match self {
+            Self::Ok(value) => AuthenticatedOutcome::Ok(map(value)),
+            Self::ReauthenticationRequired => AuthenticatedOutcome::ReauthenticationRequired,
+            Self::Transient => AuthenticatedOutcome::Transient,
+        }
+    }
+}
+
+/// What one dispatched Operation attempt brought back, before anyone reads meaning into it.
+///
+/// Transport status is deliberately preserved rather than interpreted here. Turning this into a
+/// semantic outcome, with fingerprint and Item-version verification, belongs to the outcome and
+/// reconciliation slice.
+pub(crate) struct OperationDispatchResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+pub(crate) struct RawJsonPage<T> {
+    pub raw_body: Vec<u8>,
+    pub value: T,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveManifestHttpEntry {
+    pub(crate) attachment_id: String,
+    pub(crate) envelope_version: i32,
+    pub(crate) ciphertext_sha256: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveManifestHttpRequest {
+    pub(crate) item_id: String,
+    pub(crate) source_vault_id: String,
+    pub(crate) target_vault_id: String,
+    pub(crate) attachments: Vec<AttachmentMoveManifestHttpEntry>,
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestUpload {
+    pub(crate) attachment_id: String,
+    pub(crate) storage_key: String,
+    pub(crate) upload_url: String,
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestHttpResponse {
+    pub(crate) operation_id: String,
+    pub(crate) expires_at: String,
+    pub(crate) attachments: Vec<AttachmentMoveManifestUpload>,
+}
+
+pub(crate) enum AttachmentMoveManifestAnswer {
+    Prepared(AttachmentMoveManifestHttpResponse),
+    Busy,
+    StaleAuthority,
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentDownloadGrant {
+    pub(crate) attachment_id: String,
+    pub(crate) item_id: String,
+    pub(crate) vault_id: String,
+    pub(crate) storage_key: String,
+    pub(crate) envelope_version: i32,
+    pub(crate) uploaded_by: String,
+    pub(crate) download_url: String,
+    pub(crate) encrypted_name: String,
+    pub(crate) encrypted_content_type: String,
+    pub(crate) encryption_iv: String,
+    pub(crate) encrypted_content_type_iv: String,
+    pub(crate) encryption_algorithm: String,
+    pub(crate) file_size: i32,
+}
+
+pub(crate) enum AttachmentDownloadGrantAnswer {
+    Grant(Box<AttachmentDownloadGrant>),
+    StaleAuthority,
+    AccessDenied,
+}
+
+pub(crate) enum AttachmentRenameAnswer {
+    Updated,
+    Ambiguous,
+    Missing,
+    AccessDenied,
+}
+
+pub(crate) enum AttachmentDeleteAnswer {
+    Deleted,
+    Ambiguous,
+    Missing,
+    AccessDenied,
+}
+
+pub(crate) enum AttachmentUploadGrantAnswer {
+    Grant(crate::server_contract::AttachmentUploadResponse),
+    AccessDenied,
+    QuotaRejected,
+    SizeRejected,
+}
+
+pub(crate) enum AttachmentMetadataCreateAnswer {
+    Created(crate::server_contract::CreateAttachmentResponse),
+    Ambiguous,
+    AccessDenied,
+    Missing,
+    Rejected,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentAuthorityPage {
+    items: Vec<crate::server_contract::VaultAttachmentResponse>,
+    has_more: bool,
+    next_cursor: Option<String>,
+}
+
+pub(crate) struct AttachmentAuthorityFetch {
+    item_id: String,
+    cursor: Option<String>,
+    authority: AttachmentAuthorityAccumulator,
+    page_pending: bool,
+}
+
+struct RawHttpResponse {
+    status: u16,
+    headers: Vec<HttpHeader>,
+    body: Vec<u8>,
+}
+// Authentication is all-or-nothing. These maintainer-approved aggregate bounds cover the initial
+// Finish-login page and every cursor page so a hostile Server cannot grow unique cursors forever.
+const MAX_AUTH_VAULT_KEYS: usize = 21_000;
+const MAX_AUTH_VAULT_KEY_BYTES: usize = 32 * 1024 * 1024;
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub enum ClientPlatform {
+    Web,
+    Desktop,
+    Mobile,
+    Extension,
+}
+
+impl ClientPlatform {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Web => "web",
+            Self::Desktop => "desktop",
+            Self::Mobile => "mobile",
+            Self::Extension => "extension",
+        }
+    }
+}
+
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct AuthClientConfig {
+    pub(crate) client_id: String,
+    pub(crate) platform: ClientPlatform,
+    pub(crate) version: String,
+}
+
+impl AuthClientConfig {
+    #[inline]
+    pub fn new(
+        client_id: String,
+        platform: ClientPlatform,
+        version: String,
+    ) -> Result<Self, RuntimeError> {
+        let config = Self {
+            client_id,
+            platform,
+            version,
+        };
+        validate_config(&config)?;
+        Ok(config)
+    }
+}
+
+/// Typed authentication requests and response policy over the primitive host transport seam.
+pub(crate) struct AuthHttpClient<'transport> {
+    transport: &'transport HttpTransport,
+    base_url: Url,
+    config: AuthClientConfig,
+}
+
+impl<'transport> AuthHttpClient<'transport> {
+    pub(crate) fn new(
+        transport: &'transport HttpTransport,
+        server_url: &str,
+        insecure_transport_confirmed: bool,
+        config: AuthClientConfig,
+    ) -> Result<Self, RuntimeError> {
+        validate_config(&config)?;
+        let base_url = normalize_server_url(server_url, insecure_transport_confirmed)?;
+        Ok(Self {
+            transport,
+            base_url,
+            config,
+        })
+    }
+
+    pub(crate) fn normalized_server_url(&self) -> String {
+        self.base_url.as_str().trim_end_matches('/').to_owned()
+    }
+
+    pub(crate) async fn start_login(
+        &self,
+        request: &StartLoginRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<LoginAttemptResponse, RuntimeError> {
+        self.post_json(
+            &["api", "v1", "auth", "login-attempts"],
+            request,
+            201,
+            SMALL_AUTH_RESPONSE_BYTES,
+            None,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn finish_login(
+        &self,
+        attempt_id: &str,
+        request: &FinishLoginRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<FinishLoginResponse, RuntimeError> {
+        self.post_json(
+            &["api", "v1", "auth", "login-attempts", attempt_id, "finish"],
+            request,
+            200,
+            VAULT_KEY_RESPONSE_BYTES,
+            None,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn drain_vault_keys(
+        &self,
+        token: &str,
+        initial_page: CursorPageAuthVaultKeyResponse,
+        cancellation: RequestCancellation,
+    ) -> Result<Vec<AuthVaultKeyResponse>, RuntimeError> {
+        validate_bearer(token)?;
+        let CursorPageAuthVaultKeyResponse {
+            has_more,
+            items,
+            next_cursor: page_cursor,
+        } = initial_page;
+        let mut cursor = next_cursor(has_more, page_cursor, items.len())?;
+        let mut vault_keys = VaultKeyAccumulator::new();
+        vault_keys.append(items)?;
+        let mut cursor_evidence = CursorEvidence::new();
+
+        while let Some(current) = cursor {
+            cursor_evidence.record(&current)?;
+            let mut url = self.endpoint(&["api", "v1", "users", "me", "vault-keys"])?;
+            url.query_pairs_mut().append_pair("cursor", &current);
+            let page: CursorPageAuthVaultKeyResponse = self
+                .get_json(
+                    url,
+                    200,
+                    VAULT_KEY_RESPONSE_BYTES,
+                    Some(token),
+                    cancellation.clone(),
+                )
+                .await?;
+            let CursorPageAuthVaultKeyResponse {
+                has_more,
+                items,
+                next_cursor: page_cursor,
+            } = page;
+            cursor = next_cursor(has_more, page_cursor, items.len())?;
+            vault_keys.append(items)?;
+        }
+        Ok(vault_keys.into_items())
+    }
+
+    pub(crate) async fn get_travel_mode(
+        &self,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<TravelModeResponse, RuntimeError> {
+        validate_bearer(token)?;
+        let url = self.endpoint(&["api", "v1", "travel-mode"])?;
+        self.get_json(
+            url,
+            200,
+            SMALL_AUTH_RESPONSE_BYTES,
+            Some(token),
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn refresh_session(
+        &self,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::RefreshSessionResponse>, RuntimeError>
+    {
+        validate_bearer(token)?;
+        let url = self.endpoint(&["api", "v1", "sessions", "current", "refresh"])?;
+        let raw = self
+            .execute_raw(
+                HttpMethod::Post,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                SMALL_AUTH_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let value = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Session refresh returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(value))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn delete_server_account(
+        &self,
+        token: &str,
+        request_id: &str,
+        confirm_email: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<ServerAccountDeletionAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_deletion_request_id(request_id)?;
+        let body = serde_json::to_vec(&DeleteAccountRequest {
+            confirm_email: confirm_email.to_owned(),
+        })
+        .map_err(|_| invariant("Account deletion request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".to_owned(),
+                value: "application/json".to_owned(),
+            },
+        );
+        headers.push(HttpHeader {
+            name: "Idempotency-Key".to_owned(),
+            value: request_id.to_owned(),
+        });
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Delete,
+                    self.endpoint(&["api", "v1", "users", "me"])?.into(),
+                    headers,
+                    body,
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await
+            .map_err(|_| authentication_failure("Account deletion transport failed"))?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let response: DeleteAccountResponse =
+                    serde_json::from_slice(&body).map_err(|_| {
+                        authentication_failure("Account deletion returned invalid JSON")
+                    })?;
+                if response.outcome != "deleted" {
+                    return Err(authentication_failure(
+                        "Account deletion returned an unknown outcome",
+                    ));
+                }
+                Ok(AuthenticatedOutcome::Ok(
+                    ServerAccountDeletionAnswer::Deleted {
+                        request_id: response.request_id,
+                    },
+                ))
+            }
+            HttpResponse::Completed {
+                status: status @ (400 | 409),
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Account deletion returned invalid Problem Details")
+                })?;
+                let answer = match (status, problem.code) {
+                    (400, ErrorCode::AccountDeletionConfirmationMismatch) => {
+                        ServerAccountDeletionAnswer::ConfirmationEmailMismatch {
+                            request_id: problem.request_id,
+                        }
+                    }
+                    (409, ErrorCode::AccountDeletionBlocked) => {
+                        ServerAccountDeletionAnswer::Blocked {
+                            request_id: problem.request_id,
+                        }
+                    }
+                    _ => {
+                        return Err(authentication_failure(
+                            "Account deletion returned an unexpected closed outcome",
+                        ));
+                    }
+                };
+                Ok(AuthenticatedOutcome::Ok(answer))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed {
+                status: 0 | 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge
+            | HttpResponse::Cancelled => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Completed { .. } => Err(authentication_failure(
+                "Account deletion returned an unexpected status",
+            )),
+        }
+    }
+
+    pub(crate) async fn bootstrap_page(
+        &self,
+        token: &str,
+        phase: &str,
+        request_cursor: Option<&str>,
+        pinned_sync_cursor: Option<&str>,
+        sync_cursor_captured: bool,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<RawJsonPage<crate::server_contract::BootstrapItemsResponse>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        let mut url = self.endpoint(&["api", "v1", "sync", "bootstrap"])?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", "500");
+            query.append_pair("phase", phase);
+            if let Some(cursor) = request_cursor {
+                query.append_pair("cursor", cursor);
+            }
+            if sync_cursor_captured {
+                query.append_pair("syncCursorCaptured", "true");
+                if let Some(sync_cursor) = pinned_sync_cursor {
+                    query.append_pair("syncCursor", sync_cursor);
+                }
+            }
+        }
+        self.get_authenticated_json(url, VAULT_KEY_RESPONSE_BYTES, token, cancellation)
+            .await
+    }
+
+    pub(crate) async fn sync_changes(
+        &self,
+        token: &str,
+        since_id: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::SyncChangesResponse>, RuntimeError>
+    {
+        validate_bearer(token)?;
+        let mut url = self.endpoint(&["api", "v1", "sync", "changes"])?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", "100");
+            if let Some(since_id) = since_id {
+                query.append_pair("sinceId", since_id);
+            }
+        }
+        Ok(self
+            .get_authenticated_json(url, VAULT_KEY_RESPONSE_BYTES, token, cancellation)
+            .await?
+            .map(|page| page.value))
+    }
+
+    pub(crate) async fn fetch_item(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::ItemResponseDto>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let url = self.endpoint(&["api", "v1", "items", item_id])?;
+        Ok(self
+            .get_authenticated_json(url, VAULT_KEY_RESPONSE_BYTES, token, cancellation)
+            .await?
+            .map(|page| page.value))
+    }
+
+    /// Reads current Item authority for semantic reconciliation, where `404` is authoritative
+    /// absence rather than a transport failure.
+    pub(crate) async fn fetch_item_or_absent(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
+    {
+        self.fetch_item_or_absent_with_transport_policy(token, item_id, cancellation, false)
+            .await
+    }
+
+    pub(crate) async fn fetch_item_or_absent_for_attachment(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
+    {
+        self.fetch_item_or_absent_with_transport_policy(token, item_id, cancellation, true)
+            .await
+    }
+
+    async fn fetch_item_or_absent_with_transport_policy(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+        transport_is_transient: bool,
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
+    {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let url = self.endpoint(&["api", "v1", "items", item_id])?;
+        self.get_optional_authenticated_json(
+            url,
+            VAULT_KEY_RESPONSE_BYTES,
+            token,
+            cancellation,
+            transport_is_transient,
+        )
+        .await
+    }
+
+    /// Complete encrypted Item authority uses Bootstrap's metadata visibility policy. A forbidden
+    /// response remains unavailable; only the Server's explicit404 proves absence.
+    pub(crate) async fn fetch_sync_item_authority(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<Option<crate::server_contract::BootstrapItemResponse>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let url = self.endpoint(&["api", "v1", "items", item_id, "authority"])?;
+        self.get_optional_authenticated_json(
+            url,
+            VAULT_KEY_RESPONSE_BYTES,
+            token,
+            cancellation,
+            false,
+        )
+        .await
+    }
+
+    async fn get_optional_authenticated_json<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        max_bytes: u32,
+        token: &str,
+        cancellation: RequestCancellation,
+        transport_is_transient: bool,
+    ) -> Result<AuthenticatedOutcome<Option<T>>, RuntimeError> {
+        let raw = match self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                max_bytes,
+                cancellation,
+            )
+            .await
+        {
+            Ok(raw) => raw,
+            Err(error) if transport_is_transient && is_raw_transport_failure(&error) => {
+                return Ok(AuthenticatedOutcome::Transient);
+            }
+            Err(error) => return Err(error),
+        };
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let item = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Sync Server returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(Some(item)))
+            }
+            404 => Ok(AuthenticatedOutcome::Ok(None)),
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn open_sync_events(
+        &self,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<HttpByteStream>, RuntimeError> {
+        validate_bearer(token)?;
+        let url = self.endpoint(&["api", "v1", "sync", "events"])?;
+        let mut headers = self.headers(Some(token))?;
+        headers.push(HttpHeader {
+            name: "Accept".to_owned(),
+            value: "text/event-stream".to_owned(),
+        });
+        let opened = self
+            .transport
+            .open_stream(
+                HttpDispatch::new(HttpMethod::Get, url.into(), headers, Vec::new(), 64 * 1024),
+                cancellation,
+            )
+            .await?;
+        match opened {
+            HttpStreamOpening::Opened {
+                status: 200,
+                headers,
+                stream,
+            } => {
+                let content_types: Vec<_> = headers
+                    .iter()
+                    .filter(|header| header.name.eq_ignore_ascii_case("content-type"))
+                    .collect();
+                if content_types.len() != 1
+                    || !content_types[0]
+                        .value
+                        .split(';')
+                        .next()
+                        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
+                {
+                    return Ok(AuthenticatedOutcome::Transient);
+                }
+                Ok(AuthenticatedOutcome::Ok(stream))
+            }
+            HttpStreamOpening::Opened { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpStreamOpening::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Sync stream opening was cancelled",
+            )),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    /// Reads the semantic outcome the Server already retained for one Operation ID.
+    ///
+    /// This is what makes a lost response recoverable without sending the mutation again. The
+    /// Server keeps the outcome for the Account's lifetime, so `404` is a real answer — nothing
+    /// was decided yet — and not a transport failure to retry blindly.
+    pub(crate) async fn fetch_operation_outcome(
+        &self,
+        token: &str,
+        operation_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::OperationOutcome>>, RuntimeError>
+    {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let url = self.endpoint(&["api", "v1", "operations", operation_id])?;
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                OPERATION_OUTCOME_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let outcome = serde_json::from_slice(&raw.body).map_err(|_| {
+                    authentication_failure("Operation outcome lookup returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(Some(outcome)))
+            }
+            404 => Ok(AuthenticatedOutcome::Ok(None)),
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn renew_attachment_move_manifest(
+        &self,
+        token: &str,
+        operation_id: &str,
+        request: &AttachmentMoveManifestHttpRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentMoveManifestAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let body = serde_json::to_vec(request)
+            .map_err(|_| invariant("Attachment Move manifest request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".to_owned(),
+                value: "application/json".to_owned(),
+            },
+        );
+        let url = self.endpoint(&[
+            "api",
+            "v1",
+            "operations",
+            operation_id,
+            "attachment-move-manifest",
+        ])?;
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Put,
+                    url.into(),
+                    headers,
+                    body,
+                    ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let response = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment Move manifest returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(
+                    AttachmentMoveManifestAnswer::Prepared(response),
+                ))
+            }
+            HttpResponse::Completed {
+                status: 409,
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure(
+                        "Attachment Move manifest returned invalid Problem Details",
+                    )
+                })?;
+                let answer = match problem.code {
+                    ErrorCode::AttachmentAuthorityStale => {
+                        AttachmentMoveManifestAnswer::StaleAuthority
+                    }
+                    ErrorCode::AttachmentStagingBusy => AttachmentMoveManifestAnswer::Busy,
+                    _ => {
+                        return Err(authentication_failure(
+                            "Attachment Move manifest returned an unexpected conflict",
+                        ));
+                    }
+                };
+                Ok(AuthenticatedOutcome::Ok(answer))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed {
+                status: 0 | 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Attachment Move manifest request was cancelled",
+            )),
+            HttpResponse::Completed { .. } => Err(authentication_failure(
+                "Attachment Move manifest returned an unexpected status",
+            )),
+        }
+    }
+
+    pub(crate) async fn create_attachment_download_grant(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentDownloadGrantAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(attachment_id, "Attachment")?;
+        let url = self.endpoint(&["api", "v1", "attachments", attachment_id, "download-urls"])?;
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Post,
+                    url.into(),
+                    self.headers(Some(token))?,
+                    Vec::new(),
+                    ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let grant = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment download grant returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(
+                    AttachmentDownloadGrantAnswer::Grant(Box::new(grant)),
+                ))
+            }
+            HttpResponse::Completed { status: 404, .. } => Ok(AuthenticatedOutcome::Ok(
+                AttachmentDownloadGrantAnswer::StaleAuthority,
+            )),
+            HttpResponse::Completed { status: 403, .. } => Ok(AuthenticatedOutcome::Ok(
+                AttachmentDownloadGrantAnswer::AccessDenied,
+            )),
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed {
+                status: 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Attachment download grant request was cancelled",
+            )),
+            HttpResponse::Completed { .. } => Err(authentication_failure(
+                "Attachment download grant returned an unexpected status",
+            )),
+        }
+    }
+
+    pub(crate) async fn create_attachment_upload_grant(
+        &self,
+        token: &str,
+        item_id: &str,
+        body: &crate::server_contract::AttachmentUploadBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentUploadGrantAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Attachment Upload grant could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Post,
+                    self.endpoint(&["api", "v1", "items", item_id, "attachment-uploads"])?
+                        .into(),
+                    headers,
+                    body,
+                    ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let grant = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment Upload grant returned invalid JSON")
+                })?;
+                AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::Grant(grant))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed {
+                status: 403,
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure(
+                        "Attachment Upload grant returned invalid Problem Details",
+                    )
+                })?;
+                AuthenticatedOutcome::Ok(if problem.code == ErrorCode::AttachmentQuotaExceeded {
+                    AttachmentUploadGrantAnswer::QuotaRejected
+                } else {
+                    AttachmentUploadGrantAnswer::AccessDenied
+                })
+            }
+            HttpResponse::Completed {
+                status: 400 | 413, ..
+            } => AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::SizeRejected),
+            HttpResponse::Completed {
+                status: 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => AuthenticatedOutcome::Transient,
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment Upload grant was cancelled",
+                ))
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant(
+                    "Attachment Upload grant returned an unexpected status",
+                ))
+            }
+        })
+    }
+
+    pub(crate) async fn create_attachment_metadata(
+        &self,
+        token: &str,
+        item_id: &str,
+        body: &crate::server_contract::CreateAttachmentBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentMetadataCreateAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Attachment metadata could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Post,
+                    self.endpoint(&["api", "v1", "items", item_id, "attachments"])?
+                        .into(),
+                    headers,
+                    body,
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let created = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure("Attachment metadata returned invalid JSON")
+                })?;
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Created(created))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed { status: 403, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::AccessDenied)
+            }
+            HttpResponse::Completed { status: 404, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Missing)
+            }
+            HttpResponse::Completed {
+                status: 400 | 413, ..
+            } => AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Rejected),
+            HttpResponse::Completed {
+                status: 408 | 409 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Ambiguous)
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment metadata creation was cancelled",
+                ))
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant(
+                    "Attachment metadata returned an unexpected status",
+                ))
+            }
+        })
+    }
+
+    pub(crate) async fn rename_attachment(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        body: &crate::server_contract::UpdateAttachmentBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentRenameAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(attachment_id, "Attachment")?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Attachment Rename request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".to_owned(),
+                value: "application/merge-patch+json".to_owned(),
+            },
+        );
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Patch,
+                    self.endpoint(&["api", "v1", "attachments", attachment_id])?
+                        .into(),
+                    headers,
+                    body,
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed { status: 200, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::Updated)
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed { status: 403, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::AccessDenied)
+            }
+            HttpResponse::Completed { status: 404, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::Missing)
+            }
+            HttpResponse::Completed {
+                status: 408 | 409 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Ok(AttachmentRenameAnswer::Ambiguous)
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment Rename was cancelled",
+                ));
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant("Attachment Rename returned an unexpected status"));
+            }
+        })
+    }
+
+    pub(crate) async fn delete_attachment(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<AttachmentDeleteAnswer>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(attachment_id, "Attachment")?;
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Delete,
+                    self.endpoint(&["api", "v1", "attachments", attachment_id])?
+                        .into(),
+                    self.headers(Some(token))?,
+                    Vec::new(),
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed { status: 200, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::Deleted)
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                AuthenticatedOutcome::ReauthenticationRequired
+            }
+            HttpResponse::Completed { status: 403, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::AccessDenied)
+            }
+            HttpResponse::Completed { status: 404, .. } => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::Missing)
+            }
+            HttpResponse::Completed {
+                status: 408 | 409 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Ok(AttachmentDeleteAnswer::Ambiguous)
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Attachment Delete was cancelled",
+                ));
+            }
+            HttpResponse::Completed { .. } => {
+                return Err(invariant("Attachment Delete returned an unexpected status"));
+            }
+        })
+    }
+
+    pub(crate) async fn fetch_attachment_authority(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<Vec<crate::server_contract::VaultAttachmentResponse>>,
+        RuntimeError,
+    > {
+        let mut fetch = self.begin_attachment_authority(item_id)?;
+        loop {
+            match self
+                .fetch_attachment_authority_page(token, &mut fetch, cancellation.clone())
+                .await?
+            {
+                AuthenticatedOutcome::Ok(Some(authority)) => {
+                    return Ok(AuthenticatedOutcome::Ok(authority));
+                }
+                AuthenticatedOutcome::Ok(None) => {}
+                AuthenticatedOutcome::ReauthenticationRequired => {
+                    return Ok(AuthenticatedOutcome::ReauthenticationRequired);
+                }
+                AuthenticatedOutcome::Transient => {
+                    return Ok(AuthenticatedOutcome::Transient);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn begin_attachment_authority(
+        &self,
+        item_id: &str,
+    ) -> Result<AttachmentAuthorityFetch, RuntimeError> {
+        validate_identifier(item_id, "Item")?;
+        Ok(AttachmentAuthorityFetch {
+            item_id: item_id.to_owned(),
+            cursor: None,
+            authority: AttachmentAuthorityAccumulator::new(),
+            page_pending: false,
+        })
+    }
+
+    /// Fetches one bounded page. A 401 leaves the page pending so a caller can durably replace its
+    /// Session and retry the exact URL without replaying earlier pages.
+    pub(crate) async fn fetch_attachment_authority_page(
+        &self,
+        token: &str,
+        fetch: &mut AttachmentAuthorityFetch,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<Option<Vec<crate::server_contract::VaultAttachmentResponse>>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        if !fetch.page_pending {
+            fetch.authority.begin_page()?;
+            fetch.page_pending = true;
+        }
+        let mut url = self.endpoint(&["api", "v1", "items", &fetch.item_id, "attachments"])?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", "500");
+            if let Some(cursor) = fetch.cursor.as_deref() {
+                query.append_pair("cursor", cursor);
+            }
+        }
+        let page = match self
+            .get_authenticated_json_with_transport_policy::<AttachmentAuthorityPage>(
+                url,
+                ATTACHMENT_AUTHORITY_RESPONSE_BYTES,
+                token,
+                cancellation,
+                true,
+            )
+            .await?
+        {
+            AuthenticatedOutcome::Ok(page) => page,
+            AuthenticatedOutcome::ReauthenticationRequired => {
+                return Ok(AuthenticatedOutcome::ReauthenticationRequired);
+            }
+            AuthenticatedOutcome::Transient => return Ok(AuthenticatedOutcome::Transient),
+        };
+        fetch.page_pending = false;
+        let RawJsonPage { raw_body, value } = page;
+        fetch.authority.record_raw_page(raw_body.len())?;
+        drop(raw_body);
+        let AttachmentAuthorityPage {
+            items,
+            has_more,
+            next_cursor,
+        } = value;
+        fetch.authority.append(items)?;
+        match (has_more, next_cursor) {
+            (false, None) => Ok(AuthenticatedOutcome::Ok(Some(
+                std::mem::replace(&mut fetch.authority, AttachmentAuthorityAccumulator::new())
+                    .into_items(),
+            ))),
+            (false, Some(_)) => Err(invariant(
+                "Attachment authority final page retained a continuation",
+            )),
+            (true, _) if fetch.authority.last_page_was_empty() => Err(invariant(
+                "Attachment authority continuation made no progress",
+            )),
+            (true, Some(next)) if !next.is_empty() => {
+                fetch.authority.record_cursor(&next)?;
+                fetch.cursor = Some(next);
+                Ok(AuthenticatedOutcome::Ok(None))
+            }
+            (true, _) => Err(invariant(
+                "Attachment authority page omitted its continuation",
+            )),
+        }
+    }
+
+    pub(crate) async fn vault_image_staging_status(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultImageStagingStatusResponse>, RuntimeError> {
+        self.vault_image_staging_json(
+            token,
+            operation_id,
+            "status",
+            HttpMethod::Post,
+            body,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn grant_vault_image_staging(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultImageStagingGrantResponse>, RuntimeError> {
+        self.vault_image_staging_json(
+            token,
+            operation_id,
+            "grants",
+            HttpMethod::Post,
+            body,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn confirm_vault_image_staging(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultImageStagingStatusResponse>, RuntimeError> {
+        self.vault_image_staging_json(
+            token,
+            operation_id,
+            "confirmations",
+            HttpMethod::Post,
+            body,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn cleanup_vault_image_staging(
+        &self,
+        token: &str,
+        operation_id: &str,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<()>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Vault image cleanup request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let raw = self
+            .execute_raw(
+                HttpMethod::Delete,
+                self.endpoint(&[
+                    "api",
+                    "v1",
+                    "operations",
+                    operation_id,
+                    "vault-image-staging",
+                ])?,
+                headers,
+                body,
+                SMALL_AUTH_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        Ok(match raw.status {
+            200 | 204 => AuthenticatedOutcome::Ok(()),
+            401 => AuthenticatedOutcome::ReauthenticationRequired,
+            _ => AuthenticatedOutcome::Transient,
+        })
+    }
+
+    async fn vault_image_staging_json<T: DeserializeOwned>(
+        &self,
+        token: &str,
+        operation_id: &str,
+        suffix: &str,
+        method: HttpMethod,
+        body: &VaultImageStagingBody,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<T>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let body = serde_json::to_vec(body)
+            .map_err(|_| invariant("Vault image staging request could not be serialized"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+        );
+        let url = self.endpoint(&[
+            "api",
+            "v1",
+            "operations",
+            operation_id,
+            "vault-image-staging",
+            suffix,
+        ])?;
+        let raw = self
+            .execute_raw(
+                method,
+                url,
+                headers,
+                body,
+                VAULT_IMAGE_STAGING_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let response = serde_json::from_slice(&raw.body).map_err(|_| {
+                    authentication_failure("Vault image staging returned invalid JSON")
+                })?;
+                Ok(AuthenticatedOutcome::Ok(response))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn upload_vault_image_staging(
+        &self,
+        upload_url: &str,
+        content_type: &str,
+        sha256: &str,
+        headers: &[HttpHeader],
+        bytes: &[u8],
+        cancellation: RequestCancellation,
+    ) -> Result<bool, RuntimeError> {
+        let url = Url::parse(upload_url)
+            .map_err(|_| invariant("Vault image staging upload URL is invalid"))?;
+        if !matches!(url.scheme(), "https" | "http")
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(invariant("Vault image staging upload URL is unsafe"));
+        }
+        use base64::Engine as _;
+        let digest = decode_sha256_hex(sha256)
+            .ok_or_else(|| invariant("Vault image staging SHA-256 is invalid"))?;
+        let expected = vec![
+            HttpHeader {
+                name: "Content-Length".into(),
+                value: bytes.len().to_string(),
+            },
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: content_type.to_owned(),
+            },
+            HttpHeader {
+                name: "x-amz-content-sha256".into(),
+                value: sha256.to_owned(),
+            },
+            HttpHeader {
+                name: "x-amz-checksum-sha256".into(),
+                value: base64::engine::general_purpose::STANDARD.encode(digest),
+            },
+        ];
+        if headers != expected {
+            return Err(invariant(
+                "Vault image staging upload headers do not match the exact binding",
+            ));
+        }
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Put,
+                    upload_url.to_owned(),
+                    headers.to_vec(),
+                    bytes.to_vec(),
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(matches!(
+            response,
+            HttpResponse::Completed {
+                status: 200..=299,
+                ..
+            }
+        ))
+    }
+
+    pub(crate) async fn fetch_vault_authority(
+        &self,
+        token: &str,
+        vault_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<VaultDetailsResponseDto>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(vault_id, "Vault")?;
+        let url = self.endpoint(&["api", "v1", "vaults", vault_id])?;
+        self.authenticated_json_response(token, url, cancellation)
+            .await
+    }
+
+    pub(crate) async fn fetch_import_authority_page(
+        &self,
+        token: &str,
+        vault_id: &str,
+        item_ids: &[String],
+        cursor: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<(Vec<u8>, Option<String>)>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_identifier(vault_id, "Vault")?;
+        let url = self.endpoint(&["api", "v1", "vaults", vault_id, "item-authority-pages"])?;
+        let body = serde_json::to_vec(
+            &serde_json::json!({"itemIds": item_ids, "cursor": cursor, "limit": 200}),
+        )
+        .map_err(|_| invariant("Import authority request is invalid"))?;
+        let mut headers = self.headers(Some(token))?;
+        headers.extend([
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            },
+            HttpHeader {
+                name: "Accept".into(),
+                value: "application/json".into(),
+            },
+        ]);
+        let raw = self
+            .execute_raw(
+                HttpMethod::Post,
+                url,
+                headers,
+                body,
+                16 * 1024 * 1024,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let mut cursors = raw
+                    .headers
+                    .iter()
+                    .filter(|header| header.name.eq_ignore_ascii_case("Bittery-Next-Cursor"));
+                let cursor = cursors.next().map(|header| header.value.clone());
+                if cursors.next().is_some() {
+                    return Err(invariant("Import authority repeated its cursor header"));
+                }
+                Ok(AuthenticatedOutcome::Ok((raw.body, cursor)))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn fetch_vault_key_page_raw(
+        &self,
+        token: &str,
+        cursor: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<Vec<u8>>, RuntimeError> {
+        validate_bearer(token)?;
+        let mut url = self.endpoint(&["api", "v1", "users", "me", "vault-keys"])?;
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                VAULT_KEY_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                Ok(AuthenticatedOutcome::Ok(raw.body))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    pub(crate) async fn list_item_share_links(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::ShareLinkListResponse>, RuntimeError>
+    {
+        validate_identifier(item_id, "Item")?;
+        self.share_management_json(
+            HttpMethod::Get,
+            self.endpoint(&["api", "v1", "items", item_id, "share-links"])?,
+            token,
+            cancellation,
+        )
+        .await
+    }
+
+    pub(crate) async fn share_access_log_page(
+        &self,
+        token: &str,
+        link_id: &str,
+        cursor: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<crate::server_contract::CursorPageShareAccessLogResponse>,
+        RuntimeError,
+    > {
+        validate_identifier(link_id, "Share link")?;
+        let mut url = self.endpoint(&["api", "v1", "share-links", link_id, "access-logs"])?;
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        self.share_management_json(HttpMethod::Get, url, token, cancellation)
+            .await
+    }
+
+    pub(crate) async fn revoke_share_link(
+        &self,
+        token: &str,
+        link_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::SuccessResponse>, RuntimeError> {
+        validate_identifier(link_id, "Share link")?;
+        self.share_management_json(
+            HttpMethod::Delete,
+            self.endpoint(&["api", "v1", "share-links", link_id])?,
+            token,
+            cancellation,
+        )
+        .await
+    }
+
+    // This is foreground work, never an accepted Operation. In particular an ambiguous DELETE
+    // is reported to its caller, not automatically replayed or represented as retained success.
+    async fn share_management_json<T: DeserializeOwned>(
+        &self,
+        method: HttpMethod,
+        url: Url,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<T>, RuntimeError> {
+        let mut headers = self.headers(Some(token))?;
+        headers.push(HttpHeader {
+            name: "Accept".into(),
+            value: "application/json".into(),
+        });
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    method,
+                    url.into(),
+                    headers,
+                    Vec::new(),
+                    VAULT_KEY_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                let value = serde_json::from_slice(&body)
+                    .map_err(|_| invariant("Share management returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(value))
+            }
+            HttpResponse::Completed { status: 401, .. } => {
+                Ok(AuthenticatedOutcome::ReauthenticationRequired)
+            }
+            HttpResponse::Completed { status: 403, .. } => Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Share management was denied",
+            )),
+            HttpResponse::Completed { status: 404, .. } => Err(RuntimeError::new(
+                RuntimeErrorCode::AuthorityMissing,
+                "Share link or Item is unavailable",
+            )),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Share management was cancelled",
+            )),
+            HttpResponse::Completed {
+                status: 0 | 408 | 425 | 429 | 500..=599,
+                ..
+            }
+            | HttpResponse::NetworkFailure
+            | HttpResponse::ResponseTooLarge => Ok(AuthenticatedOutcome::Transient),
+            HttpResponse::Completed { .. } => Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Share management request was refused",
+            )),
+        }
+    }
+
+    async fn authenticated_json_response<T: DeserializeOwned>(
+        &self,
+        token: &str,
+        url: Url,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<T>, RuntimeError> {
+        let raw = self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                VAULT_KEY_RESPONSE_BYTES,
+                cancellation,
+            )
+            .await?;
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let response = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Authority returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(response))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    /// Replays one accepted Operation's immutable bytes and attaches what is deliberately not
+    /// durable: the Session credential, and the `Idempotency-Key` that carries the Operation ID.
+    ///
+    /// The classification is the same one every other authenticated route uses. `401` is the
+    /// renewable Session answer the caller refreshes against, transport failure and the Server's
+    /// own retryable statuses are transient, and everything else is handed back untouched because
+    /// only a semantic reader may decide what it means.
+    pub(crate) async fn dispatch_operation(
+        &self,
+        token: &str,
+        operation_id: &str,
+        request: &ImmutableHttpRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<OperationDispatchResponse>, RuntimeError> {
+        validate_bearer(token)?;
+        validate_operation_id(operation_id)?;
+        let url = self.route(&request.path)?;
+        let mut headers = request.headers.clone();
+        headers.push(HttpHeader {
+            name: "Idempotency-Key".to_owned(),
+            value: operation_id.to_owned(),
+        });
+        headers.extend(self.headers(Some(token))?);
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    request.method,
+                    url.into(),
+                    headers,
+                    request.body.clone(),
+                    OPERATION_OUTCOME_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        Ok(match response {
+            HttpResponse::Completed { status, body, .. } => match status {
+                401 => AuthenticatedOutcome::ReauthenticationRequired,
+                // An opaque zero status, a timeout, a rate limit, and every Server-side failure
+                // are the same answer: try the identical bytes again later.
+                0 | 408 | 425 | 429 | 500..=599 => AuthenticatedOutcome::Transient,
+                _ => AuthenticatedOutcome::Ok(OperationDispatchResponse { status, body }),
+            },
+            HttpResponse::NetworkFailure | HttpResponse::ResponseTooLarge => {
+                AuthenticatedOutcome::Transient
+            }
+            HttpResponse::Cancelled => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Operation dispatch was cancelled",
+                ));
+            }
+        })
+    }
+
+    async fn get_authenticated_json<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        max_response_bytes: u32,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<RawJsonPage<T>>, RuntimeError> {
+        self.get_authenticated_json_with_transport_policy(
+            url,
+            max_response_bytes,
+            token,
+            cancellation,
+            false,
+        )
+        .await
+    }
+
+    async fn get_authenticated_json_with_transport_policy<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        max_response_bytes: u32,
+        token: &str,
+        cancellation: RequestCancellation,
+        transport_is_transient: bool,
+    ) -> Result<AuthenticatedOutcome<RawJsonPage<T>>, RuntimeError> {
+        let raw = match self
+            .execute_raw(
+                HttpMethod::Get,
+                url,
+                self.headers(Some(token))?,
+                Vec::new(),
+                max_response_bytes,
+                cancellation,
+            )
+            .await
+        {
+            Ok(raw) => raw,
+            Err(error) if transport_is_transient && is_raw_transport_failure(&error) => {
+                return Ok(AuthenticatedOutcome::Transient);
+            }
+            Err(error) => return Err(error),
+        };
+        match raw.status {
+            200 => {
+                require_json_content_type(&raw.headers)?;
+                let value = serde_json::from_slice(&raw.body)
+                    .map_err(|_| authentication_failure("Sync Server returned invalid JSON"))?;
+                Ok(AuthenticatedOutcome::Ok(RawJsonPage {
+                    raw_body: raw.body,
+                    value,
+                }))
+            }
+            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
+            _ => Ok(AuthenticatedOutcome::Transient),
+        }
+    }
+
+    async fn execute_raw(
+        &self,
+        method: HttpMethod,
+        url: Url,
+        headers: Vec<HttpHeader>,
+        body: Vec<u8>,
+        max_response_bytes: u32,
+        cancellation: RequestCancellation,
+    ) -> Result<RawHttpResponse, RuntimeError> {
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(method, url.into(), headers, body, max_response_bytes),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status,
+                headers,
+                body,
+            } => Ok(RawHttpResponse {
+                status,
+                headers,
+                body,
+            }),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "request was cancelled",
+            )),
+            HttpResponse::NetworkFailure | HttpResponse::ResponseTooLarge => {
+                Err(authentication_failure("Server request failed"))
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn post_json<Request, Response>(
+        &self,
+        path: &[&str],
+        request: &Request,
+        expected_status: u16,
+        max_response_bytes: u32,
+        bearer: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<Response, RuntimeError>
+    where
+        Request: Serialize,
+        Response: DeserializeOwned,
+    {
+        let body = serde_json::to_vec(request)
+            .map_err(|_| invariant("Authentication request could not be serialized"))?;
+        let mut headers = self.headers(bearer)?;
+        headers.insert(
+            0,
+            HttpHeader {
+                name: "Content-Type".to_owned(),
+                value: "application/json".to_owned(),
+            },
+        );
+        self.execute_json(
+            HttpMethod::Post,
+            self.endpoint(path)?,
+            headers,
+            body,
+            expected_status,
+            max_response_bytes,
+            cancellation,
+        )
+        .await
+    }
+
+    async fn get_json<Response: DeserializeOwned>(
+        &self,
+        url: Url,
+        expected_status: u16,
+        max_response_bytes: u32,
+        bearer: Option<&str>,
+        cancellation: RequestCancellation,
+    ) -> Result<Response, RuntimeError> {
+        self.execute_json(
+            HttpMethod::Get,
+            url,
+            self.headers(bearer)?,
+            Vec::new(),
+            expected_status,
+            max_response_bytes,
+            cancellation,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_json<Response: DeserializeOwned>(
+        &self,
+        method: HttpMethod,
+        url: Url,
+        headers: Vec<HttpHeader>,
+        body: Vec<u8>,
+        expected_status: u16,
+        max_response_bytes: u32,
+        cancellation: RequestCancellation,
+    ) -> Result<Response, RuntimeError> {
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(method, url.into(), headers, body, max_response_bytes),
+                cancellation,
+            )
+            .await?;
+        let HttpResponse::Completed {
+            status,
+            headers,
+            body,
+        } = response
+        else {
+            return Err(match response {
+                HttpResponse::Cancelled => RuntimeError::new(
+                    RuntimeErrorCode::Cancelled,
+                    "Authentication request was cancelled",
+                ),
+                HttpResponse::NetworkFailure | HttpResponse::ResponseTooLarge => {
+                    authentication_failure("Authentication Server request failed")
+                }
+                HttpResponse::Completed { .. } => unreachable!(),
+            });
+        };
+        if status != expected_status {
+            return Err(authentication_failure(
+                "Authentication Server returned an unexpected status",
+            ));
+        }
+        require_json_content_type(&headers)?;
+        serde_json::from_slice(&body)
+            .map_err(|_| authentication_failure("Authentication Server returned invalid JSON"))
+    }
+
+    fn headers(&self, bearer: Option<&str>) -> Result<Vec<HttpHeader>, RuntimeError> {
+        let mut headers = vec![
+            HttpHeader {
+                name: "Bittery-Client-Id".to_owned(),
+                value: self.config.client_id.clone(),
+            },
+            HttpHeader {
+                name: "Bittery-Client-Platform".to_owned(),
+                value: self.config.platform.as_str().to_owned(),
+            },
+            HttpHeader {
+                name: "Bittery-Client-Version".to_owned(),
+                value: self.config.version.clone(),
+            },
+        ];
+        if let Some(token) = bearer {
+            validate_bearer(token)?;
+            headers.push(HttpHeader {
+                name: "Authorization".to_owned(),
+                value: format!("Bearer {token}"),
+            });
+        }
+        Ok(headers)
+    }
+
+    /// Joins one accepted Operation's stored absolute path onto this Account's Server, keeping
+    /// any path prefix the normalized Server URL carries.
+    fn route(&self, path: &str) -> Result<Url, RuntimeError> {
+        if !path.starts_with('/') {
+            return Err(invariant("Operation route path is not absolute"));
+        }
+        let base = self.base_url.as_str().trim_end_matches('/');
+        Url::parse(&format!("{base}{path}"))
+            .map_err(|_| invariant("Operation route path is invalid"))
+    }
+
+    fn endpoint(&self, segments: &[&str]) -> Result<Url, RuntimeError> {
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|_| invariant("Normalized Server URL cannot own path segments"))?
+            .extend(segments);
+        Ok(url)
+    }
+}
+
+struct CursorEvidence {
+    seen: HashSet<String>,
+    total_bytes: usize,
+}
+
+impl CursorEvidence {
+    fn new() -> Self {
+        Self {
+            seen: HashSet::new(),
+            total_bytes: 0,
+        }
+    }
+
+    fn record(&mut self, cursor: &str) -> Result<(), RuntimeError> {
+        self.record_with_limits(cursor, MAX_AUTH_VAULT_KEYS, MAX_AUTH_VAULT_KEY_BYTES)
+    }
+
+    fn record_with_limits(
+        &mut self,
+        cursor: &str,
+        max_cursors: usize,
+        max_bytes: usize,
+    ) -> Result<(), RuntimeError> {
+        if self.seen.contains(cursor) {
+            return Err(authentication_failure(
+                "Server returned a repeated Vault-key cursor",
+            ));
+        }
+        if self.seen.len() >= max_cursors {
+            return Err(authentication_failure(
+                "Server returned too many Vault-key cursors",
+            ));
+        }
+        let new_bytes = self
+            .total_bytes
+            .checked_add(cursor.len())
+            .ok_or_else(|| authentication_failure("Server returned too much cursor data"))?;
+        if new_bytes > max_bytes {
+            return Err(authentication_failure(
+                "Server returned too much cursor data",
+            ));
+        }
+        self.total_bytes = new_bytes;
+        self.seen.insert(cursor.to_owned());
+        Ok(())
+    }
+}
+
+struct VaultKeyAccumulator {
+    items: Vec<AuthVaultKeyResponse>,
+    // Exact serialized JSON-array size: opening/closing brackets, item bytes and separators.
+    serialized_bytes: usize,
+}
+
+struct AttachmentAuthorityAccumulator {
+    items: Vec<crate::server_contract::VaultAttachmentResponse>,
+    attachment_ids: HashSet<String>,
+    cursors: HashSet<String>,
+    cursor_bytes: usize,
+    raw_body_bytes: usize,
+    pages: usize,
+    last_page_empty: bool,
+}
+
+impl AttachmentAuthorityAccumulator {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            attachment_ids: HashSet::new(),
+            cursors: HashSet::new(),
+            cursor_bytes: 0,
+            raw_body_bytes: 0,
+            pages: 0,
+            last_page_empty: false,
+        }
+    }
+
+    fn begin_page(&mut self) -> Result<(), RuntimeError> {
+        if self.pages >= MAX_ATTACHMENT_AUTHORITY_PAGES {
+            return Err(invariant("Attachment authority exceeded the page bound"));
+        }
+        self.pages += 1;
+        Ok(())
+    }
+
+    fn append(
+        &mut self,
+        incoming: Vec<crate::server_contract::VaultAttachmentResponse>,
+    ) -> Result<(), RuntimeError> {
+        if incoming.len() > 500 {
+            return Err(invariant(
+                "Attachment authority page exceeded its item bound",
+            ));
+        }
+        self.last_page_empty = incoming.is_empty();
+        let new_count = self
+            .items
+            .len()
+            .checked_add(incoming.len())
+            .ok_or_else(|| invariant("Attachment authority item count overflowed"))?;
+        if new_count > MAX_ATTACHMENT_AUTHORITY_ITEMS {
+            return Err(invariant("Attachment authority exceeded its item bound"));
+        }
+
+        let mut new_ids = HashSet::new();
+        for item in &incoming {
+            if self.attachment_ids.contains(&item.id) || !new_ids.insert(item.id.clone()) {
+                return Err(invariant("Attachment authority duplicated an Attachment"));
+            }
+        }
+
+        self.attachment_ids.extend(new_ids);
+        self.items.extend(incoming);
+        Ok(())
+    }
+
+    fn record_raw_page(&mut self, body_bytes: usize) -> Result<(), RuntimeError> {
+        let raw_body_bytes = self
+            .raw_body_bytes
+            .checked_add(body_bytes)
+            .ok_or_else(|| invariant("Attachment authority byte count overflowed"))?;
+        if raw_body_bytes > MAX_ATTACHMENT_AUTHORITY_BYTES {
+            return Err(invariant("Attachment authority exceeded its byte bound"));
+        }
+        self.raw_body_bytes = raw_body_bytes;
+        Ok(())
+    }
+
+    fn last_page_was_empty(&self) -> bool {
+        self.last_page_empty
+    }
+
+    fn record_cursor(&mut self, cursor: &str) -> Result<(), RuntimeError> {
+        if self.cursors.contains(cursor) {
+            return Err(invariant("Attachment authority cursor repeated"));
+        }
+        if self.cursors.len() >= MAX_ATTACHMENT_AUTHORITY_PAGES - 1 {
+            return Err(invariant("Attachment authority exhausted its cursor bound"));
+        }
+        let cursor_bytes = self
+            .cursor_bytes
+            .checked_add(cursor.len())
+            .ok_or_else(|| invariant("Attachment authority cursor bytes overflowed"))?;
+        if cursor_bytes > MAX_ATTACHMENT_AUTHORITY_BYTES {
+            return Err(invariant(
+                "Attachment authority exceeded its cursor byte bound",
+            ));
+        }
+        self.cursor_bytes = cursor_bytes;
+        self.cursors.insert(cursor.to_owned());
+        Ok(())
+    }
+
+    fn into_items(self) -> Vec<crate::server_contract::VaultAttachmentResponse> {
+        self.items
+    }
+}
+
+impl VaultKeyAccumulator {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            serialized_bytes: 2,
+        }
+    }
+
+    fn append(&mut self, incoming: Vec<AuthVaultKeyResponse>) -> Result<(), RuntimeError> {
+        self.append_with_limits(incoming, MAX_AUTH_VAULT_KEYS, MAX_AUTH_VAULT_KEY_BYTES)
+    }
+
+    fn append_with_limits(
+        &mut self,
+        incoming: Vec<AuthVaultKeyResponse>,
+        max_items: usize,
+        max_bytes: usize,
+    ) -> Result<(), RuntimeError> {
+        let new_count = self
+            .items
+            .len()
+            .checked_add(incoming.len())
+            .ok_or_else(|| authentication_failure("Server returned too many Vault keys"))?;
+        if new_count > max_items {
+            return Err(authentication_failure(
+                "Server returned too many Vault keys",
+            ));
+        }
+
+        let mut additional_bytes = 0usize;
+        for (index, item) in incoming.iter().enumerate() {
+            let item_bytes = serde_json::to_vec(item)
+                .map_err(|_| invariant("Vault key could not be measured"))?
+                .len();
+            let separator = usize::from(!self.items.is_empty() || index > 0);
+            additional_bytes = additional_bytes
+                .checked_add(separator)
+                .and_then(|bytes| bytes.checked_add(item_bytes))
+                .ok_or_else(|| authentication_failure("Server returned too much Vault-key data"))?;
+        }
+        let new_bytes = self
+            .serialized_bytes
+            .checked_add(additional_bytes)
+            .ok_or_else(|| authentication_failure("Server returned too much Vault-key data"))?;
+        if new_bytes > max_bytes {
+            return Err(authentication_failure(
+                "Server returned too much Vault-key data",
+            ));
+        }
+        self.serialized_bytes = new_bytes;
+        self.items.extend(incoming);
+        Ok(())
+    }
+
+    fn into_items(self) -> Vec<AuthVaultKeyResponse> {
+        self.items
+    }
+}
+
+fn normalize_server_url(value: &str, confirmed: bool) -> Result<Url, RuntimeError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(authentication_failure("Server URL is invalid"));
+    }
+    let candidate = if has_explicit_scheme(trimmed) {
+        trimmed.to_owned()
+    } else {
+        let parsed_http = Url::parse(&format!("http://{trimmed}"))
+            .map_err(|_| authentication_failure("Server URL is invalid"))?;
+        let inferred_http = parsed_http
+            .host()
+            .is_some_and(|host| is_loopback_host(&host) || is_unspecified_ipv4(&host));
+        format!(
+            "{}://{trimmed}",
+            if inferred_http { "http" } else { "https" }
+        )
+    };
+    let mut url =
+        Url::parse(&candidate).map_err(|_| authentication_failure("Server URL is invalid"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(authentication_failure("Server URL is invalid"));
+    }
+    if url.scheme() == "http"
+        && !url.host().is_some_and(|host| is_loopback_host(&host))
+        && !confirmed
+    {
+        return Err(authentication_failure(
+            "Remote plain HTTP requires explicit confirmation",
+        ));
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    let normalized_path = url.path().trim_end_matches('/').to_owned();
+    url.set_path(if normalized_path.is_empty() {
+        "/"
+    } else {
+        &normalized_path
+    });
+    Ok(url)
+}
+
+fn has_explicit_scheme(value: &str) -> bool {
+    let Some((scheme, _)) = value.split_once("://") else {
+        return false;
+    };
+    !scheme.is_empty()
+        && scheme.bytes().enumerate().all(|(index, byte)| match byte {
+            b'a'..=b'z' | b'A'..=b'Z' => true,
+            b'0'..=b'9' | b'+' | b'-' | b'.' => index > 0,
+            _ => false,
+        })
+}
+
+fn is_loopback_host(host: &Host<&str>) -> bool {
+    match host {
+        Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+        Host::Ipv4(address) => address.is_loopback(),
+        Host::Ipv6(address) => address.is_loopback(),
+    }
+}
+
+fn is_unspecified_ipv4(host: &Host<&str>) -> bool {
+    matches!(host, Host::Ipv4(address) if address.is_unspecified())
+}
+
+fn validate_config(config: &AuthClientConfig) -> Result<(), RuntimeError> {
+    for value in [&config.client_id, &config.version] {
+        if value.is_empty()
+            || value
+                .as_bytes()
+                .iter()
+                .any(|byte| byte.is_ascii_control() || matches!(byte, b'\r' | b'\n'))
+        {
+            return Err(authentication_failure(
+                "Authentication client configuration is invalid",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_identifier(value: &str, label: &str) -> Result<(), RuntimeError> {
+    if value.is_empty() {
+        Err(invariant("Sync identifier is empty"))
+    } else {
+        let _ = label;
+        Ok(())
+    }
+}
+
+fn validate_bearer(token: &str) -> Result<(), RuntimeError> {
+    if token.is_empty()
+        || token
+            .as_bytes()
+            .iter()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err(invariant("Authentication bearer token is invalid"));
+    }
+    Ok(())
+}
+
+/// The Server's own `Idempotency-Key` rule, applied before a byte leaves the Device: one to 255
+/// visible ASCII characters. A request that cannot satisfy it would be rejected as malformed and
+/// would never reach the Operation table, so it is a local invariant violation, not a retry.
+fn validate_operation_id(value: &str) -> Result<(), RuntimeError> {
+    if value.is_empty()
+        || value.len() > 255
+        || !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    {
+        return Err(invariant("Operation identity is not a usable wire value"));
+    }
+    Ok(())
+}
+
+fn validate_deletion_request_id(value: &str) -> Result<(), RuntimeError> {
+    let bytes = value.as_bytes();
+    let hyphens = [8, 13, 18, 23];
+    if bytes.len() != 36
+        || hyphens.iter().any(|index| bytes[*index] != b'-')
+        || bytes[14] != b'4'
+        || bytes.iter().enumerate().any(|(index, byte)| {
+            !hyphens.contains(&index) && !matches!(byte, b'0'..=b'9' | b'a'..=b'f')
+        })
+    {
+        return Err(invariant(
+            "Account deletion request identity is not a canonical UUID v4",
+        ));
+    }
+    Ok(())
+}
+
+fn require_json_content_type(headers: &[HttpHeader]) -> Result<(), RuntimeError> {
+    let mut values = headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("content-type"));
+    let Some(value) = values.next() else {
+        return Err(authentication_failure(
+            "Authentication Server response is not JSON",
+        ));
+    };
+    if values.next().is_some() {
+        return Err(authentication_failure(
+            "Authentication Server response has ambiguous content type",
+        ));
+    }
+    let mut parts = value.value.split(';');
+    if !parts
+        .next()
+        .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("application/json"))
+        || parts.any(|parameter| !parameter.trim().eq_ignore_ascii_case("charset=utf-8"))
+    {
+        return Err(authentication_failure(
+            "Authentication Server response is not JSON",
+        ));
+    }
+    Ok(())
+}
+
+fn require_problem_json_content_type(headers: &[HttpHeader]) -> Result<(), RuntimeError> {
+    let mut values = headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("content-type"));
+    let Some(value) = values.next() else {
+        return Err(authentication_failure(
+            "Attachment Move manifest response is not Problem Details JSON",
+        ));
+    };
+    if values.next().is_some() {
+        return Err(authentication_failure(
+            "Attachment Move manifest response has ambiguous content type",
+        ));
+    }
+    let mut parts = value.value.split(';');
+    if !parts.next().is_some_and(|media_type| {
+        media_type
+            .trim()
+            .eq_ignore_ascii_case("application/problem+json")
+    }) || parts.any(|parameter| !parameter.trim().eq_ignore_ascii_case("charset=utf-8"))
+    {
+        return Err(authentication_failure(
+            "Attachment Move manifest response is not Problem Details JSON",
+        ));
+    }
+    Ok(())
+}
+
+fn next_cursor(
+    has_more: bool,
+    cursor: Option<String>,
+    item_count: usize,
+) -> Result<Option<String>, RuntimeError> {
+    match (has_more, cursor, item_count) {
+        (true, _, 0) => Err(authentication_failure(
+            "Server returned a Vault-key continuation without progress",
+        )),
+        (true, Some(cursor), _) if !cursor.is_empty() => Ok(Some(cursor)),
+        (true, _, _) => Err(authentication_failure(
+            "Server returned an incomplete Vault-key page",
+        )),
+        (false, _, _) => Ok(None),
+    }
+}
+
+fn invariant(message: &'static str) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
+}
+
+fn authentication_failure(message: &'static str) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::AuthenticationUnavailable, message)
+}
+
+fn is_raw_transport_failure(error: &RuntimeError) -> bool {
+    error.code == RuntimeErrorCode::AuthenticationUnavailable
+        && error.message == "Server request failed"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http_transport::SerializedHttpExecutor;
+    use crate::server_contract::{VaultRole, VaultType};
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
+    use std::sync::{Arc, Mutex};
+
+    struct ScriptedExecutor {
+        responses: Mutex<Vec<String>>,
+        requests: Mutex<Vec<String>>,
+    }
+
+    impl ScriptedExecutor {
+        fn new(responses: Vec<String>) -> Self {
+            Self {
+                responses: Mutex::new(responses.into_iter().rev().collect()),
+                requests: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn requests(&self) -> Vec<Value> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|request| serde_json::from_str(request).unwrap())
+                .collect()
+        }
+    }
+
+    #[async_trait]
+    impl SerializedHttpExecutor for ScriptedExecutor {
+        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+            self.requests.lock().unwrap().push(request_json);
+            self.responses.lock().unwrap().pop().ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "test script exhausted",
+                )
+            })
+        }
+
+        fn cancel(&self, _dispatch_id: &str) {}
+    }
+
+    fn completed(status: u16, content_type: &str, body: Value) -> String {
+        serde_json::to_string(&json!({
+            "type": "completed",
+            "status": status,
+            "headers": [{ "name": "Content-Type", "value": content_type }],
+            "body": serde_json::to_vec(&body).unwrap(),
+        }))
+        .unwrap()
+    }
+
+    fn metadata() -> AuthClientConfig {
+        AuthClientConfig::new("client-7".into(), ClientPlatform::Web, "0.5.2".into()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn sync_stream_opening_preserves_session_headers_and_validates_media_type() {
+        for (status, content_types, expected) in [
+            (200, vec!["text/event-stream; charset=utf-8"], "opened"),
+            (401, vec!["application/json"], "renew"),
+            (503, vec!["text/event-stream"], "transient"),
+            (200, vec!["application/json"], "transient"),
+            (200, vec![], "transient"),
+            (
+                200,
+                vec!["text/event-stream", "text/event-stream"],
+                "transient",
+            ),
+        ] {
+            let executor = Arc::new(ScriptedExecutor::new(vec![json!({
+                "type": "opened", "status": status,
+                "headers": content_types.into_iter().map(|value| json!({"name":"Content-Type", "value":value})).collect::<Vec<_>>()
+            }).to_string()]));
+            let transport = HttpTransport::new(executor.clone());
+            let client =
+                AuthHttpClient::new(&transport, "https://server.test/prefix", false, metadata())
+                    .unwrap();
+            let result = client
+                .open_sync_events("session-7", RequestCancellation::new())
+                .await
+                .unwrap();
+            let actual = match result {
+                AuthenticatedOutcome::Ok(_) => "opened",
+                AuthenticatedOutcome::ReauthenticationRequired => "renew",
+                AuthenticatedOutcome::Transient => "transient",
+            };
+            assert_eq!(actual, expected);
+            let requests = executor.requests();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0]["type"], "openStream");
+            let request = &requests[0]["request"];
+            assert_eq!(
+                request["url"],
+                "https://server.test/prefix/api/v1/sync/events"
+            );
+            assert_eq!(request["method"], "GET");
+            assert_eq!(request["body"], json!([]));
+            let headers = request["headers"].as_array().unwrap();
+            assert_eq!(
+                headers
+                    .iter()
+                    .filter(|header| header["name"] == "Authorization")
+                    .count(),
+                1
+            );
+            assert!(headers.contains(&json!({"name":"Authorization", "value":"Bearer session-7"})));
+            assert!(headers.contains(&json!({"name":"Accept", "value":"text/event-stream"})));
+        }
+    }
+
+    fn vault_key(id: &str) -> Value {
+        json!({
+            "encryptedVaultKey": format!("wrapped-{id}"),
+            "role": "owner",
+            "vaultIcon": null,
+            "vaultId": id,
+            "vaultImageUrl": null,
+            "vaultName": format!("Vault {id}"),
+            "vaultType": "personal"
+        })
+    }
+
+    fn contract_vault_key(id: &str, encrypted_vault_key: &str) -> AuthVaultKeyResponse {
+        AuthVaultKeyResponse {
+            encrypted_vault_key: encrypted_vault_key.into(),
+            role: VaultRole::Owner,
+            vault_icon: None,
+            vault_id: id.into(),
+            vault_image_url: None,
+            vault_name: format!("Vault {id}"),
+            vault_type: VaultType::Personal,
+        }
+    }
+
+    fn expect_error<T>(result: Result<T, RuntimeError>) -> RuntimeError {
+        match result {
+            Ok(_) => panic!("expected authentication request to fail"),
+            Err(error) => error,
+        }
+    }
+
+    fn finish_response() -> Value {
+        json!({
+            "expiresAt": "2026-08-23T12:00:00Z",
+            "serverProof": "server-proof",
+            "sessionId": "session-1",
+            "token": "fresh-token",
+            "user": {
+                "email": "alice@example.test",
+                "encryptedPrivateKey": "private-key",
+                "id": "user-1",
+                "name": "Alice",
+                "publicKey": "public-key",
+                "secretKeyHint": "A3-ONE",
+                "teamAvatarUrl": null,
+                "teamName": "Alice"
+            },
+            "vaultKeys": {
+                "hasMore": true,
+                "items": [vault_key("vault-1")],
+                "nextCursor": "cursor one/+"
+            }
+        })
+    }
+
+    fn manifest_request() -> AttachmentMoveManifestHttpRequest {
+        AttachmentMoveManifestHttpRequest {
+            item_id: "item-7".into(),
+            source_vault_id: "vault-source".into(),
+            target_vault_id: "vault-target".into(),
+            attachments: vec![AttachmentMoveManifestHttpEntry {
+                attachment_id: "attachment-7".into(),
+                envelope_version: 12,
+                ciphertext_sha256:
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            }],
+        }
+    }
+
+    fn source_grant() -> Value {
+        json!({
+            "attachmentId": "attachment /?7",
+            "itemId": "item-7",
+            "vaultId": "vault-source",
+            "storageKey": "attachments/source/attachment-7",
+            "envelopeVersion": 12,
+            "uploadedBy": "user-7",
+            "downloadUrl": "https://objects.example.test/invocation-only-signature",
+            "encryptedName": "encrypted-name",
+            "encryptedContentType": "encrypted-content-type",
+            "encryptionIv": "encryption-iv",
+            "encryptedContentTypeIv": "content-type-iv",
+            "encryptionAlgorithm": "AES-GCM-AAD-V1",
+            "fileSize": 1048576
+        })
+    }
+
+    #[tokio::test]
+    async fn import_authority_posts_the_identity_set_and_preserves_raw_pages_and_continuation() {
+        let raw_body = b"[  ]\n".to_vec();
+        let response = json!({ "type": "completed", "status": 200,
+            "headers": [{"name": "Content-Type", "value": "application/json"}, {"name": "bittery-next-cursor", "value": "next-page"}],
+            "body": raw_body }).to_string();
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            response,
+            completed(401, "application/json", json!({})),
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+        let ids = vec!["item-2".to_owned(), "item-1".to_owned()];
+        let answer = client
+            .fetch_import_authority_page(
+                "token",
+                "vault-1",
+                &ids,
+                Some("previous"),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let AuthenticatedOutcome::Ok((body, cursor)) = answer else {
+            panic!("raw authority")
+        };
+        assert_eq!(body, raw_body);
+        assert_eq!(cursor.as_deref(), Some("next-page"));
+        let requests = executor.requests();
+        assert_eq!(requests[0]["method"], "POST");
+        let headers: Vec<HttpHeader> =
+            serde_json::from_value(requests[0]["headers"].clone()).unwrap();
+        let content_types: Vec<_> = headers
+            .iter()
+            .filter(|header| header.name.eq_ignore_ascii_case("Content-Type"))
+            .map(|header| header.value.as_str())
+            .collect();
+        assert_eq!(content_types, ["application/json"]);
+        let accepted_types: Vec<_> = headers
+            .iter()
+            .filter(|header| header.name.eq_ignore_ascii_case("Accept"))
+            .map(|header| header.value.as_str())
+            .collect();
+        assert_eq!(accepted_types, ["application/json"]);
+        assert_eq!(
+            requests[0]["url"],
+            "https://vault.example.test/api/v1/vaults/vault-1/item-authority-pages"
+        );
+        let bytes: Vec<u8> = serde_json::from_value(requests[0]["body"].clone()).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"itemIds": ids, "cursor": "previous", "limit": 200})
+        );
+        assert!(matches!(
+            client
+                .fetch_import_authority_page(
+                    "token",
+                    "vault-1",
+                    &ids,
+                    None,
+                    RequestCancellation::new()
+                )
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::ReauthenticationRequired
+        ));
+    }
+
+    #[tokio::test]
+    async fn owns_exact_authenticated_attachment_upload_grant_and_metadata_exchanges() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            completed(
+                200,
+                "application/json",
+                json!({ "attachmentId": "attachment-7", "key": "attachments/key", "uploadUrl": "https://storage.test/upload" }),
+            ),
+            completed(
+                200,
+                "application/json",
+                json!({ "attachmentId": "attachment-7" }),
+            ),
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+        let grant_body = crate::server_contract::AttachmentUploadBody {
+            file_name: "opaque.enc".into(),
+            content_type: "application/octet-stream".into(),
+            file_size: 7,
+        };
+        let grant = client
+            .create_attachment_upload_grant(
+                "token",
+                "item-7",
+                &grant_body,
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            grant,
+            AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::Grant(_))
+        ));
+        let create_body = crate::server_contract::CreateAttachmentBody {
+            attachment_id: "attachment-7".into(),
+            storage_key: "attachments/key".into(),
+            encrypted_attachment_key: "key".into(),
+            attachment_key_iv: "key-iv".into(),
+            attachment_key_algorithm: "AES-GCM-AAD-V1".into(),
+            envelope_version: 1,
+            encrypted_name: "name".into(),
+            encrypted_content_type: "type".into(),
+            encryption_iv: "name-iv".into(),
+            encrypted_content_type_iv: "type-iv".into(),
+            encryption_algorithm: "AES-GCM-AAD-V1".into(),
+            file_size: 7,
+        };
+        let created = client
+            .create_attachment_metadata("token", "item-7", &create_body, RequestCancellation::new())
+            .await
+            .unwrap();
+        assert!(matches!(
+            created,
+            AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Created(_))
+        ));
+        let requests = executor.requests();
+        assert_eq!(requests[0]["method"], "POST");
+        assert_eq!(
+            requests[0]["url"],
+            "https://server.test/api/v1/items/item-7/attachment-uploads"
+        );
+        assert_eq!(
+            serde_json::from_value::<Vec<u8>>(requests[0]["body"].clone()).unwrap(),
+            serde_json::to_vec(&grant_body).unwrap()
+        );
+        assert_eq!(
+            requests[1]["url"],
+            "https://server.test/api/v1/items/item-7/attachments"
+        );
+        assert_eq!(
+            serde_json::from_value::<Vec<u8>>(requests[1]["body"].clone()).unwrap(),
+            serde_json::to_vec(&create_body).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn attachment_upload_quota_classification_uses_only_the_stable_code() {
+        let problem = |code: &str, detail: &str| {
+            json!({
+                "type": "https://bittery.com/problems/attachment-upload",
+                "title": "Upload rejected",
+                "status": 403,
+                "code": code,
+                "detail": detail,
+                "instance": "urn:bittery:request:request-1",
+                "requestId": "request-1",
+                "retryable": false,
+                "errors": null
+            })
+        };
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            completed(
+                403,
+                "application/problem+json",
+                problem("FORBIDDEN", "quota quota quota"),
+            ),
+            completed(
+                403,
+                "application/problem+json",
+                problem("ATTACHMENT_QUOTA_EXCEEDED", "Speicherplatz nicht verfugbar"),
+            ),
+        ]));
+        let transport = HttpTransport::new(executor);
+        let client =
+            AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+        let body = crate::server_contract::AttachmentUploadBody {
+            file_name: "opaque.enc".into(),
+            content_type: "application/octet-stream".into(),
+            file_size: 7,
+        };
+        assert!(matches!(
+            client
+                .create_attachment_upload_grant(
+                    "token",
+                    "item-7",
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::AccessDenied)
+        ));
+        assert!(matches!(
+            client
+                .create_attachment_upload_grant(
+                    "token",
+                    "item-7",
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::QuotaRejected)
+        ));
+    }
+
+    #[tokio::test]
+    async fn owns_exact_authenticated_attachment_source_grant_exchange() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json; charset=utf-8",
+            source_grant(),
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client = AuthHttpClient::new(
+            &transport,
+            "https://vault.example.test/root",
+            false,
+            metadata(),
+        )
+        .unwrap();
+
+        let answer = client
+            .create_attachment_download_grant(
+                "fresh-token",
+                "attachment /?7",
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let AuthenticatedOutcome::Ok(AttachmentDownloadGrantAnswer::Grant(grant)) = answer else {
+            panic!("expected an exact source grant");
+        };
+        assert_eq!(grant.attachment_id, "attachment /?7");
+        assert_eq!(grant.item_id, "item-7");
+        assert_eq!(grant.vault_id, "vault-source");
+        assert_eq!(grant.storage_key, "attachments/source/attachment-7");
+        assert_eq!(grant.envelope_version, 12);
+        assert_eq!(grant.uploaded_by, "user-7");
+        assert_eq!(
+            grant.download_url,
+            "https://objects.example.test/invocation-only-signature"
+        );
+        assert_eq!(grant.encrypted_name, "encrypted-name");
+        assert_eq!(grant.encrypted_content_type, "encrypted-content-type");
+        assert_eq!(grant.encryption_iv, "encryption-iv");
+        assert_eq!(grant.encrypted_content_type_iv, "content-type-iv");
+        assert_eq!(grant.encryption_algorithm, "AES-GCM-AAD-V1");
+        assert_eq!(grant.file_size, 1_048_576);
+
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["method"], "POST");
+        assert_eq!(
+            requests[0]["url"],
+            "https://vault.example.test/root/api/v1/attachments/attachment%20%2F%3F7/download-urls"
+        );
+        assert_eq!(
+            requests[0]["headers"],
+            json!([
+                {"name":"Bittery-Client-Id","value":"client-7"},
+                {"name":"Bittery-Client-Platform","value":"web"},
+                {"name":"Bittery-Client-Version","value":"0.5.2"},
+                {"name":"Authorization","value":"Bearer fresh-token"}
+            ])
+        );
+        assert_eq!(requests[0]["body"], json!([]));
+        assert_eq!(
+            requests[0]["maxResponseBytes"],
+            ATTACHMENT_DOWNLOAD_GRANT_RESPONSE_BYTES
+        );
+    }
+
+    #[tokio::test]
+    async fn classifies_attachment_source_grant_authority_and_transport_answers() {
+        let cases = [
+            (
+                completed(404, "application/problem+json", json!({})),
+                "stale",
+            ),
+            (
+                completed(401, "application/problem+json", json!({})),
+                "reauth",
+            ),
+            (
+                completed(403, "application/problem+json", json!({})),
+                "denied",
+            ),
+            (
+                completed(408, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(425, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(429, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(500, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(599, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (r#"{"type":"networkFailure"}"#.to_owned(), "transient"),
+            (r#"{"type":"responseTooLarge"}"#.to_owned(), "transient"),
+        ];
+
+        for (response, expected) in cases {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor.clone());
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let answer = client
+                .create_attachment_download_grant(
+                    "fresh-token",
+                    "attachment-7",
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+            match (expected, answer) {
+                (
+                    "stale",
+                    AuthenticatedOutcome::Ok(AttachmentDownloadGrantAnswer::StaleAuthority),
+                )
+                | (
+                    "denied",
+                    AuthenticatedOutcome::Ok(AttachmentDownloadGrantAnswer::AccessDenied),
+                )
+                | ("reauth", AuthenticatedOutcome::ReauthenticationRequired)
+                | ("transient", AuthenticatedOutcome::Transient) => {}
+                _ => panic!("unexpected source-grant classification for {expected}"),
+            }
+            assert_eq!(executor.requests().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_malformed_or_unrecognized_attachment_source_grant_answers() {
+        let mut unknown_field = source_grant();
+        unknown_field["unexpected"] = json!("not-authority");
+        let cases = [
+            completed(200, "text/plain", source_grant()),
+            serde_json::to_string(&json!({
+                "type": "completed",
+                "status": 200,
+                "headers": [{ "name": "Content-Type", "value": "application/json" }],
+                "body": [123]
+            }))
+            .unwrap(),
+            completed(200, "application/json", unknown_field),
+            completed(0, "application/problem+json", json!({})),
+            completed(201, "application/json", source_grant()),
+            completed(400, "application/problem+json", json!({})),
+            completed(409, "application/problem+json", json!({})),
+            completed(499, "application/problem+json", json!({})),
+            completed(600, "application/problem+json", json!({})),
+        ];
+
+        for response in cases {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor);
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let error = expect_error(
+                client
+                    .create_attachment_download_grant(
+                        "fresh-token",
+                        "attachment-7",
+                        RequestCancellation::new(),
+                    )
+                    .await,
+            );
+            assert!(matches!(
+                error.code,
+                RuntimeErrorCode::AuthenticationUnavailable | RuntimeErrorCode::InvariantViolation
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn reports_attachment_source_grant_cancellation_without_retrying() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            r#"{"type":"cancelled"}"#.to_owned()
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+
+        let error = expect_error(
+            client
+                .create_attachment_download_grant(
+                    "fresh-token",
+                    "attachment-7",
+                    RequestCancellation::new(),
+                )
+                .await,
+        );
+
+        assert_eq!(error.code, RuntimeErrorCode::Cancelled);
+        assert_eq!(executor.requests().len(), 1);
+    }
+
+    fn problem(code: &str, status: u16) -> Value {
+        json!({
+            "type": "https://vault.example.test/problems/attachment-move",
+            "title": "Attachment Move preparation failed",
+            "status": status,
+            "detail": "safe bounded detail",
+            "instance": "/api/v1/operations/move-7/attachment-move-manifest",
+            "code": code,
+            "requestId": "request-7",
+            "retryable": false,
+            "errors": null
+        })
+    }
+
+    #[tokio::test]
+    async fn owns_exact_authenticated_attachment_move_manifest_exchange() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json; charset=utf-8",
+            json!({
+                "operationId": "move/7",
+                "expiresAt": "2026-08-27T12:00:00Z",
+                "attachments": [{
+                    "attachmentId": "attachment-7",
+                    "storageKey": "attachments/staging/move-7/attachment-7",
+                    "uploadUrl": "https://objects.example.test/invocation-only-signature"
+                }]
+            }),
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client = AuthHttpClient::new(
+            &transport,
+            "https://vault.example.test/root",
+            false,
+            metadata(),
+        )
+        .unwrap();
+
+        let answer = client
+            .renew_attachment_move_manifest(
+                "fresh-token",
+                "move/7",
+                &manifest_request(),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::Prepared(manifest)) = answer
+        else {
+            panic!("expected a prepared manifest");
+        };
+        assert_eq!(manifest.operation_id, "move/7");
+        assert_eq!(manifest.expires_at, "2026-08-27T12:00:00Z");
+        assert_eq!(manifest.attachments.len(), 1);
+        assert_eq!(manifest.attachments[0].attachment_id, "attachment-7");
+        assert_eq!(
+            manifest.attachments[0].storage_key,
+            "attachments/staging/move-7/attachment-7"
+        );
+        assert_eq!(
+            manifest.attachments[0].upload_url,
+            "https://objects.example.test/invocation-only-signature"
+        );
+
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["method"], "PUT");
+        assert_eq!(
+            requests[0]["url"],
+            "https://vault.example.test/root/api/v1/operations/move%2F7/attachment-move-manifest"
+        );
+        assert_eq!(
+            requests[0]["headers"],
+            json!([
+                {"name":"Content-Type","value":"application/json"},
+                {"name":"Bittery-Client-Id","value":"client-7"},
+                {"name":"Bittery-Client-Platform","value":"web"},
+                {"name":"Bittery-Client-Version","value":"0.5.2"},
+                {"name":"Authorization","value":"Bearer fresh-token"}
+            ])
+        );
+        assert_eq!(
+            requests[0]["maxResponseBytes"],
+            ATTACHMENT_MOVE_MANIFEST_RESPONSE_BYTES
+        );
+        assert_eq!(
+            String::from_utf8(
+                serde_json::from_value::<Vec<u8>>(requests[0]["body"].clone()).unwrap()
+            )
+            .unwrap(),
+            r#"{"itemId":"item-7","sourceVaultId":"vault-source","targetVaultId":"vault-target","attachments":[{"attachmentId":"attachment-7","envelopeVersion":12,"ciphertextSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn consumes_valid_multi_attachment_manifest_larger_than_small_auth_responses() {
+        let request = AttachmentMoveManifestHttpRequest {
+            item_id: "item-many".into(),
+            source_vault_id: "vault-source".into(),
+            target_vault_id: "vault-target".into(),
+            attachments: (0..200)
+                .map(|index| AttachmentMoveManifestHttpEntry {
+                    attachment_id: format!("attachment-{index:03}"),
+                    envelope_version: 12,
+                    ciphertext_sha256:
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                })
+                .collect(),
+        };
+        let attachments = request
+            .attachments
+            .iter()
+            .map(|entry| {
+                let attachment_id = &entry.attachment_id;
+                json!({
+                    "attachmentId": attachment_id,
+                    "storageKey": format!("attachments/staging/move-many/{attachment_id}"),
+                    "uploadUrl": format!(
+                        "https://objects.example.test/attachments/staging/move-many/{attachment_id}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={}&X-Amz-Date=20260827T120000Z&X-Amz-Expires=300&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bx-amz-content-sha256&X-Amz-Signature={}",
+                        "credential-expansion".repeat(8),
+                        "a".repeat(64),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let response_body = json!({
+            "operationId": "move-many",
+            "expiresAt": "2026-08-27T12:00:00Z",
+            "attachments": attachments
+        });
+        let response_bytes = serde_json::to_vec(&response_body).unwrap().len();
+        assert!(response_bytes > SMALL_AUTH_RESPONSE_BYTES as usize);
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json",
+            response_body,
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+
+        let answer = client
+            .renew_attachment_move_manifest(
+                "fresh-token",
+                "move-many",
+                &request,
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::Prepared(manifest)) = answer
+        else {
+            panic!("valid multi-Attachment manifest must not be classified as transient");
+        };
+        assert_eq!(manifest.attachments.len(), 200);
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0]["maxResponseBytes"].as_u64().unwrap() >= response_bytes as u64);
+    }
+
+    #[tokio::test]
+    async fn classifies_attachment_move_manifest_authority_and_transport_answers() {
+        let cases = [
+            (
+                completed(
+                    409,
+                    "application/problem+json",
+                    problem("ATTACHMENT_AUTHORITY_STALE", 409),
+                ),
+                "stale",
+            ),
+            (
+                completed(
+                    409,
+                    "application/problem+json; charset=utf-8",
+                    problem("ATTACHMENT_STAGING_BUSY", 409),
+                ),
+                "busy",
+            ),
+            (
+                completed(401, "application/problem+json", json!({})),
+                "reauth",
+            ),
+            (
+                completed(408, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(425, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(429, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(500, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (
+                completed(599, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (r#"{"type":"networkFailure"}"#.to_owned(), "transient"),
+            (r#"{"type":"responseTooLarge"}"#.to_owned(), "transient"),
+        ];
+
+        for (response, expected) in cases {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor);
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let answer = client
+                .renew_attachment_move_manifest(
+                    "fresh-token",
+                    "move-7",
+                    &manifest_request(),
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+            match (expected, answer) {
+                (
+                    "stale",
+                    AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::StaleAuthority),
+                )
+                | ("busy", AuthenticatedOutcome::Ok(AttachmentMoveManifestAnswer::Busy))
+                | ("reauth", AuthenticatedOutcome::ReauthenticationRequired)
+                | ("transient", AuthenticatedOutcome::Transient) => {}
+                _ => panic!("unexpected manifest classification for {expected}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn owns_exact_auth_exchange_requests_and_drains_every_vault_key_page() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            completed(
+                201,
+                "application/json",
+                json!({
+                    "attemptId": "attempt /?",
+                    "kdfParams": { "algorithm": "pbkdf2", "iterations": 600000, "schemaVersion": 1 },
+                    "salt": "salt",
+                    "serverPublicKey": "server-public-key"
+                }),
+            ),
+            completed(200, "application/json; charset=utf-8", finish_response()),
+            completed(
+                200,
+                "application/json",
+                json!({
+                    "hasMore": true,
+                    "items": [vault_key("vault-2")],
+                    "nextCursor": "cursor/two"
+                }),
+            ),
+            completed(
+                200,
+                "application/json",
+                json!({
+                    "hasMore": false,
+                    "items": [vault_key("vault-3")],
+                    "nextCursor": null
+                }),
+            ),
+            completed(
+                200,
+                "application/json",
+                json!({
+                    "enabled": true,
+                    "enabledAt": "2026-08-23T10:00:00Z",
+                    "hiddenVaultIds": ["vault-3"],
+                    "updatedAt": "2026-08-23T10:00:00Z"
+                }),
+            ),
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client = AuthHttpClient::new(
+            &transport,
+            " HTTPS://Vault.Example.test/bittery/// ",
+            false,
+            metadata(),
+        )
+        .unwrap();
+        assert_eq!(
+            client.normalized_server_url(),
+            "https://vault.example.test/bittery"
+        );
+
+        let attempt = client
+            .start_login(
+                &StartLoginRequest {
+                    client_public_key: "client-public-key".into(),
+                    email: "alice@example.test".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let finish = client
+            .finish_login(
+                &attempt.attempt_id,
+                &FinishLoginRequest {
+                    client_proof: "client-proof".into(),
+                    client_public_key: "client-public-key".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let vault_keys = client
+            .drain_vault_keys(&finish.token, finish.vault_keys, RequestCancellation::new())
+            .await
+            .unwrap();
+        let travel_mode = client
+            .get_travel_mode(&finish.token, RequestCancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(vault_keys.len(), 3);
+        assert!(travel_mode.enabled);
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 5);
+        assert_eq!(requests[0]["method"], "POST");
+        assert_eq!(
+            requests[0]["url"],
+            "https://vault.example.test/bittery/api/v1/auth/login-attempts"
+        );
+        assert_eq!(
+            String::from_utf8(
+                serde_json::from_value::<Vec<u8>>(requests[0]["body"].clone()).unwrap()
+            )
+            .unwrap(),
+            r#"{"email":"alice@example.test","clientPublicKey":"client-public-key"}"#
+        );
+        assert_eq!(
+            String::from_utf8(
+                serde_json::from_value::<Vec<u8>>(requests[1]["body"].clone()).unwrap()
+            )
+            .unwrap(),
+            r#"{"clientPublicKey":"client-public-key","clientProof":"client-proof"}"#
+        );
+        assert_eq!(
+            requests[1]["url"],
+            "https://vault.example.test/bittery/api/v1/auth/login-attempts/attempt%20%2F%3F/finish"
+        );
+        assert_eq!(
+            requests[2]["url"],
+            "https://vault.example.test/bittery/api/v1/users/me/vault-keys?cursor=cursor+one%2F%2B"
+        );
+        assert_eq!(
+            requests[3]["url"],
+            "https://vault.example.test/bittery/api/v1/users/me/vault-keys?cursor=cursor%2Ftwo"
+        );
+        assert_eq!(
+            requests[4]["url"],
+            "https://vault.example.test/bittery/api/v1/travel-mode"
+        );
+        assert_eq!(requests[0]["maxResponseBytes"], SMALL_AUTH_RESPONSE_BYTES);
+        assert_eq!(requests[1]["maxResponseBytes"], VAULT_KEY_RESPONSE_BYTES);
+        assert_eq!(requests[2]["maxResponseBytes"], VAULT_KEY_RESPONSE_BYTES);
+        assert_eq!(requests[4]["maxResponseBytes"], SMALL_AUTH_RESPONSE_BYTES);
+
+        let public_headers = requests[0]["headers"].as_array().unwrap();
+        assert_eq!(
+            public_headers,
+            &vec![
+                json!({"name":"Content-Type","value":"application/json"}),
+                json!({"name":"Bittery-Client-Id","value":"client-7"}),
+                json!({"name":"Bittery-Client-Platform","value":"web"}),
+                json!({"name":"Bittery-Client-Version","value":"0.5.2"}),
+            ]
+        );
+        for request in &requests[2..] {
+            assert_eq!(
+                request["headers"].as_array().unwrap().last().unwrap(),
+                &json!({"name":"Authorization","value":"Bearer fresh-token"})
+            );
+        }
+    }
+
+    #[test]
+    fn normalizes_defaults_and_rejects_invalid_or_unconfirmed_urls_before_invocation() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![]));
+        let transport = HttpTransport::new(executor.clone());
+
+        for (input, confirmed, expected) in [
+            ("localhost:3000", false, "http://localhost:3000"),
+            ("127.0.0.1:3000/", false, "http://127.0.0.1:3000"),
+            ("127.1:3000/", false, "http://127.0.0.1:3000"),
+            ("[::1]:3000", false, "http://[::1]:3000"),
+            (
+                "bücher.example/bittery",
+                false,
+                "https://xn--bcher-kva.example/bittery",
+            ),
+            (
+                "vault.example.test/base/",
+                false,
+                "https://vault.example.test/base",
+            ),
+            (
+                "https://vault.example.test:443/base//nested///?tenant=one#section",
+                false,
+                "https://vault.example.test/base//nested",
+            ),
+            (
+                "https://vault.example.test/root/../bittery/./",
+                false,
+                "https://vault.example.test/bittery",
+            ),
+            ("0.0.0.0:3000", true, "http://0.0.0.0:3000"),
+            (
+                "http://vault.example.test",
+                true,
+                "http://vault.example.test",
+            ),
+        ] {
+            let client = AuthHttpClient::new(&transport, input, confirmed, metadata()).unwrap();
+            assert_eq!(client.normalized_server_url(), expected);
+        }
+
+        for input in [
+            "",
+            "ftp://vault.example.test",
+            "0.0.0.0:3000",
+            "https://user@vault.example.test",
+            "http://vault.example.test",
+        ] {
+            assert!(AuthHttpClient::new(&transport, input, false, metadata()).is_err());
+        }
+        assert!(executor.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_and_repeated_vault_key_cursors_fail_closed() {
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json",
+            json!({
+                "hasMore": true,
+                "items": [vault_key("vault-2")],
+                "nextCursor": "cursor-1"
+            }),
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+        let missing = expect_error(
+            client
+                .drain_vault_keys(
+                    "fresh-token",
+                    CursorPageAuthVaultKeyResponse {
+                        has_more: true,
+                        items: vec![contract_vault_key("vault-1", "wrapped-1")],
+                        next_cursor: None,
+                    },
+                    RequestCancellation::new(),
+                )
+                .await,
+        );
+        assert_eq!(missing.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert!(executor.requests().is_empty());
+
+        let repeated = expect_error(
+            client
+                .drain_vault_keys(
+                    "fresh-token",
+                    CursorPageAuthVaultKeyResponse {
+                        has_more: true,
+                        items: vec![contract_vault_key("vault-1", "wrapped-1")],
+                        next_cursor: Some("cursor-1".into()),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await,
+        );
+        assert_eq!(repeated.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert_eq!(executor.requests().len(), 1);
+
+        let empty_executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json",
+            json!({ "hasMore": true, "items": [], "nextCursor": "fresh-cursor-2" }),
+        )]));
+        let empty_transport = HttpTransport::new(empty_executor.clone());
+        let empty_client = AuthHttpClient::new(
+            &empty_transport,
+            "https://vault.example.test",
+            false,
+            metadata(),
+        )
+        .unwrap();
+        let no_progress = expect_error(
+            empty_client
+                .drain_vault_keys(
+                    "fresh-token",
+                    CursorPageAuthVaultKeyResponse {
+                        has_more: true,
+                        items: vec![contract_vault_key("vault-1", "wrapped-1")],
+                        next_cursor: Some("fresh-cursor-1".into()),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await,
+        );
+        assert_eq!(
+            no_progress.code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert_eq!(empty_executor.requests().len(), 1);
+    }
+
+    #[test]
+    fn cursor_evidence_rejects_repetition_count_and_byte_overflow_at_exact_boundaries() {
+        let mut exact = CursorEvidence::new();
+        exact.record_with_limits("one", 2, 6).unwrap();
+        exact.record_with_limits("two", 2, 6).unwrap();
+        assert_eq!(exact.seen.len(), 2);
+        assert_eq!(exact.total_bytes, 6);
+
+        let repeated = exact.record_with_limits("one", usize::MAX, usize::MAX);
+        assert_eq!(
+            repeated.unwrap_err().code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        let too_many = exact.record_with_limits("three", 2, usize::MAX);
+        assert_eq!(
+            too_many.unwrap_err().code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert_eq!(exact.seen.len(), 2);
+        assert_eq!(exact.total_bytes, 6);
+
+        let mut oversized = CursorEvidence::new();
+        let too_large = oversized.record_with_limits("abc", usize::MAX, 2);
+        assert_eq!(
+            too_large.unwrap_err().code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert!(oversized.seen.is_empty());
+        assert_eq!(oversized.total_bytes, 0);
+    }
+
+    #[test]
+    fn aggregate_vault_key_count_and_serialized_bytes_are_exact_and_all_or_nothing() {
+        assert_eq!(MAX_AUTH_VAULT_KEYS, 21_000);
+        assert_eq!(MAX_AUTH_VAULT_KEY_BYTES, 32 * 1024 * 1024);
+
+        let first = contract_vault_key("one", "wrapped-one");
+        let second = contract_vault_key("two", "wrapped-two");
+        let exact_two_bytes = serde_json::to_vec(&vec![first.clone(), second.clone()])
+            .unwrap()
+            .len();
+        let mut accumulator = VaultKeyAccumulator::new();
+        accumulator
+            .append_with_limits(vec![first, second], 2, exact_two_bytes)
+            .unwrap();
+        assert_eq!(accumulator.items.len(), 2);
+        assert_eq!(accumulator.serialized_bytes, exact_two_bytes);
+
+        let count_error = accumulator
+            .append_with_limits(
+                vec![contract_vault_key("three", "wrapped-three")],
+                2,
+                usize::MAX,
+            )
+            .unwrap_err();
+        assert_eq!(
+            count_error.code,
+            RuntimeErrorCode::AuthenticationUnavailable
+        );
+        assert_eq!(accumulator.items.len(), 2);
+
+        let mut byte_limited = VaultKeyAccumulator::new();
+        let one = contract_vault_key("one", "wrapped-one");
+        let exact_one_byte_limit = serde_json::to_vec(&vec![one.clone()]).unwrap().len();
+        byte_limited
+            .append_with_limits(vec![one], usize::MAX, exact_one_byte_limit)
+            .unwrap();
+        let byte_error = byte_limited
+            .append_with_limits(
+                vec![contract_vault_key("two", "wrapped-two")],
+                usize::MAX,
+                exact_one_byte_limit,
+            )
+            .unwrap_err();
+        assert_eq!(byte_error.code, RuntimeErrorCode::AuthenticationUnavailable);
+        assert_eq!(byte_limited.items.len(), 1);
+        assert_eq!(byte_limited.serialized_bytes, exact_one_byte_limit);
+    }
+
+    #[tokio::test]
+    async fn rejects_redirect_opaque_wrong_content_type_and_malformed_json() {
+        for response in [
+            completed(302, "application/json", json!({})),
+            completed(0, "application/json", json!({})),
+            completed(201, "text/html", json!({})),
+            completed(
+                201,
+                "application/json",
+                json!({
+                    "attemptId": "attempt-1",
+                    "kdfParams": {
+                        "algorithm": "pbkdf2",
+                        "iterations": 1,
+                        "schemaVersion": 1,
+                        "unexpectedNested": true
+                    },
+                    "salt": "salt",
+                    "serverPublicKey": "key"
+                }),
+            ),
+            r#"{"type":"networkFailure"}"#.to_owned(),
+            r#"{"type":"responseTooLarge"}"#.to_owned(),
+        ] {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor);
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let error = expect_error(
+                client
+                    .start_login(
+                        &StartLoginRequest {
+                            client_public_key: "key".into(),
+                            email: "alice@example.test".into(),
+                        },
+                        RequestCancellation::new(),
+                    )
+                    .await,
+            );
+            assert_eq!(error.code, RuntimeErrorCode::AuthenticationUnavailable);
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_ambiguous_content_type_invalid_bearer_and_host_oversize() {
+        let ambiguous = serde_json::to_string(&json!({
+            "type": "completed",
+            "status": 201,
+            "headers": [
+                { "name": "Content-Type", "value": "application/json" },
+                { "name": "content-type", "value": "application/json" }
+            ],
+            "body": serde_json::to_vec(&json!({})).unwrap()
+        }))
+        .unwrap();
+        let oversized = serde_json::to_string(&json!({
+            "type": "completed",
+            "status": 201,
+            "headers": [{ "name": "Content-Type", "value": "application/json" }],
+            "body": vec![b' '; SMALL_AUTH_RESPONSE_BYTES as usize + 1]
+        }))
+        .unwrap();
+
+        for response in [ambiguous, oversized] {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor);
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            assert!(client
+                .start_login(
+                    &StartLoginRequest {
+                        client_public_key: "key".into(),
+                        email: "alice@example.test".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+                .is_err());
+        }
+
+        let executor = Arc::new(ScriptedExecutor::new(vec![]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+        let error = expect_error(
+            client
+                .get_travel_mode("bad token", RequestCancellation::new())
+                .await,
+        );
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(executor.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn vault_image_upload_sends_every_exact_signed_header_and_rejects_drift() {
+        let completed = serde_json::to_string(&json!({
+            "type": "completed",
+            "status": 200,
+            "headers": [],
+            "body": []
+        }))
+        .unwrap();
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                .unwrap();
+        let sha256 = "a".repeat(64);
+        let exact = vec![
+            HttpHeader {
+                name: "Content-Length".into(),
+                value: "1".into(),
+            },
+            HttpHeader {
+                name: "Content-Type".into(),
+                value: "image/png".into(),
+            },
+            HttpHeader {
+                name: "x-amz-content-sha256".into(),
+                value: sha256.clone(),
+            },
+            HttpHeader {
+                name: "x-amz-checksum-sha256".into(),
+                value: "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo=".into(),
+            },
+        ];
+
+        assert!(client
+            .upload_vault_image_staging(
+                "https://objects.example.test/exact",
+                "image/png",
+                &sha256,
+                &exact,
+                b"x",
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap());
+        let request = executor.requests().pop().unwrap();
+        assert_eq!(request["body"], json!([120]));
+        assert_eq!(request["headers"], serde_json::to_value(&exact).unwrap());
+
+        for wrong in [exact[..3].to_vec(), {
+            let mut headers = exact.clone();
+            headers[0].value = "2".into();
+            headers
+        }] {
+            let error = client
+                .upload_vault_image_staging(
+                    "https://objects.example.test/exact",
+                    "image/png",
+                    &sha256,
+                    &wrong,
+                    b"x",
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        }
+        assert_eq!(executor.requests().len(), 1);
+    }
+}

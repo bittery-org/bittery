@@ -26,6 +26,16 @@ pub(super) async fn load_vault_access<'e>(
         .ok_or_else(|| AppError::forbidden("Access denied to this vault"))
 }
 
+pub(super) async fn find_vault_access<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
+    vault_id: &str,
+    user_id: &str,
+) -> Result<Option<VaultAccess>, AppError> {
+    query_vault_access(executor, vault_id, user_id)
+        .await
+        .map_err(|error| database_error(error, "Failed to verify vault access"))
+}
+
 pub(super) async fn assert_item_read_access<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
     vault_id: &str,
@@ -64,19 +74,31 @@ pub(super) async fn load_item_row<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
     item_id: &str,
 ) -> Result<DbBootstrapItemRow, AppError> {
+    find_item_row(executor, item_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Item not found"))
+}
+
+/// Reads one Item row without deciding that a missing Item is an error.
+///
+/// An Operation has to be able to prove "no such Item" as a retained semantic rejection, which a
+/// `404`-shaped `AppError` cannot express.
+pub(super) async fn find_item_row<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
+    item_id: &str,
+) -> Result<Option<DbBootstrapItemRow>, AppError> {
     query_as::<_, DbBootstrapItemRow>(&format!(
         "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = $1 LIMIT 1"
     ))
     .bind(item_id)
     .fetch_optional(executor)
     .await
-    .map_err(|error| database_error(error, "Failed to load item"))?
-    .ok_or_else(|| AppError::not_found("Item not found"))
+    .map_err(|error| database_error(error, "Failed to load item"))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn insert_item_sync_event<'e>(
-    executor: impl sqlx::Executor<'e, Database = Postgres>,
+pub(super) async fn insert_item_sync_event(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
     event_type: SyncEventType,
     item_id: &str,
     vault_id: &str,
@@ -85,7 +107,7 @@ pub(super) async fn insert_item_sync_event<'e>(
     version: i32,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        executor,
+        transaction,
         event_type,
         item_id,
         SyncEntityType::Item,

@@ -1,0 +1,2 @@
+import { useCreateVault as nativeCreate } from "@bittery/core/hooks";
+nativeCreate();

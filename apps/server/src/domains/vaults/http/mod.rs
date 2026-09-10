@@ -5,14 +5,19 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use utoipa::{IntoParams, IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     app::NotifySyncExt,
     db::enums::{ItemCategory, VaultRole, VaultType},
-    domains::vaults as vault,
-    error::{AppError, AppErrorCode},
+    domains::{
+        operations::{
+            ItemOperationEffect, ItemOperationInput, OperationOutcome, OperationResolution,
+        },
+        vaults as vault,
+    },
     http::{
         dto::{
             CursorPage, DecimalString, PageCursor, PageRequest, PatchField,
@@ -25,7 +30,7 @@ use crate::{
             ApiJson, ApiJsonBytes, ApiMergePatch, ApiMergePatchBytes, ApiQuery,
             AuthenticatedRequest,
         },
-        idempotency,
+        middleware::NEXT_CURSOR_HEADER,
         openapi::ORDINARY_API_BODY_LIMIT_BYTES,
         pagination::{
             decode_page_key, page_prefetched, page_prefetched_with_more, page_values, query_limit,
@@ -34,8 +39,7 @@ use crate::{
     },
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
-        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_item_shape, create_vault_shape, item_shape, update_item_shape, update_vault_shape,
+        convert_vault_type_shape, create_attachment_shape, item_shape, update_vault_shape,
         vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
         vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
@@ -48,19 +52,109 @@ mod items;
 mod members;
 pub(crate) mod rotation;
 pub(crate) mod travel_mode;
+mod vault_image_staging;
 
 pub(crate) const ITEM_BODY_LIMIT_BYTES: usize = ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024;
+
+/// The largest Import request body this Server will read.
+///
+/// It is deliberately *not* `BULK_IMPORT_ITEMS * ITEM_CIPHERTEXT_BYTES`, which would be about
+/// 200 MiB. A `413` here carries no Operation outcome, so the Client Runtime bounds one accepted
+/// batch's frozen request bytes below this limit at accept time instead — see
+/// `MAX_IMPORT_REQUEST_BYTES` in `runtime/import.rs`, guarded on this side by
+/// `import_request_bounds_match_the_runtime_batch_derivation`.
+pub(crate) const BULK_IMPORT_BODY_LIMIT_BYTES: usize = BULK_IMPORT_BYTES as usize;
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateVaultBody {
-    #[schema(max_length = 200)]
+    #[schema(min_length = 2, max_length = 200)]
     name: String,
     vault_type: VaultType,
     #[schema(max_length = 65536)]
     encrypted_vault_key: String,
-    icon: Option<String>,
+    #[schema(min_length = 1, max_length = 128)]
+    icon: String,
     image_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VaultImageStagingBody {
+    vault_id: String,
+    byte_length: i64,
+    content_type: VaultImageContentType,
+    sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+enum VaultImageContentType {
+    #[serde(rename = "image/jpeg")]
+    Jpeg,
+    #[serde(rename = "image/png")]
+    Png,
+    #[serde(rename = "image/webp")]
+    Webp,
+    #[serde(rename = "image/gif")]
+    Gif,
+    #[serde(rename = "image/avif")]
+    Avif,
+}
+
+impl VaultImageContentType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+            Self::Webp => "image/webp",
+            Self::Gif => "image/gif",
+            Self::Avif => "image/avif",
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultImageStagingGrantResponse {
+    object_key: String,
+    upload_url: String,
+    generation: i64,
+    lease_expires_at: String,
+    upload_headers: Vec<VaultImageStagingUploadHeader>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultImageStagingUploadHeader {
+    name: String,
+    value: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+enum VaultImageStagingStatusResponse {
+    Absent {},
+    Unconfirmed {
+        #[serde(rename = "objectKey")]
+        object_key: String,
+        generation: i64,
+        #[serde(rename = "leaseExpiresAt")]
+        lease_expires_at: String,
+    },
+    Confirmed {
+        #[serde(rename = "objectKey")]
+        object_key: String,
+        generation: i64,
+        #[serde(rename = "leaseExpiresAt")]
+        lease_expires_at: String,
+    },
+    CleanupPending {
+        #[serde(rename = "objectKey")]
+        object_key: String,
+        generation: i64,
+        #[serde(rename = "leaseExpiresAt")]
+        lease_expires_at: String,
+    },
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -100,6 +194,26 @@ struct CreateItemBody {
     encrypted_data: String,
     encryption_iv: String,
     encryption_algorithm: String,
+}
+
+/// The Item identities one authority page asks for, plus where to continue.
+// The identity set travels in a request body because up to 200 identities do not belong in a
+// query string. `get_item_authority_page` records the rest of the reasoning; it stays out of the
+// published contract, which describes vocabulary rather than Server internals.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ItemAuthorityPageBody {
+    #[schema(max_items = 200)]
+    item_ids: Vec<String>,
+    #[serde(default)]
+    cursor: Option<PageCursor>,
+    #[serde(default = "default_item_authority_page_limit")]
+    #[schema(minimum = 1, maximum = 200, default = 200)]
+    limit: u16,
+}
+
+fn default_item_authority_page_limit() -> u16 {
+    BULK_IMPORT_ITEMS
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -212,14 +326,91 @@ struct FavoriteBody {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(
+    tag = "mode",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum MoveItemBody {
+    Prepared {
+        #[serde(rename = "sourceVaultId")]
+        source_vault_id: String,
+        #[serde(rename = "targetVaultId")]
+        target_vault_id: String,
+        #[serde(rename = "encryptedData")]
+        #[schema(max_length = 1048576)]
+        encrypted_data: String,
+        #[serde(rename = "encryptionIv")]
+        encryption_iv: String,
+        #[serde(rename = "encryptionAlgorithm")]
+        encryption_algorithm: String,
+        #[serde(default)]
+        attachments: Vec<MoveAttachmentBody>,
+    },
+    RejectStaleAuthority {
+        #[serde(rename = "sourceVaultId")]
+        source_vault_id: String,
+        #[serde(rename = "targetVaultId")]
+        target_vault_id: String,
+        attachments: Vec<MoveAttachmentIntentBody>,
+    },
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MoveItemBody {
+struct MoveAttachmentBody {
+    attachment_id: String,
+    expected_envelope_version: i32,
+    encrypted_attachment_key: String,
+    attachment_key_iv: String,
+    attachment_key_algorithm: String,
+    encrypted_name: String,
+    encrypted_content_type: String,
+    encryption_iv: String,
+    encrypted_content_type_iv: String,
+    encryption_algorithm: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MoveAttachmentIntentBody {
+    attachment_id: String,
+    expected_envelope_version: i32,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentMoveManifestBody {
+    item_id: String,
     source_vault_id: String,
     target_vault_id: String,
-    #[schema(max_length = 1048576)]
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
+    attachments: Vec<AttachmentMoveManifestEntryBody>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentMoveManifestEntryBody {
+    attachment_id: String,
+    envelope_version: i32,
+    #[schema(min_length = 64, max_length = 64, pattern = "^[0-9a-f]{64}$")]
+    ciphertext_sha256: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentMoveManifestResponse {
+    operation_id: String,
+    expires_at: String,
+    attachments: Vec<AttachmentMoveUploadResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentMoveUploadResponse {
+    attachment_id: String,
+    storage_key: String,
+    upload_url: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -277,13 +468,6 @@ struct UpdateVaultMemberRoleBody {
     role: VaultRole,
 }
 
-create_vault_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct CreateVaultResponse
-});
-create_vault_shape!(shape_from { vault::CreateVaultResponse => CreateVaultResponse });
-
 update_vault_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
     #[serde(rename_all = "camelCase")]
@@ -299,29 +483,6 @@ convert_vault_type_shape!(wire_struct {
 convert_vault_type_shape!(shape_from {
     vault::ConvertVaultTypeResponse => ConvertVaultTypeResponse
 });
-
-create_item_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct CreateItemResponse
-});
-create_item_shape!(shape_from { vault::CreateItemResponse => CreateItemResponse });
-
-bulk_import_result_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct BulkImportItemsResponse
-});
-bulk_import_result_shape!(shape_from {
-    vault::BulkImportItemsResponse => BulkImportItemsResponse
-});
-
-update_item_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct UpdateItemResponse
-});
-update_item_shape!(shape_from { vault::UpdateItemResponse => UpdateItemResponse });
 
 create_attachment_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
@@ -458,26 +619,64 @@ impl From<vault::VaultItemDetailsResponse> for ItemResponseDto {
     }
 }
 
-fn check_ciphertext(value: &str) -> Result<(), ApiError> {
-    if value.len() > ITEM_CIPHERTEXT_BYTES as usize {
-        Err(ApiError::payload_too_large(format!(
-            "Item ciphertext cannot exceed {ITEM_CIPHERTEXT_BYTES} bytes."
-        )))
-    } else {
-        Ok(())
-    }
-}
-
+/// The one Import refusal that is not a retained decision.
+///
+/// A batch beyond the published Item bound is malformed, not state-dependent: retrying the same
+/// bytes can never make it valid, and no closed Import rejection code describes it. It is also
+/// unreachable from a Client Runtime, which refuses both an over-count batch (`MAX_IMPORT_ITEMS`)
+/// and an over-byte batch (`MAX_IMPORT_REQUEST_BYTES`) at accept time, so no accepted Operation
+/// can meet this refusal and be left retrying a status that carries no outcome.
+///
+/// An oversized ciphertext is different: it reaches the executor and becomes
+/// `invalid_ciphertext`, a terminal answer the Runtime can retain and replay.
 fn check_bulk_import(body: &BulkImportBody) -> Result<(), ApiError> {
     if body.items.len() > BULK_IMPORT_ITEMS as usize {
         return Err(ApiError::payload_too_large(format!(
             "Bulk imports cannot contain more than {BULK_IMPORT_ITEMS} items."
         )));
     }
-    for item in &body.items {
-        check_ciphertext(&item.encrypted_data)?;
+    Ok(())
+}
+
+fn check_item_authority_page_limit(limit: u16) -> Result<u16, ApiError> {
+    if limit == 0 || limit > BULK_IMPORT_ITEMS {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidPageLimit,
+            format!("limit must be between 1 and {BULK_IMPORT_ITEMS}"),
+        ));
+    }
+    Ok(limit)
+}
+
+/// A published bound is the bound a request actually hits, so the schema's `maxItems` is enforced
+/// here rather than only documented. One authority read answers at most one Import batch, and
+/// `check_bulk_import` holds the same number on the sibling Import route.
+fn check_item_authority_page_ids(item_ids: &[String]) -> Result<(), ApiError> {
+    if item_ids.len() > BULK_IMPORT_ITEMS as usize {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidRequest,
+            format!("An authority page cannot name more than {BULK_IMPORT_ITEMS} Items."),
+        ));
     }
     Ok(())
+}
+
+/// Binds one authority cursor to the exact identity set it was issued for.
+///
+/// Two things make an authority page mean what it means: the Vault and the Item identities asked
+/// for. Both belong in the cursor's filters, or a cursor issued for one set could be replayed
+/// against a different set in the same Vault and silently skip past Items the caller named.
+/// `cursor_rejects_tampering_principal_endpoint_and_filters` is the rule this follows.
+fn item_authority_cursor_filters(vault_id: &str, item_ids: &[String]) -> String {
+    let mut identities: Vec<&str> = item_ids.iter().map(String::as_str).collect();
+    identities.sort_unstable();
+    identities.dedup();
+    let mut digest = Sha256::new();
+    for identity in identities {
+        digest.update((identity.len() as u64).to_be_bytes());
+        digest.update(identity.as_bytes());
+    }
+    format!("{vault_id}\0{}", hex::encode(digest.finalize()))
 }
 
 fn optional_patch_value(
@@ -530,14 +729,6 @@ fn required_item_version(headers: &HeaderMap) -> Result<i32, ApiError> {
             )
         })?;
     Ok(version)
-}
-
-fn item_mutation_error(error: AppError) -> ApiError {
-    if error.code == AppErrorCode::Conflict {
-        ApiError::version_conflict(error.message)
-    } else {
-        error.into()
-    }
 }
 
 fn versioned_json<T: Serialize>(value: T, version: i32) -> Result<Response, ApiError> {
@@ -629,6 +820,104 @@ enum VaultErrorResponses {
     Internal(ProblemDetails),
 }
 
+#[derive(IntoResponses)]
+#[allow(dead_code)]
+enum ItemOperationErrorResponses {
+    #[response(
+        status = 400,
+        description = "Malformed request or Operation ID",
+        content_type = "application/problem+json"
+    )]
+    BadRequest(ProblemDetails),
+    #[response(
+        status = 401,
+        description = "Authentication required",
+        content_type = "application/problem+json"
+    )]
+    Unauthorized(ProblemDetails),
+    #[response(
+        status = 413,
+        description = "Payload too large",
+        content_type = "application/problem+json"
+    )]
+    PayloadTooLarge(ProblemDetails),
+    #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
+    #[response(
+        status = 422,
+        description = "Operation ID was reused with different immutable request bytes",
+        content_type = "application/problem+json"
+    )]
+    OperationIdReused(ProblemDetails),
+    #[response(
+        status = 500,
+        description = "Internal error",
+        content_type = "application/problem+json"
+    )]
+    Internal(ProblemDetails),
+}
+
+/// The transport-level refusals an Item mutation Operation can answer with.
+///
+/// A mutation adds `428` to the create set because it requires `If-Match`. Every other refusal it
+/// can produce is a semantic rejection carried inside a `200` outcome, not a status code.
+#[derive(IntoResponses)]
+#[allow(dead_code)]
+enum ItemMutationOperationErrorResponses {
+    #[response(
+        status = 400,
+        description = "Malformed request, Operation ID, or If-Match",
+        content_type = "application/problem+json"
+    )]
+    BadRequest(ProblemDetails),
+    #[response(
+        status = 401,
+        description = "Authentication required",
+        content_type = "application/problem+json"
+    )]
+    Unauthorized(ProblemDetails),
+    #[response(
+        status = 409,
+        description = "Attachment Move staging is incomplete",
+        content_type = "application/problem+json"
+    )]
+    Conflict(ProblemDetails),
+    #[response(
+        status = 413,
+        description = "Payload too large",
+        content_type = "application/problem+json"
+    )]
+    PayloadTooLarge(ProblemDetails),
+    #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
+    #[response(
+        status = 422,
+        description = "Operation ID was reused with different immutable request bytes",
+        content_type = "application/problem+json"
+    )]
+    OperationIdReused(ProblemDetails),
+    #[response(
+        status = 428,
+        description = "If-Match is required for this Item mutation",
+        content_type = "application/problem+json"
+    )]
+    PreconditionRequired(ProblemDetails),
+    #[response(
+        status = 500,
+        description = "Internal error",
+        content_type = "application/problem+json"
+    )]
+    Internal(ProblemDetails),
+}
+
 pub(crate) fn router() -> OpenApiRouter<AppState> {
     let reads = OpenApiRouter::new()
         .routes(routes!(catalog::list_vaults))
@@ -638,6 +927,8 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(items::list_all_trashed_items))
         .routes(routes!(items::list_deleted_items))
         .routes(routes!(items::get_item))
+        // A read that names its Items in a body; see `items::get_item_authority_page`.
+        .routes(routes!(items::get_item_authority_page))
         .routes(routes!(catalog::stats))
         .routes(routes!(attachments::list_attachments))
         .routes(routes!(members::list_members))
@@ -648,6 +939,10 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(catalog::convert_vault))
         .routes(routes!(catalog::delete_vault))
         .routes(routes!(catalog::create_image_upload))
+        .routes(routes!(vault_image_staging::grant))
+        .routes(routes!(vault_image_staging::status))
+        .routes(routes!(vault_image_staging::confirm))
+        .routes(routes!(vault_image_staging::cleanup))
         .routes(routes!(items::set_favorite))
         .routes(routes!(items::delete_item))
         .routes(routes!(items::restore_item))
@@ -664,10 +959,11 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(items::create_item))
         .routes(routes!(items::update_item))
         .routes(routes!(items::move_item))
+        .routes(routes!(items::create_attachment_move_manifest))
         .route_layer(DefaultBodyLimit::max(ITEM_BODY_LIMIT_BYTES));
     let bulk = OpenApiRouter::new()
         .routes(routes!(items::bulk_import_items))
-        .route_layer(DefaultBodyLimit::max(BULK_IMPORT_BYTES as usize));
+        .route_layer(DefaultBodyLimit::max(BULK_IMPORT_BODY_LIMIT_BYTES));
 
     reads.merge(ordinary_writes).merge(item_writes).merge(bulk)
 }
@@ -683,8 +979,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
+        check_bulk_import, check_item_authority_page_ids, check_item_authority_page_limit,
+        item_authority_cursor_filters, nullable_patch_value, router, AllItemsResponse,
         BulkImportBody, BulkImportItemInput, FavoriteBody, ItemCategory, UpdateVaultBody,
+        VaultImageContentType, VaultImageStagingBody, VaultImageStagingStatusResponse,
         VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
     };
     use crate::{
@@ -709,11 +1007,80 @@ mod tests {
     }
 
     #[test]
-    fn item_ciphertext_limit_is_byte_based_and_inclusive() {
-        assert!(check_ciphertext(&"a".repeat(1_048_576)).is_ok());
-        assert!(check_ciphertext(&"a".repeat(1_048_577)).is_err());
-        assert!(check_ciphertext(&"é".repeat(524_288)).is_ok());
-        assert!(check_ciphertext(&format!("{}a", "é".repeat(524_288))).is_err());
+    fn vault_image_staging_wire_values_are_closed_and_correlated() {
+        for content_type in [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif",
+            "image/avif",
+        ] {
+            let body: VaultImageStagingBody = serde_json::from_value(json!({
+                "vaultId": "vault_test",
+                "byteLength": 12,
+                "contentType": content_type,
+                "sha256": "0".repeat(64),
+            }))
+            .expect("allowed Vault image MIME must decode");
+            assert_eq!(body.content_type.as_str(), content_type);
+            assert_eq!(
+                serde_json::to_value(body.content_type).unwrap(),
+                json!(content_type)
+            );
+        }
+        assert!(serde_json::from_value::<VaultImageStagingBody>(json!({
+            "vaultId": "vault_test",
+            "byteLength": 12,
+            "contentType": "image/svg+xml",
+            "sha256": "0".repeat(64),
+        }))
+        .is_err());
+
+        let authority = || {
+            (
+                "vaults/key".to_string(),
+                7_i64,
+                "2026-08-31T12:00:00Z".to_string(),
+            )
+        };
+        let values = [
+            VaultImageStagingStatusResponse::Absent {},
+            VaultImageStagingStatusResponse::Unconfirmed {
+                object_key: authority().0,
+                generation: authority().1,
+                lease_expires_at: authority().2,
+            },
+            VaultImageStagingStatusResponse::Confirmed {
+                object_key: authority().0,
+                generation: authority().1,
+                lease_expires_at: authority().2,
+            },
+            VaultImageStagingStatusResponse::CleanupPending {
+                object_key: authority().0,
+                generation: authority().1,
+                lease_expires_at: authority().2,
+            },
+        ];
+        for value in values {
+            let encoded = serde_json::to_value(&value).unwrap();
+            let decoded: VaultImageStagingStatusResponse =
+                serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+        }
+        assert!(
+            serde_json::from_value::<VaultImageStagingStatusResponse>(json!({
+                "state": "absent",
+                "objectKey": "impossible"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<VaultImageStagingStatusResponse>(json!({
+                "state": "confirmed"
+            }))
+            .is_err()
+        );
+        assert!(serde_json::from_value::<VaultImageContentType>(json!("text/plain")).is_err());
     }
 
     #[tokio::test]
@@ -736,10 +1103,12 @@ mod tests {
         assert_eq!(body["code"], "UNSUPPORTED_MEDIA_TYPE");
     }
 
+    /// Only the Item bound is a request error now; an oversized ciphertext is a retained
+    /// `invalid_ciphertext` decision the executor makes, covered by the Import Operation tests.
     #[test]
-    fn bulk_import_rejects_too_many_items_and_oversized_ciphertext() {
-        let too_many = BulkImportBody {
-            items: (0..201)
+    fn bulk_import_refuses_only_a_batch_beyond_its_item_bound() {
+        let batch = |count: usize| BulkImportBody {
+            items: (0..count)
                 .map(|index| {
                     let mut value = item("ciphertext".to_string());
                     value.item_id = format!("item_{index}");
@@ -747,12 +1116,53 @@ mod tests {
                 })
                 .collect(),
         };
-        assert!(check_bulk_import(&too_many).is_err());
-
+        assert!(check_bulk_import(&batch(201)).is_err());
+        assert!(check_bulk_import(&batch(200)).is_ok());
         assert!(check_bulk_import(&BulkImportBody {
             items: vec![item("a".repeat(1_048_577))],
         })
-        .is_err());
+        .is_ok());
+    }
+
+    #[test]
+    fn item_authority_page_limit_stays_within_one_import_batch() {
+        assert!(check_item_authority_page_limit(0).is_err());
+        assert!(check_item_authority_page_limit(1).is_ok());
+        assert!(check_item_authority_page_limit(200).is_ok());
+        assert!(check_item_authority_page_limit(201).is_err());
+
+        let ids = |count: usize| (0..count).map(|i| format!("item_{i}")).collect::<Vec<_>>();
+        assert!(check_item_authority_page_ids(&ids(0)).is_ok());
+        assert!(check_item_authority_page_ids(&ids(200)).is_ok());
+        assert!(check_item_authority_page_ids(&ids(201)).is_err());
+    }
+
+    /// A cursor means "after this Item, in this Vault, among these identities".
+    #[test]
+    fn item_authority_cursor_filters_bind_the_vault_and_the_identity_set() {
+        let set = |ids: &[&str]| {
+            item_authority_cursor_filters(
+                "vault_1",
+                &ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(set(&["a", "b"]), set(&["b", "a"]), "order is not identity");
+        assert_eq!(
+            set(&["a", "a", "b"]),
+            set(&["a", "b"]),
+            "a set has no duplicates"
+        );
+        assert_ne!(set(&["a", "b"]), set(&["a"]));
+        assert_ne!(
+            set(&["ab", "c"]),
+            set(&["a", "bc"]),
+            "parts are length-prefixed"
+        );
+        assert_ne!(
+            set(&["a"]),
+            item_authority_cursor_filters("vault_2", &["a".to_owned()]),
+            "the Vault stays part of the filters"
+        );
     }
 
     #[test]
@@ -970,11 +1380,22 @@ mod tests {
     }
 
     #[test]
+    fn rotation_and_item_routes_use_retained_outcomes() {
+        for source in [include_str!("items.rs"), include_str!("rotation.rs")] {
+            assert!(!source.contains("idempotency::execute"));
+            assert!(source.contains("OperationOutcome"));
+        }
+    }
+
+    #[test]
     fn router_registers_all_used_vault_operations_only() {
         let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
-        let rendered = openapi.to_string();
-        assert_eq!(rendered.matches("operationId").count(), 31);
+        let rendered = openapi["paths"].to_string();
+        // Counted over `paths` alone: the retained Operation outcome schema carries an
+        // `operationId` property of its own, and that is a field name, not a route.
+        assert_eq!(rendered.matches("operationId").count(), 47);
         assert!(rendered.contains("listAllTrashedItems"));
+        assert!(rendered.contains("getVaultItemAuthorityPage"));
         assert!(rendered.contains("/items/trashed"));
         assert!(!rendered.contains("lookupUser"));
         assert!(rendered.contains("If-Match"));

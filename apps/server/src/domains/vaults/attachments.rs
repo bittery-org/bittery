@@ -4,19 +4,421 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
 use rand::random;
 use regex::Regex;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, query_scalar, PgPool};
 use time::OffsetDateTime;
 
 use super::{
     access::{assert_item_write_access, insert_item_sync_event, load_item_row, load_vault_access},
-    AttachmentDownloadResponse, AttachmentIdInput, CreateAttachmentInput, CreateAttachmentResponse,
-    CreateAttachmentUploadInput, CreateAttachmentUploadResponse, ItemIdInput, SuccessResponse,
-    UpdateAttachmentInput, VaultAttachmentResponse,
+    AttachmentDownloadResponse, AttachmentIdInput, AttachmentMoveManifestInput,
+    AttachmentMoveManifestResponse, AttachmentMoveUploadResponse, CreateAttachmentInput,
+    CreateAttachmentResponse, CreateAttachmentUploadInput, CreateAttachmentUploadResponse,
+    ItemIdInput, SuccessResponse, UpdateAttachmentInput, VaultAttachmentResponse,
 };
+
+const ATTACHMENT_MOVE_STAGING_LEASE_HOURS: i64 = 24;
+
+pub(crate) async fn create_attachment_move_manifest(
+    pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
+    deployment_mode: DeploymentMode,
+    user_id: &str,
+    input: AttachmentMoveManifestInput,
+) -> Result<AttachmentMoveManifestResponse, AppError> {
+    if input.attachments.is_empty()
+        || input.attachments.iter().any(|entry| {
+            entry.attachment_id.is_empty()
+                || entry.envelope_version <= 0
+                || entry.ciphertext_sha256.len() != crate::http::limits::CIPHERTEXT_SHA256_HEX_CHARS
+                || !entry
+                    .ciphertext_sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+    {
+        return Err(AppError::bad_request("Invalid Attachment Move manifest"));
+    }
+    if query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM operation_outcome WHERE user_id = $1 AND operation_id = $2)",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to check completed Attachment Move"))?
+    {
+        return Err(AppError::conflict(
+            "Attachment Move Operation is already resolved",
+        ));
+    }
+    let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
+    let item = load_item_row(pool, &input.item_id).await?;
+    if item.vault_id != input.source_vault_id {
+        return Err(AppError::attachment_authority_stale(
+            "Attachment Move source authority changed",
+        ));
+    }
+    assert_item_write_access(
+        load_vault_access(pool, &input.source_vault_id, user_id)
+            .await?
+            .role,
+        "Access denied",
+    )?;
+    assert_item_write_access(
+        load_vault_access(pool, &input.target_vault_id, user_id)
+            .await?
+            .role,
+        "Access denied",
+    )?;
+
+    let mut expected = input
+        .attachments
+        .iter()
+        .map(|entry| (entry.attachment_id.clone(), entry.envelope_version))
+        .collect::<Vec<_>>();
+    expected.sort();
+    expected.dedup();
+    if expected.len() != input.attachments.len() {
+        return Err(AppError::bad_request("Duplicate Attachment identity"));
+    }
+    let current = query_as::<_, (String, i32, i64)>(
+        "SELECT id, envelope_version, storage_size::bigint FROM item_attachment WHERE item_id = $1 ORDER BY id",
+    )
+    .bind(&input.item_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to load Attachment Move authority"))?;
+    let current_identity = current
+        .iter()
+        .map(|(id, version, _)| (id.clone(), *version))
+        .collect::<Vec<_>>();
+    if current_identity != expected {
+        return Err(AppError::attachment_authority_stale(
+            "Attachment Move authority changed",
+        ));
+    }
+    let current_sizes = current
+        .into_iter()
+        .map(|(id, _, storage_size)| (id, storage_size))
+        .collect::<HashMap<_, _>>();
+
+    let fingerprint = hex::encode(Sha256::digest(&input.request_bytes));
+    let now = OffsetDateTime::now_utc();
+    let expires_at = now + time::Duration::hours(ATTACHMENT_MOVE_STAGING_LEASE_HOURS);
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| database_error(error, "Failed to start Attachment Move manifest"))?;
+    for (attachment_id, _) in &expected {
+        acquire_advisory_lock(
+            &mut *transaction,
+            &format!(
+                "attachment-move-owner:{}:{}",
+                attachment_id.len(),
+                attachment_id
+            ),
+            "Failed to lock Attachment Move ownership",
+        )
+        .await?;
+    }
+    acquire_operation_lock(
+        &mut *transaction,
+        user_id,
+        &input.operation_id,
+        "Failed to lock Attachment Move manifest",
+    )
+    .await?;
+    if query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM operation_outcome WHERE user_id = $1 AND operation_id = $2)",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to recheck completed Attachment Move"))?
+    {
+        return Err(AppError::conflict(
+            "Attachment Move Operation is already resolved",
+        ));
+    }
+    let conflicts = query_as::<_, (String, String, OffsetDateTime)>(
+        "SELECT m.user_id, m.operation_id, m.expires_at FROM attachment_move_staging s INNER JOIN attachment_move_manifest m USING (user_id, operation_id) WHERE s.attachment_id = ANY($2) AND NOT (s.user_id = $1 AND s.operation_id = $3) FOR UPDATE OF m",
+    )
+    .bind(user_id)
+    .bind(expected.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>())
+    .bind(&input.operation_id)
+    .fetch_all(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to inspect Attachment Move ownership"))?
+    .into_iter()
+    .map(|(owner_user_id, operation_id, expires_at)| {
+        ((owner_user_id, operation_id), expires_at)
+    })
+    .collect::<HashMap<_, _>>();
+    if conflicts
+        .values()
+        .any(|expires_at| *expires_at > OffsetDateTime::now_utc())
+    {
+        return Err(AppError::attachment_staging_busy(
+            "A live Attachment Move already owns this Attachment.",
+        ));
+    }
+    for (conflicting_user_id, conflicting_operation_id) in conflicts.keys() {
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) SELECT user_id, operation_id, storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ON CONFLICT DO NOTHING")
+            .bind(conflicting_user_id)
+            .bind(conflicting_operation_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to queue expired Attachment Move staging"))?;
+        query("DELETE FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+            .bind(conflicting_user_id)
+            .bind(conflicting_operation_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| {
+                database_error(error, "Failed to release expired Attachment Move ownership")
+            })?;
+    }
+    let existing = query_as::<_, (String,)>(
+        "SELECT request_fingerprint FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to read Attachment Move manifest"))?;
+    if let Some((existing_fingerprint,)) = existing {
+        if existing_fingerprint != fingerprint {
+            return Err(AppError::conflict(
+                "Operation ID was reused with a different Attachment Move manifest",
+            ));
+        }
+        query("UPDATE attachment_move_manifest SET expires_at = $1 WHERE user_id = $2 AND operation_id = $3")
+            .bind(expires_at)
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to renew Attachment Move manifest"))?;
+    } else {
+        let generation = query_scalar::<_, i64>(
+            "INSERT INTO attachment_move_staging_generation (user_id, operation_id, request_fingerprint, generation) VALUES ($1, $2, $3, 1) ON CONFLICT (user_id, operation_id) DO UPDATE SET generation = attachment_move_staging_generation.generation + 1 WHERE attachment_move_staging_generation.request_fingerprint = EXCLUDED.request_fingerprint RETURNING generation",
+        )
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .bind(&fingerprint)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to advance Attachment Move staging generation"))?
+        .ok_or_else(|| {
+            AppError::conflict(
+                "Operation ID was reused with a different Attachment Move manifest",
+            )
+        })?;
+        query("INSERT INTO attachment_move_manifest (user_id, operation_id, item_id, source_vault_id, target_vault_id, request_fingerprint, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)")
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .bind(&input.item_id)
+            .bind(&input.source_vault_id)
+            .bind(&input.target_vault_id)
+            .bind(&fingerprint)
+            .bind(expires_at)
+            .bind(now)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to create Attachment Move manifest"))?;
+        for entry in &input.attachments {
+            let identity = hex::encode(Sha256::digest(
+                format!(
+                    "{}\0{}\0{}\0{}",
+                    user_id, input.operation_id, entry.attachment_id, generation
+                )
+                .as_bytes(),
+            ));
+            let storage_key = format!("attachments/staging/{identity}");
+            let storage_size = current_sizes
+                .get(&entry.attachment_id)
+                .copied()
+                .ok_or_else(|| AppError::conflict("Attachment Move authority changed"))?;
+            query("INSERT INTO attachment_move_staging (user_id, operation_id, attachment_id, expected_envelope_version, ciphertext_sha256, storage_key, storage_size) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+                .bind(user_id)
+                .bind(&input.operation_id)
+                .bind(&entry.attachment_id)
+                .bind(entry.envelope_version)
+                .bind(&entry.ciphertext_sha256)
+                .bind(storage_key)
+                .bind(storage_size)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|error| database_error(error, "Failed to create Attachment Move staging identity"))?;
+        }
+    }
+    let rows = query_as::<_, (String, String, i64, String)>(
+        "SELECT attachment_id, storage_key, storage_size, ciphertext_sha256 FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ORDER BY attachment_id",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_all(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to read Attachment Move uploads"))?;
+    let storage_keys = rows
+        .iter()
+        .map(|(_, key, _, _)| key.clone())
+        .collect::<Vec<_>>();
+    let cleanup_claimed = query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = ANY($3) AND claim_token IS NOT NULL AND claimed_at > NOW() - INTERVAL '5 minutes')",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .bind(&storage_keys)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to inspect Attachment Move cleanup claim"))?;
+    if cleanup_claimed {
+        return Err(AppError::attachment_staging_busy(
+            "Attachment Move staging cleanup is active.",
+        ));
+    }
+    query("DELETE FROM attachment_move_cleanup WHERE user_id = $1 AND operation_id = $2 AND storage_key = ANY($3) AND (claim_token IS NULL OR claimed_at <= NOW() - INTERVAL '5 minutes')")
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .bind(&storage_keys)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to cancel obsolete Attachment Move cleanup"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| database_error(error, "Failed to commit Attachment Move manifest"))?;
+
+    let mut attachments = Vec::with_capacity(rows.len());
+    for (attachment_id, storage_key, storage_size, ciphertext_sha256) in rows {
+        let upload = object_storage
+            .presign_upload(
+                &storage_key,
+                "application/octet-stream",
+                Some(storage_size),
+                Some(&ciphertext_sha256),
+                Some(300),
+            )
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "Attachment Move credential creation failed");
+                AppError::internal("An internal error occurred")
+            })?;
+        attachments.push(AttachmentMoveUploadResponse {
+            attachment_id,
+            storage_key: upload.key,
+            upload_url: upload.upload_url,
+        });
+    }
+    Ok(AttachmentMoveManifestResponse {
+        operation_id: input.operation_id,
+        expires_at: expires_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .map_err(|_| AppError::internal("Failed to format Attachment Move lease"))?,
+        attachments,
+    })
+}
+
+/// Renews the reproducible staging lease and proves every deterministic object is present.
+/// Missing preparation is deliberately not a semantic Operation outcome.
+pub(crate) async fn verify_attachment_move_staging(
+    pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
+    user_id: &str,
+    operation_id: &str,
+    intent: AttachmentMoveFinalizeIntent<'_>,
+) -> Result<AttachmentMoveStagingStatus, AppError> {
+    let now = OffsetDateTime::now_utc();
+    let expires_at = now + time::Duration::hours(ATTACHMENT_MOVE_STAGING_LEASE_HOURS);
+    let manifest = query_as::<_, (String, String, String, OffsetDateTime)>(
+        "SELECT item_id, source_vault_id, target_vault_id, expires_at FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .bind(now)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to read Attachment Move manifest"))?;
+    let Some((manifest_item_id, manifest_source_id, manifest_target_id, manifest_expires_at)) =
+        manifest
+    else {
+        return Ok(AttachmentMoveStagingStatus::Absent);
+    };
+    if manifest_expires_at <= now {
+        return Ok(AttachmentMoveStagingStatus::Incomplete);
+    }
+    let mut manifest_attachments = query_as::<_, (String, i32)>(
+        "SELECT attachment_id, expected_envelope_version FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ORDER BY attachment_id",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to read Attachment Move intent"))?;
+    let mut expected_attachments = intent.attachments.to_vec();
+    expected_attachments.sort();
+    manifest_attachments.sort();
+    if manifest_item_id != intent.item_id
+        || manifest_source_id != intent.source_vault_id
+        || manifest_target_id != intent.target_vault_id
+        || manifest_attachments != expected_attachments
+    {
+        return Ok(AttachmentMoveStagingStatus::Mismatch);
+    }
+    let renewed = query(
+        "UPDATE attachment_move_manifest SET expires_at = $1 WHERE user_id = $2 AND operation_id = $3 AND expires_at > $4",
+    )
+    .bind(expires_at)
+    .bind(user_id)
+    .bind(operation_id)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to renew Attachment Move staging"))?;
+    if renewed.rows_affected() != 1 {
+        return Ok(AttachmentMoveStagingStatus::Incomplete);
+    }
+    let rows = query_as::<_, (String, i64)>(
+        "SELECT storage_key, storage_size FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ORDER BY attachment_id",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to read Attachment Move staging"))?;
+    if rows.is_empty() {
+        return Ok(AttachmentMoveStagingStatus::Incomplete);
+    }
+    for (storage_key, storage_size) in rows {
+        let object = object_storage.head(&storage_key).await.map_err(|error| {
+            tracing::error!(error = %error, "Attachment Move staging check failed");
+            AppError::internal("An internal error occurred")
+        })?;
+        if !object.is_some_and(|object| object.size == storage_size) {
+            return Ok(AttachmentMoveStagingStatus::Incomplete);
+        }
+    }
+    Ok(AttachmentMoveStagingStatus::Ready)
+}
+
+pub(crate) enum AttachmentMoveStagingStatus {
+    Ready,
+    Absent,
+    Incomplete,
+    Mismatch,
+}
+
+pub(crate) struct AttachmentMoveFinalizeIntent<'a> {
+    pub(crate) item_id: &'a str,
+    pub(crate) source_vault_id: &'a str,
+    pub(crate) target_vault_id: &'a str,
+    pub(crate) attachments: &'a [(String, i32)],
+}
 use crate::{
     config::DeploymentMode,
-    db::events::generate_resource_id,
+    db::events::{begin_sync_event_transaction, generate_resource_id},
     db::{
         enums::{SyncEventType, VaultRole},
         models::{DbBootstrapAttachmentRow, DbBootstrapItemRow},
@@ -26,7 +428,10 @@ use crate::{
     },
     error::AppError,
     integrations::storage,
-    shared::transaction::{acquire_advisory_lock, database_error},
+    shared::transaction::{
+        acquire_advisory_lock, acquire_item_attachment_writer_lock, acquire_operation_lock,
+        database_error,
+    },
 };
 
 const ATTACHMENT_ENVELOPE_VERSION: i32 = 1;
@@ -49,9 +454,11 @@ struct DbPendingAttachmentReservationRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct DbScopedAttachmentAccessRow {
+    attachment_id: String,
     item_id: String,
     vault_id: String,
     storage_key: String,
+    envelope_version: i32,
     encrypted_name: String,
     encrypted_content_type: String,
     encryption_iv: String,
@@ -135,7 +542,7 @@ pub(crate) async fn create_vault_attachment_upload(
     let current_usage = committed_usage + pending_usage;
     if let Some(quota_bytes) = actor.attachment_storage_bytes {
         if current_usage + i64::from(storage_size) > quota_bytes {
-            return Err(AppError::forbidden(
+            return Err(AppError::attachment_quota_exceeded(
                 "Attachment storage quota has been reached for your current plan.",
             ));
         }
@@ -169,6 +576,7 @@ pub(crate) async fn create_vault_attachment_upload(
             &key,
             &input.content_type,
             Some(i64::from(storage_size)),
+            None,
             None,
         )
         .await
@@ -252,10 +660,23 @@ pub(crate) async fn create_vault_attachment(
             "Uploaded attachment does not match the reserved encrypted size.",
         ));
     }
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start attachment create transaction"))?;
+    acquire_item_attachment_writer_lock(
+        &mut *transaction,
+        &input.item_id,
+        "Failed to lock Item Attachment writer",
+    )
+    .await?;
+    let current_vault_id = query_scalar::<_, String>("SELECT vault_id FROM item WHERE id = $1")
+        .bind(&input.item_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to recheck attachment Item authority"))?;
+    if current_vault_id.as_deref() != Some(scoped_item.vault_id.as_str()) {
+        return Err(AppError::conflict("Item authority changed"));
+    }
     query(
 		"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
 	)
@@ -286,7 +707,7 @@ pub(crate) async fn create_vault_attachment(
         .await
         .map_err(|error| database_error(error, "Failed to consume attachment reservation"))?;
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &scoped_item.vault_id,
@@ -456,6 +877,12 @@ pub(crate) async fn get_attachment_download_url(
             AppError::internal("An internal error occurred")
         })?;
     Ok(AttachmentDownloadResponse {
+        attachment_id: attachment.attachment_id,
+        item_id: attachment.item_id,
+        vault_id: attachment.vault_id,
+        storage_key: attachment.storage_key,
+        envelope_version: attachment.envelope_version,
+        uploaded_by: attachment.uploaded_by,
         download_url,
         encrypted_name: attachment.encrypted_name,
         encrypted_content_type: attachment.encrypted_content_type,
@@ -476,28 +903,52 @@ pub(crate) async fn update_vault_attachment(
     let _actor = load_attachment_actor(pool, user_id, deployment_mode).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
     assert_item_write_access(attachment.role, "Access denied")?;
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start attachment update transaction"))?;
-    query(
-		"UPDATE item_attachment SET encrypted_name = $1, encryption_iv = $2, encryption_algorithm = $3 WHERE id = $4",
+    acquire_item_attachment_writer_lock(
+        &mut *transaction,
+        &attachment.item_id,
+        "Failed to lock Item Attachment writer",
+    )
+    .await?;
+    // Rename changes the Item's authoritative Attachment metadata, not either ciphertext AAD
+    // version. Advance only its concurrency revision so an already prepared Move cannot overwrite
+    // the new name. The Item and Attachment writes share this transaction and writer lock.
+    let item_version = query_scalar::<_, i32>(
+        "UPDATE item SET version = version + 1, last_modified_by = $1, updated_at = $2 WHERE id = $3 AND vault_id = $4 RETURNING version",
+    )
+    .bind(user_id)
+    .bind(OffsetDateTime::now_utc())
+    .bind(&attachment.item_id)
+    .bind(&attachment.vault_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to advance Attachment Item authority"))?
+    .ok_or_else(|| AppError::conflict("Attachment authority changed"))?;
+    let updated = query(
+		"UPDATE item_attachment SET encrypted_name = $1, encryption_iv = $2, encryption_algorithm = $3 WHERE id = $4 AND vault_id = $5 AND envelope_version = $6",
 	)
 	.bind(&input.encrypted_name)
 	.bind(&input.encryption_iv)
 	.bind(&input.encryption_algorithm)
 	.bind(&input.attachment_id)
+	.bind(&attachment.vault_id)
+	.bind(attachment.envelope_version)
 	.execute(&mut *transaction)
 	.await
 	.map_err(|error| database_error(error, "Failed to update attachment"))?;
+    if updated.rows_affected() != 1 {
+        return Err(AppError::conflict("Attachment authority changed"));
+    }
     insert_item_sync_event(
-        &mut *transaction,
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,
         user_id,
         request_client_id,
-        load_item_row(pool, &attachment.item_id).await?.version,
+        item_version,
     )
     .await?;
     transaction
@@ -535,17 +986,28 @@ pub(crate) async fn delete_vault_attachment(
             AppError::internal("An internal error occurred")
         })?;
     let item_version = load_item_row(pool, &attachment.item_id).await?.version;
-    let mut transaction = pool
-        .begin()
+    let mut transaction = begin_sync_event_transaction(pool)
         .await
         .map_err(|error| database_error(error, "Failed to start attachment delete transaction"))?;
-    query("DELETE FROM item_attachment WHERE id = $1")
-        .bind(&input.attachment_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to delete attachment"))?;
-    insert_item_sync_event(
+    acquire_item_attachment_writer_lock(
         &mut *transaction,
+        &attachment.item_id,
+        "Failed to lock Item Attachment writer",
+    )
+    .await?;
+    let deleted =
+        query("DELETE FROM item_attachment WHERE id = $1 AND vault_id = $2 AND storage_key = $3")
+            .bind(&input.attachment_id)
+            .bind(&attachment.vault_id)
+            .bind(&attachment.storage_key)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to delete attachment"))?;
+    if deleted.rows_affected() != 1 {
+        return Err(AppError::conflict("Attachment authority changed"));
+    }
+    insert_item_sync_event(
+        &mut transaction,
         SyncEventType::ItemUpdated,
         &attachment.item_id,
         &attachment.vault_id,
@@ -687,7 +1149,7 @@ async fn load_attachment_access(
     user_id: &str,
 ) -> Result<DbScopedAttachmentAccessRow, AppError> {
     query_as::<_, DbScopedAttachmentAccessRow>(
-		"SELECT ia.id, ia.item_id, ia.vault_id, ia.storage_key, ia.encrypted_attachment_key, ia.attachment_key_iv, ia.attachment_key_algorithm, ia.envelope_version, ia.encrypted_name, ia.encrypted_content_type, ia.encryption_iv, ia.encrypted_content_type_iv, ia.encryption_algorithm, ia.file_size, ia.uploaded_by, ia.created_at, vk.role::text AS role FROM item_attachment ia INNER JOIN vault_key vk ON vk.vault_id = ia.vault_id AND vk.user_id = $2 WHERE ia.id = $1 LIMIT 1",
+		"SELECT ia.id AS attachment_id, ia.item_id, ia.vault_id, ia.storage_key, ia.encrypted_attachment_key, ia.attachment_key_iv, ia.attachment_key_algorithm, ia.envelope_version, ia.encrypted_name, ia.encrypted_content_type, ia.encryption_iv, ia.encrypted_content_type_iv, ia.encryption_algorithm, ia.file_size, ia.uploaded_by, ia.created_at, vk.role::text AS role FROM item_attachment ia INNER JOIN vault_key vk ON vk.vault_id = ia.vault_id AND vk.user_id = $2 WHERE ia.id = $1 LIMIT 1",
 	)
 	.bind(attachment_id)
 	.bind(user_id)

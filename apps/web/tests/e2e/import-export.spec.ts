@@ -1,5 +1,8 @@
+import { writeFile } from "node:fs/promises";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
+import JSZip from "jszip";
 import { nanoid } from "nanoid";
+import type { VaultExportPayload } from "../../src/lib/export-types";
 import { expect, generateTestUser, signUp, test } from "../fixtures/auth";
 import {
 	buildOnePasswordArchive,
@@ -13,8 +16,9 @@ import {
 	createItem,
 	createVault,
 	cssAttributeValue,
-	gotoRoute,
+	itemRow,
 	itemRowTitles,
+	openItem,
 	toastWithText,
 	VAULT_READY_TIMEOUT_MS,
 } from "../fixtures/vault";
@@ -95,7 +99,13 @@ test.afterAll(async () => {
 
 /** Open `/settings` and switch to the General tab, which owns both triggers. */
 async function openSettingsGeneral(): Promise<void> {
-	await gotoRoute(page, "/settings", page.getByTestId("settings-tab-account"));
+	if (!(await page.getByTestId("settings-tab-account").isVisible())) {
+		await page.getByTestId("user-menu").click();
+		await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+		await expect(page.getByTestId("settings-tab-account")).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+	}
 	const general = page.getByTestId("settings-tab-general");
 	await general.click();
 	await expect(general).toHaveAttribute("data-state", "active");
@@ -276,20 +286,19 @@ async function confirmImport(
 }
 
 /**
- * Open a vault the import created and return the item titles it holds.
+ * Open a Vault the import created and wait for its exact rendered Item titles.
  *
- * The ready locator names the row count the import reported, so `gotoRoute`
- * reloads - and re-runs the bootstrap - when a hydrate came back short instead
- * of asserting against a half-decrypted list.
+ * Navigate through the app so the process-owned Runtime keeps its live keys.
+ * Full document navigation deliberately locks Runtime and belongs to restart acceptance.
  */
-async function importedVaultItemTitles(
+async function expectImportedVaultItems(
 	vaultName: string,
-	expectedItemCount: number,
-): Promise<string[]> {
+	expectedTitles: string[],
+): Promise<void> {
 	const navLink = page.locator(
 		`[data-testid="vault-nav-link"][data-vault-name="${cssAttributeValue(vaultName)}"]`,
 	);
-	await gotoRoute(page, "/vaults", navLink);
+	await expect(navLink).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 	const vaultId = await navLink.getAttribute("data-vault-id");
 	if (!vaultId) {
 		throw new Error(
@@ -297,13 +306,19 @@ async function importedVaultItemTitles(
 		);
 	}
 
-	await gotoRoute(
-		page,
-		`/vaults/${vaultId}`,
-		page.getByTestId("item-row").nth(expectedItemCount - 1),
-	);
-	const titles = await itemRowTitles(page);
-	return titles.map((title) => title ?? "").sort();
+	await navLink.click();
+	await page.waitForURL((url) => url.pathname === `/vaults/${vaultId}`);
+	const destination = page.getByTestId("vault-detail-list");
+	await expect(destination).toHaveAttribute("data-vault-id", vaultId, {
+		timeout: VAULT_READY_TIMEOUT_MS,
+	});
+	// A URL change can precede rendering, and another Vault can have the same number
+	// of rows. Poll the exact titles as well; duplicates remain separate expected rows.
+	await expect
+		.poll(async () => (await itemRowTitles(page)).sort(), {
+			timeout: VAULT_READY_TIMEOUT_MS,
+		})
+		.toEqual([...expectedTitles].sort());
 }
 
 test("a .bttrx export round-trips: the archive carries the account, and importing it brings the items back", async () => {
@@ -368,9 +383,10 @@ test("a .bttrx export round-trips: the archive carries the account, and importin
 	expect(targetVaultName).toBe(`${prefix} ${seed.vaultName}`);
 	await confirmImport(dialog, { imported: 2, skipped: 0, newVaults: 1 });
 
-	expect(
-		await importedVaultItemTitles(`${prefix} ${seed.vaultName}`, 2),
-	).toEqual([seed.loginTitle, seed.noteTitle].sort());
+	await expectImportedVaultItems(
+		`${prefix} ${seed.vaultName}`,
+		[seed.loginTitle, seed.noteTitle].sort(),
+	);
 });
 
 test("a 1Password .1pux import maps two vaults, skips the archived item and warns about it", async () => {
@@ -405,12 +421,11 @@ test("a 1Password .1pux import maps two vaults, skips the archived item and warn
 	expect(names).toEqual([`${prefix} 1P Private`, `${prefix} 1P Shared`]);
 	await confirmImport(dialog, { imported: 3, skipped: 1, newVaults: 2 });
 
-	expect(await importedVaultItemTitles(`${prefix} 1P Private`, 2)).toEqual(
+	await expectImportedVaultItems(
+		`${prefix} 1P Private`,
 		["1PUX GitHub", "1PUX Recovery Codes"].sort(),
 	);
-	expect(await importedVaultItemTitles(`${prefix} 1P Shared`, 1)).toEqual([
-		"1PUX Visa",
-	]);
+	await expectImportedVaultItems(`${prefix} 1P Shared`, ["1PUX Visa"]);
 });
 
 test("a Bitwarden .json import drops the empty folder, warns twice and imports every supported category", async () => {
@@ -464,13 +479,13 @@ test("a Bitwarden .json import drops the empty folder, warns twice and imports e
 	]);
 	await confirmImport(dialog, { imported: 6, skipped: 1, newVaults: 3 });
 
-	expect(await importedVaultItemTitles(`${prefix} Test`, 1)).toEqual([
-		"Kreditkarte",
-	]);
-	expect(await importedVaultItemTitles(`${prefix} Test 2`, 2)).toEqual(
+	await expectImportedVaultItems(`${prefix} Test`, ["Kreditkarte"]);
+	await expectImportedVaultItems(
+		`${prefix} Test 2`,
 		["Figma", "GitHub"].sort(),
 	);
-	expect(await importedVaultItemTitles(`${prefix} No Folder`, 3)).toEqual(
+	await expectImportedVaultItems(
+		`${prefix} No Folder`,
 		["Ada", "Google", "Test Notiz"].sort(),
 	);
 });
@@ -496,10 +511,12 @@ test("the same Bitwarden vault as .csv imports cleanly, with no warnings and no 
 	expect(names).toEqual([`${prefix} Test 2`, `${prefix} No Folder`]);
 	await confirmImport(dialog, { imported: 4, skipped: 0, newVaults: 2 });
 
-	expect(await importedVaultItemTitles(`${prefix} Test 2`, 2)).toEqual(
+	await expectImportedVaultItems(
+		`${prefix} Test 2`,
 		["Figma", "GitHub"].sort(),
 	);
-	expect(await importedVaultItemTitles(`${prefix} No Folder`, 2)).toEqual(
+	await expectImportedVaultItems(
+		`${prefix} No Folder`,
 		["Google", "Test Notiz"].sort(),
 	);
 });
@@ -531,7 +548,7 @@ test("a Chrome .csv import puts every row, duplicates included, into one vault",
 
 	// Chrome writes one row per affiliated domain, so "example.com" arrives twice
 	// and both rows have to survive as separate items.
-	expect(await importedVaultItemTitles(expectedVaultName, 4)).toEqual([
+	await expectImportedVaultItems(expectedVaultName, [
 		"example.com",
 		"example.com",
 		"example.org",
@@ -562,7 +579,8 @@ test("a Firefox .csv import skips the Sync account entry and says so", async () 
 	expect(targetVaultName).toBe(expectedVaultName);
 	await confirmImport(dialog, { imported: 9, skipped: 1, newVaults: 1 });
 
-	expect(await importedVaultItemTitles(expectedVaultName, 9)).toEqual(
+	await expectImportedVaultItems(
+		expectedVaultName,
 		[
 			"github.com",
 			"konto.example.de",
@@ -620,15 +638,12 @@ test("a KeePassXC .csv import turns every group path into its own vault", async 
 
 	// The group path is kept verbatim as a vault name, and the recycle bin is an
 	// ordinary group rather than something the import drops.
-	expect(await importedVaultItemTitles(`${prefix} Work/Servers`, 1)).toEqual([
-		"db-primary",
-	]);
-	expect(await importedVaultItemTitles(`${prefix} Recycle Bin`, 1)).toEqual([
-		"Old Forum",
-	]);
-	expect(
-		await importedVaultItemTitles(`${prefix} Persönliche Konten`, 2),
-	).toEqual(["Kontoauszug", "WLAN Codes"].sort());
+	await expectImportedVaultItems(`${prefix} Work/Servers`, ["db-primary"]);
+	await expectImportedVaultItems(`${prefix} Recycle Bin`, ["Old Forum"]);
+	await expectImportedVaultItems(
+		`${prefix} Persönliche Konten`,
+		["Kontoauszug", "WLAN Codes"].sort(),
+	);
 });
 
 test("an export the provider cannot read is rejected before any preview, inline and as a toast", async () => {
@@ -689,4 +704,152 @@ test("an export the provider cannot read is rejected before any preview, inline 
 		.getByRole("button", { name: uiText("vaults_import_action_cancel") })
 		.click();
 	await expect(dialog).toBeHidden();
+});
+
+test("optional imported fields and favorites survive UI edits and a real export in all five categories", async () => {
+	test.setTimeout(IMPORT_BUDGET_MS);
+	const vaultName = `Field preservation ${suffix}`;
+	const common = {
+		notes: "Imported extra notes",
+		tags: ["imported-extra"],
+		customFields: [
+			{
+				id: "extra",
+				label: "Imported extra",
+				value: "retained value",
+				type: "text" as const,
+			},
+		],
+	};
+	const inputs: VaultExportPayload["items"] = [
+		{
+			category: "login",
+			data: {
+				...common,
+				title: "Extended Login",
+				username: "alice",
+				password: "current",
+				passwordHistory: [
+					{ password: "older", changedAt: "2026-01-01T00:00:00Z" },
+				],
+				url: "https://example.test",
+				urls: ["https://other.example.test"],
+			},
+		},
+		{
+			category: "secure-note",
+			data: { ...common, title: "Extended Note", note: "Private note body" },
+		},
+		{
+			category: "credit-card",
+			data: {
+				...common,
+				title: "Extended Card",
+				cardNumber: "4111111111111111",
+				billingAddress: "Imported billing address",
+			},
+		},
+		{
+			category: "identity",
+			data: {
+				...common,
+				title: "Extended Identity",
+				firstName: "Alice",
+				middleName: "Imported middle",
+				passportNumber: "Imported passport",
+				driversLicense: "Imported license",
+			},
+		},
+		{
+			category: "totp",
+			data: {
+				...common,
+				title: "Extended Authenticator",
+				totpSecret: "JBSWY3DPEHPK3PXP",
+				totpAlgorithm: "SHA256",
+				totpDigits: 8,
+				totpPeriod: 60,
+				totpIssuer: "Imported issuer",
+				totpAccountName: "alice",
+			},
+		},
+	].map((entry, index) => ({
+		...entry,
+		id: `extended-${index}`,
+		vaultId: "extended-vault",
+		favorite: true,
+		createdAt: "2026-01-01T00:00:00Z",
+		updatedAt: "2026-01-01T00:00:00Z",
+	})) as VaultExportPayload["items"];
+	const payload: VaultExportPayload = {
+		version: "1",
+		exportDate: "2026-01-01T00:00:00Z",
+		exportedBy: { email: "import@example.test" },
+		vaults: [{ id: "extended-vault", name: vaultName, type: "personal" }],
+		items: inputs,
+		metadata: { totalItems: 5, totalVaults: 1 },
+	};
+	const zip = new JSZip();
+	zip.file("export.json", JSON.stringify(payload));
+	const fixturePath = `${scratchDir}/extended-fields.bttrx`;
+	await writeFile(fixturePath, await zip.generateAsync({ type: "nodebuffer" }));
+	const dialog = await openImportDialog();
+	await chooseProvider(dialog, "bittery-bttrx");
+	await uploadExport(dialog, fixturePath);
+	await confirmImport(dialog, { imported: 5, skipped: 0, newVaults: 1 });
+	await expectImportedVaultItems(
+		vaultName,
+		inputs.map((item) => item.data.title),
+	);
+	for (const item of inputs) {
+		await openItem(page, item.data.title);
+		await page.getByTestId("item-edit-button").click();
+		const edit = page.getByTestId("edit-item-dialog");
+		await expect(edit).toBeVisible();
+		await edit.locator("#title").fill(`${item.data.title} edited`);
+		await edit.getByTestId("item-form-submit-button").click();
+		await expect(edit).toBeHidden();
+		await expect(itemRow(page, `${item.data.title} edited`)).toBeVisible();
+	}
+	await openSettingsGeneral();
+	await page
+		.getByRole("button", {
+			name: uiText("settings_general_export_open"),
+			exact: true,
+		})
+		.click();
+	const exporting = page.getByTestId("export-dialog");
+	await exporting.getByTestId("export-confirm-button").click();
+	await expect(
+		exporting.getByText(uiText("vault_export_dialog_stage_completed")),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	const downloading = page.waitForEvent("download");
+	await exporting
+		.getByRole("button", { name: uiText("vault_export_dialog_download") })
+		.click();
+	const download = await downloading;
+	const exportedPath = `${scratchDir}/edited-fields.bttrx`;
+	await download.saveAs(exportedPath);
+	const exported = await readBttrxPayload(exportedPath);
+	const exportedVault = exported.vaults.find(
+		(vault) => vault.name === vaultName,
+	);
+	expect(exportedVault).toBeDefined();
+	const actual = exported.items.filter(
+		(item) => item.vaultId === exportedVault?.id,
+	);
+	expect(actual).toHaveLength(5);
+	for (const input of inputs) {
+		const item = actual.find(
+			(entry) => entry.data.title === `${input.data.title} edited`,
+		);
+		expect(item).toMatchObject({
+			category: input.category,
+			favorite: true,
+			data: { ...input.data, title: `${input.data.title} edited` },
+		});
+	}
+	await exporting
+		.getByRole("button", { name: uiText("vault_export_dialog_cancel") })
+		.click();
 });

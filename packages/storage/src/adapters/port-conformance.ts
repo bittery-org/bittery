@@ -34,8 +34,9 @@ const VALID_PLATFORMS: readonly Platform[] = [
 ];
 
 /**
- * Comfortably over the ~2048-byte `expo-secure-store` limit on Android, so this value proves
- * that chunking inside the react-native adapter is invisible above the port.
+ * Comfortably over the size limit a platform secure store is likely to impose (Android's was
+ * ~2048 bytes), so this value proves that any chunking an adapter does is invisible above the
+ * port.
  */
 const LARGE_SECRET = "0123456789abcdef".repeat(512); // 8192 chars
 
@@ -583,6 +584,18 @@ export function runPortConformance(
 
 			expect(await record.recordGet("c1", "big")).toBe(LARGE_RECORD);
 			expect(await record.recordGet("c1", "unicode")).toBe(UNICODE_VALUE);
+		});
+
+		test("a record round-trips the empty string as a value, not as absent", async () => {
+			const { record } = await make();
+
+			await record.recordPut("c1", "empty", "");
+
+			// The same distinction the secret tier makes above: `?? null`, never `|| null`.
+			expect(await record.recordGet("c1", "empty")).toBe("");
+			expect(await record.recordList("c1")).toEqual([
+				{ id: "empty", value: "" },
+			]);
 		});
 
 		test("collection and id strings are opaque to the port", async () => {

@@ -1,0 +1,5 @@
+/build
+/.gradle
+# Copied in by the `tauri-plugin` build script from the `tauri` crate's own Android
+# library. Machine-specific, and regenerated on every build.
+/.tauri

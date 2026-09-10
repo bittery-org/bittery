@@ -9,7 +9,6 @@ use crate::error::{AppError, AppErrorCode};
 use super::{dto::ProblemDetails, error_code::ErrorCode};
 
 const RATE_LIMIT_RETRY_AFTER_SECONDS: u32 = 60;
-const TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS: u32 = 1;
 pub(crate) const MAX_RETRY_AFTER_SECONDS: u32 = 86_400;
 
 #[derive(Clone, Copy, Debug)]
@@ -91,16 +90,6 @@ impl ApiError {
         )
     }
 
-    pub(crate) fn version_conflict(detail: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::PRECONDITION_FAILED,
-            ErrorCode::VersionConflict,
-            "Version conflict",
-            detail,
-            false,
-        )
-    }
-
     pub(crate) fn unprocessable(code: ErrorCode, detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -115,17 +104,8 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, code, "Conflict", detail, false)
     }
 
-    pub(crate) fn service_unavailable(code: ErrorCode, detail: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            code,
-            "Service unavailable",
-            detail,
-            true,
-        )
-        .with_retry_after(RetryAfter::seconds(
-            TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS,
-        ))
+    pub(crate) fn not_found(code: ErrorCode, detail: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, code, "Not found", detail, false)
     }
 
     pub(crate) fn unauthorized(detail: impl Into<String>) -> Self {
@@ -136,6 +116,50 @@ impl ApiError {
             detail,
             false,
         )
+    }
+
+    pub(crate) fn account_deletion_confirmation_mismatch(request_id: &str) -> Self {
+        Self::account_deletion_problem(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::AccountDeletionConfirmationMismatch,
+            "Account deletion confirmation mismatch",
+            "The confirmation email does not match the Account.",
+            request_id,
+        )
+    }
+
+    pub(crate) fn account_deletion_blocked(request_id: &str) -> Self {
+        Self::account_deletion_problem(
+            StatusCode::CONFLICT,
+            ErrorCode::AccountDeletionBlocked,
+            "Account deletion blocked",
+            "The Account cannot be deleted while it owns a non-personal Team with members or Vaults.",
+            request_id,
+        )
+    }
+
+    fn account_deletion_problem(
+        status: StatusCode,
+        code: ErrorCode,
+        title: &str,
+        detail: &str,
+        request_id: &str,
+    ) -> Self {
+        Self {
+            status,
+            retry_after: None,
+            problem: Box::new(ProblemDetails {
+                problem_type: code.problem_type(),
+                title: title.to_owned(),
+                status: status.as_u16(),
+                code,
+                detail: detail.to_owned(),
+                instance: format!("urn:bittery:account-deletion:{request_id}"),
+                request_id: request_id.to_owned(),
+                retryable: false,
+                errors: Vec::new(),
+            }),
+        }
     }
 
     pub(crate) fn api_route_not_found() -> Self {
@@ -240,6 +264,55 @@ impl From<AppError> for ApiError {
                 "Conflict",
                 error.message,
                 true,
+            ),
+            AppErrorCode::OperationIdReused => (
+                StatusCode::CONFLICT,
+                ErrorCode::OperationIdReused,
+                "Operation ID reused",
+                error.message,
+                false,
+            ),
+            AppErrorCode::VaultImageStagingQuotaExceeded => (
+                StatusCode::FORBIDDEN,
+                ErrorCode::AttachmentQuotaExceeded,
+                "Vault image staging quota exceeded",
+                error.message,
+                false,
+            ),
+            AppErrorCode::AttachmentStagingBusy => (
+                StatusCode::CONFLICT,
+                ErrorCode::AttachmentStagingBusy,
+                "Attachment staging busy",
+                error.message,
+                false,
+            ),
+            AppErrorCode::AttachmentStagingIncomplete => (
+                StatusCode::CONFLICT,
+                ErrorCode::AttachmentStagingIncomplete,
+                "Attachment Move staging incomplete",
+                error.message,
+                false,
+            ),
+            AppErrorCode::AttachmentStagingMismatch => (
+                StatusCode::CONFLICT,
+                ErrorCode::AttachmentStagingMismatch,
+                "Attachment Move staging mismatch",
+                error.message,
+                false,
+            ),
+            AppErrorCode::AttachmentAuthorityStale => (
+                StatusCode::CONFLICT,
+                ErrorCode::AttachmentAuthorityStale,
+                "Attachment staging authority stale",
+                error.message,
+                false,
+            ),
+            AppErrorCode::AttachmentQuotaExceeded => (
+                StatusCode::FORBIDDEN,
+                ErrorCode::AttachmentQuotaExceeded,
+                "Attachment quota exceeded",
+                error.message,
+                false,
             ),
             AppErrorCode::TooManyRequests => (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -347,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn rate_limits_and_temporary_unavailability_have_typed_retry_delays() {
+    fn rate_limits_have_typed_retry_delays() {
         let rate_limited =
             super::ApiError::from(AppError::too_many_requests("slow down")).into_response();
         assert_eq!(rate_limited.status(), StatusCode::TOO_MANY_REQUESTS);
@@ -358,19 +431,6 @@ mod tests {
                 .parse::<u32>()
                 .unwrap(),
             super::RATE_LIMIT_RETRY_AFTER_SECONDS
-        );
-
-        let unavailable =
-            super::ApiError::service_unavailable(ErrorCode::ServiceUnavailable, "try again")
-                .into_response();
-        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            unavailable.headers()["retry-after"]
-                .to_str()
-                .unwrap()
-                .parse::<u32>()
-                .unwrap(),
-            super::TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS
         );
     }
 
@@ -389,5 +449,18 @@ mod tests {
         assert_eq!(error.status, StatusCode::CONFLICT);
         assert!(error.problem.retryable);
         assert_eq!(error.problem.code, ErrorCode::Conflict);
+    }
+
+    #[test]
+    fn attachment_quota_has_a_stable_code_independent_of_detail() {
+        for detail in [
+            "Attachment storage quota has been reached.",
+            "Speicherplatz nicht verfugbar.",
+        ] {
+            let error = super::ApiError::from(AppError::attachment_quota_exceeded(detail));
+            assert_eq!(error.status, StatusCode::FORBIDDEN);
+            assert_eq!(error.problem.code, ErrorCode::AttachmentQuotaExceeded);
+            assert_eq!(error.problem.detail, detail);
+        }
     }
 }

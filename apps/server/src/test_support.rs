@@ -31,6 +31,273 @@ use crate::integrations::storage::{
 };
 use crate::{create_app, db, AppState, EdgeHttpConfig};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum VaultImageDatabaseBoundary {
+    ReplayRenewal,
+    GenerationAdvance,
+    GenerationInsert,
+    QuotaRead,
+    QuotaAdmission,
+    GrantCommit,
+    StatusRenewal,
+    StatusCommit,
+    Confirmation,
+    ConfirmationCommit,
+    CleanupRequest,
+    CleanupRequestCommit,
+    ExpiryMark,
+    CandidateSelection,
+    RowSelection,
+    FinalDelete,
+    CleanupCommit,
+}
+
+static VAULT_IMAGE_DATABASE_FAILPOINTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<(String, VaultImageDatabaseBoundary)>>,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_vault_image_database_failpoint(
+    operation_id: &str,
+    boundary: VaultImageDatabaseBoundary,
+) {
+    VAULT_IMAGE_DATABASE_FAILPOINTS
+        .lock()
+        .expect("Vault image database failpoints lock")
+        .insert((operation_id.to_owned(), boundary));
+}
+
+pub(crate) fn fail_vault_image_database_boundary(
+    operation_id: &str,
+    boundary: VaultImageDatabaseBoundary,
+) -> Result<(), sqlx::Error> {
+    if VAULT_IMAGE_DATABASE_FAILPOINTS
+        .lock()
+        .expect("Vault image database failpoints lock")
+        .remove(&(operation_id.to_owned(), boundary))
+    {
+        return Err(sqlx::Error::Protocol(format!(
+            "injected Vault image database failure at {boundary:?}"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+pub(crate) struct AttachmentMovePreflightControl {
+    claimed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl AttachmentMovePreflightControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static ATTACHMENT_MOVE_PREFLIGHT_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<AttachmentMovePreflightControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_attachment_move_preflight_hook(
+    operation_id: &str,
+) -> std::sync::Arc<AttachmentMovePreflightControl> {
+    let control = std::sync::Arc::new(AttachmentMovePreflightControl::default());
+    ATTACHMENT_MOVE_PREFLIGHT_HOOKS
+        .lock()
+        .expect("Attachment Move preflight hooks lock")
+        .insert(operation_id.to_string(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_attachment_move_preflight(operation_id: &str) {
+    let control = ATTACHMENT_MOVE_PREFLIGHT_HOOKS
+        .lock()
+        .expect("Attachment Move preflight hooks lock")
+        .get(operation_id)
+        .cloned();
+    let Some(control) = control else { return };
+    if !control
+        .claimed
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        control.entered.notify_one();
+        control.release.notified().await;
+        ATTACHMENT_MOVE_PREFLIGHT_HOOKS
+            .lock()
+            .expect("Attachment Move preflight hooks lock")
+            .remove(operation_id);
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AccountDeletionBeforeCommitControl {
+    claimed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl AccountDeletionBeforeCommitControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<AccountDeletionBeforeCommitControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_account_deletion_before_commit_hook(
+    request_id: &str,
+) -> std::sync::Arc<AccountDeletionBeforeCommitControl> {
+    let control = std::sync::Arc::new(AccountDeletionBeforeCommitControl::default());
+    ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion before-commit hooks lock")
+        .insert(request_id.to_string(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_account_deletion_before_commit(request_id: &str) {
+    let control = ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion before-commit hooks lock")
+        .get(request_id)
+        .cloned();
+    let Some(control) = control else { return };
+    if !control
+        .claimed
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        control.entered.notify_one();
+        control.release.notified().await;
+        ACCOUNT_DELETION_BEFORE_COMMIT_HOOKS
+            .lock()
+            .expect("Account deletion before-commit hooks lock")
+            .remove(request_id);
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AccountDeletionAfterDecisionControl {
+    claimed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl AccountDeletionAfterDecisionControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static ACCOUNT_DELETION_AFTER_DECISION_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<AccountDeletionAfterDecisionControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_account_deletion_after_decision_hook(
+    request_id: &str,
+) -> std::sync::Arc<AccountDeletionAfterDecisionControl> {
+    let control = std::sync::Arc::new(AccountDeletionAfterDecisionControl::default());
+    ACCOUNT_DELETION_AFTER_DECISION_HOOKS
+        .lock()
+        .expect("Account deletion after-decision hooks lock")
+        .insert(request_id.to_string(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_account_deletion_after_decision(request_id: &str) {
+    let control = ACCOUNT_DELETION_AFTER_DECISION_HOOKS
+        .lock()
+        .expect("Account deletion after-decision hooks lock")
+        .get(request_id)
+        .cloned();
+    let Some(control) = control else { return };
+    if !control
+        .claimed
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        control.entered.notify_one();
+        control.release.notified().await;
+        ACCOUNT_DELETION_AFTER_DECISION_HOOKS
+            .lock()
+            .expect("Account deletion after-decision hooks lock")
+            .remove(request_id);
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AccountDeletionAfterCommitControl {
+    claimed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl AccountDeletionAfterCommitControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static ACCOUNT_DELETION_AFTER_COMMIT_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<AccountDeletionAfterCommitControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_account_deletion_after_commit_hook(
+    request_id: &str,
+) -> std::sync::Arc<AccountDeletionAfterCommitControl> {
+    let control = std::sync::Arc::new(AccountDeletionAfterCommitControl::default());
+    ACCOUNT_DELETION_AFTER_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion after-commit hooks lock")
+        .insert(request_id.to_string(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_account_deletion_after_commit(request_id: &str) {
+    let control = ACCOUNT_DELETION_AFTER_COMMIT_HOOKS
+        .lock()
+        .expect("Account deletion after-commit hooks lock")
+        .get(request_id)
+        .cloned();
+    let Some(control) = control else { return };
+    if !control
+        .claimed
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        control.entered.notify_one();
+        control.release.notified().await;
+        ACCOUNT_DELETION_AFTER_COMMIT_HOOKS
+            .lock()
+            .expect("Account deletion after-commit hooks lock")
+            .remove(request_id);
+    }
+}
+
 pub(crate) fn with_test_config(state: AppState, overrides: &[(&str, &str)]) -> AppState {
     with_test_config_value(state, crate::config::Config::for_test_with(overrides))
 }
@@ -50,16 +317,84 @@ pub(crate) fn with_test_config_value(
 #[derive(Default)]
 pub(crate) struct RecordingObjectStorage {
     calls: std::sync::Mutex<Vec<String>>,
+    upload_requests: std::sync::Mutex<Vec<RecordedUploadRequest>>,
     fail: bool,
     public_base: Option<String>,
+    object_size: i64,
+    object_content_type: Option<String>,
+    object_sha256: Option<String>,
+    upload_key_override: Option<String>,
+    object_present: bool,
+    fail_delete: bool,
+    delete_started: Option<std::sync::Arc<tokio::sync::Notify>>,
+    delete_release: Option<std::sync::Arc<tokio::sync::Notify>>,
 }
+
+pub(crate) type RecordedUploadRequest = (String, String, Option<i64>, Option<String>);
 
 impl RecordingObjectStorage {
     pub(crate) fn succeeding(public_base: Option<&str>) -> Self {
         Self {
             calls: std::sync::Mutex::new(Vec::new()),
+            upload_requests: std::sync::Mutex::new(Vec::new()),
             fail: false,
             public_base: public_base.map(str::to_owned),
+            object_size: 1,
+            object_content_type: None,
+            object_sha256: None,
+            upload_key_override: None,
+            object_present: true,
+            fail_delete: false,
+            delete_started: None,
+            delete_release: None,
+        }
+    }
+    pub(crate) fn succeeding_with_object_size(object_size: i64) -> Self {
+        Self {
+            object_size,
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_exact_object(
+        object_size: i64,
+        content_type: &str,
+        sha256: &str,
+    ) -> Self {
+        Self {
+            object_size,
+            object_content_type: Some(content_type.to_owned()),
+            object_sha256: Some(sha256.to_owned()),
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_with_wrong_upload_key(key: &str) -> Self {
+        Self {
+            upload_key_override: Some(key.to_owned()),
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_with_absent_object() -> Self {
+        Self {
+            object_present: false,
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn failing_delete() -> Self {
+        Self {
+            fail_delete: true,
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_with_delayed_delete(
+        object_size: i64,
+        delete_started: std::sync::Arc<tokio::sync::Notify>,
+        delete_release: std::sync::Arc<tokio::sync::Notify>,
+    ) -> Self {
+        Self {
+            object_size,
+            delete_started: Some(delete_started),
+            delete_release: Some(delete_release),
+            ..Self::succeeding(None)
         }
     }
     pub(crate) fn failing() -> Self {
@@ -70,6 +405,12 @@ impl RecordingObjectStorage {
     }
     pub(crate) fn calls(&self) -> Vec<String> {
         self.calls.lock().expect("storage calls lock").clone()
+    }
+    pub(crate) fn upload_requests(&self) -> Vec<RecordedUploadRequest> {
+        self.upload_requests
+            .lock()
+            .expect("storage upload requests lock")
+            .clone()
     }
     fn record(&self, call: String) -> Result<(), StorageError> {
         self.calls.lock().expect("storage calls lock").push(call);
@@ -86,15 +427,77 @@ impl ObjectStorage for RecordingObjectStorage {
     async fn presign_upload(
         &self,
         key: &str,
-        _content_type: &str,
-        _content_length: Option<i64>,
+        content_type: &str,
+        content_length: Option<i64>,
+        payload_sha256: Option<&str>,
         _expires: Option<u64>,
     ) -> Result<PresignedUploadResult, StorageError> {
+        self.upload_requests
+            .lock()
+            .expect("storage upload requests lock")
+            .push((
+                key.into(),
+                content_type.into(),
+                content_length,
+                payload_sha256.map(str::to_owned),
+            ));
         self.record(format!("presign_upload:{key}"))?;
         Ok(PresignedUploadResult {
-            key: key.into(),
+            key: self
+                .upload_key_override
+                .clone()
+                .unwrap_or_else(|| key.to_owned()),
             upload_url: format!("https://upload.invalid/{key}"),
             public_url: self.public_url(key),
+            required_headers: Vec::new(),
+        })
+    }
+    async fn presign_exact_upload(
+        &self,
+        key: &str,
+        content_type: &str,
+        content_length: i64,
+        payload_sha256: &str,
+        _expires: Option<u64>,
+    ) -> Result<PresignedUploadResult, StorageError> {
+        use base64::Engine as _;
+        self.upload_requests
+            .lock()
+            .expect("storage upload requests lock")
+            .push((
+                key.into(),
+                content_type.into(),
+                Some(content_length),
+                Some(payload_sha256.to_owned()),
+            ));
+        self.record(format!("presign_upload:{key}"))?;
+        let checksum = hex::decode(payload_sha256)
+            .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
+        Ok(PresignedUploadResult {
+            key: self
+                .upload_key_override
+                .clone()
+                .unwrap_or_else(|| key.to_owned()),
+            upload_url: format!("https://upload.invalid/{key}"),
+            public_url: self.public_url(key),
+            required_headers: vec![
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "Content-Length".to_owned(),
+                    value: content_length.to_string(),
+                },
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "Content-Type".to_owned(),
+                    value: content_type.to_owned(),
+                },
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "x-amz-content-sha256".to_owned(),
+                    value: payload_sha256.to_owned(),
+                },
+                crate::integrations::storage::PresignedUploadHeader {
+                    name: "x-amz-checksum-sha256".to_owned(),
+                    value: base64::engine::general_purpose::STANDARD.encode(checksum),
+                },
+            ],
         })
     }
     async fn presign_download(
@@ -107,13 +510,27 @@ impl ObjectStorage for RecordingObjectStorage {
     }
     async fn head(&self, key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
         self.record(format!("head:{key}"))?;
+        if !self.object_present {
+            return Ok(None);
+        }
         Ok(Some(StorageObjectHead {
-            size: 1,
-            content_type: None,
+            size: self.object_size,
+            content_type: self.object_content_type.clone(),
+            payload_sha256: self.object_sha256.clone(),
         }))
     }
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        self.record(format!("delete:{key}"))
+        self.record(format!("delete:{key}"))?;
+        if self.fail_delete {
+            return Err(StorageError::DeleteObject(
+                "injected delete failure".to_owned(),
+            ));
+        }
+        if let (Some(started), Some(release)) = (&self.delete_started, &self.delete_release) {
+            started.notify_one();
+            release.notified().await;
+        }
+        Ok(())
     }
     fn public_url(&self, key: &str) -> Option<String> {
         self.public_base
@@ -380,10 +797,15 @@ fn validate_openapi_response(method: &Method, uri: &str, response: &ApiTestRespo
         }
     }
     if let Some(headers) = declared.get("headers").and_then(Value::as_object) {
-        for name in headers
-            .keys()
-            .filter(|name| name.as_str() != "Idempotency-Replayed")
-        {
+        // Two contract headers are conditional by design: an idempotent route sets
+        // `Idempotency-Replayed` only on a replay, and a paged authority read sets
+        // `Bittery-Next-Cursor` only when another page follows.
+        for name in headers.keys().filter(|name| {
+            !matches!(
+                name.as_str(),
+                "Idempotency-Replayed" | "Bittery-Next-Cursor"
+            )
+        }) {
             let value = response.headers.get(name).unwrap_or_else(|| {
                 panic!("{method} {path_template} status {status} requires response header {name}")
             });

@@ -1,0 +1,115 @@
+{
+	"name": "@bittery/client-runtime",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./protocol": {
+			"default": "./generated/runtime-protocol/contract.ts"
+		},
+		"./worker": {
+			"default": "./src/worker/index.ts"
+		},
+		"./indexeddb-executor": {
+			"default": "./src/indexeddb-executor.ts"
+		},
+		"./indexeddb-attachment-artifact-executor": {
+			"default": "./src/indexeddb-attachment-artifact-executor.ts"
+		},
+		"./indexeddb-vault-image-artifact-executor": {
+			"default": "./src/indexeddb-vault-image-artifact-executor.ts"
+		},
+		"./web-http-transport-executor": {
+			"default": "./src/web-http-transport-executor.ts"
+		},
+		"./web-binary-transfer-executor": {
+			"default": "./src/web-binary-transfer-executor.ts"
+		},
+		"./worker-runtime": {
+			"default": "./src/worker-runtime.ts"
+		},
+		"./web-platform-storage-host": {
+			"default": "./src/web-platform-storage-host.ts"
+		},
+		"./web": {
+			"default": "./src/web/composition.ts"
+		},
+		"./web/worker-entry": {
+			"default": "./src/web/worker-entry.ts"
+		},
+		"./client": {
+			"default": "./src/client/index.ts"
+		},
+		"./react": {
+			"default": "./src/react/index.ts"
+		},
+		"./testing": {
+			"default": "./src/testing/index.ts"
+		}
+	},
+	"scripts": {
+		"build:bindings:native": "./scripts/generate-native-bindings.sh",
+		"build:bindings:web": "./scripts/build-web-bindings.sh",
+		"check:bindings:native": "./scripts/check-native-bindings.sh",
+		"check:bindings:web": "./scripts/check-web-bindings.sh",
+		"generate:server-contract": "node ./scripts/generate-server-contract.mjs",
+		"generate:persistence-contract": "node ./scripts/generate-persistence-contract.mjs",
+		"generate:platform-storage-contract": "node ./scripts/generate-platform-storage-contract.mjs",
+		"generate:http-transport-contract": "node ./scripts/generate-http-transport-contract.mjs",
+		"generate:artifact-control-contract": "node ./scripts/generate-artifact-control-contract.mjs",
+		"generate:transfer-control-contract": "node ./scripts/generate-transfer-control-contract.mjs",
+		"generate:vault-image-control-contract": "node ./scripts/generate-vault-image-control-contract.mjs",
+		"generate:runtime-protocol-contract": "node ./scripts/generate-runtime-protocol-contract.mjs",
+		"generate:replica-conformance": "cargo run --quiet --manifest-path ./Cargo.toml -p bittery-client-core --features replica-conformance --bin generate-replica-conformance-corpus",
+		"check:server-contract": "node ./scripts/generate-server-contract.mjs --check",
+		"check:persistence-contract": "node ./scripts/generate-persistence-contract.mjs --check",
+		"check:platform-storage-contract": "node ./scripts/generate-platform-storage-contract.mjs --check",
+		"check:http-transport-contract": "node ./scripts/generate-http-transport-contract.mjs --check",
+		"check:artifact-control-contract": "node ./scripts/generate-artifact-control-contract.mjs --check",
+		"check:transfer-control-contract": "node ./scripts/generate-transfer-control-contract.mjs --check",
+		"check:vault-image-control-contract": "node ./scripts/generate-vault-image-control-contract.mjs --check",
+		"check:runtime-protocol-contract": "node ./scripts/generate-runtime-protocol-contract.mjs --check",
+		"check:replica-conformance": "cargo run --quiet --manifest-path ./Cargo.toml -p bittery-client-core --features replica-conformance --bin generate-replica-conformance-corpus -- --check",
+		"check:rust": "cargo fmt --all --check --manifest-path ./Cargo.toml && cargo clippy --manifest-path ./Cargo.toml --workspace --all-targets -- -D warnings && cargo test --manifest-path ./Cargo.toml --workspace",
+		"check:generated": "pnpm run check:server-contract && pnpm run check:persistence-contract && pnpm run check:platform-storage-contract && pnpm run check:http-transport-contract && pnpm run check:artifact-control-contract && pnpm run check:transfer-control-contract && pnpm run check:vault-image-control-contract && pnpm run check:recovery-control && pnpm run check:runtime-protocol-contract && pnpm run check:replica-conformance && pnpm run check:bindings:native && pnpm run check:bindings:web",
+		"check": "pnpm run check:rust && pnpm run test:generator && pnpm run check:generated",
+		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs ./scripts/generate-http-transport-contract.test.mjs ./scripts/generate-artifact-control-contract.test.mjs ./scripts/generate-transfer-control-contract.test.mjs ./scripts/generate-vault-image-control-contract.test.mjs ./scripts/generate-runtime-protocol-contract.test.mjs ./scripts/generate-recovery-control-contract.test.mjs ./scripts/generated-validator-esm.test.mjs ./scripts/harden-native-secret-bindings.test.mjs",
+		"test:bindings:web": "./scripts/test-web-binding-harness.sh",
+		"test:chromium": "node ./scripts/test-chromium.mjs",
+		"test:binary-transfer:chromium": "node ./scripts/test-chromium.mjs binary-transfer",
+		"test:attachment-download-sink:chromium": "node ./scripts/test-chromium.mjs attachment-download-sink",
+		"test:vault-image-artifact:chromium": "node ./scripts/test-chromium.mjs vault-image-artifact",
+		"test:vault-image-http:chromium": "node ./scripts/test-chromium.mjs vault-image-http",
+		"test:create-vault:chromium": "node ./scripts/test-chromium.mjs create-vault",
+		"check-types": "tsc --noEmit",
+		"test": "bun test src",
+		"generate:recovery-control": "node scripts/generate-recovery-control-contract.mjs",
+		"check:recovery-control": "node scripts/generate-recovery-control-contract.mjs --check"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"@tanstack/react-query": "^5.101.4",
+		"@testing-library/react": "^16.2.0",
+		"@types/jsdom": "^21.1.7",
+		"@types/react": "catalog:",
+		"ajv": "8.17.1",
+		"fake-indexeddb": "6.2.4",
+		"jsdom": "^26.0.0",
+		"json-schema-to-typescript": "15.0.4",
+		"react": "catalog:",
+		"react-dom": "catalog:"
+	},
+	"peerDependencies": {
+		"typescript": "^5",
+		"react": "^19",
+		"@tanstack/react-query": "^5"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		},
+		"@tanstack/react-query": {
+			"optional": true
+		}
+	}
+}

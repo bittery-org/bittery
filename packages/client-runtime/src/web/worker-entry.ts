@@ -1,0 +1,154 @@
+import { WebRecoveryExecutor } from "../web-recovery-executor";
+import { RecoveryWorkerFiles } from "../web-recovery-files";
+import { WebStorageFamily } from "../web-storage-family";
+/**
+ * The Web Worker composition root.
+ *
+ * The Worker owns the Runtime and, for now, the Crypto backend. The Crypto channel arrives
+ * injected rather than imported: `crypto-port` still hosts Desktop's and Mobile's own Worker
+ * roots and therefore still imports this package's transport, so an import the other way
+ * would close a package cycle. Ticket 22 removes the Crypto channel entirely.
+ */
+
+import { IndexedDbAttachmentArtifactExecutor } from "../indexeddb-attachment-artifact-executor";
+import { IndexedDbReplicaExecutor } from "../indexeddb-executor";
+import { IndexedDbVaultImageArtifactExecutor } from "../indexeddb-vault-image-artifact-executor";
+import { WebAccountLeaseExecutor } from "../web-account-lease-executor";
+import { WebAttachmentDownloadSinkExecutor } from "../web-attachment-download-sink";
+import { WebAttachmentUploadSourceExecutor } from "../web-attachment-upload-source";
+import { WebBinaryTransferExecutor } from "../web-binary-transfer-executor";
+import { WebHttpTransportExecutor } from "../web-http-transport-executor";
+import { WebVaultImageSourceExecutor } from "../web-vault-image-source";
+import { createWorkerHostRpc } from "../worker/host-rpc";
+import {
+	serveWorkerChannels,
+	type WorkerChannelService,
+	type WorkerRouterScope,
+} from "../worker/router";
+import {
+	createRuntimeWorkerService,
+	type RuntimeAuthClientConfig,
+	type RuntimeWasm,
+} from "../worker-runtime";
+
+export { decodeRuntimeClientIdentity } from "./client-identity";
+
+export interface WebRuntimeWorkerScope extends WorkerRouterScope {}
+
+export interface WebRuntimeWorkerDeps {
+	/** The combined WASM module. The host supplies it; only it may import the bindings. */
+	loadWasm(): Promise<RuntimeWasm>;
+	/** Who this client is on the Server. The host reads it; the Worker cannot. */
+	authClient?: RuntimeAuthClientConfig;
+	/** The Crypto channel, or none. Ticket 22 deletes this branch. */
+	crypto?: WorkerChannelService;
+	/** Test-only substitution; production proves the actual Worker-global timer. */
+	deviceTimerLivenessProbe?: () => Promise<void>;
+}
+
+/** Registers every channel this Worker serves. Nothing is loaded until a request arrives. */
+export function serveWebRuntimeWorker(
+	scope: WebRuntimeWorkerScope,
+	deps: WebRuntimeWorkerDeps,
+): void {
+	const hostRpc = createWorkerHostRpc(scope);
+	const attachmentArtifactExecutor = new IndexedDbAttachmentArtifactExecutor();
+	const vaultImageArtifacts = new IndexedDbVaultImageArtifactExecutor();
+	const accountLeaseExecutor = new WebAccountLeaseExecutor();
+	const storageFamily = new WebStorageFamily(() => vaultImageArtifacts.close());
+	const replica = new IndexedDbReplicaExecutor();
+	serveWorkerChannels(scope, {
+		...(deps.crypto === undefined ? {} : { crypto: deps.crypto }),
+		runtime: createRuntimeWorkerService({
+			storageFamily,
+			prepareRecoveryRuntimeIncarnation: async (runtimeIncarnation) => {
+				await hostRpc.request({
+					type: "recoveryRuntimeScope",
+					runtimeIncarnation,
+				});
+			},
+			recoveryExecutorFactory: (runtimeIncarnation) => {
+				const files = new RecoveryWorkerFiles(runtimeIncarnation, (message) =>
+					hostRpc.request(message),
+				);
+				const executor = new WebRecoveryExecutor(storageFamily, files.invoke);
+				return {
+					invoke: executor.invoke.bind(executor),
+					cancel: executor.cancel.bind(executor),
+					close: async () => {
+						await executor.close();
+						await files.close();
+					},
+				};
+			},
+			executor: {
+				invoke: (json) => storageFamily.runNormal(() => replica.invoke(json)),
+			},
+			platformStorageExecutor: {
+				invoke: (requestJson) => hostRpc.request<string>(requestJson),
+			},
+			httpExecutor: new WebHttpTransportExecutor(),
+			attachmentArtifactExecutor: {
+				invoke: (json, binary) =>
+					storageFamily.runNormal(() =>
+						attachmentArtifactExecutor.invoke(json, binary),
+					),
+			},
+			vaultImageArtifactExecutor: {
+				async invoke(controlRequestJson, binaryChunk) {
+					const response = (await storageFamily.runNormal(() =>
+						vaultImageArtifacts.invoke(
+							JSON.parse(controlRequestJson),
+							binaryChunk,
+						),
+					)) as { type: string; bytes?: Uint8Array };
+					const { bytes, ...control } = response;
+					return {
+						controlResponseJson: JSON.stringify(control),
+						...(bytes === undefined ? {} : { binaryChunk: bytes }),
+					};
+				},
+			},
+			binaryTransferExecutorFactory: () => new WebBinaryTransferExecutor(),
+			prepareAttachmentDownloadSinkRuntimeIncarnation: async (
+				runtimeIncarnation,
+			) => {
+				await hostRpc.request<string>({
+					type: "attachmentDownloadSinkRuntimeScope",
+					runtimeIncarnation,
+					phase: "prepare",
+				});
+			},
+			commitAttachmentDownloadSinkRuntimeIncarnation: async (
+				runtimeIncarnation,
+			) => {
+				await hostRpc.request<string>({
+					type: "attachmentDownloadSinkRuntimeScope",
+					runtimeIncarnation,
+					phase: "commit",
+				});
+			},
+			attachmentDownloadSinkExecutorFactory: (runtimeIncarnation) =>
+				new WebAttachmentDownloadSinkExecutor(
+					(payload) => hostRpc.request<string>(payload),
+					runtimeIncarnation,
+				),
+			attachmentUploadSourceExecutorFactory: (runtimeIncarnation) =>
+				new WebAttachmentUploadSourceExecutor(
+					(payload) => hostRpc.request(payload),
+					runtimeIncarnation,
+				),
+			vaultImageSourceExecutorFactory: (runtimeIncarnation) =>
+				new WebVaultImageSourceExecutor(
+					(payload) => hostRpc.request(payload),
+					runtimeIncarnation,
+				),
+			accountLeaseExecutor,
+			...(deps.deviceTimerLivenessProbe === undefined
+				? {}
+				: { deviceTimerLivenessProbe: deps.deviceTimerLivenessProbe }),
+			loadWasm: deps.loadWasm,
+			...(deps.authClient === undefined ? {} : { authClient: deps.authClient }),
+		}),
+	});
+}

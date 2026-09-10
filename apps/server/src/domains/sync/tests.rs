@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::{future::Future, sync::Arc, time::Duration as StdDuration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -7,12 +7,15 @@ use axum::{
 };
 use rand::random;
 use serde_json::{json, Value};
-use sqlx::{query, query_scalar, PgPool};
+use sqlx::{query, query_as, query_scalar, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
 use super::*;
-use crate::db::enums::{SyncEntityType, SyncEventType};
+use crate::db::{
+    enums::{SyncEntityType, SyncEventType},
+    events::{begin_sync_event_transaction, insert_sync_event, lock_sync_event_order},
+};
 use crate::error::AppErrorCode;
 use crate::{
     config::DeploymentMode,
@@ -23,6 +26,124 @@ use crate::{
     },
     AppState,
 };
+
+#[tokio::test]
+async fn item_authority_preserves_bootstrap_visibility_and_paid_attachment_policy() {
+    with_sync_test_app("item_authority_visibility", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        crate::test_support::seed_team(&app.pool, "team_sync_authority", "Authority", &fixture.owner_user_id, "family", "free", "active").await;
+        crate::test_support::assign_user_to_team(&app.pool, &fixture.owner_user_id, "team_sync_authority", "owner").await;
+        for (plan, status, attachment_count) in [("free", "active", 0), ("family", "active", 1), ("family", "canceled", 0)] {
+            query("UPDATE team SET billing_plan = $1::billing_plan, billing_status = $2::billing_status WHERE id = 'team_sync_authority'")
+                .bind(plan).bind(status).execute(&app.pool).await.unwrap();
+            let authority = app.api_json(Method::GET, &format!("/api/v1/items/{}/authority", fixture.primary_item_id), None, headers.clone()).await;
+            assert_eq!(authority.status, StatusCode::OK, "{plan}/{status}: {}", authority.body);
+            let bootstrap = app.api_json(Method::GET, "/api/v1/sync/bootstrap?phase=items", None, headers.clone()).await;
+            assert_eq!(bootstrap.status, StatusCode::OK);
+            let expected = bootstrap.body["items"].as_array().unwrap().iter().find(|item| item["id"] == fixture.primary_item_id).unwrap();
+            assert_eq!(&authority.body, expected, "complete Item authority must use the Bootstrap visibility contract");
+            assert_eq!(authority.body["attachments"].as_array().unwrap().len(), attachment_count);
+            assert!(authority.body.get("vault").is_none());
+            let paid_list = app.api_json(Method::GET, &format!("/api/v1/items/{}/attachments", fixture.primary_item_id), None, headers.clone()).await;
+            assert_eq!(paid_list.status, if attachment_count == 0 { StatusCode::FORBIDDEN } else { StatusCode::OK });
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn item_authority_requires_authentication_and_exact_item_access() {
+    with_sync_test_app("item_authority_access", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let path = format!("/api/v1/items/{}/authority", fixture.primary_item_id);
+        let anonymous = app
+            .api_json(Method::GET, &path, None, HeaderMap::new())
+            .await;
+        assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+        let outsider = app.issue_session(&fixture._outsider_user_id).await;
+        let denied = app
+            .api_json(
+                Method::GET,
+                &path,
+                None,
+                authenticated_json_headers(&outsider.token),
+            )
+            .await;
+        assert_eq!(denied.status, StatusCode::FORBIDDEN);
+        assert!(denied.body.get("encryptedData").is_none());
+        let owner = app.issue_session(&fixture.owner_user_id).await;
+        let missing = app
+            .api_json(
+                Method::GET,
+                "/api/v1/items/item_missing_authority/authority",
+                None,
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(missing.status, StatusCode::NOT_FOUND);
+        let empty = app
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/items/{}/authority", fixture.secondary_item_id),
+                None,
+                authenticated_json_headers(&owner.token),
+            )
+            .await;
+        assert_eq!(empty.status, StatusCode::OK);
+        assert_eq!(empty.body["id"], fixture.secondary_item_id);
+        assert_eq!(empty.body["attachments"], json!([]));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn item_authority_self_hosted_is_complete_and_refuses_oversized_answers() {
+    with_self_hosted_sync_test_app("item_authority_bound", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        let path = format!("/api/v1/items/{}/authority", fixture.primary_item_id);
+        let authority = app
+            .api_json(Method::GET, &path, None, headers.clone())
+            .await;
+        assert_eq!(authority.status, StatusCode::OK);
+        assert_eq!(authority.body["attachments"][0]["id"], "attachment_sync_01");
+        query("UPDATE item SET deleted_at = NOW() WHERE id = $1")
+            .bind(&fixture.primary_item_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let trashed = app
+            .api_json(Method::GET, &path, None, headers.clone())
+            .await;
+        assert_eq!(trashed.status, StatusCode::OK);
+        assert!(trashed.body["deletedAt"].is_string());
+        // Keep ciphertext within the per-Item limit; escaped Attachment metadata alone can
+        // overflow the complete wire answer and must never become a truncated Attachment list.
+        query("UPDATE item_attachment SET encrypted_name = $1 WHERE item_id = $2")
+            .bind("\"".repeat(2_100_000))
+            .bind(&fixture.primary_item_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let oversized = app
+            .api_json(Method::GET, &path, None, headers.clone())
+            .await;
+        assert_eq!(oversized.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(oversized.body.get("attachments").is_none());
+        query("UPDATE item_attachment SET encrypted_name = $1 WHERE item_id = $2")
+            .bind("x".repeat(4_200_000))
+            .bind(&fixture.primary_item_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let prebounded = app.api_json(Method::GET, &path, None, headers).await;
+        assert_eq!(prebounded.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(prebounded.body_bytes < crate::http::pagination::RESPONSE_PAGE_BYTES);
+    })
+    .await;
+}
 
 #[test]
 fn sync_notification_session_revoked_serializes_correctly() {
@@ -508,6 +629,236 @@ async fn seed_attachment(
 		.expect("attachment should seed");
 }
 
+async fn seed_commit_order_fixture(pool: &PgPool) -> (String, String, String) {
+    let first_user_id = "sync_order_user_first".to_owned();
+    let second_user_id = "sync_order_user_second".to_owned();
+    let vault_id = "sync_order_vault_shared".to_owned();
+    seed_user(
+        pool,
+        &first_user_id,
+        "First observer",
+        "sync-order-first@example.com",
+    )
+    .await;
+    seed_user(
+        pool,
+        &second_user_id,
+        "Second observer",
+        "sync-order-second@example.com",
+    )
+    .await;
+    seed_vault(
+        pool,
+        &vault_id,
+        "Shared sync order vault",
+        "personal",
+        &first_user_id,
+        None,
+    )
+    .await;
+    seed_vault_key(
+        pool,
+        "sync_order_key_first",
+        &vault_id,
+        &first_user_id,
+        "encrypted-key-first",
+        "owner",
+    )
+    .await;
+    seed_vault_key(
+        pool,
+        "sync_order_key_second",
+        &vault_id,
+        &second_user_id,
+        "encrypted-key-second",
+        "member",
+    )
+    .await;
+    (first_user_id, second_user_id, vault_id)
+}
+
+async fn wait_until_backend_waits_for_advisory_lock(pool: &PgPool, backend_pid: i32) {
+    tokio::time::timeout(StdDuration::from_secs(2), async {
+        loop {
+            let is_waiting: bool = query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid = $1 AND locktype = 'advisory' AND NOT granted)",
+            )
+            .bind(backend_pid)
+            .fetch_one(pool)
+            .await
+            .expect("advisory lock wait should be observable");
+            if is_waiting {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("second backend should reach the sync order fence");
+}
+
+#[tokio::test]
+async fn sync_event_cursor_order_survives_inverse_commit_attempt() {
+    with_sync_test_app("sync_event_inverse_commit", |app| async move {
+        let (first_user_id, second_user_id, vault_id) = seed_commit_order_fixture(&app.pool).await;
+        let first_entity_id = "sync_order_entity_first";
+        let second_entity_id = "sync_order_entity_second";
+
+        let mut first = begin_sync_event_transaction(&app.pool)
+            .await
+            .expect("first transaction should begin");
+        insert_sync_event(
+            &mut first,
+            SyncEventType::ItemUpdated,
+            first_entity_id,
+            SyncEntityType::Item,
+            &vault_id,
+            &first_user_id,
+            1,
+            None,
+            None,
+        )
+        .await
+        .expect("first event should be allocated");
+
+        let second_pool = app.pool.clone();
+        let second_vault_id = vault_id.clone();
+        let second_actor_id = second_user_id.clone();
+        let (backend_pid_tx, backend_pid_rx) = tokio::sync::oneshot::channel();
+        let second = tokio::spawn(async move {
+            let mut transaction = second_pool
+                .begin()
+                .await
+                .expect("second transaction should begin");
+            let backend_pid: i32 = query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut *transaction)
+                .await
+                .expect("second backend pid should load");
+            backend_pid_tx
+                .send(backend_pid)
+                .expect("parent should receive the second backend pid");
+            insert_sync_event(
+                &mut transaction,
+                SyncEventType::ItemUpdated,
+                second_entity_id,
+                SyncEntityType::Item,
+                &second_vault_id,
+                &second_actor_id,
+                1,
+                None,
+                None,
+            )
+            .await
+            .expect("second event should eventually be allocated");
+            transaction
+                .commit()
+                .await
+                .expect("second transaction should commit");
+        });
+
+        let backend_pid = backend_pid_rx
+            .await
+            .expect("second backend should report readiness");
+        wait_until_backend_waits_for_advisory_lock(&app.pool, backend_pid).await;
+        assert!(!second.is_finished());
+        first
+            .commit()
+            .await
+            .expect("first transaction should commit");
+        second.await.expect("second event task should finish");
+
+        let first_event_id: String =
+            query_scalar("SELECT id FROM sync_event WHERE entity_id = $1 AND user_id = $2")
+                .bind(first_entity_id)
+                .bind(&first_user_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("first event should be visible");
+        let first_page = get_events_since(
+            &app.pool,
+            &first_user_id,
+            GetEventsSinceInput {
+                since_id: None,
+                vault_ids: None,
+                limit: Some(1),
+            },
+        )
+        .await
+        .expect("first changes page should load");
+        assert_eq!(first_page.events[0].id, first_event_id);
+        assert!(first_page.has_more);
+
+        let next_page = get_events_since(
+            &app.pool,
+            &first_user_id,
+            GetEventsSinceInput {
+                since_id: Some(first_event_id),
+                vault_ids: None,
+                limit: Some(10),
+            },
+        )
+        .await
+        .expect("changes after the first cursor should load");
+        assert_eq!(next_page.events.len(), 1);
+        assert_eq!(next_page.events[0].entity_id, second_entity_id);
+        assert!(!next_page.requires_full_refresh);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sync_event_order_lock_rollback_releases_waiters() {
+    with_sync_test_app("sync_event_lock_rollback", |app| async move {
+        let mut first = begin_sync_event_transaction(&app.pool)
+            .await
+            .expect("first transaction should begin");
+        let lock_count: i64 = query_scalar(
+            "SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted",
+        )
+        .fetch_one(&mut *first)
+        .await
+        .expect("held advisory locks should be countable");
+        assert_eq!(lock_count, 1, "the transaction should hold one order lock");
+
+        let second_pool = app.pool.clone();
+        let (backend_pid_tx, backend_pid_rx) = tokio::sync::oneshot::channel();
+        let second = tokio::spawn(async move {
+            let mut transaction = second_pool
+                .begin()
+                .await
+                .expect("second transaction should begin");
+            let backend_pid: i32 = query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut *transaction)
+                .await
+                .expect("second backend pid should load");
+            backend_pid_tx
+                .send(backend_pid)
+                .expect("parent should receive the second backend pid");
+            lock_sync_event_order(&mut transaction)
+                .await
+                .expect("second transaction should acquire the released lock");
+            transaction
+                .commit()
+                .await
+                .expect("second transaction should commit");
+        });
+        let backend_pid = backend_pid_rx
+            .await
+            .expect("second backend should report readiness");
+        wait_until_backend_waits_for_advisory_lock(&app.pool, backend_pid).await;
+        assert!(!second.is_finished());
+        first
+            .rollback()
+            .await
+            .expect("rolling back should release transaction locks");
+        tokio::time::timeout(StdDuration::from_secs(2), second)
+            .await
+            .expect("rollback should unblock the waiter")
+            .expect("waiter task should finish");
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn sync_handlers_require_authentication() {
     with_sync_test_app("sync_handlers_require_authentication", |app| async move {
@@ -539,7 +890,7 @@ async fn sync_handlers_reject_malformed_request_input() {
 
             let cases = [
                 (
-                    "/api/v1/sync/bootstrap?limit=0",
+                    "/api/v1/sync/bootstrap?phase=vaults&limit=0",
                     "BAD_REQUEST",
                     "Invalid params",
                 ),
@@ -865,6 +1216,79 @@ async fn vault_deleted_event_remains_visible_after_its_vault_is_deleted() {
 }
 
 #[tokio::test]
+async fn operation_resolved_continues_through_count_bounded_sync_pages() {
+    with_sync_test_app("sync_operation_count_pages", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        seed_sync_event(
+            &app.pool,
+            "sync_operation_count_event",
+            "operation_resolved",
+            "operation_count_1",
+            "operation",
+            None,
+            &fixture.owner_user_id,
+            1,
+            Some("operation-client"),
+            None,
+            datetime!(2025-05-02 10:00 UTC),
+        )
+        .await;
+        seed_sync_event(
+            &app.pool,
+            "sync_item_after_operation",
+            "item_updated",
+            &fixture.primary_item_id,
+            "item",
+            Some(&fixture.primary_vault_id),
+            &fixture.owner_user_id,
+            10,
+            Some("operation-client"),
+            None,
+            datetime!(2025-05-02 10:01 UTC),
+        )
+        .await;
+
+        let first = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/changes?limit=1&sinceId={}",
+                    fixture.secondary_event_id
+                ),
+                None,
+                headers.clone(),
+            )
+            .await;
+        first.assert_contract_status();
+        assert_eq!(first.body["events"].as_array().map(Vec::len), Some(1));
+        assert_eq!(first.body["events"][0]["type"], "operation_resolved");
+        assert_eq!(first.body["events"][0]["entityId"], "operation_count_1");
+        assert_eq!(first.body["hasMore"], json!(true));
+
+        let second = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/changes?limit=1&sinceId={}",
+                    first.body["cursor"]["id"]
+                        .as_str()
+                        .expect("count-bounded page should continue")
+                ),
+                None,
+                headers,
+            )
+            .await;
+        second.assert_contract_status();
+        assert_eq!(second.body["events"].as_array().map(Vec::len), Some(1));
+        assert_eq!(second.body["events"][0]["id"], "sync_item_after_operation");
+        assert_eq!(second.body["hasMore"], json!(false));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
     with_sync_test_app("sync_changes_byte_budget", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;
@@ -875,13 +1299,26 @@ async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
             .map(|index| format!("sync_budget_event_{index}"))
             .collect();
         for (index, event_id) in expected_ids.iter().enumerate() {
+            let is_operation = index % 2 == 0;
             seed_sync_event(
                 &app.pool,
                 event_id,
-                "item_updated",
-                &fixture.primary_item_id,
-                "item",
-                Some(&fixture.primary_vault_id),
+                if is_operation {
+                    "operation_resolved"
+                } else {
+                    "item_updated"
+                },
+                if is_operation {
+                    event_id
+                } else {
+                    &fixture.primary_item_id
+                },
+                if is_operation { "operation" } else { "item" },
+                if is_operation {
+                    None
+                } else {
+                    Some(&fixture.primary_vault_id)
+                },
                 &fixture.owner_user_id,
                 index as i32 + 10,
                 Some("budget-client"),
@@ -941,50 +1378,100 @@ async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
 }
 
 #[tokio::test]
-async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachments() {
+async fn bootstrap_vault_phase_returns_an_accessible_personal_vault_with_zero_items() {
+    with_self_hosted_sync_test_app("sync_bootstrap_empty_vault", |app| async move {
+        let user_id = "user_sync_empty_vault";
+        let vault_id = "vault_sync_empty_personal";
+        seed_user(
+            &app.pool,
+            user_id,
+            "Empty Vault Owner",
+            "sync-empty-vault@example.com",
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            vault_id,
+            "Encrypted Empty Vault",
+            "personal",
+            user_id,
+            None,
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "vault_key_sync_empty_personal",
+            vault_id,
+            user_id,
+            "encrypted-empty-vault-key",
+            "owner",
+        )
+        .await;
+
+        let session = app.issue_session(user_id).await;
+        let response = app
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/bootstrap?phase=vaults",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+
+        response.assert_contract_status();
+        assert_eq!(response.body["phase"], json!("vaults"));
+        assert_eq!(response.body["hasMore"], json!(false));
+        assert_eq!(response.body["nextCursor"], Value::Null);
+        assert_eq!(response.body["vaults"].as_array().unwrap().len(), 1);
+        assert_eq!(response.body["vaults"][0]["id"], json!(vault_id));
+        assert_eq!(
+            response.body["vaults"][0]["encryptedVaultKey"],
+            json!("encrypted-empty-vault-key")
+        );
+        assert!(response.body.get("items").is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn bootstrap_phases_paginate_vaults_then_items_with_one_pinned_watermark() {
     with_self_hosted_sync_test_app("sync_bootstrap_items_success", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
 
-        let first_page = app
+        let first_vault_page = app
             .api_json(
                 Method::GET,
-                "/api/v1/sync/bootstrap?limit=1",
+                "/api/v1/sync/bootstrap?phase=vaults&limit=1",
                 None,
                 headers.clone(),
             )
             .await;
-        first_page.assert_contract_status();
+        first_vault_page.assert_contract_status();
+        assert_eq!(first_vault_page.body["phase"], json!("vaults"));
         assert_eq!(
-            first_page.body["items"]
+            first_vault_page.body["vaults"]
                 .as_array()
-                .expect("items should be an array")
+                .expect("vaults should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            first_page.body["items"][0]["id"],
-            json!(fixture.primary_item_id)
+            first_vault_page.body["vaults"][0]["id"],
+            json!(fixture.primary_vault_id)
         );
         assert_eq!(
-            first_page.body["items"][0]["attachments"]
-                .as_array()
-                .expect("attachments should be an array")
-                .len(),
-            1
-        );
-        assert_eq!(
-            first_page.body["items"][0]["vault"]["encryptedVaultKey"],
+            first_vault_page.body["vaults"][0]["encryptedVaultKey"],
             json!("encrypted-vault-key-primary")
         );
-        assert_eq!(first_page.body["hasMore"], json!(true));
+        assert_eq!(first_vault_page.body["hasMore"], json!(true));
         assert_eq!(
-            first_page.body["nextCursor"],
-            json!(fixture.primary_item_id)
+            first_vault_page.body["nextCursor"],
+            json!(fixture.primary_vault_id)
         );
         assert_eq!(
-            first_page.body["syncCursor"]["id"],
+            first_vault_page.body["syncCursor"]["id"],
             json!(fixture.secondary_event_id)
         );
 
@@ -1004,32 +1491,85 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
         )
         .await;
 
-        let second_page_path = format!(
-            "/api/v1/sync/bootstrap?cursor={}&syncCursor={}",
-            fixture.primary_item_id, fixture.secondary_event_id
+        let second_vault_page_path = format!(
+            "/api/v1/sync/bootstrap?phase=vaults&cursor={}&syncCursor={}&limit=1",
+            fixture.primary_vault_id, fixture.secondary_event_id
         );
-        let second_page = app
-            .api_json(Method::GET, &second_page_path, None, headers)
+        let second_vault_page = app
+            .api_json(Method::GET, &second_vault_page_path, None, headers.clone())
             .await;
-        second_page.assert_contract_status();
+        second_vault_page.assert_contract_status();
         assert_eq!(
-            second_page.body["items"]
+            second_vault_page.body["vaults"]
                 .as_array()
-                .expect("items should be an array")
+                .expect("vaults should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            second_page.body["items"][0]["id"],
-            json!(fixture.secondary_item_id)
+            second_vault_page.body["vaults"][0]["id"],
+            json!(fixture.secondary_vault_id)
         );
-        assert_eq!(second_page.body["hasMore"], json!(false));
-        assert_eq!(second_page.body["nextCursor"], Value::Null);
+        assert_eq!(second_vault_page.body["hasMore"], json!(false));
+        assert_eq!(second_vault_page.body["nextCursor"], Value::Null);
         assert_eq!(
-            second_page.body["syncCursor"]["id"],
+            second_vault_page.body["syncCursor"]["id"],
             json!(fixture.secondary_event_id)
         );
-        assert_ne!(second_page.body["syncCursor"]["id"], json!(later_event_id));
+        assert_ne!(
+            second_vault_page.body["syncCursor"]["id"],
+            json!(later_event_id)
+        );
+
+        let first_item_page = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/bootstrap?phase=items&syncCursor={}&limit=1",
+                    fixture.secondary_event_id
+                ),
+                None,
+                headers.clone(),
+            )
+            .await;
+        first_item_page.assert_contract_status();
+        assert_eq!(first_item_page.body["phase"], json!("items"));
+        assert_eq!(
+            first_item_page.body["items"][0]["id"],
+            json!(fixture.primary_item_id)
+        );
+        assert_eq!(
+            first_item_page.body["items"][0]["attachments"]
+                .as_array()
+                .expect("attachments should be an array")
+                .len(),
+            1
+        );
+        assert!(first_item_page.body["items"][0].get("vault").is_none());
+        assert_eq!(first_item_page.body["hasMore"], json!(true));
+
+        let second_item_page = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/sync/bootstrap?phase=items&cursor={}&syncCursor={}&limit=1",
+                    fixture.primary_item_id, fixture.secondary_event_id
+                ),
+                None,
+                headers,
+            )
+            .await;
+        second_item_page.assert_contract_status();
+        assert_eq!(
+            second_item_page.body["items"][0]["id"],
+            json!(fixture.secondary_item_id)
+        );
+        assert_eq!(second_item_page.body["hasMore"], json!(false));
+        assert_eq!(second_item_page.body["nextCursor"], Value::Null);
+        assert_eq!(
+            second_item_page.body["syncCursor"]["id"],
+            json!(fixture.secondary_event_id)
+        );
     })
     .await;
 }
@@ -1048,7 +1588,7 @@ async fn bootstrap_rejects_invalid_or_inaccessible_sync_cursors() {
             let response = app
                 .api_json(
                     Method::GET,
-                    &format!("/api/v1/sync/bootstrap?syncCursor={sync_cursor}"),
+                    &format!("/api/v1/sync/bootstrap?phase=vaults&syncCursor={sync_cursor}"),
                     None,
                     headers.clone(),
                 )
@@ -1079,7 +1619,7 @@ async fn bootstrap_captures_sync_cursor_before_fetching_the_first_item_page() {
                 request_app
                     .api_json(
                         Method::GET,
-                        "/api/v1/sync/bootstrap?limit=1",
+                        "/api/v1/sync/bootstrap?phase=items&limit=1",
                         None,
                         headers,
                     )
@@ -1145,7 +1685,7 @@ async fn bootstrap_pins_an_empty_sync_cursor_across_item_pages() {
         let first_page = app
             .api_json(
                 Method::GET,
-                "/api/v1/sync/bootstrap?limit=1",
+                "/api/v1/sync/bootstrap?phase=items&limit=1",
                 None,
                 headers.clone(),
             )
@@ -1176,7 +1716,7 @@ async fn bootstrap_pins_an_empty_sync_cursor_across_item_pages() {
             .api_json(
                 Method::GET,
                 &format!(
-                    "/api/v1/sync/bootstrap?cursor={}&limit=1&syncCursorCaptured=true",
+                    "/api/v1/sync/bootstrap?phase=items&cursor={}&limit=1&syncCursorCaptured=true",
                     next_cursor
                 ),
                 None,
@@ -1218,8 +1758,8 @@ async fn max_ciphertext_bootstrap_pages_stay_byte_bounded_and_continue() {
         let mut seen_ids = Vec::new();
         for _ in 0..4 {
             let query = cursor.as_deref().map_or_else(
-                || "limit=500".to_string(),
-                |cursor| format!("limit=500&cursor={cursor}"),
+                || "phase=items&limit=500".to_string(),
+                |cursor| format!("phase=items&limit=500&cursor={cursor}"),
             );
             let response = app
                 .api_json(
@@ -1286,13 +1826,12 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
         let large_name = "n".repeat(crate::domains::vaults::VAULT_NAME_MAX_CHARS);
         let large_key = "k".repeat(crate::domains::vaults::key::ENCRYPTED_VAULT_KEY_MAX_BYTES);
         let expected_ids: Vec<String> = (0..70)
-            .map(|index| format!("sync_metadata_item_{index:03}"))
+            .map(|index| format!("sync_metadata_vault_{index:03}"))
             .collect();
-        for (index, item_id) in expected_ids.iter().enumerate() {
-            let vault_id = format!("sync_metadata_vault_{index:03}");
+        for (index, vault_id) in expected_ids.iter().enumerate() {
             seed_vault(
                 &app.pool,
-                &vault_id,
+                vault_id,
                 &large_name,
                 "personal",
                 &fixture.owner_user_id,
@@ -1302,20 +1841,10 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
             seed_vault_key(
                 &app.pool,
                 &format!("sync_metadata_key_{index:03}"),
-                &vault_id,
+                vault_id,
                 &fixture.owner_user_id,
                 &large_key,
                 "owner",
-            )
-            .await;
-            seed_item(
-                &app.pool,
-                item_id,
-                &vault_id,
-                "login",
-                "ciphertext",
-                "iv",
-                &fixture.owner_user_id,
             )
             .await;
         }
@@ -1324,8 +1853,8 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
         let mut seen_ids = Vec::new();
         for _ in 0..4 {
             let query = cursor.as_deref().map_or_else(
-                || "limit=500".to_string(),
-                |cursor| format!("limit=500&cursor={cursor}"),
+                || "phase=vaults&limit=500".to_string(),
+                |cursor| format!("phase=vaults&limit=500&cursor={cursor}"),
             );
             let response = app
                 .api_json(
@@ -1338,9 +1867,9 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
             response.assert_contract_status();
             assert!(response.body_bytes <= crate::http::pagination::RESPONSE_PAGE_BYTES);
             seen_ids.extend(
-                response.body["items"]
+                response.body["vaults"]
                     .as_array()
-                    .expect("bootstrap page should contain items")
+                    .expect("bootstrap page should contain vaults")
                     .iter()
                     .filter_map(|item| item["id"].as_str().map(str::to_string)),
             );
@@ -1354,8 +1883,8 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
                     .to_string(),
             );
         }
-        for item_id in expected_ids {
-            assert_eq!(seen_ids.iter().filter(|seen| **seen == item_id).count(), 1);
+        for vault_id in expected_ids {
+            assert_eq!(seen_ids.iter().filter(|seen| **seen == vault_id).count(), 1);
         }
     })
     .await;

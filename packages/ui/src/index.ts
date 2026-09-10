@@ -6,6 +6,7 @@ export * from "./components/auth-doors-loader";
 export * from "./components/avatar";
 export * from "./components/avatar-group";
 export * from "./components/badge";
+export * from "./components/bittery-logo";
 export * from "./components/button";
 export * from "./components/button-group";
 export * from "./components/card";

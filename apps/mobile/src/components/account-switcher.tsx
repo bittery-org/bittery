@@ -1,242 +1,180 @@
-import { lockAllAccounts } from "@bittery/core/services/account-lifecycle";
-import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
-import { BottomSheet, PressableFeedback, useToast } from "heroui-native";
-import { useState } from "react";
-import { Alert, Text, View } from "react-native";
-import { AccountAvatar, getAccountLabel } from "@/components/auth-kit";
+/**
+ * The account avatar in the app bar, and the sheet behind it. Ported from
+ * `apps/mobile/src/components/account-switcher.tsx`, which is the design this app was
+ * missing entirely: switching accounts, settings, trash and lock all lived as loose header
+ * buttons here, or nowhere.
+ *
+ * Lock is not sign-out: every in-memory master unlock key is dropped — the native autofill
+ * mirror first — but `session_data` stays, so quick-unlock still works afterwards.
+ */
+
+import { toast } from "@bittery/ui";
 import {
 	IconCheck,
 	IconLock,
 	IconPlus,
 	IconSettings,
 	IconTrash,
-	iconSize,
+} from "@bittery/ui/icons";
+import { cn } from "@bittery/ui/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import {
+	AccountAvatar,
+	ConfirmSheet,
+	getAccountLabel,
+	MobileSheet,
+	Pressable,
 	SectionLabel,
-	SheetBrandAccent,
+	SheetAction,
 } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { useAccount } from "@/contexts/account-context";
+import { type AccountMetadata, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
-import { useAccount } from "../contexts/account-context";
-import { lifecycleDeps } from "../services/lifecycle";
-import { type AccountMetadata, storage } from "../services/storage";
-
-/** One of the four verbs the sheet offers below the account list. */
-function SheetAction({
-	label,
-	icon: Icon,
-	onPress,
-	tone = "default",
-}: {
-	label: string;
-	icon: typeof IconPlus;
-	onPress: () => void;
-	tone?: "default" | "danger";
-}) {
-	const isDanger = tone === "danger";
-
-	return (
-		<PressableFeedback
-			onPress={onPress}
-			accessibilityRole="button"
-			className="h-14 flex-row items-center gap-3 rounded-xl px-2"
-		>
-			<PressableFeedback.Highlight />
-			<View
-				className={cn(
-					"h-10 w-10 items-center justify-center rounded-xl",
-					isDanger ? "bg-danger-soft" : "bg-surface-tertiary",
-				)}
-			>
-				<Icon
-					size={iconSize.bar}
-					className={isDanger ? "text-danger" : "text-foreground"}
-				/>
-			</View>
-			<Text
-				className={cn(
-					"font-medium text-base",
-					isDanger ? "text-danger" : "text-foreground",
-				)}
-			>
-				{label}
-			</Text>
-		</PressableFeedback>
-	);
-}
 
 export function AccountSwitcher() {
-	const router = useRouter();
-	const { toast } = useToast();
+	const navigate = useNavigate();
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
-	const { allAccounts, activeAccount, activeAccountConfig, switchAccount } =
+	const { allAccounts, activeAccount, switchAccount, lockAllAccounts } =
 		useAccount();
-	const [switching, setSwitching] = useState(false);
 	const [isOpen, setIsOpen] = useState(false);
+	const [isSwitching, setIsSwitching] = useState(false);
+	const [isConfirmingLock, setIsConfirmingLock] = useState(false);
+
+	const activeAccountId = activeAccount?.accountId ?? null;
+	const accountFallback = m.mob_settings_account_fallback();
 
 	const handleAccountSwitch = async (account: AccountMetadata) => {
-		if (activeAccountConfig && account.accountId === activeAccountConfig) {
+		if (account.accountId === activeAccountId) {
 			setIsOpen(false);
 			return;
 		}
 
-		setSwitching(true);
+		setIsSwitching(true);
 		try {
-			// Clear query cache before switching
+			// The cache is keyed by nothing account-scoped, so it has to go before the
+			// switch — otherwise the new account briefly renders the old one's items.
 			queryClient.clear();
-
-			// Switch account
 			await switchAccount(account.accountId);
 
-			// Check if the new account has a valid session
-			const isValid = await storage.isSessionValid(account.accountId);
-
+			const hasValidSession = await storage.isSessionValid(account.accountId);
 			setIsOpen(false);
-
-			if (isValid) {
-				// Has valid session, refresh the current view
-				router.replace("/(tabs)");
-			} else {
-				// No valid session, go to unlock
-				router.replace("/(auth)/unlock");
-			}
+			await navigate({ to: hasValidSession ? "/vault" : "/unlock" });
 		} catch (error) {
-			console.error("Error switching account:", error);
-			toast.show({
-				variant: "danger",
-				label: m.mob_account_switcher_toast_switch_failed(),
-				placement: "bottom",
-			});
+			console.error("[AccountSwitcher] switch failed", error);
+			toast.error(m.mob_account_switcher_toast_switch_failed());
 		} finally {
-			setSwitching(false);
+			setIsSwitching(false);
 		}
 	};
 
-	const handleAddAccount = () => {
+	const go = (to: "/login" | "/vault/settings" | "/vault/trash") => {
 		setIsOpen(false);
-		router.push("/(auth)/login");
+		// "Add account" is a deliberate visit to `/login`, so it has to carry `addAccount` —
+		// without it the route's guard sees the stored accounts and redirects to `/unlock`.
+		if (to === "/login") {
+			void navigate({ to, search: { addAccount: true } });
+			return;
+		}
+		void navigate({ to });
 	};
 
-	const handleSettings = () => {
+	const handleLock = async () => {
+		await lockAllAccounts();
+		setIsConfirmingLock(false);
 		setIsOpen(false);
-		router.push("/settings");
+		await navigate({ to: "/unlock" });
 	};
-
-	const handleTrash = () => {
-		setIsOpen(false);
-		router.push("/(tabs)/trash");
-	};
-
-	const handleLockVault = async () => {
-		Alert.alert(
-			m.mob_account_switcher_lock_dialog_title(),
-			m.mob_account_switcher_lock_dialog_message(),
-			[
-				{ text: m.mob_account_switcher_lock_dialog_cancel(), style: "cancel" },
-				{
-					text: m.mob_account_switcher_lock_dialog_confirm(),
-					style: "destructive",
-					onPress: async () => {
-						// Lock, not sign out: every in-memory master unlock key is dropped —
-						// the native autofill mirror first — but `session_data` stays, so
-						// quick-unlock still works.
-						await lockAllAccounts(lifecycleDeps);
-
-						setIsOpen(false);
-						router.replace("/(auth)/unlock");
-					},
-				},
-			],
-		);
-	};
-
-	const accountFallback = m.mob_settings_account_fallback();
 
 	return (
-		<BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
-			<BottomSheet.Trigger>
-				<View
-					accessibilityRole="button"
-					accessibilityLabel={m.mob_account_switcher_title()}
-				>
-					<AccountAvatar account={activeAccount} size={32} radius={10} />
-				</View>
-			</BottomSheet.Trigger>
-			<BottomSheet.Portal>
-				<BottomSheet.Overlay />
-				<BottomSheet.Content>
-					<SheetBrandAccent />
-					<View className="items-center pt-1 pb-4">
-						<BottomSheet.Title>
-							{m.mob_account_switcher_title()}
-						</BottomSheet.Title>
-					</View>
+		<>
+			<Pressable
+				onClick={() => setIsOpen(true)}
+				aria-label={m.mob_account_switcher_title()}
+				scale
+				haptic={false}
+				className="shrink-0 rounded-[10px]"
+			>
+				<AccountAvatar account={activeAccount} size={32} radius={10} />
+			</Pressable>
 
-					<View className="px-4 pb-2">
-						<SectionLabel>{m.mob_settings_section_account()}</SectionLabel>
-						<View className="gap-1">
-							{allAccounts.map((account) => {
-								const isActive = account.accountId === activeAccountConfig;
-								return (
-									<PressableFeedback
-										key={account.accountId}
-										onPress={() => handleAccountSwitch(account)}
-										isDisabled={switching}
-										accessibilityRole="button"
-										className={cn(
-											"h-16 flex-row items-center gap-3 rounded-xl px-2",
-											isActive ? "border border-accent/15 bg-selected" : "",
-										)}
-									>
-										<PressableFeedback.Highlight />
-										<AccountAvatar account={account} />
-										<View className="min-w-0 flex-1">
-											<Text
-												numberOfLines={1}
-												className="font-medium text-base text-foreground"
-											>
-												{getAccountLabel(account, accountFallback)}
-											</Text>
-											<Text numberOfLines={1} className="text-muted text-sm">
-												{account.email}
-											</Text>
-										</View>
-										{isActive ? (
-											<IconCheck size={iconSize.row} className="text-accent" />
-										) : null}
-									</PressableFeedback>
-								);
-							})}
-						</View>
-					</View>
+			<MobileSheet
+				open={isOpen}
+				onOpenChange={setIsOpen}
+				title={m.mob_account_switcher_title()}
+			>
+				<div className="px-4 pb-2">
+					<SectionLabel>{m.mob_settings_section_account()}</SectionLabel>
+					<div className="flex flex-col gap-1">
+						{allAccounts.map((account) => {
+							const isActive = account.accountId === activeAccountId;
+							return (
+								<Pressable
+									key={account.accountId}
+									onClick={() => void handleAccountSwitch(account)}
+									disabled={isSwitching}
+									surface="sheet"
+									className={cn(
+										"flex h-16 w-full items-center gap-3 rounded-xl px-2",
+										isActive && "border border-primary/15 bg-selected",
+									)}
+								>
+									<AccountAvatar account={account} />
+									<span className="min-w-0 flex-1 text-left">
+										<span className="block truncate font-medium text-base text-foreground">
+											{getAccountLabel(account, accountFallback)}
+										</span>
+										<span className="block truncate text-muted-foreground text-sm">
+											{account.email}
+										</span>
+									</span>
+									{isActive ? (
+										<IconCheck className="size-[18px] shrink-0 text-primary" />
+									) : null}
+								</Pressable>
+							);
+						})}
+					</div>
+				</div>
 
-					<View className="h-px bg-separator" />
-					<View className="px-4 pt-2 pb-6">
-						<SheetAction
-							label={m.mob_account_switcher_add_account()}
-							icon={IconPlus}
-							onPress={handleAddAccount}
-						/>
-						<SheetAction
-							label={m.mob_account_switcher_settings()}
-							icon={IconSettings}
-							onPress={handleSettings}
-						/>
-						<SheetAction
-							label={m.mob_account_switcher_trash()}
-							icon={IconTrash}
-							onPress={handleTrash}
-						/>
-						<SheetAction
-							label={m.mob_account_switcher_lock_vault()}
-							icon={IconLock}
-							onPress={handleLockVault}
-							tone="danger"
-						/>
-					</View>
-				</BottomSheet.Content>
-			</BottomSheet.Portal>
-		</BottomSheet>
+				<div className="mt-2 h-px bg-separator" />
+
+				<div className="flex flex-col px-4 pt-2 pb-6">
+					<SheetAction
+						label={m.mob_account_switcher_add_account()}
+						icon={IconPlus}
+						onPress={() => go("/login")}
+					/>
+					<SheetAction
+						label={m.mob_account_switcher_settings()}
+						icon={IconSettings}
+						onPress={() => go("/vault/settings")}
+					/>
+					<SheetAction
+						label={m.mob_account_switcher_trash()}
+						icon={IconTrash}
+						onPress={() => go("/vault/trash")}
+					/>
+					<SheetAction
+						label={m.mob_account_switcher_lock_vault()}
+						icon={IconLock}
+						onPress={() => setIsConfirmingLock(true)}
+						tone="danger"
+					/>
+				</div>
+			</MobileSheet>
+
+			<ConfirmSheet
+				open={isConfirmingLock}
+				onOpenChange={setIsConfirmingLock}
+				title={m.mob_account_switcher_lock_dialog_title()}
+				description={m.mob_account_switcher_lock_dialog_message()}
+				confirmLabel={m.mob_account_switcher_lock_dialog_confirm()}
+				cancelLabel={m.mob_account_switcher_lock_dialog_cancel()}
+				onConfirm={() => void handleLock()}
+			/>
+		</>
 	);
 }

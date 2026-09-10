@@ -65,6 +65,7 @@ export interface SyncMetadataMap {
 	vault_member_removed: VaultMemberRemovedMetadata;
 	vault_key_rotated: VaultKeyRotatedMetadata;
 	travel_mode_updated: TravelModeUpdatedMetadata;
+	operation_resolved: DefaultSyncMetadata;
 }
 
 /**
@@ -257,6 +258,10 @@ export interface ItemCommandProjection {
 	preserveItemConflict(
 		command: import("@bittery/types").ItemSyncCommand,
 	): Promise<import("@bittery/types").ItemSyncCommand | undefined>;
+	rejectItemCommand(
+		command: import("@bittery/types").ItemSyncCommand,
+		code: import("@bittery/types").CreateItemRejectionCode,
+	): Promise<void>;
 	acknowledgeItemCommand(
 		command: import("@bittery/types").ItemSyncCommand,
 		acknowledgement: import("@bittery/types").ItemSyncAcknowledgement,

@@ -425,11 +425,14 @@ export function memoizedBackendLoader<Key>(
 	};
 }
 
-export const loadCryptoWebBindings: LoadCryptoUniffi = async () => {
+export const loadCombinedWebWasm = async () => {
 	const wasm = await import("@bittery/crypto-wasm");
 	await wasm.uniffiInitAsync();
-	return wasm as CryptoUniffiBindings;
+	return wasm;
 };
+
+export const loadCryptoWebBindings: LoadCryptoUniffi = async () =>
+	(await loadCombinedWebWasm()) as CryptoUniffiBindings;
 
 export const loadCryptoWebBackend = async (): Promise<
 	UniffiBackend<import("@bittery/crypto-wasm").KeyHandleLike>

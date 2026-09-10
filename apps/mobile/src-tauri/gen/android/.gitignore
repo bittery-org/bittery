@@ -1,0 +1,19 @@
+# Trimmed from Tauri's generated default: this spike commits the whole Gradle
+# project so chunk C can diff what a CredentialProviderService needs. Only
+# machine-local files and build outputs stay out.
+#
+# tauri.settings.gradle stays ignored — the CLI rewrites it with an absolute
+# path into the local cargo registry, so it is machine-specific by construction.
+/.tauri
+/tauri.settings.gradle
+*.iml
+.gradle
+.idea
+.DS_Store
+build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+key.properties
+keystore.properties

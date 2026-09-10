@@ -83,11 +83,19 @@ fn closed_sets_keep_their_wire_strings() {
             "vault_member_removed",
             "vault_key_rotated",
             "travel_mode_updated",
+            "operation_resolved",
         ]
     );
     assert_wire_labels!(
         SyncEntityType,
-        ["item", "vault", "vault_member", "vault_key", "user"]
+        [
+            "item",
+            "vault",
+            "vault_member",
+            "vault_key",
+            "user",
+            "operation"
+        ]
     );
     assert_wire_labels!(
         ItemCategory,
@@ -121,6 +129,70 @@ fn closed_sets_keep_their_wire_strings() {
     assert_wire_labels!(
         VaultKeyRotationManifestKind,
         ["member", "item", "attachment"]
+    );
+    assert_wire_labels!(
+        OperationKind,
+        [
+            "create_item",
+            "update_item",
+            "set_item_favorite",
+            "trash_item",
+            "restore_item",
+            "move_item",
+            "permanently_delete_item",
+            "create_share",
+            "create_vault",
+            "import_items",
+            "create_vault_member_removal_rotation_plans",
+            "finalize_vault_member_removal_rotation_plans",
+            "create_team_leave_rotation_plans",
+            "finalize_team_leave_rotation_plans",
+            "create_team_member_removal_rotation_plans",
+            "finalize_team_member_removal_rotation_plans",
+        ]
+    );
+    assert_wire_labels!(OperationOutcomeStatus, ["applied", "rejected"]);
+    assert_wire_labels!(
+        OperationRejectionCode,
+        [
+            "invalid_ciphertext",
+            "vault_access_denied",
+            "vault_read_only",
+            "item_id_conflict",
+            "item_not_found",
+            "item_version_conflict",
+            "item_trashed",
+            "item_not_trashed",
+            "source_vault_mismatch",
+            "target_vault_access_denied",
+            "target_vault_read_only",
+            "attachment_state_conflict",
+            "share_entitlement_denied",
+            "share_limit_reached",
+            "vault_id_conflict",
+            "team_membership_required",
+            "vault_sharing_entitlement_denied",
+            "shared_vault_limit_reached",
+            "vault_member_not_found",
+            "self_removal_forbidden",
+            "vault_owner_protected",
+            "vault_admin_peer_protected",
+            "shared_vault_required",
+            "vault_membership_changed",
+            "rotation_plan_unavailable",
+            "rotation_plan_mismatch",
+            "rotation_plan_incomplete",
+            "rotation_plan_stale",
+            "team_member_not_found",
+            "personal_team_departure_forbidden",
+            "team_owner_leave_forbidden",
+            "team_membership_changed",
+            "rotation_plan_set_mismatch",
+            "team_management_denied",
+            "team_owner_protected",
+            "team_management_entitlement_denied",
+            "vault_management_incomplete",
+        ]
     );
 }
 
@@ -201,6 +273,9 @@ fn closed_sets_match_the_postgres_enums() {
     assert_matches_postgres!(VaultKeyRotationPlanState);
     assert_matches_postgres!(VaultKeyRotationStaleReason);
     assert_matches_postgres!(VaultKeyRotationManifestKind);
+    assert_matches_postgres!(OperationKind);
+    assert_matches_postgres!(OperationOutcomeStatus);
+    assert_matches_postgres!(OperationRejectionCode);
 }
 
 #[test]

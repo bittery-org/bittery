@@ -9,8 +9,9 @@ use super::error_code::ErrorCode;
 
 pub use super::limits::{
     BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_AUDIT_EVENTS, DEFAULT_PAGE_SIZE,
-    ENCRYPTED_VAULT_KEY_BYTES, ITEM_CIPHERTEXT_BYTES, MAX_AUDIT_EVENTS, MAX_AUDIT_SEARCH_BYTES,
-    MAX_BATCH_ITEMS, MAX_CAPABILITIES, MAX_PAGE_SIZE, NAME_MAX_CHARS, SUPPORTED_MAJORS,
+    ENCRYPTED_VAULT_KEY_BYTES, ICON_MAX_CHARS, ITEM_CIPHERTEXT_BYTES, MAX_AUDIT_EVENTS,
+    MAX_AUDIT_SEARCH_BYTES, MAX_BATCH_ITEMS, MAX_CAPABILITIES, MAX_PAGE_SIZE, NAME_MAX_CHARS,
+    NAME_MIN_CHARS, SUPPORTED_MAJORS,
 };
 
 pub const API_MAJOR: u16 = 1;
@@ -402,6 +403,7 @@ mod tests {
             key: "attachments/user-1/item-1/file".to_string(),
             upload_url: "https://storage.invalid/upload".to_string(),
             public_url: None,
+            required_headers: Vec::new(),
         });
 
         assert_eq!(

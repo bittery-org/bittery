@@ -1,0 +1,2 @@
+import { nestedLegacyCreate as create } from "./reexport-middle";
+create();

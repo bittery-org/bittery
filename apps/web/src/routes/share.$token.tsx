@@ -1,5 +1,5 @@
 import { usePlatformCrypto } from "@bittery/core/hooks";
-import { readShareKeyFromUrl } from "@bittery/core/services/share-service";
+import { readShareKeyFromUrl } from "@bittery/core/services/share-url";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
 import { base64ToArrayBuffer } from "@bittery/shared/crypto";

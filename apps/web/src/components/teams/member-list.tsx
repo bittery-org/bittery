@@ -13,7 +13,7 @@ import { useState } from "react";
 import { useVaultKeyRotation } from "@/hooks/use-vault-key-rotation";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
-import { useQueryInvalidator } from "../../providers/sync-provider";
+import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 import { TeamRotationError } from "./team-rotation-error";
 
 interface MemberListProps {

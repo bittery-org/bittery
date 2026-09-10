@@ -14,12 +14,32 @@ export interface ApiWriteOptions {
 	idempotencyKey?: string;
 }
 
+/**
+ * The write options an Item Operation requires.
+ *
+ * `Idempotency-Key` is no longer an optimisation a caller may skip: it carries the stable
+ * Operation ID, and the Server refuses an Item mutation without one.
+ */
+export interface CreateItemWriteOptions extends ApiWriteOptions {
+	idempotencyKey: string;
+}
+
+export interface CreateVaultWriteOptions extends ApiWriteOptions {
+	idempotencyKey: string;
+}
+
+/** An Item mutation additionally requires the strong version it is written against. */
+export interface ItemOperationWriteOptions extends CreateItemWriteOptions {
+	etag: string;
+}
+
 export interface ApiPageRequest {
 	cursor?: string;
 	limit?: number;
 }
 
 export interface SyncBootstrapRequest extends ApiPageRequest {
+	phase: SyncBootstrapPage["phase"];
 	syncCursor?: string;
 	syncCursorCaptured?: boolean;
 }
@@ -85,6 +105,7 @@ export type SignupResponse = Omit<WireSignupResponse, "vaultKeys"> & {
 };
 export type AuthUser = Schema<"MeResponse">;
 export type DeleteAccountInput = Schema<"DeleteAccountRequest">;
+export type DeleteAccountResponse = Schema<"DeleteAccountResponse">;
 export type EmailChangeInput = Schema<"EmailChangeRequest">;
 export type PasswordChangeInput = Schema<"PasswordChangeRequest">;
 export type RecoveryKeyInput = Schema<"RecoveryKeyRequest">;
@@ -102,7 +123,10 @@ export type AuthVaultKey = Schema<"AuthVaultKeyResponse">;
 export type Vault = Schema<"VaultListEntryResponse">;
 export type VaultDetails = Schema<"VaultDetailsResponseDto">;
 export type CreateVaultInput = Schema<"CreateVaultBody">;
-export type CreateVaultResponse = Schema<"CreateVaultResponse">;
+export type CreateVaultResponse = Extract<
+	Schema<"OperationOutcome">,
+	{ kind: "create_vault" }
+>;
 export type UpdateVaultInput = Schema<"UpdateVaultBody">;
 export type UpdateVaultResponse = Schema<"UpdateVaultResponse">;
 export type VaultStats = Omit<
@@ -117,7 +141,11 @@ export type PresignedUpload = Schema<"PresignedUploadResponse">;
 export type ConvertVaultInput = Schema<"ConvertVaultBody">;
 export type ConvertVaultResponse = Schema<"ConvertVaultTypeResponse">;
 export type BulkImportInput = Schema<"BulkImportBody">;
-export type BulkImportResponse = Schema<"BulkImportItemsResponse">;
+/**
+ * Import is one Operation now, so it answers with the retained outcome every Operation answers
+ * with. The legacy `BulkImportItemsResponse` no longer exists in the contract.
+ */
+export type BulkImportResponse = Schema<"OperationOutcome">;
 
 /**
  * The fields every server Item payload carries, whichever endpoint returned it.
@@ -139,9 +167,35 @@ export type VaultItem = Omit<WireVaultItem, "attachments"> & {
 export type VaultItemDetails = Schema<"VaultItemDetailsResponse">;
 export type DeletedVaultItem = Schema<"DeletedVaultItemWithVaultResponse">;
 export type CreateItemInput = Schema<"CreateItemBody">;
-export type CreateItemResponse = Schema<"CreateItemResponse">;
+/**
+ * The one retained Operation outcome, discriminated by `kind`.
+ *
+ * `GET /operations/{operationId}` answers this union, because a caller recovering from a lost
+ * response is exactly the caller that does not yet know what happened. Read `kind`, check it
+ * against your own durable record, and only then read `result`.
+ */
+export type OperationOutcome = Schema<"OperationOutcome">;
+/** The retained outcomes returned directly by Item mutation routes. */
+export type ItemOperationOutcome = Extract<
+	OperationOutcome,
+	{
+		kind:
+			| "create_item"
+			| "update_item"
+			| "set_item_favorite"
+			| "trash_item"
+			| "restore_item"
+			| "move_item"
+			| "permanently_delete_item";
+	}
+>;
+export type ItemOperationResult = Schema<"ItemOperationResult">;
+export type OperationRejectionCode = Schema<"OperationRejectionCode">;
+export type CreateItemOperationOutcome = Extract<
+	OperationOutcome,
+	{ kind: "create_item" }
+>;
 export type UpdateItemInput = Schema<"UpdateItemBody">;
-export type UpdateItemResponse = Schema<"UpdateItemResponse">;
 export type FavoriteInput = Schema<"FavoriteBody">;
 export type MoveItemInput = Schema<"MoveItemBody">;
 
@@ -157,9 +211,24 @@ export type AvailableTeamMember = Schema<"VaultAvailableMemberResponse">;
 export type VaultMember = Schema<"VaultMemberResponse">;
 export type AddVaultMemberInput = Schema<"AddVaultMemberBody">;
 export type UpdateVaultMemberRoleInput = Schema<"UpdateVaultMemberRoleBody">;
-export type RotationPlanSet = Schema<"PlanSetResponse">;
+export type RotationOperationOutcome = Extract<
+	OperationOutcome,
+	{
+		kind:
+			| "create_vault_member_removal_rotation_plans"
+			| "finalize_vault_member_removal_rotation_plans"
+			| "create_team_leave_rotation_plans"
+			| "finalize_team_leave_rotation_plans"
+			| "create_team_member_removal_rotation_plans"
+			| "finalize_team_member_removal_rotation_plans";
+	}
+>;
+export type RotationOutcome<Kind extends RotationOperationOutcome["kind"]> =
+	Extract<RotationOperationOutcome, { kind: Kind }>;
+export interface RotationOperationWriteOptions extends ApiWriteOptions {
+	readonly idempotencyKey: string;
+}
 export type RotationPlanSetFinalizeInput = Schema<"FinalizePlanSetRequest">;
-export type RotationPlanSetFinalizeResponse = Schema<"FinalizePlanSetResponse">;
 export type RotationPreparationPage = Schema<"PreparationPage">;
 export type RotationStageInput = Schema<"StageRequest">;
 
@@ -179,8 +248,6 @@ export type TeamMember = Schema<"TeamMemberResponse">;
 export type TeamMemberAccess = Schema<"MemberAccessResponse">;
 export type TeamVault = Schema<"TeamVaultResponse">;
 
-export type CreateShareLinkInput = Schema<"CreateShareLinkRequest">;
-export type CreateShareLinkResponse = Schema<"CreateShareLinkResponse">;
 export type ShareLinkList = Schema<"ShareLinkListResponse">;
 export type PublicShareInfo = Schema<"PublicShareInfoResponse">;
 export type EmailShareAccessInput = Schema<"EmailAccessRequest">;

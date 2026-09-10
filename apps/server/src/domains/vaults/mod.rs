@@ -1,17 +1,18 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::enums::{ItemCategory, VaultRole, VaultType},
+    db::enums::{ItemCategory, OperationRejectionCode, VaultRole, VaultType},
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
-        bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_item_shape, create_vault_shape, item_shape, success_shape, update_item_shape,
+        convert_vault_type_shape, create_attachment_shape, item_shape, success_shape,
         update_vault_shape, vault_available_member_shape, vault_details_shape,
         vault_list_entry_shape, vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
 };
 
+pub(crate) const VAULT_NAME_MIN_CHARS: usize = 2;
 pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
+pub(crate) const VAULT_ICON_MAX_CHARS: usize = 128;
 
 mod access;
 mod attachments;
@@ -25,26 +26,34 @@ mod pagination;
 pub(crate) mod rotation;
 pub(crate) mod shapes;
 pub(crate) mod travel_mode;
+mod vault_image_staging;
 
 pub(crate) use attachments::{
-    create_vault_attachment, create_vault_attachment_upload, delete_vault_attachment,
-    get_attachment_download_url, list_vault_attachments_page, update_vault_attachment,
+    create_attachment_move_manifest, create_vault_attachment, create_vault_attachment_upload,
+    delete_vault_attachment, get_attachment_download_url, list_vault_attachments_page,
+    update_vault_attachment, verify_attachment_move_staging, AttachmentMoveFinalizeIntent,
+    AttachmentMoveStagingStatus,
 };
 pub(crate) use catalog::{
-    convert_vault_type, create_vault, create_vault_image_upload, delete_vault, get_vault,
-    get_vault_stats, list_vaults_page, update_vault,
+    convert_vault_type, create_vault_image_upload, delete_vault, execute_create_vault_operation,
+    get_vault, get_vault_stats, list_vaults_page, update_vault, CreateVaultOperationInput,
 };
 pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
-    bulk_import_vault_items, create_vault_item, delete_vault_item, get_vault_item,
-    list_all_deleted_vault_items_page, list_all_vault_items_page, list_deleted_vault_items_page,
-    list_vault_items_page, move_vault_item, permanently_delete_vault_item, restore_vault_item,
-    toggle_vault_favorite, update_vault_item,
+    apply_create_item, apply_move_item, apply_permanently_delete_item, apply_restore_item,
+    apply_set_item_favorite, apply_trash_item, apply_update_item, execute_import_items_operation,
+    get_vault_item, list_all_deleted_vault_items_page, list_all_vault_items_page,
+    list_deleted_vault_items_page, list_vault_item_authority_page, list_vault_items_page,
 };
 pub(crate) use members::{
     add_vault_member, available_team_members, list_vault_members, update_vault_member_role,
 };
 pub(crate) use pagination::ByteBoundedPage;
+pub(crate) use vault_image_staging::{
+    confirm_vault_image_staging, grant_vault_image_staging, request_vault_image_staging_cleanup,
+    status_vault_image_staging, VaultImageStagingBinding, VaultImageStagingState,
+    VaultImageStagingStatus,
+};
 
 #[cfg(test)]
 use access::assert_item_write_access;
@@ -53,6 +62,8 @@ use attachments::{
     attachment_quota_lock_key, base64_encoded_length, encrypted_attachment_storage_size,
     pending_attachment_upload_expiry,
 };
+#[cfg(test)]
+use items::oversized;
 
 #[cfg(test)]
 mod tests;
@@ -78,6 +89,93 @@ pub struct CreateVaultImageUploadInput {
 #[serde(deny_unknown_fields)]
 pub struct ItemIdInput {
     pub item_id: String,
+}
+
+pub(crate) struct CreateItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) vault_id: String,
+    pub(crate) category: ItemCategory,
+    pub(crate) encrypted_data: String,
+    pub(crate) encryption_iv: String,
+    pub(crate) encryption_algorithm: String,
+    pub(crate) client_id: Option<String>,
+    pub(crate) ciphertext_limit: usize,
+}
+
+/// What one Item Operation did, decided inside its own transaction.
+///
+/// The two arms are the whole vocabulary: the effect landed at a known version, or the Server
+/// proved one closed reason it never will. Anything else is an infrastructure failure and leaves
+/// through `Err`, where it retains nothing.
+pub(crate) enum ItemEffect {
+    Applied { item_id: String, version: i32 },
+    Rejected(OperationRejectionCode),
+}
+
+pub(crate) struct UpdateItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) encrypted_data: Option<String>,
+    pub(crate) encryption_iv: Option<String>,
+    pub(crate) encryption_algorithm: Option<String>,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+    pub(crate) ciphertext_limit: usize,
+}
+
+pub(crate) struct FavoriteItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) favorite: bool,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+}
+
+/// The input shared by the three Item Operations that carry no body: trash, restore and
+/// permanent delete.
+pub(crate) struct ItemEffectInput {
+    pub(crate) item_id: String,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+}
+
+pub(crate) struct MoveItemEffectInput {
+    pub(crate) operation_id: String,
+    pub(crate) item_id: String,
+    pub(crate) source_vault_id: String,
+    pub(crate) target_vault_id: String,
+    pub(crate) expected_version: i32,
+    pub(crate) client_id: Option<String>,
+    pub(crate) ciphertext_limit: usize,
+    pub(crate) finalization: MoveItemFinalizationInput,
+}
+
+pub(crate) enum MoveItemFinalizationInput {
+    Prepared {
+        encrypted_data: String,
+        encryption_iv: String,
+        encryption_algorithm: String,
+        attachments: Vec<MoveAttachmentEffectInput>,
+    },
+    RejectStaleAuthority {
+        attachments: Vec<MoveAttachmentIntentInput>,
+    },
+}
+
+pub(crate) struct MoveAttachmentIntentInput {
+    pub(crate) attachment_id: String,
+    pub(crate) expected_envelope_version: i32,
+}
+
+pub(crate) struct MoveAttachmentEffectInput {
+    pub(crate) attachment_id: String,
+    pub(crate) expected_envelope_version: i32,
+    pub(crate) encrypted_attachment_key: String,
+    pub(crate) attachment_key_iv: String,
+    pub(crate) attachment_key_algorithm: String,
+    pub(crate) encrypted_name: String,
+    pub(crate) encrypted_content_type: String,
+    pub(crate) encryption_iv: String,
+    pub(crate) encrypted_content_type_iv: String,
+    pub(crate) encryption_algorithm: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -141,6 +239,41 @@ pub struct CreateAttachmentUploadResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestInput {
+    pub(crate) operation_id: String,
+    pub(crate) item_id: String,
+    pub(crate) source_vault_id: String,
+    pub(crate) target_vault_id: String,
+    pub(crate) attachments: Vec<AttachmentMoveManifestEntryInput>,
+    pub(crate) request_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AttachmentMoveManifestEntryInput {
+    pub(crate) attachment_id: String,
+    pub(crate) envelope_version: i32,
+    pub(crate) ciphertext_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveManifestResponse {
+    pub(crate) operation_id: String,
+    pub(crate) expires_at: String,
+    pub(crate) attachments: Vec<AttachmentMoveUploadResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentMoveUploadResponse {
+    pub(crate) attachment_id: String,
+    pub(crate) storage_key: String,
+    pub(crate) upload_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateVaultMemberRoleInput {
@@ -160,25 +293,6 @@ pub struct AddVaultMemberInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct CreateItemInput {
-    pub item_id: Option<String>,
-    pub vault_id: String,
-    pub category: ItemCategory,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub client_id: Option<String>,
-}
-
-create_item_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateItemResponse
-});
-
 bulk_import_item_shape!(service_struct {
     #[derive(Debug, Clone, Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -186,70 +300,14 @@ bulk_import_item_shape!(service_struct {
     pub struct BulkImportItemInput
 });
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct BulkImportItemsInput {
+/// One accepted Import batch, with the exact bytes its fingerprint is taken from.
+pub struct ImportItemsOperationInput {
+    pub operation_id: String,
     pub vault_id: String,
     pub client_id: Option<String>,
+    pub raw_body: Vec<u8>,
     pub items: Vec<BulkImportItemInput>,
-}
-
-bulk_import_result_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct BulkImportItemsResponse
-});
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct UpdateItemInput {
-    pub item_id: String,
-    pub encrypted_data: Option<String>,
-    pub encryption_iv: Option<String>,
-    pub encryption_algorithm: Option<String>,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
-}
-
-update_item_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct UpdateItemResponse
-});
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct MoveItemInput {
-    pub item_id: String,
-    pub source_vault_id: String,
-    pub target_vault_id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct ToggleFavoriteInput {
-    pub item_id: String,
-    pub favorite: bool,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct ItemClientInput {
-    pub item_id: String,
-    pub expected_version: Option<i32>,
-    pub client_id: Option<String>,
+    pub ciphertext_limit: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -282,12 +340,6 @@ vault_details_shape!(service_struct {
     #[serde(rename_all = "camelCase")]
     pub struct VaultDetailsResponse
 }, count = i64);
-
-create_vault_shape!(service_struct {
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct CreateVaultResponse
-});
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

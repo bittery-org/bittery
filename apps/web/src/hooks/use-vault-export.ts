@@ -1,39 +1,17 @@
-import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import {
-	decryptAttachmentParts,
-	parseAttachmentBlobEnvelope,
-	unwrapAttachmentKey,
-} from "@bittery/core/services/attachment-crypto";
-import type { KeyRef } from "@bittery/crypto-port";
-import { useApiClient } from "@bittery/shared/api";
-import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
-import JSZip from "jszip";
-import { useCallback, useState } from "react";
-import { normalizeItemCategory } from "@/lib/api-normalizers";
-import type {
-	ExportedAttachment,
-	ExportedItem,
-	ExportedVault,
-	VaultExportPayload,
-} from "@/lib/export-types";
+	useRuntimeClient,
+	useRuntimeItems,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { attachmentDownloadSinks } from "@/lib/crypto";
+import { observeAccountDeparture } from "@/lib/runtime-account-presentation";
+import {
+	createRuntimeVaultArchive,
+	type ExportProgress,
+} from "@/lib/runtime-vault-export";
 
-export type ExportStage =
-	| "idle"
-	| "fetching"
-	| "decrypting"
-	| "downloading-files"
-	| "building-archive"
-	| "completed"
-	| "error";
-
-export interface ExportProgress {
-	stage: ExportStage;
-	totalItems: number;
-	processedItems: number;
-	totalAttachments: number;
-	processedAttachments: number;
-	currentVaultName?: string;
-}
+export type { ExportProgress, ExportStage } from "@/lib/runtime-vault-export";
 
 function createEmptyProgress(): ExportProgress {
 	return {
@@ -46,290 +24,65 @@ function createEmptyProgress(): ExportProgress {
 }
 
 export function useVaultExport() {
-	const api = useApiClient();
-	const crypto = usePlatformCrypto();
-	const { vaultCrypto } = useCoreContext();
-
-	const [progress, setProgress] = useState<ExportProgress>(
-		createEmptyProgress(),
-	);
-	const [archiveBlob, setArchiveBlob] = useState<Blob | null>(null);
+	const runtime = useRuntimeClient();
+	const session = useRuntimeSession();
+	const accountId = session.state === "unlocked" ? session.accountId : null;
+	// Keeps the shared projection ready while the dialog is mounted.
+	useRuntimeItems(accountId);
+	const [progress, setProgress] = useState<ExportProgress>(createEmptyProgress);
+	const [archive, setArchive] = useState<{
+		accountId: string | null;
+		blob: Blob;
+	} | null>(null);
 	const [error, setError] = useState<string | null>(null);
-
+	const attempt = useRef<AbortController | null>(null);
 	const reset = useCallback(() => {
+		attempt.current?.abort();
+		attempt.current = null;
 		setProgress(createEmptyProgress());
-		setArchiveBlob(null);
+		setArchive(null);
 		setError(null);
 	}, []);
-
+	useEffect(() => {
+		reset();
+		const release = observeAccountDeparture(runtime, accountId, reset);
+		return () => {
+			release();
+			attempt.current?.abort();
+		};
+	}, [runtime, accountId, reset]);
 	const startExport = useCallback(async () => {
-		setArchiveBlob(null);
-		setError(null);
-
-		// One ref per vault, held for the whole export and retired in `finally`.
-		const vaultKeyCache = new Map<string, KeyRef>();
-
+		reset();
+		const controller = new AbortController();
+		attempt.current = controller;
+		setProgress({ ...createEmptyProgress(), stage: "fetching" });
 		try {
-			// ── Stage 1: fetch ─────────────────────────────────────────────
-			setProgress({
-				stage: "fetching",
-				totalItems: 0,
-				processedItems: 0,
-				totalAttachments: 0,
-				processedAttachments: 0,
-			});
-
-			const allItems = (await api.items.list()).data;
-			const me = (await api.auth.me()).data;
-
-			// Collect unique vaults
-			const vaultMap = new Map<
-				string,
-				{
-					id: string;
-					name: string;
-					type: "personal" | "team";
-					icon: string | null;
-				}
-			>();
-			for (const item of allItems) {
-				if (!vaultMap.has(item.vaultId)) {
-					const vaultRecord = item.vault;
-					const vault = vaultRecord
-						? toCachedVaultFields({
-								...vaultRecord,
-								icon: vaultRecord.icon ?? null,
-								imageUrl: vaultRecord.imageUrl ?? null,
-							})
-						: undefined;
-					vaultMap.set(item.vaultId, {
-						id: vault?.id ?? item.vaultId,
-						name: vault?.name ?? item.vaultId,
-						type: vault?.type ?? "personal",
-						icon: vault?.icon ?? null,
-					});
-				}
-			}
-
-			const totalAttachments = allItems.reduce(
-				(sum, item) => sum + (item.attachments?.length ?? 0),
-				0,
+			const blob = await createRuntimeVaultArchive(
+				runtime,
+				attachmentDownloadSinks,
+				(next) => {
+					if (!controller.signal.aborted) setProgress(next);
+				},
+				controller.signal,
 			);
-
-			// ── Stage 2: decrypt items ─────────────────────────────────────
-			setProgress({
-				stage: "decrypting",
-				totalItems: allItems.length,
-				processedItems: 0,
-				totalAttachments,
-				processedAttachments: 0,
-			});
-
-			for (const vaultId of vaultMap.keys()) {
-				const key = await vaultCrypto.getVaultKey({ vaultId });
-				if (key) {
-					vaultKeyCache.set(vaultId, key);
-				}
-			}
-
-			const exportedItems: ExportedItem[] = [];
-
-			for (const [i, item] of allItems.entries()) {
-				const vaultKey = vaultKeyCache.get(item.vaultId);
-				if (!vaultKey) {
-					setProgress((prev) => ({
-						...prev,
-						processedItems: i + 1,
-					}));
-					continue;
-				}
-
-				const decryptedStr = await vaultCrypto.decryptStoredItem(
-					item,
-					vaultKey,
-				);
-
-				exportedItems.push({
-					id: item.id,
-					vaultId: item.vaultId,
-					category: normalizeItemCategory(item.category),
-					favorite: item.favorite,
-					data: JSON.parse(decryptedStr),
-					attachments: [],
-					createdAt: String(item.createdAt),
-					updatedAt: String(item.updatedAt),
-				});
-
-				setProgress((prev) => ({
-					...prev,
-					processedItems: i + 1,
-				}));
-			}
-
-			// ── Stage 3: download attachments ──────────────────────────────
-			setProgress((prev) => ({
-				...prev,
-				stage: "downloading-files",
-			}));
-
-			const zip = new JSZip();
-			let processedAttachments = 0;
-
-			for (const item of allItems) {
-				if (!item.attachments || item.attachments.length === 0) {
-					continue;
-				}
-				const vaultKey = vaultKeyCache.get(item.vaultId);
-				if (!vaultKey) {
-					continue;
-				}
-				const exportedItem = exportedItems.find((ei) => ei.id === item.id);
-
-				for (const attachment of item.attachments) {
-					try {
-						const scope = {
-							vaultId: item.vaultId,
-							attachmentId: attachment.id,
-							userId: attachment.uploadedBy,
-							envelopeVersion: attachment.envelopeVersion,
-						};
-
-						const {
-							downloadUrl,
-							encryptionIv,
-							encryptionAlgorithm,
-							encryptedName,
-							encryptedContentType,
-							encryptedContentTypeIv,
-						} = (await api.attachments.createDownloadUrl(attachment.id)).data;
-
-						const response = await fetch(downloadUrl);
-						if (!response.ok) {
-							throw new Error("Failed to download attachment");
-						}
-						const attachmentKey = await unwrapAttachmentKey(
-							vaultCrypto,
-							vaultKey,
-							scope,
-							attachment,
-						);
-						let base64File: string;
-						let fileName: string;
-						let contentType: string;
-						try {
-							({
-								base64File,
-								name: fileName,
-								contentType,
-							} = await decryptAttachmentParts(
-								vaultCrypto,
-								attachmentKey,
-								scope,
-								{
-									blobEnvelope: parseAttachmentBlobEnvelope(
-										await response.text(),
-									),
-									encryptedName,
-									encryptedContentType,
-									encryptionIv,
-									encryptedContentTypeIv,
-									encryptionAlgorithm,
-								},
-							));
-						} finally {
-							await crypto.destroyKey(attachmentKey);
-						}
-
-						// Convert base64 to bytes for the ZIP entry
-						const binaryString = atob(base64File);
-						const bytes = new Uint8Array(binaryString.length);
-						for (let i = 0; i < binaryString.length; i++) {
-							bytes[i] = binaryString.charCodeAt(i);
-						}
-
-						zip.file(`files/${item.id}/${fileName}`, bytes);
-
-						if (exportedItem) {
-							if (!exportedItem.attachments) {
-								exportedItem.attachments = [];
-							}
-							exportedItem.attachments.push({
-								filename: fileName,
-								contentType,
-								data: base64File,
-							} satisfies ExportedAttachment);
-						}
-					} catch {
-						// skip failed attachment, continue with others
-					}
-
-					processedAttachments += 1;
-					setProgress((prev) => ({
-						...prev,
-						processedAttachments,
-					}));
-				}
-			}
-
-			// ── Stage 4: build archive ─────────────────────────────────────
-			setProgress((prev) => ({
-				...prev,
-				stage: "building-archive",
-			}));
-
-			const exportedVaults: ExportedVault[] = [...vaultMap.values()];
-			const payload: VaultExportPayload = {
-				version: "1",
-				exportDate: new Date().toISOString(),
-				exportedBy: {
-					email: me?.email ?? "",
-					name: me?.name ?? undefined,
-				},
-				vaults: exportedVaults,
-				items: exportedItems,
-				metadata: {
-					totalItems: exportedItems.length,
-					totalVaults: exportedVaults.length,
-				},
-			};
-
-			zip.file("export.json", JSON.stringify(payload, null, 2));
-			const blob = await zip.generateAsync({ type: "blob" });
-
-			setArchiveBlob(blob);
-			setProgress((prev) => ({
-				...prev,
-				stage: "completed",
-			}));
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Unknown error");
-			setProgress((prev) => ({
-				...prev,
-				stage: "error",
-			}));
-		} finally {
-			for (const key of vaultKeyCache.values()) {
-				await crypto.destroyKey(key);
-			}
+			if (!controller.signal.aborted) setArchive({ accountId, blob });
+		} catch (failure) {
+			if (controller.signal.aborted) return;
+			setError(failure instanceof Error ? failure.message : "Unknown error");
+			setProgress((previous) => ({ ...previous, stage: "error" }));
 		}
-	}, [api, crypto, vaultCrypto]);
-
+	}, [runtime, accountId, reset]);
+	const archiveBlob = archive?.accountId === accountId ? archive.blob : null;
 	const downloadArchive = useCallback(() => {
-		if (!archiveBlob) return;
+		if (!archiveBlob || !accountId) return;
+		const current = runtime.session().getSnapshot();
+		if (current.state !== "unlocked" || current.accountId !== accountId) return;
 		const url = URL.createObjectURL(archiveBlob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = "bittery-export.bttrx";
-		a.click();
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = "bittery-export.bttrx";
+		anchor.click();
 		URL.revokeObjectURL(url);
-	}, [archiveBlob]);
-
-	return {
-		progress,
-		archiveBlob,
-		error,
-		reset,
-		startExport,
-		downloadArchive,
-	};
+	}, [archiveBlob, accountId, runtime]);
+	return { progress, archiveBlob, error, reset, startExport, downloadArchive };
 }

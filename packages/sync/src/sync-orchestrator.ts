@@ -186,7 +186,7 @@ export class SyncOrchestrator {
 	}
 
 	private async applyEvent(event: SyncEvent): Promise<void> {
-		await performDeltaSync(
+		const outcome = await performDeltaSync(
 			this.options.apiClient,
 			this.options.itemCache,
 			event,
@@ -194,6 +194,12 @@ export class SyncOrchestrator {
 			this.getDeltaSyncServerUrl(),
 			this.getDeltaSyncAccountEmail(),
 		);
+		if (outcome) {
+			await this.options.outboundQueue.reconcileCreateItemOutcome(
+				this.getDeltaSyncAccountScope(),
+				outcome,
+			);
+		}
 		await this.onEventProcessed?.(event);
 		await this.acknowledgeEvent(event);
 	}

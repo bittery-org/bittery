@@ -6,7 +6,8 @@ not restate it.
 
 Bittery crosses the Rust/TypeScript boundary in four places, and each one already has a
 generator: the HTTP API (`openapi.v1.json` → `openapi-typescript` → `packages/api-contract`),
-the crypto core (uniffi → `packages/crypto/{wasm,react-native}/src/generated`), the Tauri
+the crypto core (uniffi → `packages/crypto/wasm/generated` and
+`packages/crypto/android/generated`), the Tauri
 command surface and the desktop↔extension IPC protocol (both ts-rs →
 `apps/desktop/src/generated`). Before this record, three of those four were routinely
 re-typed by hand downstream of the generator — `packages/shared/vault-mapping.ts` restated

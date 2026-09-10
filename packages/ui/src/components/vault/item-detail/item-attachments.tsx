@@ -16,18 +16,11 @@ import { toast } from "../../sonner";
 
 export interface AttachmentItem {
 	id: string;
+	accountId?: string;
 	itemId: string;
 	vaultId: string;
-	storageKey: string;
-	encryptedAttachmentKey: string;
-	attachmentKeyIv: string;
-	attachmentKeyAlgorithm: string;
-	envelopeVersion: number;
-	encryptedName: string;
-	encryptedContentType: string;
-	encryptionIv: string;
-	encryptedContentTypeIv: string;
-	encryptionAlgorithm: string;
+	name?: string;
+	contentType?: string;
 	fileSize: number;
 	uploadedBy: string;
 	createdAt: Date | string;
@@ -107,26 +100,28 @@ function defaultHandleDownloadedFile(bytes: Uint8Array, fileName: string) {
 	setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-function AttachmentRow({
-	attachment,
-	onDecryptMeta,
-	onRename,
-	onDownload,
-	onDelete,
-	canEdit,
-}: {
+interface AttachmentRowProps {
 	attachment: AttachmentItem;
 	onDecryptMeta: (attachment: AttachmentItem) => Promise<{ name: string }>;
 	onRename: (attachmentId: string, newName: string) => Promise<unknown>;
 	onDownload: (attachment: AttachmentItem) => void;
 	onDelete: (attachmentId: string) => void;
 	canEdit: boolean;
-}) {
-	const { m } = useI18n();
+}
+
+function AttachmentRow(props: AttachmentRowProps) {
+	// Runtime publishes the current decrypted name. Keep that projection as the sole
+	// display authority; legacy hosts still decrypt metadata through their callback.
+	return props.attachment.name !== undefined ? (
+		<AttachmentRowContent {...props} currentName={props.attachment.name} />
+	) : (
+		<DecryptingAttachmentRow {...props} />
+	);
+}
+
+function DecryptingAttachmentRow(props: AttachmentRowProps) {
+	const { attachment, onDecryptMeta } = props;
 	const [decryptedName, setDecryptedName] = useState<string | null>(null);
-	const [isEditing, setIsEditing] = useState(false);
-	const [editValue, setEditValue] = useState("");
-	const [isRenaming, setIsRenaming] = useState(false);
 	const decryptedNameQuery = useQuery({
 		queryKey: [
 			"attachment",
@@ -140,11 +135,37 @@ function AttachmentRow({
 		},
 		retry: false,
 	});
+	return (
+		<AttachmentRowContent
+			{...props}
+			currentName={decryptedName ?? decryptedNameQuery.data}
+			nameFailed={decryptedNameQuery.isError}
+			onRenamed={setDecryptedName}
+		/>
+	);
+}
 
-	const currentName = decryptedName ?? decryptedNameQuery.data;
+function AttachmentRowContent({
+	attachment,
+	onRename,
+	onDownload,
+	onDelete,
+	canEdit,
+	currentName,
+	nameFailed = false,
+	onRenamed,
+}: AttachmentRowProps & {
+	currentName: string | undefined;
+	nameFailed?: boolean;
+	onRenamed?: (name: string) => void;
+}) {
+	const { m } = useI18n();
+	const [isEditing, setIsEditing] = useState(false);
+	const [editValue, setEditValue] = useState("");
+	const [isRenaming, setIsRenaming] = useState(false);
 	const displayName =
 		currentName ??
-		(decryptedNameQuery.isError
+		(nameFailed
 			? m.vaults_detail_items_attachments_row_encrypted_file()
 			: m.vaults_detail_items_attachments_row_loading());
 
@@ -162,7 +183,8 @@ function AttachmentRow({
 		setIsRenaming(true);
 		try {
 			await onRename(attachment.id, trimmed);
-			setDecryptedName(trimmed);
+			onRenamed?.(trimmed);
+			setEditValue("");
 			setIsEditing(false);
 		} catch {
 			toast.error(m.vaults_detail_items_attachments_toast_rename_attachment_failed());
@@ -172,7 +194,11 @@ function AttachmentRow({
 	}
 
 	return (
-		<div className="flex items-center gap-3 rounded-md border p-3">
+		<div
+			className="flex items-center gap-3 rounded-md border p-3"
+			data-testid="attachment-row"
+			data-attachment-id={attachment.id}
+		>
 			<FileIcon className="size-4 shrink-0 text-muted-foreground" />
 			<div className="min-w-0 flex-1">
 				{isEditing ? (

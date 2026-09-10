@@ -25,5 +25,6 @@ getrandom_02.workspace = true
 
 [dev-dependencies]
 aes-gcm.workspace = true
+bittery-crypto-core = { workspace = true, features = ["attachment-move-test-vectors"] }
 hex.workspace = true
 p256.workspace = true

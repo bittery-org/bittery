@@ -1,0 +1,681 @@
+{
+  "$defs": {
+    "VaultImageChunkWriteControl": {
+      "enum": [
+        "stored",
+        "alreadyStored"
+      ],
+      "type": "string"
+    },
+    "VaultImageControlRequest": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "scope": {
+              "$ref": "#/$defs/VaultImageScopeControl"
+            },
+            "type": {
+              "const": "begin",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkIndex": {
+              "format": "uint32",
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scope": {
+              "$ref": "#/$defs/VaultImageScopeControl"
+            },
+            "type": {
+              "const": "writeChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "scope",
+            "chunkIndex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "metadata": {
+              "$ref": "#/$defs/VaultImageMetadataControl"
+            },
+            "type": {
+              "const": "publish",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "metadata"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chunkIndex": {
+              "format": "uint32",
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/VaultImageMetadataControl"
+            },
+            "type": {
+              "const": "readChunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "metadata",
+            "chunkIndex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "scope": {
+              "$ref": "#/$defs/VaultImageScopeControl"
+            },
+            "type": {
+              "const": "delete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "deleteAccount",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "wipe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "referencedOperationIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "startupSweep",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "referencedOperationIds"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "VaultImageControlResponse": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "begun",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/VaultImageChunkWriteControl"
+            },
+            "type": {
+              "const": "chunkWritten",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/VaultImagePublicationControl"
+            },
+            "type": {
+              "const": "published",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "chunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "missing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "deleted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "accountDeleted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "wiped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "swept",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "VaultImageMetadataControl": {
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "byteLength": {
+          "type": "string"
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "operationId",
+        "vaultId",
+        "byteLength",
+        "contentType",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "VaultImagePublicationControl": {
+      "enum": [
+        "published",
+        "alreadyPublished"
+      ],
+      "type": "string"
+    },
+    "VaultImageScopeControl": {
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "operationId"
+      ],
+      "type": "object"
+    },
+    "VaultImageSourceControlRequest": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "byteLength": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "claim",
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "capabilityId",
+            "accountId",
+            "operationId",
+            "vaultId",
+            "contentType",
+            "byteLength"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "capabilityId": {
+              "type": "string"
+            },
+            "maxBytes": {
+              "format": "uint32",
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": {
+              "const": "read",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "capabilityId",
+            "maxBytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "capabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "close",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "capabilityId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "retireAccount",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "completeAccountRetirement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "beginAcceptance",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "operationId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "endAcceptance",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "operationId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "retireRuntime",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "VaultImageSourceControlResponse": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "claimed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "chunk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "closed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "retired",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "acceptanceBegun",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "acceptanceEnded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "sourceFailure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "invariantViolation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/VaultImageControlRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/VaultImageControlResponse"
+    },
+    "sourceRequest": {
+      "$ref": "#/$defs/VaultImageSourceControlRequest"
+    },
+    "sourceResponse": {
+      "$ref": "#/$defs/VaultImageSourceControlResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response",
+    "sourceRequest",
+    "sourceResponse"
+  ],
+  "title": "VaultImageControlContract",
+  "type": "object",
+  "$id": "urn:bittery:client-runtime:vault-image-control"
+}

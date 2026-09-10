@@ -24,6 +24,7 @@ export {
 	OutboundQueue,
 	type OutboundQueueApiClient,
 	type PendingMutation,
+	SemanticOperationRejected,
 	type TempIdMapping,
 } from "./outbound-queue";
 export type {

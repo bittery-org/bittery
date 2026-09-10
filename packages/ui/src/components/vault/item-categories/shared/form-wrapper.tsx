@@ -40,7 +40,13 @@ export function FormWrapper({
 				{children}
 			</div>
 
-			<div className="flex items-center justify-between gap-3 border-t px-6 py-4">
+			{/*
+			  * Footer. Below `sm` (phones, and only there) it stacks: the vault selector on its own
+			  * row above full-width actions. Side by side it overflows a ~411px viewport and pushes
+			  * the submit button off-screen. Every mobile rule is a `max-sm:` variant, so at `sm`
+			  * and up the emitted CSS is byte-identical to before.
+			  */}
+			<div className="flex items-center justify-between gap-3 border-t px-6 py-4 max-sm:flex-col max-sm:items-stretch">
 				{vaults.length > 0 && (
 					<VaultSelector
 						vaults={vaults}

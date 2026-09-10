@@ -26,7 +26,7 @@
 		"./services/item-commands": "./src/services/item-commands.ts",
 		"./services/cross-account-item-command-executor": "./src/services/cross-account-item-command-executor.ts",
 		"./services/vault-service": "./src/services/vault-service.ts",
-		"./services/share-service": "./src/services/share-service.ts",
+		"./services/share-url": "./src/services/share-url.ts",
 		"./services/account-session-manager": "./src/services/account-session-manager.ts",
 		"./services/attachment-crypto": "./src/services/attachment-crypto.ts",
 		"./services/select-active-account": "./src/services/select-active-account.ts",

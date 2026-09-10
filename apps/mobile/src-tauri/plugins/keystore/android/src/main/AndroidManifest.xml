@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Empty on purpose. The Android Keystore needs no permission, no service and no
+    component: it is reached through java.security.KeyStore in the app's own process.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+</manifest>

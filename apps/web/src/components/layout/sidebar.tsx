@@ -1,10 +1,20 @@
+import { RuntimeRequestError } from "@bittery/client-runtime/client";
+import { useRuntimeClient } from "@bittery/client-runtime/react";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
 import {
 	ActiveRail,
+	AlertDialog,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
 	Avatar,
 	AvatarFallback,
 	activeRailTarget,
+	Button,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -29,16 +39,30 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { ImportOnboardingCard } from "@/components/import/import-onboarding-card";
 import { appNavItems, filterNavItems } from "@/components/layout/nav-config";
+import { gateLocalTeardown } from "@/lib/account-deletion";
+import {
+	type AccountRemovalDeps,
+	type AccountRemovalResult,
+	clearBrowserStoredDataOnly,
+	removeAccountFromDevice,
+} from "@/lib/account-removal";
 import {
 	normalizeCloudPlanId,
 	normalizeDeploymentMode,
 	normalizeEntitlements,
 	normalizeTeamRole,
 } from "@/lib/api-normalizers";
-import { clearActiveAccountData } from "@/lib/storage";
+import {
+	clearActiveAccountData,
+	forgetWebAccountId,
+	getTransitionalAccountId,
+	readAccountDeletionMarker,
+	writeAccountDeletionMarker,
+} from "@/lib/storage";
+import { getTeardownAreaLabel } from "@/lib/teardown-areas";
 import { useAccountRuntime } from "@/providers/account-runtime-provider";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -65,6 +89,7 @@ function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 
 function UserNav() {
 	const { manager } = useAccountRuntime();
+	const runtimeClient = useRuntimeClient();
 	const api = useApiClient();
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
@@ -81,13 +106,121 @@ function UserNav() {
 				.slice(0, 2)
 		: "??";
 
-	// Signing out of web removes the whole account: the secret tier is plain
-	// `localStorage`, so leaving `secret_key` behind on a shared machine is worse, and
-	// web has no UI to manage a left-behind account.
-	const handleRemoveAccount = async () => {
-		await clearActiveAccountData(() => manager.refresh());
-		queryClient.clear();
-		navigate({ to: "/login" });
+	// Logging out of web removes the whole account: the secret tier is plain
+	// `localStorage`, so leaving `secret_key` behind on a shared machine is worse, and web
+	// has no UI to manage a left-behind account. That is irreversible, so it asks first.
+	//
+	// `RemoveAccount`, not `SignOut`. The Runtime is the destruction authority: it fences
+	// every runner, revokes the live master unlock key and the plaintext leases, and only
+	// then destroys the Replica, the platform state, the Attachment artifacts and the
+	// upload spool. It answers the whole outcome, and anything short of `complete` leaves
+	// named data on the device — so the app reports it and stays put instead of navigating
+	// away and looking signed out over surviving material.
+	const [removal, setRemoval] = useState<LogOutState>(CLOSED);
+
+	// The last report, held outside the dialog state on purpose. Closing the dialog — "Not
+	// now", or Escape while nothing is running — must not throw the report away: the next
+	// gesture would then re-resolve both names, and the transitional store answers `null`
+	// once a half-failed sweep emptied its pointer. It also keeps the attempt count, so a
+	// wedged Device does not hide the escape hatch again after every close.
+	const lastIncompleteReport = useRef<LogOutReport | null>(null);
+
+	// Two stores hold this Account and each has its own name for it. The Runtime knows its
+	// `AccountId`. The transitional store knows whichever id it is pointed at: the synthetic
+	// `bittery_web_account_id` before the first sign-in, and the id sign-in minted for the
+	// (server, user) pair after one. The module resolves both once and carries them.
+	const removalDeps: AccountRemovalDeps = {
+		resolveRuntimeAccountId: () => runtimeClient.resolveAccount(),
+		resolveTransitionalAccountId: getTransitionalAccountId,
+		removeAccount: async (accountId: string) => {
+			const transitionalAccountId = await getTransitionalAccountId();
+			if (
+				transitionalAccountId !== null &&
+				gateLocalTeardown(
+					{ runtimeAccountId: accountId, transitionalAccountId },
+					{
+						readMarker: readAccountDeletionMarker,
+						writeMarker: writeAccountDeletionMarker,
+					},
+				) === "recoveryRequired"
+			) {
+				throw new RuntimeRequestError(
+					"AUTHENTICATION_UNAVAILABLE",
+					"Account deletion recovery must finish before removal.",
+				);
+			}
+			return runtimeClient.removeAccount(accountId);
+		},
+		selectAccount: (accountId: string | null) =>
+			runtimeClient.selectAccount(accountId),
+		clearTransitionalAccountData: (accountId: string) =>
+			clearActiveAccountData(accountId, () => manager.refresh()),
+		forgetTransitionalAccountId: forgetWebAccountId,
+		// A deletion the user abandoned leaves this record behind. A log out destroys
+		// everything this browser holds for the Account, so it takes the record too.
+		clearAccountDeletionMarker: () => writeAccountDeletionMarker(null),
+	};
+
+	// One driver for both actions: neither may navigate away or close over data it did not
+	// destroy, and every decision about which of the two happened belongs to the module.
+	const runRemoval = async (
+		action: LogOutAction,
+		previous: LogOutReport | null,
+		attempt: () => Promise<AccountRemovalResult>,
+	): Promise<void> => {
+		// The running phase carries the report it retries, so the dialog keeps saying what
+		// survived instead of falling back to the confirmation copy mid-request.
+		setRemoval({ phase: "removing", action, previous });
+		const result = await attempt();
+		if (result.status === "removed") {
+			lastIncompleteReport.current = null;
+			setRemoval(CLOSED);
+			try {
+				queryClient.clear();
+				await navigate({ to: "/login" });
+			} catch {
+				// The Account is gone from this Device. A cache reset or a router that
+				// throws must not leave the user on a page whose data no longer exists,
+				// and must not become an unhandled rejection out of this driver.
+				window.location.assign("/login");
+			}
+			return;
+		}
+		if (result.status === "browserDataCleared") {
+			// No navigation: the Account was not removed, so the session is untouched and
+			// pretending otherwise is the lie this dialog exists to avoid. The cache still
+			// goes, because it holds the decrypted Items this button was pressed to hide.
+			queryClient.clear();
+			setRemoval({ phase: "browserDataCleared" });
+			return;
+		}
+		// Deliberately no attempt limit. A platform-namespace failure forbids the Replica
+		// phase, so a converging device can need a third attempt.
+		lastIncompleteReport.current = result;
+		setRemoval({ phase: "incomplete", result });
+	};
+
+	// A retry hands the previous report back, so both account names are the ones the first
+	// attempt resolved. Re-resolving is unsafe in either store: see `account-removal.ts`.
+	// A closed dialog is only a closed dialog, so the held report drives that gesture too.
+	const handleLogOut = () => {
+		const previous =
+			removal.phase === "incomplete"
+				? removal.result
+				: lastIncompleteReport.current;
+		void runRemoval("remove", previous, () =>
+			removeAccountFromDevice(previous, removalDeps),
+		);
+	};
+
+	const handleClearBrowserData = () => {
+		if (removal.phase !== "incomplete") {
+			return;
+		}
+		const previous = removal.result;
+		void runRemoval("clearBrowserData", previous, () =>
+			clearBrowserStoredDataOnly(previous, removalDeps),
+		);
 	};
 
 	return (
@@ -136,7 +269,7 @@ function UserNav() {
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
-							onClick={handleRemoveAccount}
+							onClick={() => setRemoval({ phase: "confirming" })}
 							className="cursor-pointer text-destructive"
 							data-testid="sign-out-button"
 						>
@@ -145,8 +278,155 @@ function UserNav() {
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
+				<LogOutDialog
+					state={removal}
+					onOpenChange={(open) => {
+						if (!open) setRemoval(CLOSED);
+					}}
+					onConfirm={handleLogOut}
+					onClearBrowserData={handleClearBrowserData}
+				/>
 			</SidebarMenuItem>
 		</SidebarMenu>
+	);
+}
+
+/** Closed, confirming, running, reporting what survived, or reporting the escape hatch. */
+type LogOutState =
+	| { readonly phase: "closed" }
+	| { readonly phase: "confirming" }
+	| {
+			readonly phase: "removing";
+			readonly action: LogOutAction;
+			readonly previous: LogOutReport | null;
+	  }
+	| { readonly phase: "incomplete"; readonly result: LogOutReport }
+	| { readonly phase: "browserDataCleared" };
+
+/** What a log out that did not finish told the user. */
+type LogOutReport = Extract<AccountRemovalResult, { status: "incomplete" }>;
+
+/** Removing the Account, or the browser-only escape hatch. Never the same thing. */
+type LogOutAction = "remove" | "clearBrowserData";
+
+const CLOSED: LogOutState = { phase: "closed" };
+
+function LogOutDialog({
+	state,
+	onOpenChange,
+	onConfirm,
+	onClearBrowserData,
+}: {
+	state: LogOutState;
+	onOpenChange: (open: boolean) => void;
+	onConfirm: () => void;
+	onClearBrowserData: () => void;
+}) {
+	const { m } = useI18n();
+	const busy = state.phase === "removing";
+	const clearingBrowserData =
+		state.phase === "removing" && state.action === "clearBrowserData";
+	const report =
+		state.phase === "incomplete"
+			? state.result
+			: state.phase === "removing"
+				? state.previous
+				: null;
+	// A terminal report of the escape hatch. It is not a removal, so it says so and
+	// offers no retry: the Account is still there and nothing here can reach it.
+	const cleared = state.phase === "browserDataCleared";
+
+	return (
+		// Not `ConfirmDialog`: `AlertDialogAction` closes on click, and this dialog has to
+		// survive the request so it can report a teardown that did not finish.
+		<AlertDialog
+			open={state.phase !== "closed"}
+			// A running destroy cannot be dismissed out from under itself. Reopening the
+			// dialog later to report what survived would be worse than holding it here.
+			onOpenChange={(open) => {
+				if (!busy) onOpenChange(open);
+			}}
+		>
+			<AlertDialogContent
+				data-testid="log-out-dialog"
+				data-teardown-status={cleared ? "browserDataCleared" : undefined}
+				onEscapeKeyDown={(event) => {
+					if (busy) event.preventDefault();
+				}}
+			>
+				<AlertDialogHeader>
+					<AlertDialogTitle>
+						{cleared
+							? m.nav_log_out_browser_cleared_title()
+							: report
+								? m.nav_log_out_incomplete_title()
+								: m.nav_log_out_confirm_title()}
+					</AlertDialogTitle>
+					<AlertDialogDescription>
+						{cleared
+							? m.nav_log_out_browser_cleared_description()
+							: report
+								? report.code !== null
+									? m.nav_log_out_incomplete_refused()
+									: m.nav_log_out_incomplete_description()
+								: m.nav_log_out_confirm_description()}
+					</AlertDialogDescription>
+				</AlertDialogHeader>
+				{report && report.areas.length > 0 ? (
+					<ul
+						className="list-disc space-y-1 pl-5 text-muted-foreground text-sm"
+						data-testid="log-out-incomplete-areas"
+					>
+						{report.areas.map((area) => (
+							<li key={area}>{getTeardownAreaLabel(area, m)}</li>
+						))}
+					</ul>
+				) : null}
+				{report?.canClearBrowserDataOnly ? (
+					// Set apart from the footer on purpose. It must not read as a second way
+					// to press "Try again": it clears this browser only and removes nothing.
+					<div className="space-y-2 rounded-md border border-border/60 p-3">
+						<p className="text-muted-foreground text-sm">
+							{m.nav_log_out_clear_browser_data_hint()}
+						</p>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={onClearBrowserData}
+							disabled={busy}
+							data-testid="log-out-clear-browser-data"
+						>
+							{clearingBrowserData
+								? m.nav_log_out_clear_browser_data_busy()
+								: m.nav_log_out_clear_browser_data()}
+						</Button>
+					</div>
+				) : null}
+				<AlertDialogFooter>
+					<AlertDialogCancel disabled={busy} data-testid="log-out-cancel">
+						{cleared
+							? m.nav_log_out_browser_cleared_close()
+							: report
+								? m.nav_log_out_incomplete_close()
+								: m.nav_log_out_confirm_cancel()}
+					</AlertDialogCancel>
+					{cleared ? null : (
+						<Button
+							variant="destructive"
+							onClick={onConfirm}
+							disabled={busy}
+							data-testid="log-out-confirm"
+						>
+							{busy && !clearingBrowserData
+								? m.nav_log_out_busy()
+								: report
+									? m.nav_log_out_incomplete_retry()
+									: m.nav_log_out_confirm_action()}
+						</Button>
+					)}
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
 	);
 }
 

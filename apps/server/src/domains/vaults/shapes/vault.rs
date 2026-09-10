@@ -9,15 +9,6 @@ macro_rules! success_shape {
     };
 }
 
-/// The id of a freshly created vault.
-macro_rules! create_vault_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            vault_id: String,
-        } }
-    };
-}
-
 /// A vault after a rename or a re-icon.
 macro_rules! update_vault_shape {
     ($emit:ident $args:tt) => {
@@ -53,38 +44,6 @@ macro_rules! bulk_import_item_shape {
             encrypted_data: String,
             encryption_iv: String,
             encryption_algorithm: String,
-        } }
-    };
-}
-
-/// A created item. `itemId` is the client-generated id and `id` the stored one; they agree unless
-/// the client supplied none.
-macro_rules! create_item_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            item_id: String,
-            id: String,
-        } }
-    };
-}
-
-/// The outcome of a bulk import.
-macro_rules! bulk_import_result_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            success: bool,
-            imported_count: usize,
-            item_ids: Vec<String>,
-        } }
-    };
-}
-
-/// An item mutation, carrying the version the caller must send back as `If-Match`.
-macro_rules! update_item_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            success: bool,
-            version: i32,
         } }
     };
 }
@@ -160,6 +119,12 @@ macro_rules! vault_available_member_shape {
 macro_rules! attachment_download_shape {
     ($emit:ident $args:tt) => {
         $crate::shapes::$emit! { $args {
+            attachment_id: String,
+            item_id: String,
+            vault_id: String,
+            storage_key: String,
+            envelope_version: i32,
+            uploaded_by: String,
             download_url: String,
             encrypted_name: String,
             encrypted_content_type: String,
@@ -200,9 +165,8 @@ macro_rules! vault_stats_shape {
 }
 
 pub(crate) use {
-    attachment_download_shape, bulk_import_item_shape, bulk_import_result_shape,
-    convert_vault_type_shape, create_attachment_shape, create_item_shape, create_vault_shape,
-    success_shape, update_item_shape, update_vault_shape, vault_available_member_shape,
+    attachment_download_shape, bulk_import_item_shape, convert_vault_type_shape,
+    create_attachment_shape, success_shape, update_vault_shape, vault_available_member_shape,
     vault_details_shape, vault_list_entry_shape, vault_member_shape, vault_stats_shape,
     vault_summary_shape,
 };

@@ -4,8 +4,10 @@ use time::{Duration, OffsetDateTime};
 use tracing::{error, info};
 
 use crate::{
+    db::events::{begin_sync_event_transaction, lock_sync_event_order},
     db::models::{DbPendingAttachmentUploadRow, DbTombstoneCandidate},
     integrations::storage,
+    shared::transaction::acquire_operation_lock,
 };
 
 const EXPIRED_SESSION_BATCH_SIZE: i64 = 1000;
@@ -17,6 +19,18 @@ const SYNC_EVENT_RETENTION_DAYS: i64 = 30;
 const RATE_LIMIT_STATE_RETENTION_DAYS: i64 = 2;
 const TOMBSTONE_RETENTION_DAYS: i64 = 90;
 const TOMBSTONE_BATCH_SIZE: i64 = 200;
+
+pub async fn observe_account_deletion_outcome_rows(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    let row_count = query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM account_deletion_outcome")
+        .fetch_one(pool)
+        .await?;
+    info!(
+        metric = "account_deletion.outcome_rows",
+        value = row_count,
+        "Account deletion retained outcome row count observed"
+    );
+    Ok(row_count)
+}
 
 pub async fn cleanup_expired_sessions(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let mut total_deleted = 0;
@@ -150,6 +164,248 @@ pub async fn cleanup_pending_attachment_uploads(
     Ok(total_deleted)
 }
 
+pub async fn cleanup_attachment_move_staging(
+    pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
+) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    let now = OffsetDateTime::now_utc();
+    let expired = query_as::<_, (String, String)>(
+        "SELECT user_id, operation_id FROM attachment_move_manifest WHERE expires_at <= $1 ORDER BY expires_at, user_id, operation_id LIMIT 100",
+    )
+    .bind(now)
+    .fetch_all(pool)
+    .await?;
+    for (user_id, operation_id) in &expired {
+        let mut transaction = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *transaction,
+            user_id,
+            operation_id,
+            "Failed to lock expired Attachment Move",
+        )
+        .await?;
+        let still_expired = query_scalar::<_, String>(
+            "SELECT operation_id FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2 AND expires_at <= $3 FOR UPDATE",
+        )
+        .bind(user_id)
+        .bind(operation_id)
+        .bind(now)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if still_expired.is_none() {
+            transaction.rollback().await?;
+            continue;
+        }
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) SELECT user_id, operation_id, storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ON CONFLICT DO NOTHING")
+            .bind(user_id)
+            .bind(operation_id)
+            .execute(&mut *transaction)
+            .await?;
+        query("DELETE FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+            .bind(user_id)
+            .bind(operation_id)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+    }
+
+    let queued = query_as::<_, (i64, String, String, String)>(
+        "SELECT id, user_id, operation_id, storage_key FROM (SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NULL UNION ALL SELECT id, user_id, operation_id, storage_key FROM attachment_move_cleanup WHERE claim_token IS NOT NULL AND claimed_at <= NOW() - INTERVAL '5 minutes') eligible ORDER BY id LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut deleted = 0;
+    for (id, user_id, operation_id, storage_key) in queued {
+        let mut transaction = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *transaction,
+            &user_id,
+            &operation_id,
+            "Failed to lock Attachment Move cleanup",
+        )
+        .await?;
+        let live = query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM attachment_move_staging s INNER JOIN attachment_move_manifest m USING (user_id, operation_id) WHERE s.user_id = $1 AND s.operation_id = $2 AND s.storage_key = $3 AND m.expires_at > $4)",
+        )
+        .bind(&user_id)
+        .bind(&operation_id)
+        .bind(&storage_key)
+        .bind(OffsetDateTime::now_utc())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if live {
+            query("DELETE FROM attachment_move_cleanup WHERE id = $1")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+            transaction.commit().await?;
+            continue;
+        }
+        let claim_token = format!("{:032x}", rand::random::<u128>());
+        let claimed = query_scalar::<_, i64>(
+            "UPDATE attachment_move_cleanup SET claim_token = $1, claimed_at = NOW() WHERE id = $2 AND (claim_token IS NULL OR claimed_at <= NOW() - INTERVAL '5 minutes') RETURNING id",
+        )
+        .bind(&claim_token)
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if claimed.is_none() {
+            transaction.rollback().await?;
+            continue;
+        }
+        transaction.commit().await?;
+
+        if let Err(error) = object_storage.delete(&storage_key).await {
+            let mut release = pool.begin().await?;
+            acquire_operation_lock(
+                &mut *release,
+                &user_id,
+                &operation_id,
+                "Failed to lock failed Attachment Move cleanup",
+            )
+            .await?;
+            query("UPDATE attachment_move_cleanup SET claim_token = NULL, claimed_at = NULL WHERE id = $1 AND claim_token = $2")
+                .bind(id)
+                .bind(&claim_token)
+                .execute(&mut *release)
+                .await?;
+            release.commit().await?;
+            error!(%error, "attachment-move-cleanup will retry object deletion");
+            continue;
+        }
+
+        let mut finalize = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *finalize,
+            &user_id,
+            &operation_id,
+            "Failed to lock completed Attachment Move cleanup",
+        )
+        .await?;
+        let finalized =
+            query("DELETE FROM attachment_move_cleanup WHERE id = $1 AND claim_token = $2")
+                .bind(id)
+                .bind(&claim_token)
+                .execute(&mut *finalize)
+                .await;
+        match finalized {
+            Ok(result) => {
+                finalize.commit().await?;
+                deleted += result.rows_affected();
+            }
+            Err(error) => {
+                finalize.rollback().await?;
+                let mut release = pool.begin().await?;
+                acquire_operation_lock(
+                    &mut *release,
+                    &user_id,
+                    &operation_id,
+                    "Failed to unlock incomplete Attachment Move cleanup",
+                )
+                .await?;
+                query("UPDATE attachment_move_cleanup SET claim_token = NULL, claimed_at = NULL WHERE id = $1 AND claim_token = $2")
+                    .bind(id)
+                    .bind(&claim_token)
+                    .execute(&mut *release)
+                    .await?;
+                release.commit().await?;
+                return Err(error.into());
+            }
+        }
+    }
+    Ok(deleted)
+}
+
+/// Deletes expired unconfirmed or explicitly abandoned Vault-image staging objects.
+///
+/// The Operation advisory lock remains held across the idempotent object delete. The stable object
+/// key can therefore never be rebound to a later generation while an old delete is in flight.
+pub async fn cleanup_vault_image_staging(
+    pool: &PgPool,
+    object_storage: &dyn storage::ObjectStorage,
+) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(test)]
+    {
+        let expired = query_scalar::<_, String>("UPDATE vault_image_staging SET state = 'cleanup_pending', updated_at = NOW() WHERE state = 'unconfirmed' AND lease_expires_at <= NOW() RETURNING operation_id")
+            .fetch_all(pool)
+            .await?;
+        for operation_id in &expired {
+            crate::test_support::fail_vault_image_database_boundary(
+                operation_id,
+                crate::test_support::VaultImageDatabaseBoundary::ExpiryMark,
+            )?;
+        }
+    }
+    #[cfg(not(test))]
+    query("UPDATE vault_image_staging SET state = 'cleanup_pending', updated_at = NOW() WHERE state = 'unconfirmed' AND lease_expires_at <= NOW()")
+        .execute(pool)
+        .await?;
+    let candidates = query_as::<_, (String, String, i64)>(
+        "SELECT user_id, operation_id, generation FROM vault_image_staging WHERE state = 'cleanup_pending' ORDER BY updated_at, user_id, operation_id LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await?;
+    #[cfg(test)]
+    for (_, operation_id, _) in &candidates {
+        crate::test_support::fail_vault_image_database_boundary(
+            operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::CandidateSelection,
+        )?;
+    }
+    let mut deleted = 0;
+    for (user_id, operation_id, selected_generation) in candidates {
+        let mut transaction = pool.begin().await?;
+        acquire_operation_lock(
+            &mut *transaction,
+            &user_id,
+            &operation_id,
+            "Failed to lock Vault image staging cleanup",
+        )
+        .await?;
+        let row = query_as::<_, (String, i64)>(
+            "SELECT object_key, generation FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND state = 'cleanup_pending' AND generation = $3 FOR UPDATE",
+        )
+        .bind(&user_id)
+        .bind(&operation_id)
+        .bind(selected_generation)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some((object_key, generation)) = row else {
+            transaction.rollback().await?;
+            continue;
+        };
+        #[cfg(test)]
+        crate::test_support::fail_vault_image_database_boundary(
+            &operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::RowSelection,
+        )?;
+        if let Err(error) = object_storage.delete(&object_key).await {
+            transaction.rollback().await?;
+            error!(%error, %object_key, "vault-image-staging cleanup will retry object deletion");
+            continue;
+        }
+        let result = query("DELETE FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND generation = $3 AND state = 'cleanup_pending'")
+            .bind(&user_id)
+            .bind(&operation_id)
+            .bind(generation)
+            .execute(&mut *transaction)
+            .await?;
+        #[cfg(test)]
+        crate::test_support::fail_vault_image_database_boundary(
+            &operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::FinalDelete,
+        )?;
+        #[cfg(test)]
+        crate::test_support::fail_vault_image_database_boundary(
+            &operation_id,
+            crate::test_support::VaultImageDatabaseBoundary::CleanupCommit,
+        )?;
+        transaction.commit().await?;
+        deleted += result.rows_affected();
+    }
+    Ok(deleted)
+}
+
 pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let cutoff = OffsetDateTime::now_utc() - Duration::days(TOMBSTONE_RETENTION_DAYS);
     let mut total_deleted = 0;
@@ -187,9 +443,11 @@ pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
             })
             .collect();
 
-        let mut transaction = pool.begin().await?;
+        let mut transaction = begin_sync_event_transaction(pool).await?;
 
         if !event_rows.is_empty() {
+            lock_sync_event_order(&mut transaction).await?;
+
             let mut ids = Vec::with_capacity(event_rows.len());
             let mut entity_ids = Vec::with_capacity(event_rows.len());
             let mut vault_ids = Vec::with_capacity(event_rows.len());

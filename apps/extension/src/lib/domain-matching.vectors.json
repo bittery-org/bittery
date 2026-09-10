@@ -6,8 +6,8 @@
 		"",
 		"Read by:",
 		"  apps/extension/tests/lib/hostname.test.ts",
-		"  apps/mobile/modules/credential-provider/android/src/test/java/",
-		"    expo/modules/credentialprovider/domain/DomainMatchVectorsTest.kt",
+		"  apps/mobile/src-tauri/plugins/credential-provider/android/src/test/java/",
+		"    com/bittery/mobile/credentialprovider/domain/DomainMatchVectorsTest.kt",
 		"",
 		"Changing a vector is a product decision about which saved credential may be",
 		"offered on which site. Change it here first, then make both sides pass."

@@ -12,6 +12,11 @@ pub struct BoundedBootstrapRows {
     pub has_more: bool,
 }
 
+pub struct BoundedBootstrapVaultRows {
+    pub rows: Vec<DbBootstrapVaultAccessRow>,
+    pub has_more: bool,
+}
+
 pub struct BoundedSyncEventRows {
     pub rows: Vec<DbSyncEventRow>,
     pub has_more: bool,
@@ -55,7 +60,7 @@ pub async fn fetch_visible_cursor_event(
 ) -> Result<Option<DbSyncEventCursorRow>, AppError> {
     if target_vault_ids.is_empty() {
         return query_as::<_, DbSyncEventCursorRow>(
-			"SELECT id, seq FROM sync_event WHERE id = $1 AND user_id = $2 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) LIMIT 1",
+			"SELECT id, seq FROM sync_event WHERE id = $1 AND user_id = $2 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type) LIMIT 1",
 		)
 		.bind(since_id)
 		.bind(user_id)
@@ -65,7 +70,7 @@ pub async fn fetch_visible_cursor_event(
     }
 
     query_as::<_, DbSyncEventCursorRow>(
-		"SELECT id, seq FROM sync_event WHERE id = $1 AND ((vault_id = ANY($2) AND event_type NOT IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $3 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type))) LIMIT 1",
+		"SELECT id, seq FROM sync_event WHERE id = $1 AND ((vault_id = ANY($2) AND event_type NOT IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type)) OR (user_id = $3 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type))) LIMIT 1",
 	)
 	.bind(since_id)
 	.bind(target_vault_ids)
@@ -82,7 +87,7 @@ pub async fn fetch_latest_visible_event_id(
 ) -> Result<Option<String>, AppError> {
     if target_vault_ids.is_empty() {
         return query_as::<_, DbSyncEventIdRow>(
-			"SELECT id FROM sync_event WHERE user_id = $1 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) ORDER BY seq DESC LIMIT 1",
+			"SELECT id FROM sync_event WHERE user_id = $1 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type) ORDER BY seq DESC LIMIT 1",
 		)
 		.bind(user_id)
 		.fetch_optional(pool)
@@ -92,7 +97,7 @@ pub async fn fetch_latest_visible_event_id(
     }
 
     query_as::<_, DbSyncEventIdRow>(
-		"SELECT id FROM sync_event WHERE (vault_id = ANY($1) AND event_type NOT IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $2 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) ORDER BY seq DESC LIMIT 1",
+		"SELECT id FROM sync_event WHERE (vault_id = ANY($1) AND event_type NOT IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type)) OR (user_id = $2 AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type)) ORDER BY seq DESC LIMIT 1",
 	)
 	.bind(target_vault_ids)
 	.bind(user_id)
@@ -120,7 +125,7 @@ pub async fn fetch_visible_events_since(
                 FROM sync_event
                 WHERE user_id = $1
                   AND event_type IN ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type,
-                    'travel_mode_updated'::sync_event_type)
+                    'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type)
                   AND seq > $2 ORDER BY seq ASC LIMIT $3
             ), weighted AS (
                 SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
@@ -147,9 +152,9 @@ pub async fn fetch_visible_events_since(
                 FROM sync_event
                 WHERE ((vault_id = ANY($1) AND event_type NOT IN
                   ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type,
-                    'travel_mode_updated'::sync_event_type)) OR (user_id = $2 AND event_type IN
+                    'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type)) OR (user_id = $2 AND event_type IN
                   ('vault_deleted'::sync_event_type, 'vault_access_revoked'::sync_event_type,
-                    'travel_mode_updated'::sync_event_type)))
+                    'travel_mode_updated'::sync_event_type, 'operation_resolved'::sync_event_type)))
                   AND seq > $3 ORDER BY seq ASC LIMIT $4
             ), weighted AS (
                 SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
@@ -200,8 +205,50 @@ pub async fn fetch_bootstrap_items(
     cursor: Option<&str>,
     limit: i32,
 ) -> Result<BoundedBootstrapRows, AppError> {
+    fetch_scoped_bootstrap_items(pool, user_id, cursor, limit, None).await
+}
+
+pub(super) async fn fetch_bootstrap_item(
+    pool: &PgPool,
+    user_id: &str,
+    item_id: &str,
+) -> Result<DbBootstrapItemRow, AppError> {
+    // Decide missing versus denied using only identity/access data, before reading ciphertext.
+    let allowed: Option<bool> = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM vault_key vk WHERE vk.vault_id = i.vault_id AND vk.user_id = $1) FROM item i WHERE i.id = $2",
+    )
+    .bind(user_id)
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to verify Item authority access"))?;
+    match allowed {
+        None => return Err(AppError::not_found("Item not found")),
+        Some(false) => return Err(AppError::forbidden("Access denied")),
+        Some(true) => {}
+    }
+    fetch_scoped_bootstrap_items(pool, user_id, None, 1, Some(item_id))
+        .await?
+        .rows
+        .pop()
+        .ok_or_else(|| AppError::not_found("Item not found"))
+}
+
+async fn fetch_scoped_bootstrap_items(
+    pool: &PgPool,
+    user_id: &str,
+    cursor: Option<&str>,
+    limit: i32,
+    item_id: Option<&str>,
+) -> Result<BoundedBootstrapRows, AppError> {
+    // Keep the exact-identity query indexable even when PostgreSQL chooses a generic plan.
+    let item_filter = if item_id.is_some() {
+        "i.id = $5"
+    } else {
+        "$5::text IS NULL"
+    };
     let weights = query_as::<_, BootstrapPageWeight>(
-        r#"WITH candidates AS (
+        &format!(r#"WITH candidates AS (
             SELECT i.id, ROW_NUMBER() OVER (ORDER BY i.id ASC)::bigint AS position,
                    (20480 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
                     + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
@@ -220,6 +267,7 @@ pub async fn fetch_bootstrap_items(
             FROM item i
             WHERE EXISTS (SELECT 1 FROM vault_key access WHERE access.vault_id = i.vault_id AND access.user_id = $1)
               AND ($2::text IS NULL OR i.id > $2)
+              AND {item_filter}
             ORDER BY i.id ASC LIMIT $3
         ), weighted AS (
             SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
@@ -227,12 +275,13 @@ pub async fn fetch_bootstrap_items(
             FROM candidates
         )
         SELECT id, position, candidate_count, cumulative_bytes FROM weighted
-        WHERE cumulative_bytes <= $4 OR position = 1 ORDER BY position"#,
+        WHERE cumulative_bytes <= $4 OR position = 1 ORDER BY position"#),
     )
     .bind(user_id)
     .bind(cursor)
     .bind(limit + 1)
     .bind(BOOTSTRAP_QUERY_BYTES)
+    .bind(item_id)
     .fetch_all(pool)
     .await
     .map_err(|error| database_error(error, "Failed to size bootstrap item page"))?;
@@ -259,6 +308,63 @@ pub async fn fetch_bootstrap_items(
     .await
     .map_err(|error| database_error(error, "Failed to materialize bounded bootstrap item page"))?;
     Ok(BoundedBootstrapRows { rows, has_more })
+}
+
+pub async fn fetch_bootstrap_vaults(
+    pool: &PgPool,
+    user_id: &str,
+    cursor: Option<&str>,
+    limit: i32,
+) -> Result<BoundedBootstrapVaultRows, AppError> {
+    let weights = query_as::<_, BootstrapPageWeight>(
+        r#"WITH candidates AS (
+            SELECT vk.vault_id AS id, ROW_NUMBER() OVER (ORDER BY vk.vault_id ASC)::bigint AS position,
+                   (4096 + octet_length(vk.vault_id) + octet_length(v.name) + octet_length(v.type::text)
+                    + coalesce(octet_length(v.icon), 0) + coalesce(octet_length(v.image_key), 0)
+                    + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text))::bigint AS estimated_bytes
+            FROM vault_key vk
+            INNER JOIN vault v ON v.id = vk.vault_id
+            WHERE vk.user_id = $1 AND ($2::text IS NULL OR vk.vault_id > $2)
+            ORDER BY vk.vault_id ASC LIMIT $3
+        ), weighted AS (
+            SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $4 OR position = 1 ORDER BY position"#,
+    )
+    .bind(user_id)
+    .bind(cursor)
+    .bind(limit + 1)
+    .bind(BOOTSTRAP_QUERY_BYTES)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to size bootstrap vault page"))?;
+    let Some(first) = weights.first() else {
+        return Ok(BoundedBootstrapVaultRows {
+            rows: Vec::new(),
+            has_more: false,
+        });
+    };
+    if first.cumulative_bytes > BOOTSTRAP_QUERY_BYTES {
+        return Err(AppError::payload_too_large(
+            "A single bootstrap vault exceeds the response page byte budget.",
+        ));
+    }
+    let has_more = weights
+        .last()
+        .is_some_and(|last| last.position < last.candidate_count);
+    let vault_ids: Vec<String> = weights.into_iter().map(|weight| weight.id).collect();
+    let rows = query_as::<_, DbBootstrapVaultAccessRow>(
+        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2) ORDER BY array_position($2::text[], vk.vault_id)",
+    )
+    .bind(user_id)
+    .bind(&vault_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to materialize bounded bootstrap vault page"))?;
+    Ok(BoundedBootstrapVaultRows { rows, has_more })
 }
 
 pub async fn load_bootstrap_attachment_rows(

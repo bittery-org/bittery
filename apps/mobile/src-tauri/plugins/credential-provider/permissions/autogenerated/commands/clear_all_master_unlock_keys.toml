@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-clear-all-master-unlock-keys"
+description = "Enables the clear_all_master_unlock_keys command without any pre-configured scope."
+commands.allow = ["clear_all_master_unlock_keys"]
+
+[[permission]]
+identifier = "deny-clear-all-master-unlock-keys"
+description = "Denies the clear_all_master_unlock_keys command without any pre-configured scope."
+commands.deny = ["clear_all_master_unlock_keys"]

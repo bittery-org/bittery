@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-get-escrow-remaining-time"
+description = "Enables the get_escrow_remaining_time command without any pre-configured scope."
+commands.allow = ["get_escrow_remaining_time"]
+
+[[permission]]
+identifier = "deny-get-escrow-remaining-time"
+description = "Denies the get_escrow_remaining_time command without any pre-configured scope."
+commands.deny = ["get_escrow_remaining_time"]

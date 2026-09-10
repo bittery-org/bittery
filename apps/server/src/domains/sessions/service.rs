@@ -217,9 +217,9 @@ impl SessionService {
         }
     }
 
-    pub async fn verify_token(&self, token: &str) -> Option<VerifiedSession> {
+    pub async fn verify_token(&self, token: &str) -> Result<Option<VerifiedSession>, AppError> {
         match &self.backend {
-            SessionBackend::Memory(inner) => verify_memory_token(inner, token),
+            SessionBackend::Memory(inner) => Ok(verify_memory_token(inner, token)),
             SessionBackend::Postgres(store) => store.verify_token(token).await,
         }
     }
@@ -370,6 +370,7 @@ impl SessionService {
                 store
                     .verify_token(&created.token)
                     .await
+                    .expect("created test session lookup should succeed")
                     .expect("created test session should verify")
             }
         }
@@ -476,7 +477,7 @@ impl PostgresSessionStore {
         })
     }
 
-    async fn verify_token(&self, token: &str) -> Option<VerifiedSession> {
+    async fn verify_token(&self, token: &str) -> Result<Option<VerifiedSession>, AppError> {
         let hashed_id = hash_token(token);
         let session = sqlx::query_as::<_, DbSessionRecord>(
             r#"
@@ -504,16 +505,16 @@ impl PostgresSessionStore {
         .bind(hashed_id)
         .fetch_optional(&self.pool)
         .await
-        .ok()?;
+        .map_err(|error| database_error(error, "Session store is unavailable"))?;
 
-        session.map(|row| VerifiedSession {
+        Ok(session.map(|row| VerifiedSession {
             token: token.to_string(),
             session_id: row.id,
             user_id: row.user_id,
             expires_at: row.expires_at,
             platform: normalize_session_platform(row.platform.as_deref()),
             client_id: normalized_session_client_id(row.platform.as_deref(), row.client_id),
-        })
+        }))
     }
 
     async fn refresh_session(

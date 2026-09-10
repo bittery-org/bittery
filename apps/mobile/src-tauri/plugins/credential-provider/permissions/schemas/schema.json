@@ -1,0 +1,630 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PermissionFile",
+  "description": "Permission file that can define a default permission, a set of permissions or a list of inlined permissions.",
+  "type": "object",
+  "properties": {
+    "default": {
+      "description": "The default permission set for the plugin",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DefaultPermission"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "set": {
+      "description": "A list of permissions sets defined",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PermissionSet"
+      }
+    },
+    "permission": {
+      "description": "A list of inlined permissions",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Permission"
+      }
+    }
+  },
+  "definitions": {
+    "DefaultPermission": {
+      "description": "The default permission set of the plugin.\n\nWorks similarly to a permission with the \"default\" identifier.",
+      "type": "object",
+      "required": [
+        "permissions"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PermissionSet": {
+      "description": "A set of direct permissions grouped together under a new name.",
+      "type": "object",
+      "required": [
+        "description",
+        "identifier",
+        "permissions"
+      ],
+      "properties": {
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does.",
+          "type": "string"
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PermissionKind"
+          }
+        }
+      }
+    },
+    "Permission": {
+      "description": "Descriptions of explicit privileges of commands.\n\nIt can enable commands to be accessible in the frontend of the application.\n\nIf the scope is defined it can be used to fine grain control the access of individual or multiple commands.",
+      "type": "object",
+      "required": [
+        "identifier"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri internal convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commands": {
+          "description": "Allowed or denied commands when using this permission.",
+          "default": {
+            "allow": [],
+            "deny": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/Commands"
+            }
+          ]
+        },
+        "scope": {
+          "description": "Allowed or denied scoped when using this permission.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Scopes"
+            }
+          ]
+        },
+        "platforms": {
+          "description": "Target platforms this permission applies. By default all platforms are affected by this permission.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Target"
+          }
+        }
+      }
+    },
+    "Commands": {
+      "description": "Allowed and denied commands inside a permission.\n\nIf two commands clash inside of `allow` and `deny`, it should be denied by default.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Allowed command.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Denied command, which takes priority.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Scopes": {
+      "description": "An argument for fine grained behavior control of Tauri commands.\n\nIt can be of any serde serializable type and is used to allow or prevent certain actions inside a Tauri command. The configured scope is passed to the command and will be enforced by the command implementation.\n\n## Example\n\n```json { \"allow\": [{ \"path\": \"$HOME/**\" }], \"deny\": [{ \"path\": \"$HOME/secret.txt\" }] } ```",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Data that defines what is allowed by the scope.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        "deny": {
+          "description": "Data that defines what is denied by the scope. This should be prioritized by validation logic.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      }
+    },
+    "Value": {
+      "description": "All supported ACL values.",
+      "anyOf": [
+        {
+          "description": "Represents a null JSON value.",
+          "type": "null"
+        },
+        {
+          "description": "Represents a [`bool`].",
+          "type": "boolean"
+        },
+        {
+          "description": "Represents a valid ACL [`Number`].",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Number"
+            }
+          ]
+        },
+        {
+          "description": "Represents a [`String`].",
+          "type": "string"
+        },
+        {
+          "description": "Represents a list of other [`Value`]s.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        {
+          "description": "Represents a map of [`String`] keys to [`Value`]s.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      ]
+    },
+    "Number": {
+      "description": "A valid ACL number.",
+      "anyOf": [
+        {
+          "description": "Represents an [`i64`].",
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "description": "Represents a [`f64`].",
+          "type": "number",
+          "format": "double"
+        }
+      ]
+    },
+    "Target": {
+      "description": "Platform target.",
+      "oneOf": [
+        {
+          "description": "MacOS.",
+          "type": "string",
+          "enum": [
+            "macOS"
+          ]
+        },
+        {
+          "description": "Windows.",
+          "type": "string",
+          "enum": [
+            "windows"
+          ]
+        },
+        {
+          "description": "Linux.",
+          "type": "string",
+          "enum": [
+            "linux"
+          ]
+        },
+        {
+          "description": "Android.",
+          "type": "string",
+          "enum": [
+            "android"
+          ]
+        },
+        {
+          "description": "iOS.",
+          "type": "string",
+          "enum": [
+            "iOS"
+          ]
+        }
+      ]
+    },
+    "PermissionKind": {
+      "type": "string",
+      "oneOf": [
+        {
+          "description": "Enables the authenticate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-authenticate",
+          "markdownDescription": "Enables the authenticate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the authenticate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-authenticate",
+          "markdownDescription": "Denies the authenticate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the borrow_live_master_unlock_key_base64 command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-borrow-live-master-unlock-key-base64",
+          "markdownDescription": "Enables the borrow_live_master_unlock_key_base64 command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the borrow_live_master_unlock_key_base64 command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-borrow-live-master-unlock-key-base64",
+          "markdownDescription": "Denies the borrow_live_master_unlock_key_base64 command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the can_use_biometric_unlock command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-can-use-biometric-unlock",
+          "markdownDescription": "Enables the can_use_biometric_unlock command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the can_use_biometric_unlock command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-can-use-biometric-unlock",
+          "markdownDescription": "Denies the can_use_biometric_unlock command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_all_master_unlock_keys command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-all-master-unlock-keys",
+          "markdownDescription": "Enables the clear_all_master_unlock_keys command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_all_master_unlock_keys command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-all-master-unlock-keys",
+          "markdownDescription": "Denies the clear_all_master_unlock_keys command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_escrow command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-escrow",
+          "markdownDescription": "Enables the clear_escrow command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_escrow command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-escrow",
+          "markdownDescription": "Denies the clear_escrow command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_escrow_for_account command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-escrow-for-account",
+          "markdownDescription": "Enables the clear_escrow_for_account command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_escrow_for_account command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-escrow-for-account",
+          "markdownDescription": "Denies the clear_escrow_for_account command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_master_unlock_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-master-unlock-key",
+          "markdownDescription": "Enables the clear_master_unlock_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_master_unlock_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-master-unlock-key",
+          "markdownDescription": "Denies the clear_master_unlock_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the escrow_muk_with_biometric command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-escrow-muk-with-biometric",
+          "markdownDescription": "Enables the escrow_muk_with_biometric command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the escrow_muk_with_biometric command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-escrow-muk-with-biometric",
+          "markdownDescription": "Denies the escrow_muk_with_biometric command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_escrow_remaining_time command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-escrow-remaining-time",
+          "markdownDescription": "Enables the get_escrow_remaining_time command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_escrow_remaining_time command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-escrow-remaining-time",
+          "markdownDescription": "Denies the get_escrow_remaining_time command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_last_master_password_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-last-master-password-entry",
+          "markdownDescription": "Enables the get_last_master_password_entry command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_last_master_password_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-last-master-password-entry",
+          "markdownDescription": "Denies the get_last_master_password_entry command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_master_unlock_key_base64 command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-master-unlock-key-base64",
+          "markdownDescription": "Enables the get_master_unlock_key_base64 command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_master_unlock_key_base64 command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-master-unlock-key-base64",
+          "markdownDescription": "Denies the get_master_unlock_key_base64 command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_pending_passkey_mutations command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-pending-passkey-mutations",
+          "markdownDescription": "Enables the get_pending_passkey_mutations command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_pending_passkey_mutations command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-pending-passkey-mutations",
+          "markdownDescription": "Denies the get_pending_passkey_mutations command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the has_valid_escrow command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-has-valid-escrow",
+          "markdownDescription": "Enables the has_valid_escrow command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the has_valid_escrow command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-has-valid-escrow",
+          "markdownDescription": "Denies the has_valid_escrow command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the has_valid_escrow_for_email command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-has-valid-escrow-for-email",
+          "markdownDescription": "Enables the has_valid_escrow_for_email command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the has_valid_escrow_for_email command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-has-valid-escrow-for-email",
+          "markdownDescription": "Denies the has_valid_escrow_for_email command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-is-available",
+          "markdownDescription": "Enables the is_available command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-is-available",
+          "markdownDescription": "Denies the is_available command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_biometric_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-is-biometric-available",
+          "markdownDescription": "Enables the is_biometric_available command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_biometric_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-is-biometric-available",
+          "markdownDescription": "Denies the is_biometric_available command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_master_password_reentry_required command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-is-master-password-reentry-required",
+          "markdownDescription": "Enables the is_master_password_reentry_required command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_master_password_reentry_required command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-is-master-password-reentry-required",
+          "markdownDescription": "Denies the is_master_password_reentry_required command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_supported command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-is-supported",
+          "markdownDescription": "Enables the is_supported command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_supported command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-is-supported",
+          "markdownDescription": "Denies the is_supported command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_vault_unlocked command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-is-vault-unlocked",
+          "markdownDescription": "Enables the is_vault_unlocked command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_vault_unlocked command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-is-vault-unlocked",
+          "markdownDescription": "Denies the is_vault_unlocked command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mark_pending_passkey_mutations_applied command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mark-pending-passkey-mutations-applied",
+          "markdownDescription": "Enables the mark_pending_passkey_mutations_applied command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mark_pending_passkey_mutations_applied command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mark-pending-passkey-mutations-applied",
+          "markdownDescription": "Denies the mark_pending_passkey_mutations_applied command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mark_pending_passkey_mutations_failed command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mark-pending-passkey-mutations-failed",
+          "markdownDescription": "Enables the mark_pending_passkey_mutations_failed command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mark_pending_passkey_mutations_failed command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mark-pending-passkey-mutations-failed",
+          "markdownDescription": "Denies the mark_pending_passkey_mutations_failed command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_credential_provider_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-credential-provider-settings",
+          "markdownDescription": "Enables the open_credential_provider_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_credential_provider_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-credential-provider-settings",
+          "markdownDescription": "Denies the open_credential_provider_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the retrieve_escrowed_muk command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retrieve-escrowed-muk",
+          "markdownDescription": "Enables the retrieve_escrowed_muk command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the retrieve_escrowed_muk command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retrieve-escrowed-muk",
+          "markdownDescription": "Denies the retrieve_escrowed_muk command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_master_unlock_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-master-unlock-key",
+          "markdownDescription": "Enables the set_master_unlock_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_master_unlock_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-master-unlock-key",
+          "markdownDescription": "Denies the set_master_unlock_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_muk_auto_lock_timeout command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-muk-auto-lock-timeout",
+          "markdownDescription": "Enables the set_muk_auto_lock_timeout command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_muk_auto_lock_timeout command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-muk-auto-lock-timeout",
+          "markdownDescription": "Denies the set_muk_auto_lock_timeout command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_vault_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-vault-data",
+          "markdownDescription": "Enables the sync_vault_data command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_vault_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-vault-data",
+          "markdownDescription": "Denies the sync_vault_data command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_last_master_password_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-last-master-password-entry",
+          "markdownDescription": "Enables the update_last_master_password_entry command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_last_master_password_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-last-master-password-entry",
+          "markdownDescription": "Denies the update_last_master_password_entry command without any pre-configured scope."
+        },
+        {
+          "description": "Allows every bittery-credential-provider command. The set is the bridge the Expo\nmodule used to expose to React Native: vault state, MUK escrow, vault sync, the\npending passkey mutation queue, the 30-day master password clock, and the\ncapability probes. The app is the only caller — the *system* reaches the\ncredential provider and autofill services by intent, not through this ACL — so\nsplitting the set would gate the app against itself and gate nothing else.\n\n#### This default permission set includes:\n\n- `allow-set-master-unlock-key`\n- `allow-set-muk-auto-lock-timeout`\n- `allow-clear-master-unlock-key`\n- `allow-clear-all-master-unlock-keys`\n- `allow-is-vault-unlocked`\n- `allow-get-master-unlock-key-base64`\n- `allow-borrow-live-master-unlock-key-base64`\n- `allow-escrow-muk-with-biometric`\n- `allow-retrieve-escrowed-muk`\n- `allow-has-valid-escrow`\n- `allow-has-valid-escrow-for-email`\n- `allow-get-escrow-remaining-time`\n- `allow-clear-escrow`\n- `allow-clear-escrow-for-account`\n- `allow-sync-vault-data`\n- `allow-get-pending-passkey-mutations`\n- `allow-mark-pending-passkey-mutations-applied`\n- `allow-mark-pending-passkey-mutations-failed`\n- `allow-is-master-password-reentry-required`\n- `allow-can-use-biometric-unlock`\n- `allow-update-last-master-password-entry`\n- `allow-get-last-master-password-entry`\n- `allow-is-available`\n- `allow-is-biometric-available`\n- `allow-authenticate`\n- `allow-open-credential-provider-settings`\n- `allow-is-supported`",
+          "type": "string",
+          "const": "default",
+          "markdownDescription": "Allows every bittery-credential-provider command. The set is the bridge the Expo\nmodule used to expose to React Native: vault state, MUK escrow, vault sync, the\npending passkey mutation queue, the 30-day master password clock, and the\ncapability probes. The app is the only caller — the *system* reaches the\ncredential provider and autofill services by intent, not through this ACL — so\nsplitting the set would gate the app against itself and gate nothing else.\n\n#### This default permission set includes:\n\n- `allow-set-master-unlock-key`\n- `allow-set-muk-auto-lock-timeout`\n- `allow-clear-master-unlock-key`\n- `allow-clear-all-master-unlock-keys`\n- `allow-is-vault-unlocked`\n- `allow-get-master-unlock-key-base64`\n- `allow-borrow-live-master-unlock-key-base64`\n- `allow-escrow-muk-with-biometric`\n- `allow-retrieve-escrowed-muk`\n- `allow-has-valid-escrow`\n- `allow-has-valid-escrow-for-email`\n- `allow-get-escrow-remaining-time`\n- `allow-clear-escrow`\n- `allow-clear-escrow-for-account`\n- `allow-sync-vault-data`\n- `allow-get-pending-passkey-mutations`\n- `allow-mark-pending-passkey-mutations-applied`\n- `allow-mark-pending-passkey-mutations-failed`\n- `allow-is-master-password-reentry-required`\n- `allow-can-use-biometric-unlock`\n- `allow-update-last-master-password-entry`\n- `allow-get-last-master-password-entry`\n- `allow-is-available`\n- `allow-is-biometric-available`\n- `allow-authenticate`\n- `allow-open-credential-provider-settings`\n- `allow-is-supported`"
+        }
+      ]
+    }
+  }
+}

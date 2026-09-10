@@ -25,6 +25,7 @@ export type {
 export type { CustomField, VaultOption } from "./types";
 
 interface ItemFormProps {
+	mode?: "create" | "edit";
 	category: ItemCategory;
 	initialData?: Partial<
 		| LoginFormData
@@ -68,6 +69,7 @@ export function ItemForm(props: ItemFormProps) {
 	if (props.category === "credit-card") {
 		return (
 			<CreditCardForm
+				allowIncomplete={props.mode === "edit"}
 				initialData={props.initialData as Partial<CreditCardFormData>}
 				onSubmit={props.onSubmit}
 				onCancel={props.onCancel}

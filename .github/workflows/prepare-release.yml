@@ -74,8 +74,7 @@ jobs:
             package.json \
             apps/desktop/package.json \
             apps/extension/package.json \
-            apps/desktop/src-tauri/tauri.conf.json \
-            apps/mobile/app.json
+            apps/desktop/src-tauri/tauri.conf.json
 
       - name: Verify version tooling
         run: |
@@ -100,7 +99,6 @@ jobs:
             apps/desktop/src-tauri/tauri.conf.json \
             apps/desktop/src-tauri/Cargo.toml \
             apps/desktop/src-tauri/Cargo.lock \
-            apps/mobile/app.json \
             apps/server/Cargo.toml \
             apps/server/Cargo.lock
           git commit -m "chore(release): v${VERSION}"

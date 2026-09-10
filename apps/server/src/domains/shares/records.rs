@@ -1,4 +1,4 @@
-use sqlx::{query, query_as, query_scalar, PgPool};
+use sqlx::{query, query_as, PgPool};
 
 use crate::db::events::{generate_resource_id, hash_token};
 use crate::db::models::{
@@ -101,33 +101,6 @@ pub async fn consume_share_link_access(
 	.rows_affected();
 
     Ok(updated_rows > 0)
-}
-
-pub async fn count_active_share_links(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    team_id: Option<&str>,
-    user_id: &str,
-    now: time::OffsetDateTime,
-) -> Result<i64, AppError> {
-    let count = match team_id {
-		Some(team_id) => query_scalar::<_, i64>(
-			"SELECT COUNT(*)::bigint FROM share_link sl INNER JOIN \"user\" u ON sl.created_by_id = u.id WHERE u.team_id = $1 AND sl.status = 'active' AND sl.expires_at > $2 AND (sl.max_access_count IS NULL OR sl.access_count < sl.max_access_count)",
-		)
-		.bind(team_id)
-		.bind(now)
-		.fetch_one(&mut **transaction)
-		.await,
-		None => query_scalar::<_, i64>(
-			"SELECT COUNT(*)::bigint FROM share_link WHERE created_by_id = $1 AND status = 'active' AND expires_at > $2 AND (max_access_count IS NULL OR access_count < max_access_count)",
-		)
-		.bind(user_id)
-		.bind(now)
-		.fetch_one(&mut **transaction)
-		.await,
-	}
-	.map_err(|error| database_error(error, "Failed to count active share links"))?;
-
-    Ok(count)
 }
 
 pub async fn load_share_access_logs(

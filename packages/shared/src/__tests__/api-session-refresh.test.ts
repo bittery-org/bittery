@@ -81,6 +81,7 @@ function createSwitchingClient(
 	const { switchAfterSnapshot = true, serverPath = "" } = options;
 	let activeAccountId = "account-a";
 	const storedFor: string[] = [];
+	const unauthorizedOrigins: Array<string | null> = [];
 	const client = createSessionRefreshingApiClient({
 		defaultServerUrl: `https://a.example.test${serverPath}`,
 		getAccountSnapshot: async () => {
@@ -102,12 +103,48 @@ function createSwitchingClient(
 		getClientId: async () => "client-1",
 		clientPlatform: "desktop",
 		clientVersion: "0.5.0",
+		onUnauthorized: (accountId) => {
+			unauthorizedOrigins.push(accountId);
+		},
 		fetch,
 	});
-	return { client, storedFor };
+	return { client, storedFor, unauthorizedOrigins };
 }
 
 describe("session-refreshing API client account isolation", () => {
+	test("reports an unscoped rejection without inventing an account", async () => {
+		const unauthorizedOrigins: Array<string | null> = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "https://a.example.test",
+			getAccountSnapshot: async () => null,
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "web",
+			clientVersion: "0.5.0",
+			onUnauthorized: (accountId) => {
+				unauthorizedOrigins.push(accountId);
+			},
+			fetch: async () => unauthorized(),
+		});
+
+		await expect(client.auth.me()).rejects.toEqual(
+			expect.objectContaining({ status: 401 }),
+		);
+		expect(unauthorizedOrigins).toEqual([null]);
+	});
+
+	test("reports the request-origin account after the active account switches", async () => {
+		const { client, unauthorizedOrigins } = createSwitchingClient(async () =>
+			unauthorized(),
+		);
+
+		await expect(client.auth.me()).rejects.toEqual(
+			expect.objectContaining({ status: 401 }),
+		);
+
+		expect(unauthorizedOrigins).toEqual(["account-a"]);
+	});
+
 	test("paged reauth keeps its newly issued token despite an expired stored session", async () => {
 		const requests: Request[] = [];
 		const client = createSessionRefreshingApiClient({

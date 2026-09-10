@@ -48,10 +48,11 @@ export interface ValueTier {
  *    On the extension this is a deliberate behaviour change — `vault_keys` used to
  *    survive restart in `chrome.storage.local`. That outlier is what this table fixes.
  *
- * 3. The react-native rule "values under 2000 bytes go to SecureStore, larger values go
- *    to plaintext SQLite" is **deleted**. It silently demoted the largest, most sensitive
- *    blobs (`vault_keys`) out of the secure store. Tier decides placement; size never
- *    does. Oversized secrets are chunked inside the react-native adapter, never demoted.
+ * 3. The rule the old React Native adapter used — "values under 2000 bytes go to
+ *    SecureStore, larger values go to plaintext SQLite" — is **deleted**. It silently
+ *    demoted the largest, most sensitive blobs (`vault_keys`) out of the secure store.
+ *    Tier decides placement; size never does. An adapter whose secure store has a size
+ *    limit must chunk, never demote.
  */
 export const STORAGE_TIERS = {
 	// --- secret, session-bound: credentials and key material that must not outlive
@@ -60,8 +61,8 @@ export const STORAGE_TIERS = {
 	vault_keys: { tier: "secret", class: "session-bound" },
 	encrypted_private_key: { tier: "secret", class: "session-bound" },
 
-	// --- secret, device-bound: the quick-unlock pair. `session_data` holds the MUK
-	// --- encrypted under `device_key`; neither is useful without the other.
+	// --- secret, device-bound: wrapped-key restoration and the stored Secret Key used
+	// --- with the plain pinned KDF profile for a fresh online Quick Unlock ceremony.
 	session_data: { tier: "secret", class: "device-bound" },
 	device_key: { tier: "secret", class: "device-bound" },
 	secret_key: { tier: "secret", class: "device-bound" },

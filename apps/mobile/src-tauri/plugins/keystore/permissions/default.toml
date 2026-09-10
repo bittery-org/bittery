@@ -1,0 +1,14 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = """
+Allows the four bittery-keystore commands. All four are needed by
+`packages/storage`'s tauri-mobile adapter: without `secret_available` the adapter
+cannot probe, and without the other three the `secret` tier has no backing.
+"""
+permissions = [
+	"allow-secret-set",
+	"allow-secret-get",
+	"allow-secret-delete",
+	"allow-secret-available",
+]

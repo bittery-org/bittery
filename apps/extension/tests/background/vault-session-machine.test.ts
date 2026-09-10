@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type {
 	LifecycleOutcome,
 	LifecycleStepFailure,
@@ -36,6 +36,7 @@ interface Recorder {
 
 interface HarnessOptions {
 	lockAllError?: Error;
+	invalidateError?: Error;
 	/** Resolves `lockAll` manually so `dispatchNow` can be observed mid-flight. */
 	deferLockAll?: boolean;
 	desktop?: DesktopSnapshot | null;
@@ -100,6 +101,9 @@ function createHarness(options: HarnessOptions = {}) {
 			async invalidateSession(target): Promise<InvalidatedSession> {
 				recorder.calls.push("invalidate_session");
 				recorder.invalidations.push(target);
+				if (options.invalidateError) {
+					throw options.invalidateError;
+				}
 				return { accountId: null, email: null, wasActive: false };
 			},
 		},
@@ -154,11 +158,14 @@ describe("vault session machine — fail-closed effect runner", () => {
 		const h = createHarness({ lockAllError: new Error("storage offline") });
 		await h.machine.dispatch({ type: "LOCAL_UNLOCKED", muk: MUK, at: NOW });
 
-		const snapshot = await h.machine.dispatch({
-			type: "LOCK_REQUESTED",
-			source: "popup",
-			at: NOW,
-		});
+		await expect(
+			h.machine.dispatch({
+				type: "LOCK_REQUESTED",
+				source: "popup",
+				at: NOW,
+			}),
+		).rejects.toThrow("storage offline");
+		const snapshot = h.machine.getSnapshot();
 
 		expect(snapshot.unlocked).toBe(false);
 		expect(snapshot.owner).toBe("none");
@@ -211,6 +218,43 @@ describe("vault session machine — fail-closed effect runner", () => {
 
 		h.releaseLockAll();
 		await settle();
+	});
+
+	test("dispatchNow logs a detached lifecycle rejection", async () => {
+		const error = spyOn(console, "error").mockImplementation(() => {});
+		const h = createHarness({ lockAllError: new Error("storage offline") });
+		await h.machine.dispatch({ type: "LOCAL_UNLOCKED", muk: MUK, at: NOW });
+
+		const snapshot = h.machine.dispatchNow({
+			type: "LOCK_REQUESTED",
+			source: "popup",
+			at: NOW,
+		});
+		await settle();
+
+		expect(snapshot.unlocked).toBe(false);
+		expect(error).toHaveBeenCalledWith(
+			"[vault-session] detached dispatch failed:",
+			expect.any(Error),
+		);
+		error.mockRestore();
+	});
+
+	test("the auto-lock timer logs a detached lifecycle rejection", async () => {
+		const error = spyOn(console, "error").mockImplementation(() => {});
+		const h = createHarness({ lockAllError: new Error("storage offline") });
+		await h.machine.dispatch({ type: "LOCAL_UNLOCKED", muk: MUK, at: NOW });
+
+		h.setNow(NOW + SETTINGS_TIMEOUT);
+		h.recorder.fireAutoLock();
+		await settle();
+
+		expect(h.machine.getSnapshot().unlocked).toBe(false);
+		expect(error).toHaveBeenCalledWith(
+			"[vault-session] detached timeout lock failed:",
+			expect.any(Error),
+		);
+		error.mockRestore();
 	});
 
 	test("a refused lock never disconnects sync and reports its code", async () => {
@@ -371,6 +415,20 @@ describe("vault session machine — lifecycle sequences", () => {
 			h.recorder.calls.indexOf("invalidate_session"),
 		);
 	});
+
+	test("a rejected session invalidation rejects the settled dispatch", async () => {
+		const h = createHarness({ invalidateError: new Error("lock incomplete") });
+		await h.machine.dispatch({ type: "LOCAL_UNLOCKED", muk: MUK, at: NOW });
+
+		await expect(
+			h.machine.dispatch({
+				type: "SESSION_REVOKED",
+				sessionId: "s1",
+				reason: "device_revoked",
+				at: NOW,
+			}),
+		).rejects.toThrow("lock incomplete");
+	});
 });
 
 describe("lifecycle adapter — session invalidation", () => {
@@ -393,31 +451,7 @@ describe("lifecycle adapter — session invalidation", () => {
 		};
 	}
 
-	test("retries by account id when the sessionId resolves nothing", async () => {
-		const targets: unknown[] = [];
-		const adapter = createLifecycleAdapter({
-			deps: {} as never,
-			invalidate: async (target) => {
-				targets.push(target);
-				// An unresolved sessionId is reported exactly like a clean success.
-				return "sessionId" in (target as object)
-					? outcome([])
-					: outcome([ACCOUNT]);
-			},
-			resolveFallbackAccountId: () => "acc-1",
-		});
-
-		const result = await adapter.invalidateSession({ sessionId: "s1" });
-
-		expect(targets).toEqual([{ sessionId: "s1" }, { accountId: "acc-1" }]);
-		expect(result).toEqual({
-			accountId: "acc-1",
-			email: "user@example.com",
-			wasActive: true,
-		});
-	});
-
-	test("does not retry when the sessionId resolved an account", async () => {
+	test("uses the known connection account instead of scanning by session id", async () => {
 		const targets: unknown[] = [];
 		const adapter = createLifecycleAdapter({
 			deps: {} as never,
@@ -426,6 +460,50 @@ describe("lifecycle adapter — session invalidation", () => {
 				return outcome([ACCOUNT]);
 			},
 			resolveFallbackAccountId: () => "acc-1",
+		});
+
+		const result = await adapter.invalidateSession({ sessionId: "s1" });
+
+		expect(targets).toEqual([{ accountId: "acc-1" }]);
+		expect(result).toEqual({
+			accountId: "acc-1",
+			email: "user@example.com",
+			wasActive: true,
+		});
+	});
+
+	test("cannot lock another server account that shares the revoked session id", async () => {
+		const targets: unknown[] = [];
+		const otherAccount = {
+			...ACCOUNT,
+			accountId: "acc-other-server",
+			email: "other@example.com",
+		};
+		const adapter = createLifecycleAdapter({
+			deps: {} as never,
+			invalidate: async (target) => {
+				targets.push(target);
+				return "sessionId" in (target as object)
+					? outcome([otherAccount])
+					: outcome([ACCOUNT]);
+			},
+			resolveFallbackAccountId: () => "acc-1",
+		});
+
+		const result = await adapter.invalidateSession({ sessionId: "shared-s1" });
+
+		expect(targets).toEqual([{ accountId: "acc-1" }]);
+		expect(result.accountId).toBe("acc-1");
+	});
+
+	test("uses session id resolution only when no connection account is known", async () => {
+		const targets: unknown[] = [];
+		const adapter = createLifecycleAdapter({
+			deps: {} as never,
+			invalidate: async (target) => {
+				targets.push(target);
+				return outcome([ACCOUNT]);
+			},
 		});
 
 		await adapter.invalidateSession({ sessionId: "s1" });
@@ -449,7 +527,7 @@ describe("lifecycle adapter — session invalidation", () => {
 		expect(targets).toEqual([{ accountId: "fresh-account" }]);
 	});
 
-	test("lockAll never throws when C1 reports step failures", async () => {
+	test("lockAll rejects when C1 reports step failures", async () => {
 		const adapter = createLifecycleAdapter({
 			deps: {} as never,
 			lockAll: async () =>
@@ -459,6 +537,21 @@ describe("lifecycle adapter — session invalidation", () => {
 				),
 		});
 
-		await expect(adapter.lockAll()).resolves.toBeUndefined();
+		await expect(adapter.lockAll()).rejects.toThrow("did not complete safely");
+	});
+
+	test("session invalidation rejects instead of projecting step failures", async () => {
+		const adapter = createLifecycleAdapter({
+			deps: {} as never,
+			invalidate: async () =>
+				outcome(
+					[ACCOUNT],
+					[{ accountId: "acc-1", step: "clear_session", cause: "boom" }],
+				),
+		});
+
+		await expect(adapter.invalidateSession("active")).rejects.toThrow(
+			"did not complete safely",
+		);
 	});
 });

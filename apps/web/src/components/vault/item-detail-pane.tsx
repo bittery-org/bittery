@@ -1,16 +1,9 @@
+import type { ItemProjectionStatus } from "@bittery/client-runtime/protocol";
 import {
-	getAttachmentUploadErrorCode,
-	type UnifiedItem,
-	useCreateShare,
-	useItemAttachments,
-	useQueryInvalidator,
-	useToggleFavorite,
-	useUpdateItem,
-} from "@bittery/core/hooks";
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
+	useRuntimeClient,
+	useRuntimePendingShareResults,
+} from "@bittery/client-runtime/react";
 import { detectCardBrand } from "@bittery/shared/credit-card";
-import type { DecryptedItemData } from "@bittery/shared/types";
 import {
 	Button,
 	cn,
@@ -29,6 +22,7 @@ import {
 import {
 	IconArrowLeft as ArrowLeft,
 	IconArrowLeftRight as ArrowLeftRight,
+	IconClock as Clock,
 	IconEllipsis as Dots,
 	IconHistory as History,
 	IconKey as Key,
@@ -36,11 +30,25 @@ import {
 	IconShare as Share,
 	IconStar as Star,
 	IconTrash as Trash,
+	IconTriangleAlert as TriangleAlert,
 } from "@bittery/ui/icons";
-import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { MoveItemDialog } from "@/components/vault/move-item-dialog";
+import { useAccountPresentationState } from "@/hooks/use-account-presentation-state";
+import { useCreateShare } from "@/hooks/use-create-share";
+import {
+	getRuntimeAttachmentUploadErrorCode,
+	useRuntimeItemAttachments,
+} from "@/hooks/use-runtime-item-attachments";
+import {
+	useMoveItem,
+	useToggleFavorite,
+	useUpdateItem,
+} from "@/hooks/use-runtime-item-mutations";
+import { useRuntimeShareHistory } from "@/hooks/use-runtime-share-history";
+import type { RuntimeListItem, RuntimeVaultOption } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
@@ -68,8 +76,13 @@ export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
 	setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/** The pane's Item, plus what the Runtime says about it when the Runtime is the reader. */
+export type ItemDetailEntry = Omit<RuntimeListItem, "runtimeStatus"> & {
+	runtimeStatus?: ItemProjectionStatus;
+};
+
 interface ItemDetailPaneProps {
-	selectedItem: UnifiedItem | null;
+	selectedItem: ItemDetailEntry | null;
 	selectedItemId: string | null;
 	availableTags: string[];
 	canWriteItems: boolean;
@@ -94,24 +107,50 @@ export function ItemDetailPane({
 	const { m } = useI18n();
 	const toggleFavorite = useToggleFavorite();
 	const updateItem = useUpdateItem();
+	const moveItem = useMoveItem();
+	const navigate = useNavigate();
 	const createShare = useCreateShare();
-	const api = useApiClient();
-	const invalidator = useQueryInvalidator();
+	const runtimeClient = useRuntimeClient();
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
+	const [historyItem, setHistoryItem] = useAccountPresentationState<string>(
+		selectedItem?.accountId ?? null,
+	);
+	const isShareHistoryOpen = Boolean(
+		selectedItem && historyItem === selectedItem.id,
+	);
+	const setIsShareHistoryOpen = (open: boolean) =>
+		setHistoryItem(open ? (selectedItem?.id ?? null) : null);
 	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
 	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
-	const itemAttachments = useItemAttachments(
-		selectedItem?.id,
-		selectedItem?.vaultId,
-		selectedItem?.accountId ?? "",
+	const shareAccountId = selectedItem?.accountId ?? null;
+	const pendingShares = useRuntimePendingShareResults(shareAccountId);
+	const resumableShare =
+		pendingShares.state === "ready" && selectedItem
+			? (() => {
+					const result = pendingShares.value.results.find(
+						(candidate) => candidate.itemId === selectedItem.id,
+					);
+					return result
+						? { ...result, accountId: pendingShares.value.accountId }
+						: null;
+				})()
+			: null;
+	const acknowledgeShareResult = useCallback(
+		async (result: { accountId: string; operationId: string }) => {
+			await runtimeClient.acknowledgeShareResult({
+				accountId: result.accountId,
+				operationId: result.operationId,
+			});
+		},
+		[runtimeClient],
 	);
-	const shareLinks = useQuery({
-		...apiQueries.shares.list(api, selectedItem?.id ?? ""),
-		enabled: Boolean(selectedItem) && isShareHistoryOpen,
-		staleTime: 0,
-	});
+	const itemAttachments = useRuntimeItemAttachments(selectedItem);
+	const shareLinks = useRuntimeShareHistory(
+		shareAccountId,
+		selectedItem?.id ?? null,
+		isShareHistoryOpen,
+	);
 
 	const handleTagsChange = useCallback(
 		(newTags: string[]) => {
@@ -119,17 +158,12 @@ export function ItemDetailPane({
 
 			setIsUpdatingTags(true);
 
-			const updatedData: DecryptedItemData = {
-				...(selectedItem as DecryptedItemData),
-				tags: newTags.length > 0 ? newTags : undefined,
-			};
-
 			updateItem.mutate(
 				{
 					itemId: selectedItem.id,
 					vaultId: selectedItem.vaultId,
 					accountId: selectedItem.accountId,
-					data: updatedData,
+					data: { tags: newTags },
 				},
 				{
 					onSettled: () => {
@@ -163,6 +197,34 @@ export function ItemDetailPane({
 		}
 	};
 
+	// A moved projection can remove the selected Item before acceptance returns. This
+	// pane survives that transition; the dialog does not own the request's lifetime.
+	const handleMove = async (target: RuntimeVaultOption) => {
+		if (!selectedItem) return;
+		try {
+			await moveItem.mutateAsync({
+				accountId: selectedItem.accountId,
+				itemId: selectedItem.id,
+				targetAccountId: target.accountId,
+				targetVaultId: target.id,
+			});
+			toast.success(m.vaults_detail_items_move_dialog_toast_success());
+			setIsMoveDialogOpen(false);
+			navigate({
+				to: "/vaults/$vaultId",
+				params: { vaultId: target.id },
+				search: { itemId: selectedItem.id },
+			});
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") return;
+			toast.error(
+				error instanceof Error
+					? error.message
+					: m.vaults_detail_items_move_dialog_toast_error(),
+			);
+		}
+	};
+
 	return (
 		<div
 			className={cn(
@@ -174,6 +236,26 @@ export function ItemDetailPane({
 		>
 			{selectedItem ? (
 				<>
+					{/* An unfinished write says so here too: the list badge is easy to miss, and
+					    a detail view that looks saved is the one that misleads. */}
+					{selectedItem.runtimeStatus === "pending" && (
+						<div
+							className="flex shrink-0 items-center gap-2 border-b bg-foreground/3 px-3 py-1.5 text-muted-foreground text-xs"
+							data-testid="item-detail-status-pending"
+						>
+							<Clock className="size-3.5 shrink-0" />
+							{m.vaults_detail_items_status_pending()}
+						</div>
+					)}
+					{selectedItem.runtimeStatus === "failed" && (
+						<div
+							className="flex shrink-0 items-center gap-2 border-b bg-destructive/8 px-3 py-1.5 text-destructive text-xs"
+							data-testid="item-detail-status-failed"
+						>
+							<TriangleAlert className="size-3.5 shrink-0" />
+							{m.vaults_detail_items_status_failed()}
+						</div>
+					)}
 					<div className="flex h-11 min-w-0 shrink-0 items-center justify-between border-b px-2.5 xl:h-12">
 						<Button
 							variant="ghost"
@@ -313,32 +395,36 @@ export function ItemDetailPane({
 							onDelete={(attachmentId) =>
 								itemAttachments.remove.mutateAsync(attachmentId)
 							}
-							getUploadErrorCode={getAttachmentUploadErrorCode}
+							getUploadErrorCode={getRuntimeAttachmentUploadErrorCode}
 							canEdit={canWriteItems}
 							handleDownloadedFile={handleDownloadedFile}
 						/>
 					</div>
 
 					<ShareItemDialog
+						key={`${shareAccountId}:${selectedItem.id}`}
+						accountId={selectedItem.accountId}
 						item={selectedItem}
 						onCreateShare={(request) => createShare.mutateAsync(request)}
+						onAcknowledgeShareResult={acknowledgeShareResult}
+						resumableResult={resumableShare}
 						open={isShareDialogOpen}
 						onOpenChange={setIsShareDialogOpen}
 					/>
 					<ShareHistoryDialog
-						links={shareLinks.data?.links ?? []}
+						key={`${shareAccountId}:${selectedItem.id}:${isShareHistoryOpen}`}
+						links={shareLinks.links}
 						isLoading={shareLinks.isLoading}
-						onRevoke={async (linkId) => {
-							await api.share.remove(linkId);
-							await invalidator.invalidateShare(selectedItem.id);
-						}}
-						onLoadAccessLogs={async (linkId) =>
-							(await api.share.accessLogs(linkId)).data
-						}
+						onRevoke={shareLinks.revoke}
+						onLoadAccessLogs={shareLinks.loadAccessLogs}
+						failed={shareLinks.failed}
+						onRetry={shareLinks.retry}
 						open={isShareHistoryOpen}
 						onOpenChange={setIsShareHistoryOpen}
 					/>
 					<MoveItemDialog
+						isMoving={moveItem.isPending}
+						onMove={handleMove}
 						open={isMoveDialogOpen}
 						onOpenChange={setIsMoveDialogOpen}
 						item={selectedItem}

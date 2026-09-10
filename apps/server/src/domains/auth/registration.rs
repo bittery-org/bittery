@@ -41,7 +41,7 @@ use crate::{
             self, generic_ip_limit, rate_limited_error, signup_email_limit, signup_ip_limit,
             signup_verification_request_limit,
         },
-        transaction::database_error,
+        transaction::{acquire_team_authority_lock, database_error},
     },
     AppState,
 };
@@ -436,6 +436,12 @@ pub(crate) async fn signup_with_invitation(
         .begin()
         .await
         .map_err(|error| database_error(error, "Failed to start invited signup transaction"))?;
+    acquire_team_authority_lock(
+        &mut *transaction,
+        &invitation.team_id,
+        "Failed to lock Team invitation signup",
+    )
+    .await?;
 
     insert_user_account(
         &mut transaction,

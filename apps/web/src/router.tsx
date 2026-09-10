@@ -9,43 +9,73 @@ import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
+import { ReplicaRecoveryProvider } from "./components/replica-recovery-provider";
+import { StorageAvailabilityBoundary } from "./components/storage-availability-boundary";
 import { getServerUrl } from "./lib/auth-server";
-import { forgetActiveSession, initializeStorage, storage } from "./lib/storage";
+import { recoveryFiles } from "./lib/crypto";
+import {
+	initializeStorage,
+	lockRejectedAccountSession,
+	storage,
+} from "./lib/storage";
 import "./index.css";
 
+import { RuntimeProvider } from "@bittery/client-runtime/react";
 import {
 	MutationCache,
 	QueryCache,
 	QueryClient,
 	QueryClientProvider,
 } from "@tanstack/react-query";
+import { webRuntimeClient as runtimeClient } from "./lib/web-runtime-client";
 import { AccountRuntimeProvider } from "./providers/account-runtime-provider";
 import { I18nProvider } from "./providers/i18n-provider";
 import { WebPlatformProvider } from "./providers/platform-provider";
-import { SyncProvider } from "./providers/sync-provider";
+import { TransitionalSyncProvider } from "./providers/transitional-sync-provider";
 import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
 
-function handleUnauthorizedError() {
+async function handleUnauthorizedError(originAccountId: string | null) {
 	if (isHandlingAuthError) return;
 
 	// Don't handle unauthorized errors on public routes — avoids infinite reload loop
 	// when sync or other background queries fire without a valid token
 	if (window.location.pathname === "/login") return;
+	if (!originAccountId) {
+		toast.error(m.toast_auth_session_lock_failed());
+		return;
+	}
+	// A 401 on a request that carried no credential is not a rejected Session. The Runtime
+	// owns the Session on its own path and this store holds no token at all, so locking here
+	// would discard a Sign-in that succeeded. The transitional query still fails; it just no
+	// longer takes the signed-in Account down with it.
+	if (!(await storage.getAuthToken(originAccountId))) return;
 
 	isHandlingAuthError = true;
 
-	queryClient.clear();
-
-	// An expired session is a sign-out, so the quick-unlock offer in `session_data` goes too.
-	forgetActiveSession()
+	// A rejected Server Session requires online reauthentication, not a local Sign-out.
+	// Keep Device-bound Quick Unlock inputs so the login route can ask only for a password.
+	lockRejectedAccountSession(originAccountId)
+		.then((outcome) => {
+			if (outcome.failures.length > 0 || !outcome.targetPresent) {
+				throw new Error(
+					"Web session reauthentication did not complete safely",
+					{
+						cause: outcome.failures,
+					},
+				);
+			}
+			return outcome;
+		})
 		.then(() => {
+			queryClient.clear();
 			toast.error(m.toast_auth_session_expired());
 			window.location.href = "/login";
 		})
 		// Without this reset one rejection pins the latch and every later 401 is dropped.
 		.catch(() => {
+			toast.error(m.toast_auth_session_lock_failed());
 			isHandlingAuthError = false;
 		});
 }
@@ -54,7 +84,6 @@ export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
 				return;
 			}
 			// An answered request carries the API's own problem detail, which is
@@ -76,7 +105,7 @@ export const queryClient = new QueryClient({
 	mutationCache: new MutationCache({
 		onError: (error) => {
 			if (isUnauthorizedApiError(error)) {
-				handleUnauthorizedError();
+				return;
 			}
 		},
 	}),
@@ -130,6 +159,7 @@ const apiClient = createSessionRefreshingApiClient({
 	getClientId: getApiClientId,
 	clientPlatform: "web",
 	clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
+	onUnauthorized: handleUnauthorizedError,
 });
 
 export const getRouter = () => {
@@ -146,11 +176,20 @@ export const getRouter = () => {
 			<I18nProvider>
 				<QueryClientProvider client={queryClient}>
 					<ApiProvider apiClient={apiClient}>
-						<AccountRuntimeProvider queryClient={queryClient}>
-							<SyncProvider queryClient={queryClient}>
-								<WebPlatformProvider>{children}</WebPlatformProvider>
-							</SyncProvider>
-						</AccountRuntimeProvider>
+						<RuntimeProvider client={runtimeClient}>
+							<ReplicaRecoveryProvider
+								client={runtimeClient}
+								files={recoveryFiles}
+							>
+								<StorageAvailabilityBoundary>
+									<AccountRuntimeProvider queryClient={queryClient}>
+										<TransitionalSyncProvider queryClient={queryClient}>
+											<WebPlatformProvider>{children}</WebPlatformProvider>
+										</TransitionalSyncProvider>
+									</AccountRuntimeProvider>
+								</StorageAvailabilityBoundary>
+							</ReplicaRecoveryProvider>
+						</RuntimeProvider>
 					</ApiProvider>
 				</QueryClientProvider>
 			</I18nProvider>

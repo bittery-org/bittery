@@ -398,9 +398,12 @@ test("changing a login's password records the old one in history, and restoring 
 		),
 	).toBeVisible();
 
-	// Reload so the password field starts concealed again: the restore left the
-	// detail pane's reveal toggle flipped on.
-	await page.reload();
+	// Remount the detail pane within the unlocked Runtime session so reveal starts concealed.
+	await page
+		.getByRole("link", { name: uiText("nav_item_vaults"), exact: true })
+		.click();
+	await expect(pane).not.toHaveAttribute("data-item-id", /.+/);
+	await itemRow(page, item.title).click();
 	await expect(pane).toHaveAttribute("data-item-id", /.+/, {
 		timeout: VAULT_READY_TIMEOUT_MS,
 	});

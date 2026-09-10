@@ -1,36 +1,12 @@
-name: "@bittery/crypto-react-native"
+# Only the `web` (WASM) target is generated through uniffi-bindgen-react-native.
+# Android's Kotlin and .so files come from build-android.sh, which calls uniffi
+# and cargo-ndk directly - see packages/crypto/android/README.md.
+name: "@bittery/crypto-wasm"
 projectVersion: 1.0.0
 repository: https://github.com/bittery-org/bittery
 rust:
   directory: ../core
   manifestPath: crates/bittery-crypto-api/Cargo.toml
-bindings:
-  cpp: ../react-native/cpp/generated
-  ts: ../react-native/src/generated
-android:
-  directory: ../react-native/android
-  targets:
-    - arm64-v8a
-    - armeabi-v7a
-    - x86
-    - x86_64
-  apiLevel: 24
-  jniLibs: src/main/jniLibs
-  packageName: com.bittery.crypto
-  codegenOutputDir: ../react-native/android/generated
-  useSharedLibrary: true
-ios:
-  directory: ../react-native/ios
-  targets:
-    - aarch64-apple-ios
-    - aarch64-apple-ios-sim
-  frameworkName: ../react-native/bittery_crypto_api
-  codegenOutputDir: ../react-native/ios/generated
-turboModule:
-  cpp: ../react-native/cpp
-  ts: ../react-native/src
-  spec: NativeBitteryCrypto
-  entrypoint: ../react-native/src/index.ts
 web:
   manifestPath: crate/Cargo.toml
   manifestPatchFile: ../core/wasm.Cargo.patch.toml

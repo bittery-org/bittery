@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { ApiError } from "@bittery/api-contract";
+import {
+	ApiError,
+	type CreateItemOperationOutcome,
+} from "@bittery/api-contract";
 import { serverEncryptedItem } from "@bittery/shared/testing/item-fixtures";
 import {
 	OutboundQueue,
 	type OutboundQueueApiClient,
 	type PendingMutation,
+	SemanticOperationRejected,
 } from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
 import { type SyncApiClient, SyncOrchestrator } from "../sync-orchestrator";
@@ -39,6 +43,7 @@ function stubItemCache(
 		executeSemanticItemCommand: async () => undefined,
 		discardItemCommandAcknowledgedElsewhere: async () => undefined,
 		preserveItemConflict: async () => undefined,
+		rejectItemCommand: async () => undefined,
 		acknowledgeItemCommand: async () => undefined,
 		...overrides,
 	};
@@ -185,6 +190,29 @@ function apiResult<T>(data: T) {
 	return { data, etag: null, requestId: null };
 }
 
+/** The retained outcome an applied Item mutation now answers with. */
+function appliedOutcome(
+	kind: string,
+	itemId: string,
+	version: number,
+	operationId?: string,
+) {
+	return apiResult({
+		operationId: operationId ?? itemId,
+		kind,
+		result: { status: "applied" as const, itemId, version },
+	});
+}
+
+/**
+ * The version an applied Item mutation reaches: one past the strong version it was written
+ * against. The retained outcome now carries it, where the response ETag used to.
+ */
+function nextVersion(options?: TestWriteOptions): number {
+	const match = /^"(\d+)"$/.exec(options?.etag ?? "");
+	return match?.[1] ? Number(match[1]) + 1 : 1;
+}
+
 interface TestApiClientOptions {
 	changes?: (input: { sinceId?: string; limit?: number }) => Promise<{
 		events: SyncEvent[];
@@ -193,6 +221,7 @@ interface TestApiClientOptions {
 		cursor: { id: string } | null;
 	}>;
 	getItem?: (itemId: string) => Promise<Record<string, unknown>>;
+	getOperation?: (operationId: string) => Promise<CreateItemOperationOutcome>;
 	events?: (signal?: AbortSignal) => Promise<Response>;
 }
 
@@ -248,6 +277,13 @@ function testApiClient(options: TestApiClientOptions = {}): SyncApiClient {
 				),
 			listInVault: async () => apiResult([]),
 		},
+		operations: {
+			get: async (operationId: string) =>
+				apiResult(
+					await (options.getOperation?.(operationId) ??
+						Promise.reject(new Error("Operation lookup was not expected"))),
+				),
+		},
 		vaults: {
 			get: async () =>
 				apiResult({
@@ -268,7 +304,10 @@ interface TestWriteOptions {
 }
 
 interface OutboundClientHandlers {
-	create?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+	create?: (
+		itemId: string,
+		options?: TestWriteOptions,
+	) => Promise<"vault_read_only" | undefined>;
 	update?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
 	trash?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
 	deletePermanently?: (
@@ -291,8 +330,19 @@ function outboundApiClient(
 				_input: unknown,
 				options?: TestWriteOptions,
 			) => {
-				await handlers.create?.(itemId, options);
-				return apiResult({ itemId, id: itemId });
+				const rejection = await handlers.create?.(itemId, options);
+				if (rejection) {
+					return apiResult({
+						operationId: options?.idempotencyKey ?? itemId,
+						kind: "create_item" as const,
+						result: { status: "rejected" as const, code: rejection },
+					});
+				}
+				return apiResult({
+					operationId: options?.idempotencyKey ?? itemId,
+					kind: "create_item" as const,
+					result: { status: "applied" as const, itemId, version: 1 },
+				});
 			},
 			update: async (
 				itemId: string,
@@ -300,19 +350,39 @@ function outboundApiClient(
 				options?: TestWriteOptions,
 			) => {
 				await handlers.update?.(itemId, options);
-				return apiResult({ success: true, version: 1 });
+				return appliedOutcome(
+					"update_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			trash: async (itemId: string, options?: TestWriteOptions) => {
 				await handlers.trash?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"trash_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			deletePermanently: async (itemId: string, options?: TestWriteOptions) => {
 				await handlers.deletePermanently?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"permanently_delete_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			restore: async (itemId: string, options?: TestWriteOptions) => {
 				await handlers.restore?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"restore_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			move: async (
 				itemId: string,
@@ -320,7 +390,12 @@ function outboundApiClient(
 				options?: TestWriteOptions,
 			) => {
 				await handlers.move?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"move_item",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 			setFavorite: async (
 				itemId: string,
@@ -328,7 +403,12 @@ function outboundApiClient(
 				options?: TestWriteOptions,
 			) => {
 				await handlers.setFavorite?.(itemId, options);
-				return apiResult({});
+				return appliedOutcome(
+					"set_item_favorite",
+					itemId,
+					nextVersion(options),
+					options?.idempotencyKey,
+				);
 			},
 		},
 	} as unknown as OutboundQueueApiClient;
@@ -797,6 +877,99 @@ describe("sync engine regressions", () => {
 		orchestrator.dispose();
 	});
 
+	test("reconciles a retained Operation rejection before advancing its event cursor", async () => {
+		const storage = new MemoryStorage();
+		const rejected: string[] = [];
+		const outboundQueue = new OutboundQueue(storage, "self_client", {
+			apply: async () => undefined,
+			acknowledge: async () => undefined,
+			reject: async (_command, code) => {
+				rejected.push(code);
+			},
+		});
+		await outboundQueue.enqueue({
+			accountId: "account_a",
+			id: "operation_rejected",
+			operationId: "operation_rejected",
+			type: "create",
+			entityId: "item_rejected",
+			vaultId: "vault_1",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "ciphertext",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_1",
+			},
+			baseVersion: 0,
+			timestamp: 1,
+			retryCount: 0,
+		});
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				getOperation: async (operationId) => ({
+					operationId,
+					kind: "create_item",
+					result: { status: "rejected", code: "vault_read_only" },
+				}),
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			outboundQueue,
+		});
+
+		await (orchestrator as any).applyEvent(
+			buildEvent({
+				id: "evt_operation_rejected",
+				type: "operation_resolved",
+				entityId: "operation_rejected",
+				entityType: "operation",
+				vaultId: null,
+			}),
+		);
+
+		expect(rejected).toEqual(["vault_read_only"]);
+		expect(outboundQueue.getCommands("account_a")[0]?.status).toBe("failed");
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_operation_rejected",
+		);
+		orchestrator.dispose();
+	});
+
+	test("keeps the cursor when authoritative Operation lookup fails", async () => {
+		const storage = new MemoryStorage();
+		await storage.set("lastSyncCursor", { id: "evt_before_operation" });
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				getOperation: async () => {
+					throw new Error("outcome lookup failed");
+				},
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+		});
+
+		await expect(
+			(orchestrator as any).applyEvent(
+				buildEvent({
+					id: "evt_operation",
+					type: "operation_resolved",
+					entityId: "operation_1",
+					entityType: "operation",
+					vaultId: null,
+				}),
+			),
+		).rejects.toThrow("outcome lookup failed");
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_before_operation",
+		);
+		orchestrator.dispose();
+	});
+
 	test("does not discard earlier events for the same Item before advancing", async () => {
 		const storage = new MemoryStorage();
 		const processed: string[] = [];
@@ -1152,6 +1325,10 @@ describe("outbound queue multi-account drain isolation", () => {
 				id: "later-edit",
 				type: "update",
 				encryptedPayload,
+				// Written against the version the favorite before it reaches, the way a real
+				// client chains: the retained outcome now reports that version, so a command
+				// still sitting on the stale one would rightly be refused.
+				baseVersion: 2,
 				timestamp: 3,
 			}),
 		);
@@ -1305,6 +1482,35 @@ describe("outbound queue multi-account drain isolation", () => {
 
 		expect(executed).toEqual(["transfer_a"]);
 		expect(restarted.getPendingCount()).toBe(0);
+	});
+
+	test("treats a semantic executor rejection as terminal", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client", {
+			apply: async () => undefined,
+			executeSemanticCommand: async () => {
+				throw new SemanticOperationRejected("vault_read_only");
+			},
+			acknowledge: async () => undefined,
+		});
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "move-mutation",
+				operationId: "move-operation",
+				type: "cross_account_move",
+				targetAccountId: "account_b",
+				targetVaultId: "vault_b",
+				targetItemId: "item_b",
+			}),
+		);
+
+		await queue.drain(() => outboundApiClient());
+		await queue.drain(() => outboundApiClient());
+
+		expect(queue.getCommands("account_a")[0]).toMatchObject({
+			operationId: "move-operation",
+			status: "failed",
+			retryCount: 0,
+		});
 	});
 
 	test("enqueue resolves only after the command is durably persisted", async () => {
@@ -1707,6 +1913,7 @@ describe("outbound queue multi-account drain isolation", () => {
 						encryptionVersion: 1,
 						encryptedByUserId: "user_1",
 					},
+					baseVersion: index + 1,
 					timestamp: index,
 				}),
 			);
@@ -1742,16 +1949,19 @@ describe("outbound queue multi-account drain isolation", () => {
 		);
 		const requests: TestWriteOptions[] = [];
 		const client = outboundApiClient() as any;
-		client.items.trash = async (_id: string, options: TestWriteOptions) => {
+		client.items.trash = async (id: string, options: TestWriteOptions) => {
 			requests.push(options);
-			return { ...apiResult({}), etag: '"2"' };
+			return { ...appliedOutcome("trash_item", id, 2), etag: '"2"' };
 		};
 		client.items.deletePermanently = async (
-			_id: string,
+			id: string,
 			options: TestWriteOptions,
 		) => {
 			requests.push(options);
-			return { ...apiResult({}), etag: '"3"' };
+			return {
+				...appliedOutcome("permanently_delete_item", id, 3),
+				etag: '"3"',
+			};
 		};
 
 		await queue.drain(() => client);
@@ -1784,8 +1994,8 @@ describe("outbound queue multi-account drain isolation", () => {
 					}),
 				);
 				const client = outboundApiClient() as any;
-				client.items.trash = async () => ({
-					...apiResult({}),
+				client.items.trash = async (id: string) => ({
+					...appliedOutcome("trash_item", id, 2),
 					etag: '"2"',
 				});
 
@@ -1877,16 +2087,19 @@ describe("outbound queue multi-account drain isolation", () => {
 				etag: `"${version}"`,
 			});
 			client.items.setFavorite = async (
-				_itemId: string,
+				itemId: string,
 				_input: unknown,
 				options: TestWriteOptions,
 			) => {
 				requireCas(options);
 				version += 1;
-				return { ...apiResult({}), etag: `"${version}"` };
+				return {
+					...appliedOutcome("set_item_favorite", itemId, version),
+					etag: `"${version}"`,
+				};
 			};
 			client.items.update = async (
-				_itemId: string,
+				itemId: string,
 				_input: unknown,
 				options: TestWriteOptions,
 			) => {
@@ -1895,7 +2108,7 @@ describe("outbound queue multi-account drain isolation", () => {
 				encryptionVersion = version;
 				stampedEncryptionVersions.push(encryptionVersion);
 				return {
-					...apiResult({ success: true, version }),
+					...appliedOutcome("update_item", itemId, version),
 					etag: `"${version}"`,
 				};
 			};
@@ -1934,7 +2147,10 @@ describe("outbound queue multi-account drain isolation", () => {
 			buildDeleteMutation("account_a", "item_a", { id: "trash" }),
 		);
 		const client = outboundApiClient() as any;
-		client.items.trash = async () => ({ ...apiResult({}), etag: '"2"' });
+		client.items.trash = async (id: string) => ({
+			...appliedOutcome("trash_item", id, 2),
+			etag: '"2"',
+		});
 
 		await queue.drain(() => client);
 
@@ -1945,7 +2161,7 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(queue.getPendingCount()).toBe(0);
 	});
 
-	test("omits server-derived encryption context from ciphertext update and move HTTP requests", async () => {
+	test("sends the closed prepared Move body without server-derived encryption context", async () => {
 		const acknowledgements: Array<{
 			type: string;
 			baseVersion: number;
@@ -1996,7 +2212,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			options: TestWriteOptions,
 		) => {
 			requests.set(itemId, { input, options });
-			return { ...apiResult({ success: true, version: 7 }), etag: '"7"' };
+			return { ...appliedOutcome("update_item", itemId, 7), etag: '"7"' };
 		};
 		client.items.move = async (
 			itemId: string,
@@ -2004,7 +2220,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			options: TestWriteOptions,
 		) => {
 			requests.set(itemId, { input, options });
-			return { ...apiResult({ success: true, version: 7 }), etag: '"7"' };
+			return { ...appliedOutcome("move_item", itemId, 7), etag: '"7"' };
 		};
 
 		await queue.drain(() => client);
@@ -2015,6 +2231,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			encryptionAlgorithm: "AES-GCM-AAD-V1",
 		});
 		expect(requests.get("moved_item")?.input).toEqual({
+			mode: "prepared",
 			sourceVaultId: "vault_1",
 			targetVaultId: "vault_2",
 			encryptedData: "new_ciphertext",
@@ -2109,13 +2326,45 @@ describe("outbound queue multi-account drain isolation", () => {
 			...apiResult({ id: "item_a", version: 2 }),
 			etag: '"2"',
 		});
-		client.items.trash = async (_id: string, options: TestWriteOptions) => {
+		client.items.trash = async (id: string, options: TestWriteOptions) => {
 			requests.push(options);
 			if (first) {
 				first = false;
 				throw conflictError(412);
 			}
-			return { ...apiResult({}), etag: '"3"' };
+			return { ...appliedOutcome("trash_item", id, 3), etag: '"3"' };
+		};
+
+		await queue.drain(() => client);
+
+		expect(requests.map((request) => request.etag)).toEqual(['"1"', '"2"']);
+		expect(requests[1]?.idempotencyKey).not.toBe(requests[0]?.idempotencyKey);
+		expect(queue.getPendingCount()).toBe(0);
+	});
+
+	test("rebases a metadata command after a retained version-conflict rejection", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		const requests: TestWriteOptions[] = [];
+		let first = true;
+		const client = outboundApiClient() as any;
+		client.items.get = async () => ({
+			...apiResult({ id: "item_a", version: 2 }),
+			etag: '"2"',
+		});
+		client.items.trash = async (id: string, options: TestWriteOptions) => {
+			requests.push(options);
+			if (first) {
+				first = false;
+				// The Server no longer says "stale version" with a status code; it retains the
+				// rejection and answers `200`. The queue must still rebase rather than fail.
+				return apiResult({
+					operationId: options.idempotencyKey,
+					kind: "trash_item",
+					result: { status: "rejected", code: "item_version_conflict" },
+				});
+			}
+			return { ...appliedOutcome("trash_item", id, 3), etag: '"3"' };
 		};
 
 		await queue.drain(() => client);
@@ -2199,7 +2448,11 @@ describe("outbound queue multi-account drain isolation", () => {
 			throw conflictError(412);
 		};
 		client.items.create = async (_vaultId: string, itemId: string) => ({
-			...apiResult({ itemId }),
+			...apiResult({
+				operationId: itemId,
+				kind: "create_item" as const,
+				result: { status: "applied" as const, itemId, version: 1 },
+			}),
 			etag: '"1"',
 		});
 
@@ -2255,6 +2508,8 @@ describe("outbound queue multi-account drain isolation", () => {
 		queue.enqueue({
 			accountId: "account_a",
 			id: "mutation_create",
+			operationId: "operation_create",
+			attemptId: "attempt_create",
 			type: "create",
 			entityId: "item_new",
 			vaultId: "vault_1",
@@ -2293,6 +2548,7 @@ describe("outbound queue multi-account drain isolation", () => {
 			outboundApiClient({
 				create: async (_itemId, options) => {
 					sentOptions.set("create", options);
+					return undefined;
 				},
 				update: async (_itemId, options) => {
 					sentOptions.set("update", options);
@@ -2301,12 +2557,105 @@ describe("outbound queue multi-account drain isolation", () => {
 		);
 
 		expect(sentOptions.get("create")).toEqual({
-			idempotencyKey: "mutation_create",
+			idempotencyKey: "operation_create",
 		});
 		expect(sentOptions.get("update")).toEqual({
 			etag: '"7"',
 			idempotencyKey: "mutation_update",
 		});
+	});
+
+	test("stops retrying a retained semantic create rejection", async () => {
+		const rejected: Array<{ operationId: string; code: string }> = [];
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client", {
+			apply: async () => undefined,
+			acknowledge: async () => undefined,
+			reject: async (command, code) => {
+				rejected.push({
+					operationId: command.operationId ?? command.id,
+					code,
+				});
+			},
+		});
+		await queue.enqueue({
+			accountId: "account_a",
+			id: "mutation_rejected_create",
+			type: "create",
+			entityId: "item_rejected",
+			vaultId: "vault_1",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "cipher",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_1",
+			},
+			baseVersion: 0,
+			timestamp: 1,
+			retryCount: 0,
+		});
+		let attempts = 0;
+		const client = outboundApiClient({
+			create: async () => {
+				attempts += 1;
+				return "vault_read_only";
+			},
+		});
+
+		await queue.drain(() => client);
+		await queue.drain(() => client);
+
+		expect(attempts).toBe(1);
+		expect(queue.getCommands("account_a")[0]?.status).toBe("failed");
+		expect(queue.getCommands("account_a")[0]?.lastError).toContain(
+			"vault_read_only",
+		);
+		expect(rejected).toEqual([
+			{
+				operationId: "mutation_rejected_create",
+				code: "vault_read_only",
+			},
+		]);
+	});
+
+	test("acknowledges a queued create from an applied outcome discovered by Sync", async () => {
+		const acknowledged: string[] = [];
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client", {
+			apply: async () => undefined,
+			acknowledge: async (_command, result) => {
+				acknowledged.push(`${result.entityId}:${result.version}`);
+			},
+		});
+		await queue.enqueue({
+			accountId: "account_a",
+			id: "mutation_applied_create",
+			operationId: "operation_applied_create",
+			attemptId: "attempt_applied_create",
+			type: "create",
+			entityId: "item_applied",
+			vaultId: "vault_1",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "cipher",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_1",
+			},
+			baseVersion: 0,
+			timestamp: 1,
+			retryCount: 0,
+		});
+
+		await queue.reconcileCreateItemOutcome("account_a", {
+			operationId: "operation_applied_create",
+			kind: "create_item",
+			result: { status: "applied", itemId: "item_applied", version: 1 },
+		});
+
+		expect(acknowledged).toEqual(["item_applied:1"]);
+		expect(queue.getCommands("account_a")).toEqual([]);
 	});
 
 	test("one account's failure does not starve other accounts' queues", async () => {

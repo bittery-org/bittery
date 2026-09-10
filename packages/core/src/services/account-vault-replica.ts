@@ -1,10 +1,7 @@
-import type { ApiClient } from "@bittery/api-contract";
+import type { ApiClient, SyncBootstrapPage } from "@bittery/api-contract";
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
-import type {
-	EncryptedItemPayload,
-	ServerEncryptedItem,
-} from "@bittery/shared/item-mapping";
+import type { EncryptedItemPayload } from "@bittery/shared/item-mapping";
 import {
 	stripToDecryptedData,
 	toCachedItem,
@@ -16,9 +13,6 @@ import {
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
 	decodeVaultType,
-	type ServerVaultListEntry,
-	type ServerVaultSummary,
-	toCachedVaultFields,
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore, ItemCache } from "@bittery/storage";
@@ -31,6 +25,7 @@ import type {
 	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
+	CreateItemRejectionCode,
 	ItemSyncAcknowledgement,
 	ItemSyncCommand,
 	VaultSummary,
@@ -52,6 +47,7 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	encryptionVersion: number;
 	encryptedByUserId: string;
 	attachments?: CachedAttachment[];
+	optimisticFailure?: CachedEncryptedItem["optimisticFailure"];
 	_encrypted: {
 		data: string;
 		iv: string;
@@ -69,25 +65,9 @@ export type EncryptedPayload = EncryptedItemPayload;
 
 type BootstrapRequest = Parameters<ApiClient["sync"]["bootstrap"]>[0];
 
-interface BootstrapItemPage {
-	/**
-	 * Structural so a client that is not the generated one still fits, but the item fields
-	 * are the contract's — restating them here is how a new server field went missing.
-	 */
-	items: ReadonlyArray<
-		ServerEncryptedItem & { vault?: ServerVaultSummary | null }
-	>;
-	hasMore: boolean;
-	nextCursor?: string | null;
-	syncCursor?: { id: string } | null;
-}
-
 export interface BootstrapItemsClient {
 	sync: {
-		bootstrap(input?: BootstrapRequest): Promise<{ data: BootstrapItemPage }>;
-	};
-	vaults?: {
-		list?: () => Promise<{ data: ReadonlyArray<ServerVaultListEntry> }>;
+		bootstrap(input: BootstrapRequest): Promise<{ data: SyncBootstrapPage }>;
 	};
 }
 
@@ -556,17 +536,6 @@ export class AccountVaultReplica {
 		}
 	}
 
-	private async fetchVaultKeysFromServer(
-		client: BootstrapItemsClient,
-	): Promise<VaultKeyData[] | null> {
-		if (!client.vaults?.list) {
-			return null;
-		}
-
-		const { data: vaults } = await client.vaults.list();
-		return vaults.map(toVaultKeyEntry);
-	}
-
 	private async ensureServerUrl(): Promise<void> {
 		if (this.serverUrl) {
 			return;
@@ -605,6 +574,7 @@ export class AccountVaultReplica {
 			encryptionVersion: cached.encryptionVersion,
 			encryptedByUserId: cached.encryptedByUserId,
 			attachments: cached.attachments,
+			optimisticFailure: cached.optimisticFailure,
 			...decryptedData,
 			_encrypted: {
 				data: cached.encryptedData,
@@ -839,6 +809,37 @@ export class AccountVaultReplica {
 		}
 		this.pendingCommands.set(this.commandOperationId(command), command);
 		await this.rebuildItemProjection(command.entityId);
+	}
+
+	async rejectItemCommand(
+		command: ItemSyncCommand,
+		code: CreateItemRejectionCode,
+	): Promise<void> {
+		if (
+			!this.isForThisAccount(command.accountId) ||
+			command.type !== "create"
+		) {
+			return;
+		}
+		command.status = "failed";
+		this.pendingCommands.set(this.commandOperationId(command), command);
+		const projected = this.applyCommandToCachedItem(
+			this.authoritativeItems.get(command.entityId),
+			command,
+		);
+		if (!projected) return;
+		const failed = {
+			...projected,
+			optimisticFailure: {
+				operationId: this.commandOperationId(command),
+				code,
+			},
+		};
+		await this.persistItem(failed);
+		if (!(await this.isLocked())) {
+			this.items.set(command.entityId, await this.decryptItem(failed));
+		}
+		this.emit();
 	}
 
 	async discardItemCommandAcknowledgedElsewhere(
@@ -1099,15 +1100,17 @@ export class AccountVaultReplica {
 				this.hasPendingEncryptedCommand(itemId),
 			),
 		);
+		let phase: SyncBootstrapPage["phase"] = "vaults";
 		let cursor: string | undefined;
 		let syncBaseline: { id: string } | null = null;
 		let syncBaselineCaptured = false;
 		const staging = await this.itemCache.beginStagedGeneration(this.accountId);
-		let refreshedVaultKeys: VaultKeyData[] | null = null;
+		const refreshedVaultKeys = new Map<string, VaultKeyData>();
 
 		try {
 			while (true) {
 				const { data: page } = await client.sync.bootstrap({
+					phase,
 					cursor,
 					limit: 500,
 					syncCursor: syncBaseline?.id,
@@ -1123,44 +1126,66 @@ export class AccountVaultReplica {
 					);
 				}
 
-				const pageItems: CachedEncryptedItem[] = [];
-				const pageVaults: CachedVaultMetadata[] = [];
-				for (const rawItem of travelMode.filterItems(this.accountId, [
-					...page.items,
-				])) {
-					if (!rawItem.vault) {
+				if (page.phase !== phase) {
+					throw new Error(
+						`Bootstrap phase changed from ${phase} to ${page.phase} before its page sequence completed.`,
+					);
+				}
+
+				if (page.phase === "vaults") {
+					const pageVaultKeys = travelMode.filterVaultKeys(
+						this.accountId,
+						page.vaults.map(toVaultKeyEntry),
+					);
+					for (const vaultKey of pageVaultKeys) {
+						refreshedVaultKeys.set(vaultKey.vaultId, vaultKey);
+					}
+					await staging.upsertCachedVaults(
+						pageVaultKeys.map((vaultKey) => ({
+							id: vaultKey.vaultId,
+							name: vaultKey.vaultName,
+							type: vaultKey.vaultType,
+							icon: vaultKey.vaultIcon ?? null,
+							imageUrl: vaultKey.vaultImageUrl ?? null,
+							accountId: this.accountId,
+							accountEmail: this.accountEmail,
+							serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+						})),
+					);
+				} else {
+					const pageItems = travelMode
+						.filterItems(this.accountId, [...page.items])
+						.map((rawItem) => {
+							const cachedItem = toCachedItem(rawItem, this.cacheScope());
+							// A staged bootstrap record always carries the field, so a promoted
+							// generation never mixes "no attachments" with "not loaded".
+							cachedItem.attachments ??= [];
+							return cachedItem;
+						});
+					// One write per page, not per item: on desktop each staged record would
+					// otherwise cost its own fsync.
+					await staging.upsertCachedItems(pageItems);
+				}
+
+				if (page.hasMore) {
+					const nextCursor = page.nextCursor;
+					if (!nextCursor) {
+						const pageKind = page.phase === "vaults" ? "Vault" : "Item";
 						throw new Error(
-							`Bootstrap Item ${rawItem.id} is missing its Vault summary.`,
+							`Bootstrap ${pageKind} page promised a continuation without a cursor.`,
 						);
 					}
-					const cachedItem = toCachedItem(rawItem, this.cacheScope());
-					// A staged bootstrap record always carries the field, so a promoted
-					// generation never mixes "no attachments" with "not loaded".
-					cachedItem.attachments ??= [];
-					pageItems.push(cachedItem);
-
-					pageVaults.push({
-						...toCachedVaultFields(rawItem.vault),
-						accountId: this.accountId,
-						accountEmail: this.accountEmail,
-						serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-					});
+					cursor = nextCursor;
+					continue;
 				}
-				// One write per page, not per item: on desktop each staged record would
-				// otherwise cost its own fsync.
-				await staging.upsertCachedItems(pageItems);
-				await staging.upsertCachedVaults(pageVaults);
-
-				if (!page.hasMore || !page.nextCursor) {
-					break;
+				if (phase === "vaults") {
+					phase = "items";
+					cursor = undefined;
+					continue;
 				}
-				cursor = page.nextCursor;
+				break;
 			}
 
-			const fetchedVaultKeys = await this.fetchVaultKeysFromServer(client);
-			refreshedVaultKeys = fetchedVaultKeys
-				? travelMode.filterVaultKeys(this.accountId, fetchedVaultKeys)
-				: null;
 			await staging.promote({
 				lastFullSyncAt: Date.now(),
 				cacheVersion: 1,
@@ -1188,12 +1213,9 @@ export class AccountVaultReplica {
 				await this.persistItem(conflictBase);
 			}
 		}
-		const vaultKeys =
-			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.accountId));
+		const vaultKeys = [...refreshedVaultKeys.values()];
 
-		if (refreshedVaultKeys) {
-			await this.storage.storeVaultKeys(refreshedVaultKeys, this.accountId);
-		}
+		await this.storage.storeVaultKeys(vaultKeys, this.accountId);
 		const hydratedVaults = this.buildHydratedVaults(
 			cachedVaults ?? [],
 			vaultKeys ?? [],

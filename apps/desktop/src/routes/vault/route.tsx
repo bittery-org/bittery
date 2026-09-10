@@ -1,10 +1,7 @@
 import {
-	type CreateVaultInput,
 	useAccountMetadataSyncAll,
-	useAccountSwitcher,
 	useAllVaultKeys,
 	useCreateItem,
-	useCreateVault,
 	useCrossVaultTags,
 	useDeleteVault,
 	useItemCounts,
@@ -14,7 +11,6 @@ import {
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
 	CreateItemSheet,
-	CreateVaultDialog,
 	DeleteVaultDialog,
 	EditVaultDialog,
 	toast,
@@ -80,11 +76,9 @@ function RouteComponent() {
 	const navigate = useNavigate();
 
 	// Shared hooks for vault and item operations
-	const createVaultMutation = useCreateVault();
 	const updateVaultMutation = useUpdateVault();
 	const deleteVaultMutation = useDeleteVault();
 	const createItemMutation = useCreateItem();
-	const { accounts, activeAccount } = useAccountSwitcher();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
 	// Pending "new item" request from the browser extension (via native
@@ -94,7 +88,6 @@ function RouteComponent() {
 		subscribeCreateItemIntent,
 		getCreateItemIntent,
 	);
-	const [isNewVaultDialogOpen, setIsNewVaultDialogOpen] = useState(false);
 	const [isEditVaultDialogOpen, setIsEditVaultDialogOpen] = useState(false);
 	const [editingVault, setEditingVault] = useState<{
 		id: string;
@@ -127,12 +120,6 @@ function RouteComponent() {
 		enabled: accountIds.length > 0,
 		refetchInterval: 60000, // Check every minute
 	});
-
-	// Vault operation handlers
-	const handleCreateVault = async (data: CreateVaultInput) => {
-		const result = await createVaultMutation.mutateAsync(data);
-		navigate({ to: "/vault/$id", params: { id: result.vaultId } });
-	};
 
 	const handleOpenEditVault = (vault: {
 		id: string;
@@ -253,7 +240,6 @@ function RouteComponent() {
 					tags={crossVaultTags}
 					itemCounts={itemCounts}
 					currentVaultId={params.id}
-					onNewVault={() => setIsNewVaultDialogOpen(true)}
 					onEditVault={handleOpenEditVault}
 					onDeleteVault={handleOpenDeleteVault}
 				/>
@@ -291,22 +277,6 @@ function RouteComponent() {
 					onCreateItem={(data, vaultId, category) =>
 						handleCreateItem(data, vaultId, category)
 					}
-				/>
-
-				<CreateVaultDialog
-					open={isNewVaultDialogOpen}
-					onOpenChange={setIsNewVaultDialogOpen}
-					onSubmit={handleCreateVault}
-					accounts={accounts.map(
-						({ accountId, email, name, teamName, teamAvatarUrl }) => ({
-							accountId,
-							email,
-							name,
-							teamName,
-							teamAvatarUrl,
-						}),
-					)}
-					defaultAccountId={activeAccount ?? accounts[0]?.accountId ?? ""}
 				/>
 
 				<EditVaultDialog

@@ -26,11 +26,13 @@ import type {
 	CreateAttachmentInput,
 	CreateAttachmentResponse,
 	CreateItemInput,
-	CreateItemResponse,
+	CreateItemWriteOptions,
 	CreateTeamInput,
 	CreateVaultInput,
 	CreateVaultResponse,
+	CreateVaultWriteOptions,
 	DeleteAccountInput,
+	DeleteAccountResponse,
 	DeletedVaultItem,
 	EmailChangeInput,
 	EmailCheckInput,
@@ -39,9 +41,12 @@ import type {
 	FinishLoginInput,
 	FinishLoginResponse,
 	ImageUploadInput,
+	ItemOperationOutcome,
+	ItemOperationWriteOptions,
 	ItemPayload,
 	LoginAttempt,
 	MoveItemInput,
+	OperationOutcome,
 	PasswordChangeInput,
 	PendingTeamInvitation,
 	PresignedUpload,
@@ -56,9 +61,7 @@ import type {
 	ResendTeamInvitationResponse,
 	ResetPasswordInput,
 	ResetPasswordResponse,
-	RotationPlanSet,
 	RotationPlanSetFinalizeInput,
-	RotationPlanSetFinalizeResponse,
 	RotationPreparationPage,
 	RotationStageInput,
 	SecretKeyRotationInput,
@@ -82,7 +85,6 @@ import type {
 	TeamVault,
 	UpdateAttachmentInput,
 	UpdateItemInput,
-	UpdateItemResponse,
 	UpdateTeamInput,
 	UpdateVaultInput,
 	UpdateVaultMemberRoleInput,
@@ -182,8 +184,8 @@ export interface ApiClient {
 		me(): Promise<ApiResult<AuthUser>>;
 		deleteAccount(
 			input: DeleteAccountInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ApiWriteOptions & { readonly idempotencyKey: string },
+		): Promise<ApiResult<DeleteAccountResponse>>;
 		changeEmail(
 			input: EmailChangeInput,
 			options?: ApiWriteOptions,
@@ -216,7 +218,7 @@ export interface ApiClient {
 		create(
 			vaultId: string,
 			input: CreateVaultInput,
-			options?: ApiWriteOptions,
+			options: CreateVaultWriteOptions,
 		): Promise<ApiResult<CreateVaultResponse>>;
 		update(
 			vaultId: string,
@@ -237,25 +239,34 @@ export interface ApiClient {
 			input: ConvertVaultInput,
 			options?: ApiWriteOptions,
 		): Promise<ApiResult<ConvertVaultResponse>>;
+		/** Import is one Operation, so the stable Operation ID is required, not optional. */
 		importItems(
 			vaultId: string,
 			input: BulkImportInput,
-			options?: ApiWriteOptions,
+			options: ApiWriteOptions & { readonly idempotencyKey: string },
 		): Promise<ApiResult<BulkImportResponse>>;
 		members: {
 			startRemovalRotation(
 				vaultId: string,
 				userId: string,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSet>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"create_vault_member_removal_rotation_plans">
+				>
+			>;
 			finalizeRemovalRotation(
 				vaultId: string,
 				userId: string,
 				input: RotationPlanSetFinalizeInput,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"finalize_vault_member_removal_rotation_plans">
+				>
+			>;
 			list(vaultId: string): Promise<ApiResult<readonly VaultMember[]>>;
 			add(
 				vaultId: string,
@@ -292,35 +303,38 @@ export interface ApiClient {
 			vaultId: string,
 			itemId: string,
 			input: CreateItemInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<CreateItemResponse>>;
+			options: CreateItemWriteOptions,
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		update(
 			itemId: string,
 			input: UpdateItemInput,
-			options: ApiWriteOptions,
-		): Promise<ApiResult<UpdateItemResponse>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		setFavorite(
 			itemId: string,
 			input: FavoriteInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		move(
 			itemId: string,
 			input: MoveItemInput,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		trash(
 			itemId: string,
-			options: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		deletePermanently(
 			itemId: string,
-			options: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<ItemOperationOutcome>>;
 		restore(
 			itemId: string,
-			options?: ApiWriteOptions,
-		): Promise<ApiResult<unknown>>;
+			options: ItemOperationWriteOptions,
+		): Promise<ApiResult<ItemOperationOutcome>>;
+	};
+	readonly operations: {
+		get(operationId: string): Promise<ApiResult<OperationOutcome>>;
 	};
 	readonly attachments: {
 		list(itemId: string): Promise<ApiResult<readonly Attachment[]>>;
@@ -349,15 +363,19 @@ export interface ApiClient {
 	readonly teams: {
 		startLeaveRotation(
 			teamId: string,
-			options: ApiWriteOptions,
+			options: Final.RotationOperationWriteOptions,
 			signal?: AbortSignal,
-		): Promise<ApiResult<RotationPlanSet>>;
+		): Promise<
+			ApiResult<Final.RotationOutcome<"create_team_leave_rotation_plans">>
+		>;
 		finalizeLeaveRotation(
 			teamId: string,
 			input: RotationPlanSetFinalizeInput,
-			options: ApiWriteOptions,
+			options: Final.RotationOperationWriteOptions,
 			signal?: AbortSignal,
-		): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
+		): Promise<
+			ApiResult<Final.RotationOutcome<"finalize_team_leave_rotation_plans">>
+		>;
 		create(
 			input: CreateTeamInput,
 			options?: ApiWriteOptions,
@@ -416,16 +434,24 @@ export interface ApiClient {
 			startRemovalRotation(
 				teamId: string,
 				userId: string,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSet>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"create_team_member_removal_rotation_plans">
+				>
+			>;
 			finalizeRemovalRotation(
 				teamId: string,
 				userId: string,
 				input: RotationPlanSetFinalizeInput,
-				options: ApiWriteOptions,
+				options: Final.RotationOperationWriteOptions,
 				signal?: AbortSignal,
-			): Promise<ApiResult<RotationPlanSetFinalizeResponse>>;
+			): Promise<
+				ApiResult<
+					Final.RotationOutcome<"finalize_team_member_removal_rotation_plans">
+				>
+			>;
 			list(teamId: string): Promise<ApiResult<readonly TeamMember[]>>;
 			access(
 				teamId: string,
@@ -451,7 +477,7 @@ export interface ApiClient {
 	};
 	readonly sync: {
 		bootstrap(
-			page?: SyncBootstrapRequest,
+			page: SyncBootstrapRequest,
 		): Promise<ApiResult<SyncBootstrapPage>>;
 		changes(input?: {
 			sinceId?: string;
@@ -462,10 +488,6 @@ export interface ApiClient {
 	};
 	readonly share: {
 		list(itemId: string): Promise<ApiResult<Final.ShareLinkList>>;
-		create(
-			itemId: string,
-			input: Final.CreateShareLinkInput,
-		): Promise<ApiResult<Final.CreateShareLinkResponse>>;
 		remove(linkId: string): Promise<ApiResult<unknown>>;
 		accessLogs(
 			linkId: string,
@@ -545,15 +567,19 @@ function writeHeaders(
 	return headers;
 }
 
-function writeHeaderParams(options: ApiWriteOptions | undefined): {
-	header: { "If-Match": string; "Idempotency-Key"?: string };
+/**
+ * The two headers an Item mutation Operation must carry.
+ *
+ * `If-Match` is the concurrency precondition and `Idempotency-Key` is the stable Operation ID.
+ * Both are required by the Server, so neither is optional here.
+ */
+function itemOperationHeaderParams(options: ItemOperationWriteOptions): {
+	header: { "If-Match": string; "Idempotency-Key": string };
 } {
 	return {
 		header: {
-			"If-Match": options?.etag as string,
-			...(options?.idempotencyKey
-				? { "Idempotency-Key": options.idempotencyKey }
-				: {}),
+			"If-Match": options.etag,
+			"Idempotency-Key": options.idempotencyKey,
 		},
 	};
 }
@@ -595,8 +621,27 @@ function validateVaultKeyPage(
 
 function validateBootstrap(value: unknown): SyncBootstrapPage {
 	const page = object(value, "/sync/bootstrap");
-	if (!Array.isArray(page.items)) {
-		throw new TypeError("/sync/bootstrap/items must be an array.");
+	const phase = string(page.phase, "/sync/bootstrap/phase");
+	if (phase === "vaults") {
+		if (!Array.isArray(page.vaults)) {
+			throw new TypeError("/sync/bootstrap/vaults must be an array.");
+		}
+		if (page.items !== undefined) {
+			throw new TypeError(
+				"/sync/bootstrap/items must be absent during vaults.",
+			);
+		}
+	} else if (phase === "items") {
+		if (!Array.isArray(page.items)) {
+			throw new TypeError("/sync/bootstrap/items must be an array.");
+		}
+		if (page.vaults !== undefined) {
+			throw new TypeError(
+				"/sync/bootstrap/vaults must be absent during items.",
+			);
+		}
+	} else {
+		throw new TypeError('/sync/bootstrap/phase must be "vaults" or "items".');
 	}
 	boolean(page.hasMore, "/sync/bootstrap/hasMore");
 	if (page.nextCursor !== undefined && page.nextCursor !== null) {
@@ -754,6 +799,48 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			etag: result.etag,
 			requestId: result.requestId,
 		};
+	}
+
+	async function rotationOperationCall<
+		Kind extends Final.RotationOperationOutcome["kind"],
+	>(
+		kind: Kind,
+		operationId: string,
+		response: Promise<ApiResult<OperationOutcome>>,
+	): Promise<ApiResult<Final.RotationOutcome<Kind>>> {
+		const result = await response;
+		if (result.data.kind !== kind || result.data.operationId !== operationId) {
+			throw new TypeError("Rotation returned another Operation identity.");
+		}
+		return { ...result, data: result.data as Final.RotationOutcome<Kind> };
+	}
+
+	async function itemOperationCall(
+		response: Promise<ApiResult<OperationOutcome>>,
+	): Promise<ApiResult<ItemOperationOutcome>> {
+		const result = await response;
+		switch (result.data.kind) {
+			case "create_item":
+			case "update_item":
+			case "set_item_favorite":
+			case "trash_item":
+			case "restore_item":
+			case "move_item":
+			case "permanently_delete_item":
+				return { ...result, data: result.data };
+			case "create_share":
+			case "create_vault":
+			case "import_items":
+			case "create_vault_member_removal_rotation_plans":
+			case "finalize_vault_member_removal_rotation_plans":
+			case "create_team_leave_rotation_plans":
+			case "finalize_team_leave_rotation_plans":
+			case "create_team_member_removal_rotation_plans":
+			case "finalize_team_member_removal_rotation_plans":
+				throw new TypeError(
+					"An Item mutation returned a non-Item Operation outcome.",
+				);
+		}
 	}
 
 	type PaginatedPath = {
@@ -969,6 +1056,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			deleteAccount: (input, write) =>
 				call("DELETE", "/api/v1/users/me", {
 					body: input,
+					params: {
+						header: { "Idempotency-Key": write.idempotencyKey },
+					},
 					headers: writeHeaders(write),
 				}),
 			changeEmail: (input, write) =>
@@ -1014,12 +1104,20 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				call("GET", "/api/v1/vaults/{vaultId}", {
 					params: { path: { vaultId } },
 				}),
-			create: (vaultId, input, write) =>
-				call("PUT", "/api/v1/vaults/{vaultId}", {
-					params: { path: { vaultId } },
+			async create(vaultId, input, write) {
+				const result = await call("PUT", "/api/v1/vaults/{vaultId}", {
+					params: {
+						path: { vaultId },
+						header: { "Idempotency-Key": write.idempotencyKey },
+					},
 					body: input,
 					headers: writeHeaders(write),
-				}),
+				});
+				if (result.data.kind !== "create_vault") {
+					throw new TypeError("Create Vault returned another Operation kind.");
+				}
+				return { ...result, data: result.data };
+			},
 			update: (vaultId, input, write) =>
 				call("PATCH", "/api/v1/vaults/{vaultId}", {
 					params: { path: { vaultId } },
@@ -1048,31 +1146,48 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			importItems: (vaultId, input, write) =>
 				call("POST", "/api/v1/vaults/{vaultId}/item-imports", {
-					params: { path: { vaultId } },
+					params: {
+						path: { vaultId },
+						header: { "Idempotency-Key": write.idempotencyKey },
+					},
 					body: input,
 					headers: writeHeaders(write),
 				}),
 			members: {
 				startRemovalRotation: (vaultId, userId, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans",
-						{
-							params: { path: { vaultId, userId } },
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"create_vault_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans",
+							{
+								params: {
+									path: { vaultId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				finalizeRemovalRotation: (vaultId, userId, input, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize",
-						{
-							params: { path: { vaultId, userId } },
-							body: input,
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"finalize_vault_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize",
+							{
+								params: {
+									path: { vaultId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								body: input,
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				list: (vaultId) =>
 					drainPages("/api/v1/vaults/{vaultId}/members", {
@@ -1106,43 +1221,66 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			get: (itemId) =>
 				call("GET", "/api/v1/items/{itemId}", { params: { path: { itemId } } }),
 			create: (vaultId, itemId, input, write) =>
-				call("PUT", "/api/v1/vaults/{vaultId}/items/{itemId}", {
-					params: { path: { vaultId, itemId } },
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("PUT", "/api/v1/vaults/{vaultId}/items/{itemId}", {
+						params: {
+							path: { vaultId, itemId },
+							header: { "Idempotency-Key": write.idempotencyKey },
+						},
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			update: (itemId, input, write) =>
-				call("PATCH", "/api/v1/items/{itemId}", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("PATCH", "/api/v1/items/{itemId}", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			setFavorite: (itemId, input, write) =>
-				call("PATCH", "/api/v1/items/{itemId}/favorite", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("PATCH", "/api/v1/items/{itemId}/favorite", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			move: (itemId, input, write) =>
-				call("POST", "/api/v1/items/{itemId}/moves", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
-					body: input,
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("POST", "/api/v1/items/{itemId}/moves", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						body: input,
+						headers: writeHeaders(write),
+					}),
+				),
 			trash: (itemId, write) =>
-				call("DELETE", "/api/v1/items/{itemId}", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("DELETE", "/api/v1/items/{itemId}", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						headers: writeHeaders(write),
+					}),
+				),
 			deletePermanently: (itemId, write) =>
-				call("DELETE", "/api/v1/items/{itemId}/permanent", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
-					headers: writeHeaders(write),
-				}),
+				itemOperationCall(
+					call("DELETE", "/api/v1/items/{itemId}/permanent", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						headers: writeHeaders(write),
+					}),
+				),
 			restore: (itemId, write) =>
-				call("POST", "/api/v1/items/{itemId}/restore", {
-					params: { path: { itemId }, ...writeHeaderParams(write) },
-					headers: writeHeaders(write),
+				itemOperationCall(
+					call("POST", "/api/v1/items/{itemId}/restore", {
+						params: { path: { itemId }, ...itemOperationHeaderParams(write) },
+						headers: writeHeaders(write),
+					}),
+				),
+		},
+		operations: {
+			get: (operationId) =>
+				call("GET", "/api/v1/operations/{operationId}", {
+					params: { path: { operationId } },
 				}),
 		},
 		attachments: {
@@ -1179,18 +1317,32 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		},
 		teams: {
 			startLeaveRotation: (teamId, write, signal) =>
-				call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans", {
-					params: { path: { teamId } },
-					headers: writeHeaders(write),
-					signal,
-				}),
+				rotationOperationCall(
+					"create_team_leave_rotation_plans",
+					write.idempotencyKey,
+					call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans", {
+						params: {
+							path: { teamId },
+							header: { "Idempotency-Key": write.idempotencyKey },
+						},
+						headers: writeHeaders(write),
+						signal,
+					}),
+				),
 			finalizeLeaveRotation: (teamId, input, write, signal) =>
-				call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans/finalize", {
-					params: { path: { teamId } },
-					body: input,
-					headers: writeHeaders(write),
-					signal,
-				}),
+				rotationOperationCall(
+					"finalize_team_leave_rotation_plans",
+					write.idempotencyKey,
+					call("POST", "/api/v1/teams/{teamId}/leave-rotation-plans/finalize", {
+						params: {
+							path: { teamId },
+							header: { "Idempotency-Key": write.idempotencyKey },
+						},
+						body: input,
+						headers: writeHeaders(write),
+						signal,
+					}),
+				),
 			create: (input, write) =>
 				call("POST", "/api/v1/teams", {
 					body: input,
@@ -1278,25 +1430,39 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			},
 			members: {
 				startRemovalRotation: (teamId, userId, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans",
-						{
-							params: { path: { teamId, userId } },
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"create_team_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans",
+							{
+								params: {
+									path: { teamId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				finalizeRemovalRotation: (teamId, userId, input, write, signal) =>
-					call(
-						"POST",
-						"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize",
-						{
-							params: { path: { teamId, userId } },
-							body: input,
-							headers: writeHeaders(write),
-							signal,
-						},
+					rotationOperationCall(
+						"finalize_team_member_removal_rotation_plans",
+						write.idempotencyKey,
+						call(
+							"POST",
+							"/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize",
+							{
+								params: {
+									path: { teamId, userId },
+									header: { "Idempotency-Key": write.idempotencyKey },
+								},
+								body: input,
+								headers: writeHeaders(write),
+								signal,
+							},
+						),
 					),
 				list: (teamId) =>
 					drainPages("/api/v1/teams/{teamId}/members", {
@@ -1356,11 +1522,6 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			list: (itemId) =>
 				call("GET", "/api/v1/items/{itemId}/share-links", {
 					params: { path: { itemId } },
-				}),
-			create: (itemId, input) =>
-				call("POST", "/api/v1/items/{itemId}/share-links", {
-					params: { path: { itemId } },
-					body: input,
 				}),
 			remove: (linkId) =>
 				call("DELETE", "/api/v1/share-links/{linkId}", {

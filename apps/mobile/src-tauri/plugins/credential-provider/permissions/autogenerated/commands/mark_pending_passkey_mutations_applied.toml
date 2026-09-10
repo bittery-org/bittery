@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-mark-pending-passkey-mutations-applied"
+description = "Enables the mark_pending_passkey_mutations_applied command without any pre-configured scope."
+commands.allow = ["mark_pending_passkey_mutations_applied"]
+
+[[permission]]
+identifier = "deny-mark-pending-passkey-mutations-applied"
+description = "Denies the mark_pending_passkey_mutations_applied command without any pre-configured scope."
+commands.deny = ["mark_pending_passkey_mutations_applied"]

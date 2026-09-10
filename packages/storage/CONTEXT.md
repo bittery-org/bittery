@@ -124,7 +124,9 @@ members (`generateEncryptionKey`, `exportKey`, `importKey`, `wrapKey`, `unwrapKe
 `destroyKey`) and nothing else.
 
 `jwt_token`, `vault_keys` and `encrypted_private_key` are session-bound: gone after a
-browser or extension restart, retained on desktop and mobile.
+browser or extension restart, retained on desktop and mobile. Their absence or Server expiry does
+not expire Quick Unlock. That availability comes from the Device-bound stored Secret Key and valid
+pinned KDF profile; password-only Quick Unlock uses them to create a fresh online Session.
 
 ---
 
@@ -226,7 +228,7 @@ on disk after its keys are gone is a real leak.
 
 Note that lock is deliberately not sign-out:
 
-| call | `session_data` | quick-unlock afterwards |
+| call | Device-bound Quick Unlock inputs | Quick Unlock afterwards |
 | --- | --- | --- |
 | `clearSession` | kept | yes |
 | `forgetSession` | deleted | no |

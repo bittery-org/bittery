@@ -7,11 +7,17 @@ use axum::{
     response::{IntoResponse, Response},
     Json, Router,
 };
-use utoipa::OpenApi;
+use utoipa::{
+    openapi::{
+        schema::{AdditionalProperties, Discriminator, Schema},
+        RefOr,
+    },
+    OpenApi,
+};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    domains::{auth, billing, shares, sync, teams, vaults},
+    domains::{auth, billing, operations, shares, sync, teams, vaults},
     AppState,
 };
 
@@ -77,6 +83,7 @@ pub(crate) fn openapi_router() -> OpenApiRouter<AppState> {
             "/v1",
             auth::http::router()
                 .merge(vaults::http::router())
+                .merge(operations::http::router())
                 .merge(vaults::http::rotation::router())
                 .merge(sync::http::router())
                 .merge(teams::routes::router())
@@ -87,7 +94,30 @@ pub(crate) fn openapi_router() -> OpenApiRouter<AppState> {
         ),
     );
     security::apply_security_contract(router.get_openapi_mut());
+    close_vault_image_staging_status_contract(router.get_openapi_mut());
     router
+}
+
+fn close_vault_image_staging_status_contract(document: &mut utoipa::openapi::OpenApi) {
+    let status = document
+        .components
+        .as_mut()
+        .and_then(|components| {
+            components
+                .schemas
+                .get_mut("VaultImageStagingStatusResponse")
+        })
+        .expect("Vault image staging status schema must be registered");
+    let RefOr::T(Schema::OneOf(one_of)) = status else {
+        panic!("Vault image staging status schema must remain a oneOf");
+    };
+    one_of.discriminator = Some(Discriminator::new("state"));
+    for variant in &mut one_of.items {
+        let RefOr::T(Schema::Object(object)) = variant else {
+            panic!("Vault image staging status variants must remain inline objects");
+        };
+        object.additional_properties = Some(Box::new(AdditionalProperties::FreeForm(false)));
+    }
 }
 
 pub(crate) fn create_api_router() -> Router<AppState> {
@@ -174,8 +204,21 @@ mod tests {
             })
             .sum::<usize>();
 
-        assert_eq!(paths.len(), 90);
-        assert_eq!(operation_count, 104);
+        assert_eq!(paths.len(), 98);
+        assert_eq!(operation_count, 112);
+    }
+
+    #[test]
+    fn vault_image_staging_schema_forbids_cross_state_fields() {
+        let (_, document) = super::openapi_router().split_for_parts();
+        let value = serde_json::to_value(document).expect("OpenAPI should serialize");
+        let status = &value["components"]["schemas"]["VaultImageStagingStatusResponse"];
+        assert_eq!(status["discriminator"]["propertyName"], "state");
+        let variants = status["oneOf"].as_array().expect("status should be oneOf");
+        assert_eq!(variants.len(), 4);
+        assert!(variants
+            .iter()
+            .all(|variant| variant["additionalProperties"] == false));
     }
 
     /// Every `ToSchema` type reaches the document under its short Rust name, so two types that
@@ -408,7 +451,7 @@ mod tests {
             .count();
 
         assert_eq!(public, 17);
-        assert_eq!(bearer, 87);
+        assert_eq!(bearer, 95);
         assert_eq!(public + bearer, operations.len());
 
         for operation_id in [
@@ -429,6 +472,7 @@ mod tests {
             "me",
             "listVaults",
             "streamSyncEvents",
+            "getItemAuthority",
             "acceptTeamInvitation",
             "declineTeamInvitation",
         ] {

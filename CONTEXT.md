@@ -166,15 +166,15 @@ Destroy the account on the server, then remove it locally. The only one of these
 _Avoid_: close account, deactivate
 
 **Full sign-in**:
-Signing in with email, master password *and* Secret Key. This is what a sign-out, a removal or an expired quick-unlock window forces next time.
+Signing in with email, master password *and* Secret Key. This is what a sign-out, a removal, a Wipe, or missing or corrupt Quick Unlock material forces next time.
 _Avoid_: full login, fresh login, re-login
 
 **Quick unlock**:
-Getting back into a locked account with the master password alone, using material already on the device. It has a lifetime; once that runs out, a full sign-in is required.
+Getting back into a locked account with the master password alone, using the stored Secret Key and pinned KDF profile to run a fresh complete online sign-in ceremony. It has no time-based expiry. It remains available until Sign out, Remove, or Wipe deletes its Device-bound material.
 _Avoid_: fast unlock, resume, remember me
 
 **Biometric unlock**:
-Quick unlock in which the operating system's biometric prompt stands in for the master password. One prompt covers every account on the device.
+A separate local unlock in which the operating system's biometric prompt releases retained Device-bound key material. It is the only unlock that does not create a fresh Server Session; without a usable Session, the account still needs Quick unlock or Full sign-in for Server work.
 _Avoid_: Face ID, Touch ID, fingerprint login
 
 **Master password re-entry**:
@@ -253,6 +253,43 @@ _Avoid_: finding, alert, vulnerability
 
 ### Sync
 
+**Authority**:
+The Server's confirmed record of an Item, in the shape the Server answers with. A Replica installs
+authority instead of trusting its own accepted work, so a client can prove what actually landed
+rather than assume it.
+_Avoid_: source of truth, canonical copy, server state, remote record
+
+**Replica**:
+The durable Account-scoped local state owned by the Client Runtime: encrypted authoritative entities,
+accepted Operations and their optimistic effects, retained Operation outcomes already observed, and
+the Sync cursor that makes those values one coherent commit history. A Replica is not merely a
+disposable Item cache, and its invariants do not belong to a UI or platform adapter.
+_Avoid_: cache, local database, offline store, client state
+
+**Replica recovery export**:
+A copy of one Account's recoverable local state, including accepted Operations and their required
+stored data, protected by a separate password. It is labeled complete or partial; a partial export
+preserves evidence without claiming the Account can be repaired.
+_Avoid_: Recovery key, Emergency Kit, Item export
+
+**Operation**:
+One immutable Account-scoped request accepted durably by the Client Runtime under a stable Operation
+ID. Acceptance commits the request and its optimistic Replica effect together. Losing a caller,
+restarting, or exhausting a number of transport attempts does not end it.
+_Avoid_: mutation, queue entry, command attempt, request
+
+**Operation outcome**:
+The Server's durable semantic result for one Operation: success or a proved terminal non-success. It
+commits with the Domain effect or proved non-effect and lets every retry learn what happened after a
+lost response. Transport errors and an in-progress response are not outcomes.
+_Avoid_: cached HTTP response, acknowledgement, idempotency record, sync result
+
+**Sync cursor**:
+An opaque Server-minted position proving which visible Sync events a Replica has applied. It is
+committed atomically with the resulting Replica changes and is neither a timestamp nor a Device-local
+counter.
+_Avoid_: timestamp, offset, sequence number, last sync time
+
 **Sync event**:
 A server record that one entity changed — an item, a vault, a membership, a key, or the travel-mode policy. Clients react to events instead of re-reading everything.
 _Avoid_: change, update, notification, message
@@ -280,6 +317,13 @@ A folder, collection or group from the product being imported from, presented so
 _Avoid_: source folder, source collection
 
 ### Clients and deployment
+
+**Client Runtime**:
+The one process-wide Rust module that owns the Device's Account catalog and each Account's isolated
+authentication, live keys, Replica, Operations, Sync, and failure state. Web, Compose, SwiftUI,
+Desktop, and Extension hosts send typed requests and observe projections; they do not reimplement
+Runtime policy. Active account remains UI state outside this ownership rule.
+_Avoid_: core service, sync engine, worker, backend
 
 **Autofill**:
 Filling a saved login, card or identity into a form outside Bittery — the browser extension on a web page, or the operating system's autofill service on mobile.

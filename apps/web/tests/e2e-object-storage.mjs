@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 
 const HOST = "127.0.0.1";
@@ -11,7 +12,7 @@ function setCorsHeaders(response) {
 	response.setHeader("access-control-allow-origin", "*");
 	response.setHeader(
 		"access-control-allow-headers",
-		"authorization, content-length, content-type, x-amz-content-sha256, x-amz-date",
+		"authorization, content-length, content-type, x-amz-content-sha256, x-amz-checksum-sha256, x-amz-date",
 	);
 	response.setHeader(
 		"access-control-allow-methods",
@@ -43,8 +44,15 @@ const server = createServer(async (request, response) => {
 	const key = decodeURIComponent(url.pathname);
 	if (request.method === "PUT") {
 		const body = await readBody(request);
+		const checksum = createHash("sha256").update(body).digest("base64");
+		const providedChecksum = request.headers["x-amz-checksum-sha256"];
+		if (providedChecksum !== undefined && providedChecksum !== checksum) {
+			response.writeHead(400).end("Checksum mismatch");
+			return;
+		}
 		objects.set(key, {
 			body,
+			checksum,
 			contentType:
 				request.headers["content-type"] ?? "application/octet-stream",
 		});
@@ -62,6 +70,7 @@ const server = createServer(async (request, response) => {
 			.writeHead(200, {
 				"content-length": object.body.byteLength,
 				"content-type": object.contentType,
+				"x-amz-checksum-sha256": object.checksum,
 			})
 			.end();
 		return;

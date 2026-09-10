@@ -1,0 +1,20 @@
+[package]
+name = "tauri-plugin-bittery-credential-provider"
+version = "0.1.0"
+description = "First-party Tauri plugin hosting Bittery's Android credential provider and autofill services"
+edition = "2021"
+# `links` is what makes this a Tauri *mobile* plugin rather than a plain crate: the
+# build script publishes `cargo:android_library_path`, and the Tauri CLI reads it back
+# as `DEP_TAURI_PLUGIN_BITTERY_CREDENTIAL_PROVIDER_ANDROID_LIBRARY_PATH` to write the
+# Gradle `include` into `gen/android/tauri.settings.gradle`. Without it the `android/`
+# directory is never seen, the Kotlin is never compiled, and — the point of this
+# chunk — the plugin's own AndroidManifest.xml never reaches the manifest merger.
+links = "tauri-plugin-bittery-credential-provider"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

@@ -20,11 +20,14 @@ import {
 import {
 	type CredentialMirror,
 	deleteAccountEverywhere,
-	invalidateAccountSession,
 	type LifecycleDeps,
+	type LifecycleOutcome,
+	type LifecycleStepFailure,
 	lockAccount,
 	lockAllAccounts,
+	lockInvalidSession,
 	removeAccount,
+	requireCompleteLifecycleOutcome,
 	type SessionCredentialRef,
 	signOutAccount,
 	wipeDevice,
@@ -72,6 +75,8 @@ interface RecordingMirror extends CredentialMirror {
 	 * mirror was purged before the store dropped it.
 	 */
 	readonly tokensAtPurge: Array<Array<string | null>>;
+	/** Each `forgetQuickUnlock` scope, as `"device"` or the account ids it named. */
+	readonly forgotten: Array<"device" | string[]>;
 }
 
 function createRecordingMirror(
@@ -80,9 +85,16 @@ function createRecordingMirror(
 ): RecordingMirror {
 	const calls: SessionCredentialRef[][] = [];
 	const tokensAtPurge: Array<Array<string | null>> = [];
+	const forgotten: Array<"device" | string[]> = [];
 	return {
 		calls,
 		tokensAtPurge,
+		forgotten,
+		async forgetQuickUnlock(scope): Promise<void> {
+			forgotten.push(
+				scope === "device" ? "device" : scope.map((ref) => ref.accountId),
+			);
+		},
 		async purge(refs: SessionCredentialRef[]): Promise<void> {
 			calls.push(refs);
 			tokensAtPurge.push(
@@ -198,6 +210,46 @@ function accountKeys(port: InMemoryPlatformPort, accountId: string): string[] {
 async function accountIds(storage: AccountStore): Promise<string[]> {
 	return (await storage.getAccountsList()).map((account) => account.accountId);
 }
+
+function completionOutcome(
+	affected = [accountMetadata({ accountId: "acc-1" })],
+	failures: LifecycleStepFailure[] = [],
+): LifecycleOutcome {
+	return {
+		affected,
+		activeAccountId: "acc-1",
+		activeAccount: affected[0] ?? null,
+		wasActive: affected.length > 0,
+		remaining: affected,
+		failures,
+	};
+}
+
+describe("requireCompleteLifecycleOutcome", () => {
+	it("returns a complete resolved lifecycle outcome", () => {
+		const complete = completionOutcome();
+		expect(
+			requireCompleteLifecycleOutcome(complete, { operation: "test" }),
+		).toBe(complete);
+	});
+
+	it("rejects recorded failures and an unexpectedly unresolved target", () => {
+		expect(() =>
+			requireCompleteLifecycleOutcome(
+				completionOutcome(undefined, [
+					{ accountId: "acc-1", step: "clear_session", cause: "failed" },
+				]),
+				{ operation: "test" },
+			),
+		).toThrow("did not complete safely");
+		expect(() =>
+			requireCompleteLifecycleOutcome(completionOutcome([]), {
+				operation: "test",
+				requireAffected: true,
+			}),
+		).toThrow("did not complete safely");
+	});
+});
 
 describe("lockAccount", () => {
 	it("keeps session_data and every cache segment while dropping the session keys", async () => {
@@ -347,28 +399,7 @@ describe("lockAllAccounts", () => {
 	});
 });
 
-describe("signOutAccount / invalidateAccountSession", () => {
-	it("produce byte-identical state from the same fixture", async () => {
-		const realNow = Date.now;
-		// Frozen so two fixtures built moments apart cannot differ by a `lastActiveAt` ms.
-		Date.now = () => 1_700_000_000_000;
-		try {
-			const signedOut = await createFixture();
-			const invalidated = await createFixture();
-
-			const signOutOutcome = await signOutAccount("acc-1", signedOut.deps);
-			const invalidateOutcome = await invalidateAccountSession(
-				{ accountId: "acc-1" },
-				invalidated.deps,
-			);
-
-			expect(fullState(signedOut)).toEqual(fullState(invalidated));
-			expect(signOutOutcome).toEqual(invalidateOutcome);
-		} finally {
-			Date.now = realNow;
-		}
-	});
-
+describe("signOutAccount", () => {
 	it("deletes the session and all three cache segments", async () => {
 		const fixture = await createFixture();
 
@@ -383,17 +414,35 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		expect(fixture.cachePort.collections()).toEqual(segmentsOf("acc-2"));
 	});
 
-	it("keeps the secret key, server url, biometric flag and the accounts-list row", async () => {
+	it("deletes the Secret Key while keeping account metadata after explicit Sign out", async () => {
 		const fixture = await createFixture();
 
 		await signOutAccount("acc-1", fixture.deps);
 
-		expect(await fixture.storage.getStoredSecretKey("acc-1")).toBe(
-			"secret-acc-1",
-		);
+		expect(await fixture.storage.getStoredSecretKey("acc-1")).toBeNull();
 		expect(await fixture.storage.getServerUrl("acc-1")).toBe(SERVER_URL);
 		expect(await fixture.storage.isBiometricEnabled("acc-1")).toBe(true);
 		expect(await accountIds(fixture.storage)).toEqual(["acc-1", "acc-2"]);
+	});
+
+	it("locks a rejected Server Session without deleting Quick Unlock material", async () => {
+		const fixture = await createFixture();
+		await fixture.storage.updateStoredSessionMetadata("acc-1", {
+			sessionId: "session-acc-1",
+			expiresAt: Date.now() + 60_000,
+		});
+
+		const outcome = await lockInvalidSession(
+			{ sessionId: "session-acc-1" },
+			fixture.deps,
+		);
+
+		expect(outcome.failures).toEqual([]);
+		expect(await fixture.storage.getAuthToken("acc-1")).toBeNull();
+		expect(await fixture.storage.getStoredSessionData("acc-1")).not.toBeNull();
+		expect(await fixture.storage.getStoredSecretKey("acc-1")).toBe(
+			"secret-acc-1",
+		);
 	});
 
 	it("leaves the active pointer on the signed-out account", async () => {
@@ -436,10 +485,7 @@ describe("signOutAccount / invalidateAccountSession", () => {
 			throw FAILURE;
 		};
 
-		const outcome = await invalidateAccountSession(
-			{ accountId: "acc-1" },
-			fixture.deps,
-		);
+		const outcome = await signOutAccount("acc-1", fixture.deps);
 
 		expect(fixture.cachePort.collections()).toEqual(segmentsOf("acc-2"));
 		expect(outcome.failures).toEqual([
@@ -459,10 +505,10 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		]);
 	});
 
-	it("resolves the target by account id", async () => {
+	it("locks a target resolved by account id", async () => {
 		const fixture = await createFixture();
 
-		const outcome = await invalidateAccountSession(
+		const outcome = await lockInvalidSession(
 			{ accountId: "acc-2" },
 			fixture.deps,
 		);
@@ -470,19 +516,23 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		expect(outcome.affected.map((account) => account.accountId)).toEqual([
 			"acc-2",
 		]);
-		expect(await fixture.storage.getStoredSessionData("acc-2")).toBeNull();
+		expect(await fixture.storage.getAuthToken("acc-2")).toBeNull();
+		expect(await fixture.storage.getStoredSessionData("acc-2")).not.toBeNull();
 		expect(await fixture.storage.getStoredSessionData("acc-1")).not.toBeNull();
-		expect(fixture.cachePort.collections()).toEqual(segmentsOf("acc-1"));
+		expect(fixture.cachePort.collections()).toEqual([
+			...segmentsOf("acc-1"),
+			...segmentsOf("acc-2"),
+		]);
 	});
 
-	it("resolves the target by sessionId", async () => {
+	it("locks a target resolved by sessionId", async () => {
 		const fixture = await createFixture();
 		await fixture.storage.updateStoredSessionMetadata("acc-2", {
 			sessionId: "session-acc-2",
 			expiresAt: Date.now() + 60_000,
 		});
 
-		const outcome = await invalidateAccountSession(
+		const outcome = await lockInvalidSession(
 			{ sessionId: "session-acc-2" },
 			fixture.deps,
 		);
@@ -490,7 +540,8 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		expect(outcome.affected.map((account) => account.accountId)).toEqual([
 			"acc-2",
 		]);
-		expect(await fixture.storage.getStoredSessionData("acc-2")).toBeNull();
+		expect(await fixture.storage.getAuthToken("acc-2")).toBeNull();
+		expect(await fixture.storage.getStoredSessionData("acc-2")).not.toBeNull();
 		expect(await fixture.storage.getStoredSessionData("acc-1")).not.toBeNull();
 	});
 
@@ -498,7 +549,7 @@ describe("signOutAccount / invalidateAccountSession", () => {
 		const fixture = await createFixture();
 		const before = fullState(fixture);
 
-		const outcome = await invalidateAccountSession(
+		const outcome = await lockInvalidSession(
 			{ accountId: "nobody" },
 			fixture.deps,
 		);
@@ -745,6 +796,69 @@ describe("deleteAccountEverywhere", () => {
 		expect(accountKeys(fixture.port, "acc-1")).toEqual([]);
 		expect(fixture.cachePort.collections()).toEqual(segmentsOf("acc-2"));
 		expect(outcome.activeAccountId).toBe("acc-2");
+	});
+});
+
+/**
+ * Quick-unlock material is the device's own copy of the key — Android's biometric
+ * MUK escrow. It is not in `AccountStore`, so only the mirror can drop it, and
+ * nothing did: the escrow outlived sign-out, removal and deletion.
+ */
+describe("quick-unlock material", () => {
+	it("survives a lock, which a biometric prompt is meant to undo", async () => {
+		const fixture = await createFixture();
+
+		await lockAccount("acc-1", fixture.deps);
+		await lockAllAccounts(fixture.deps);
+
+		expect(fixture.mirror.forgotten).toEqual([]);
+	});
+
+	it("goes with the account that signed out, and names only that account", async () => {
+		const fixture = await createFixture();
+
+		await signOutAccount("acc-2", fixture.deps);
+
+		expect(fixture.mirror.forgotten).toEqual([["acc-2"]]);
+	});
+
+	it("survives when the Server rejects the old Session", async () => {
+		const fixture = await createFixture();
+
+		await lockInvalidSession({ accountId: "acc-1" }, fixture.deps);
+
+		expect(fixture.mirror.forgotten).toEqual([]);
+	});
+
+	it("goes when the account is taken off the device", async () => {
+		const fixture = await createFixture();
+
+		await removeAccount("acc-1", fixture.deps);
+
+		expect(fixture.mirror.forgotten).toEqual([["acc-1"]]);
+	});
+
+	/** A wipe leaves nothing, including material this device can no longer name. */
+	it("goes device-wide on a wipe", async () => {
+		const fixture = await createFixture();
+
+		await wipeDevice(fixture.deps);
+
+		expect(fixture.mirror.forgotten.at(-1)).toEqual("device");
+	});
+
+	it("goes device-wide when an account is deleted everywhere", async () => {
+		const fixture = await createFixture();
+
+		await deleteAccountEverywhere(
+			{ accountId: "acc-1", confirmEmail: "acc-1@test.com" },
+			{
+				...fixture.deps,
+				server: { deleteAccount: async (): Promise<void> => {} },
+			},
+		);
+
+		expect(fixture.mirror.forgotten.at(-1)).toEqual("device");
 	});
 });
 

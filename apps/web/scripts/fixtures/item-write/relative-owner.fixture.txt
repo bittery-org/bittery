@@ -1,0 +1,2 @@
+import { useUpdateItem as patch } from "../../../../../packages/core/src/hooks/items/use-update-item.ts";
+void patch;

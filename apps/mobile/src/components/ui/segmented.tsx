@@ -1,133 +1,129 @@
-import { PressableFeedback } from "heroui-native";
-import { ScrollView, Text, View } from "react-native";
-import { cn } from "@/lib/utils";
-import type { AppIcon } from "./icons";
-import { iconSize } from "./theme";
+/**
+ * iOS-style segmented control: a recessed track with a single raised thumb that slides.
+ *
+ * The thumb is one absolutely-positioned element translated by index rather than a
+ * background on the active segment — that is the whole reason the control feels native, and
+ * it is why segments must be equal width.
+ */
 
-export interface SegmentedOption<T extends string> {
-	value: T;
-	label: string;
+import { cn } from "@bittery/ui/lib/utils";
+import type { ReactNode } from "react";
+import { Pressable } from "./pressable";
+
+export interface SegmentOption<Key extends string> {
+	key: Key;
+	label: ReactNode;
 }
 
-/**
- * Two-or-three-way switch that splits a screen's content (Vaults / Tags).
- * Sits on the `default` rung with a raised `segment` thumb.
- */
-export function Segmented<T extends string>({
+export function Segmented<Key extends string>({
 	options,
 	value,
 	onChange,
+	ariaLabel,
 	className,
 }: {
-	options: ReadonlyArray<SegmentedOption<T>>;
-	value: T;
-	onChange: (value: T) => void;
+	options: ReadonlyArray<SegmentOption<Key>>;
+	value: Key;
+	onChange: (key: Key) => void;
+	ariaLabel: string;
 	className?: string;
 }) {
+	const activeIndex = Math.max(
+		0,
+		options.findIndex((option) => option.key === value),
+	);
+
 	return (
-		<View
+		<div
+			role="tablist"
+			aria-label={ariaLabel}
 			className={cn(
-				"flex-row rounded-xl border border-border bg-default p-1",
+				"relative flex h-9 w-full items-stretch rounded-xl bg-surface-tertiary p-0.5",
 				className,
 			)}
 		>
+			<span
+				aria-hidden
+				className="absolute inset-y-0.5 left-0.5 rounded-[10px] bg-surface shadow-surface transition-transform duration-200 ease-native"
+				style={{
+					width: `calc((100% - 4px) / ${options.length})`,
+					transform: `translateX(${activeIndex * 100}%)`,
+				}}
+			/>
 			{options.map((option) => {
-				const isActive = option.value === value;
+				const isActive = option.key === value;
 				return (
-					<PressableFeedback
-						key={option.value}
-						onPress={() => onChange(option.value)}
+					<button
+						key={option.key}
+						type="button"
+						role="tab"
+						aria-selected={isActive}
+						onClick={() => onChange(option.key)}
 						className={cn(
-							"flex-1 items-center justify-center rounded-lg py-2",
-							isActive ? "bg-segment shadow-surface" : "",
+							"relative z-10 flex-1 touch-manipulation select-none truncate rounded-[10px] px-3 text-sm outline-none transition-colors duration-150",
+							isActive
+								? "font-semibold text-foreground"
+								: "font-medium text-muted-foreground",
 						)}
 					>
-						{isActive ? null : <PressableFeedback.Highlight />}
-						<Text
-							className={cn(
-								"font-medium text-sm",
-								isActive ? "text-foreground" : "text-muted",
-							)}
-						>
-							{option.label}
-						</Text>
-					</PressableFeedback>
+						{option.label}
+					</button>
 				);
 			})}
-		</View>
+		</div>
 	);
 }
 
-export interface FilterChip<T extends string> {
-	value: T;
-	label: string;
-	icon?: AppIcon;
-	count?: number;
-}
-
 /**
- * Horizontally scrolling filter rail (item categories). Selected chips take the
- * selection tint plus an accent ring — never a solid purple fill.
+ * The horizontal-scrolling sibling of `Segmented`, for one-of-N choices that will not fit as
+ * equal-width segments — link expiry, filter facets. Ported from `apps/mobile`'s `ChipRail`.
+ *
+ * It bleeds past the screen's 16px gutter on purpose: a rail that stops at the gutter reads as
+ * a finished row, and the user never discovers the chips off-screen. The padding moves onto the
+ * scroller so the first and last chip still line up with everything else.
  */
-export function ChipRail<T extends string>({
+export function ChipRail<Key extends string>({
 	chips,
 	value,
 	onChange,
-	contentClassName,
+	ariaLabel,
+	className,
 }: {
-	chips: ReadonlyArray<FilterChip<T>>;
-	value: T;
-	onChange: (value: T) => void;
-	contentClassName?: string;
+	chips: ReadonlyArray<SegmentOption<Key>>;
+	value: Key;
+	onChange: (key: Key) => void;
+	ariaLabel: string;
+	className?: string;
 }) {
 	return (
-		<ScrollView
-			horizontal
-			showsHorizontalScrollIndicator={false}
-			contentContainerClassName={cn("flex-row gap-2 px-4", contentClassName)}
+		<div
+			role="radiogroup"
+			aria-label={ariaLabel}
+			className={cn(
+				"native-scroll -mx-4 flex gap-2 overflow-x-auto px-4",
+				className,
+			)}
 		>
 			{chips.map((chip) => {
-				const isActive = chip.value === value;
-				const Icon = chip.icon;
+				const isActive = chip.key === value;
 				return (
-					<PressableFeedback
-						key={chip.value}
-						onPress={() => onChange(chip.value)}
+					<Pressable
+						key={chip.key}
+						role="radio"
+						aria-checked={isActive}
+						surface="sheet"
+						onClick={() => onChange(chip.key)}
 						className={cn(
-							"h-9 flex-row items-center gap-1.5 rounded-full border px-3.5",
+							"flex h-9 shrink-0 items-center rounded-lg px-3.5 font-medium text-sm transition-colors",
 							isActive
-								? "border-accent/25 bg-selected"
-								: "border-border bg-surface",
+								? "bg-primary text-primary-foreground"
+								: "bg-surface-tertiary text-muted-foreground",
 						)}
 					>
-						<PressableFeedback.Highlight />
-						{Icon ? (
-							<Icon
-								size={iconSize.chip}
-								className={isActive ? "text-accent" : "text-muted"}
-							/>
-						) : null}
-						<Text
-							className={cn(
-								"font-medium text-sm",
-								isActive ? "text-accent" : "text-foreground",
-							)}
-						>
-							{chip.label}
-						</Text>
-						{typeof chip.count === "number" ? (
-							<Text
-								className={cn(
-									"text-xs",
-									isActive ? "text-accent/70" : "text-muted",
-								)}
-							>
-								{chip.count}
-							</Text>
-						) : null}
-					</PressableFeedback>
+						{chip.label}
+					</Pressable>
 				);
 			})}
-		</ScrollView>
+		</div>
 	);
 }

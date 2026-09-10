@@ -1,6 +1,9 @@
 import {
 	type ApiClient,
 	ApiError,
+	type CreateItemOperationOutcome,
+	type ItemOperationOutcome,
+	type ItemOperationResult,
 	isApiErrorStatus,
 	isApiTransportError,
 } from "@bittery/api-contract";
@@ -29,6 +32,18 @@ export type OutboundQueueApiClient = Pick<ApiClient, "items">;
 
 const QUEUE_DOCUMENT_KEY = "bittery_pending_mutation_queues_v3";
 
+type CreateItemSemanticRejection = Extract<
+	CreateItemOperationOutcome["result"],
+	{ status: "rejected" }
+>;
+
+export class SemanticOperationRejected extends Error {
+	constructor(readonly code: CreateItemSemanticRejection["code"]) {
+		super(`Create Item Operation was rejected: ${code}`);
+		this.name = "SemanticOperationRejected";
+	}
+}
+
 type QueueDocument = Record<string, PendingMutation[]>;
 
 function isNetworkError(error: unknown): boolean {
@@ -54,6 +69,44 @@ function writeOptions(mutation: PendingMutation): {
 		etag: `"${mutation.baseVersion}"`,
 		idempotencyKey: mutation.attemptId ?? mutation.id,
 	};
+}
+
+/**
+ * Reads one Item mutation response as the semantic outcome it now carries.
+ *
+ * A `200` only earns the right to read what the Server decided. The retained outcome names the
+ * kind it answered, so an answer for another kind is a contradiction rather than this command's
+ * result, and a rejection is terminal rather than something to retry.
+ */
+function appliedItemOperation(
+	outcome: ItemOperationOutcome,
+	expectedKind: ItemOperationOutcome["kind"],
+): Extract<ItemOperationResult, { status: "applied" }> {
+	if (outcome.kind !== expectedKind) {
+		throw new Error(
+			`Operation ${outcome.operationId} resolved as ${outcome.kind}, not ${expectedKind}`,
+		);
+	}
+	if (outcome.result.status === "rejected") {
+		// A stale strong version is the one rejection this queue can act on itself: it rebases
+		// the command against the authoritative Item and sends fresh bytes. The Server used to
+		// say that with `412`, and says it with a retained rejection now; the queue's own
+		// handling of the fact is unchanged.
+		if (outcome.result.code === "item_version_conflict") {
+			throw new ApiError(
+				{
+					type: "https://bittery.com/problems/conflict",
+					title: "Conflict",
+					status: 412,
+					code: "PRECONDITION_FAILED",
+					detail: `Operation ${outcome.operationId} was written against a stale Item version`,
+				},
+				null,
+			);
+		}
+		throw new SemanticOperationRejected(outcome.result.code);
+	}
+	return outcome.result;
 }
 
 function strongNumericEtag(
@@ -756,6 +809,48 @@ export class ItemSyncEngine {
 		return next;
 	}
 
+	async reconcileCreateItemOutcome(
+		accountId: string,
+		outcome: CreateItemOperationOutcome,
+	): Promise<void> {
+		const mutation = this.queuesByAccountId
+			.get(accountId)
+			?.find(
+				(command) =>
+					(command.operationId ?? command.id) === outcome.operationId,
+			);
+		if (!mutation) return;
+		if (mutation.type !== "create") {
+			throw new Error(
+				`Operation ${outcome.operationId} resolved with a create outcome for a ${mutation.type} command`,
+			);
+		}
+
+		if (outcome.result.status === "rejected") {
+			const error = new SemanticOperationRejected(outcome.result.code);
+			mutation.status = "failed";
+			mutation.lastError = error.message;
+			mutation.nextAttemptAt = undefined;
+			await this.reconciler?.reject?.(mutation, outcome.result.code);
+			await this.schedulePersistence(accountId);
+			this.emit();
+			return;
+		}
+
+		await this.reconciler?.acknowledge(mutation, {
+			entityId: outcome.result.itemId,
+			etag: null,
+			version: outcome.result.version,
+		});
+		const conflicted = await this.persistAcknowledgement(
+			accountId,
+			mutation,
+			outcome.result.version,
+		);
+		if (conflicted) await this.preserveConflict(conflicted);
+		this.emit();
+	}
+
 	async rewritePendingIds(tempId: string, realId: string): Promise<void> {
 		const writes: Promise<void>[] = [];
 		for (const [accountId, queue] of this.queuesByAccountId.entries()) {
@@ -777,7 +872,7 @@ export class ItemSyncEngine {
 	private async processMutation(
 		client: OutboundQueueApiClient,
 		mutation: PendingMutation,
-	): Promise<{ etag: string | null }> {
+	): Promise<{ etag: string | null; version?: number }> {
 		switch (mutation.type) {
 			case "create": {
 				const payload = mutation.encryptedPayload;
@@ -795,13 +890,11 @@ export class ItemSyncEngine {
 						encryptionIv: payload.encryptionIv,
 						encryptionAlgorithm: payload.encryptionAlgorithm,
 					},
-					{ idempotencyKey: mutation.attemptId ?? mutation.id },
+					{ idempotencyKey: mutation.operationId ?? mutation.id },
 				);
-				const result = response.data;
+				const result = appliedItemOperation(response.data, "create_item");
 
-				const fallbackId =
-					result.id && result.id !== mutation.vaultId ? result.id : undefined;
-				const realId = result.itemId ?? fallbackId;
+				const realId = result.itemId;
 				if (realId && realId !== mutation.entityId) {
 					this.latestMappings.push({
 						tempId: mutation.entityId,
@@ -811,7 +904,7 @@ export class ItemSyncEngine {
 					});
 					await this.rewritePendingIds(mutation.entityId, realId);
 				}
-				return { etag: response.etag };
+				return { etag: response.etag, version: result.version };
 			}
 			case "update": {
 				const payload = mutation.encryptedPayload;
@@ -829,23 +922,44 @@ export class ItemSyncEngine {
 					},
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "update_item").version,
+				};
 			}
 			case "delete": {
 				const response = await client.items.trash(
 					mutation.entityId,
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "trash_item").version,
+				};
 			}
-			case "permanent_delete":
-				return client.items
-					.deletePermanently(mutation.entityId, writeOptions(mutation))
-					.then((response) => ({ etag: response.etag }));
-			case "restore":
-				return client.items
-					.restore(mutation.entityId, writeOptions(mutation))
-					.then((response) => ({ etag: response.etag }));
+			case "permanent_delete": {
+				const response = await client.items.deletePermanently(
+					mutation.entityId,
+					writeOptions(mutation),
+				);
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(
+						response.data,
+						"permanently_delete_item",
+					).version,
+				};
+			}
+			case "restore": {
+				const response = await client.items.restore(
+					mutation.entityId,
+					writeOptions(mutation),
+				);
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "restore_item").version,
+				};
+			}
 			case "move": {
 				const payload = mutation.encryptedPayload;
 				if (!payload || !mutation.targetVaultId) {
@@ -854,6 +968,7 @@ export class ItemSyncEngine {
 				const response = await client.items.move(
 					mutation.entityId,
 					{
+						mode: "prepared",
 						sourceVaultId: mutation.vaultId,
 						targetVaultId: mutation.targetVaultId,
 						encryptedData: payload.encryptedData,
@@ -862,7 +977,10 @@ export class ItemSyncEngine {
 					},
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "move_item").version,
+				};
 			}
 			case "cross_account_move":
 				throw new Error(
@@ -874,7 +992,11 @@ export class ItemSyncEngine {
 					{ favorite: mutation.favorite ?? false },
 					writeOptions(mutation),
 				);
-				return { etag: response.etag };
+				return {
+					etag: response.etag,
+					version: appliedItemOperation(response.data, "set_item_favorite")
+						.version,
+				};
 			}
 		}
 	}
@@ -1017,7 +1139,9 @@ export class ItemSyncEngine {
 						? { etag: semanticAcknowledgement.etag }
 						: await this.processMutation(client, mutation);
 					const serverVersion =
-						semanticAcknowledgement?.version ?? strongNumericEtag(result.etag);
+						semanticAcknowledgement?.version ??
+						result.version ??
+						strongNumericEtag(result.etag);
 					await this.reconciler?.acknowledge(mutation, {
 						entityId: semanticAcknowledgement?.entityId ?? mutation.entityId,
 						etag: result.etag,
@@ -1032,6 +1156,19 @@ export class ItemSyncEngine {
 					if (conflicted) await this.preserveConflict(conflicted);
 					this.emit();
 				} catch (error) {
+					if (error instanceof SemanticOperationRejected) {
+						mutation.status = "failed";
+						mutation.lastError = error.message;
+						mutation.nextAttemptAt = undefined;
+						try {
+							await this.reconciler?.reject?.(mutation, error.code);
+						} catch (projectionError) {
+							mutation.lastError = `${error.message}; failed to persist optimistic failure: ${projectionError instanceof Error ? projectionError.message : String(projectionError)}`;
+						}
+						await this.schedulePersistence(accountId);
+						this.emit();
+						continue;
+					}
 					if (isApiErrorStatus(error, 409) || isApiErrorStatus(error, 412)) {
 						const retryImmediately = await this.rebaseMetadataMutation(
 							client,

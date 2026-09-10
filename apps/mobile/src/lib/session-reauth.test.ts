@@ -1,0 +1,73 @@
+import { describe, expect, it, mock } from "bun:test";
+import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
+import type { AccountMetadata } from "@bittery/storage/types";
+import { reauthenticateMobileSession } from "./session-reauth";
+
+function outcome(failed = false): LifecycleOutcome {
+	return {
+		affected: [
+			{ accountId: "account-a", email: "a@example.com" } as AccountMetadata,
+		],
+		activeAccountId: undefined,
+		activeAccount: null,
+		wasActive: true,
+		remaining: [],
+		failures: failed
+			? [{ accountId: "account-a", step: "clear_session", cause: "failed" }]
+			: [],
+	};
+}
+
+describe("reauthenticateMobileSession", () => {
+	it("applies the expired-session effects after a complete lock", async () => {
+		const clearQueries = mock(() => {});
+		const notifyExpired = mock(() => {});
+		const navigate = mock((_wasActive: boolean) => {});
+		const lockedAccounts: string[] = [];
+
+		await reauthenticateMobileSession(
+			"account-a",
+			async (accountId) => {
+				lockedAccounts.push(accountId);
+				return outcome();
+			},
+			{ clearQueries, notifyExpired, navigate },
+		);
+
+		expect(lockedAccounts).toEqual(["account-a"]);
+		expect(clearQueries).toHaveBeenCalledTimes(1);
+		expect(notifyExpired).toHaveBeenCalledTimes(1);
+		expect(navigate).toHaveBeenCalledWith(true);
+	});
+
+	it("surfaces an incomplete lock before clearing or navigating", async () => {
+		const clearQueries = mock(() => {});
+		const notifyExpired = mock(() => {});
+		const navigate = mock((_wasActive: boolean) => {});
+
+		expect(
+			reauthenticateMobileSession("account-a", async () => outcome(true), {
+				clearQueries,
+				notifyExpired,
+				navigate,
+			}),
+		).rejects.toThrow("did not complete safely");
+		expect(clearQueries).not.toHaveBeenCalled();
+		expect(notifyExpired).not.toHaveBeenCalled();
+		expect(navigate).not.toHaveBeenCalled();
+	});
+
+	it("rejects an unresolved Account before applying host effects", async () => {
+		const clearQueries = mock(() => {});
+		const unresolved = { ...outcome(), affected: [] };
+
+		await expect(
+			reauthenticateMobileSession("account-a", async () => unresolved, {
+				clearQueries,
+				notifyExpired: () => {},
+				navigate: () => {},
+			}),
+		).rejects.toThrow("did not complete safely");
+		expect(clearQueries).not.toHaveBeenCalled();
+	});
+});

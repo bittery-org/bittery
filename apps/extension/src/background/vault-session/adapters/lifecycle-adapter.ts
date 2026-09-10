@@ -1,17 +1,17 @@
 /**
  * The only file in `vault-session/` importing the C1 lifecycle service.
  *
- * Neither C1 entry point ever rejects — a failed step lands in
- * `outcome.failures` — so this adapter reports failures rather than
- * translating them, and the machine's `.catch` guards are belt-and-braces.
+ * C1 reports incomplete work in `outcome.failures`; the adapter turns that into
+ * a rejection so the machine's settled contract cannot project a partial lock as success.
  */
 
 import {
 	type InvalidationTarget,
-	invalidateAccountSession,
 	type LifecycleDeps,
 	type LifecycleOutcome,
 	lockAllAccounts,
+	lockInvalidSession,
+	requireCompleteLifecycleOutcome,
 } from "@bittery/core/services/account-lifecycle";
 import { lifecycleDeps } from "../../lifecycle";
 import type {
@@ -33,12 +33,6 @@ export interface LifecycleAdapterOptions {
 	 * matches nothing on the device.
 	 */
 	resolveFallbackAccountId?: () => string | null;
-}
-
-function reportFailures(scope: string, outcome: LifecycleOutcome): void {
-	if (outcome.failures.length > 0) {
-		console.error(`[vault-session] ${scope} incomplete:`, outcome.failures);
-	}
 }
 
 function project(outcome: LifecycleOutcome): InvalidatedSession {
@@ -65,11 +59,13 @@ export function createLifecycleAdapter(
 ): VaultLifecyclePort {
 	const deps = options.deps ?? lifecycleDeps;
 	const lockAll = options.lockAll ?? lockAllAccounts;
-	const invalidate = options.invalidate ?? invalidateAccountSession;
+	const invalidate = options.invalidate ?? lockInvalidSession;
 
 	return {
 		async lockAll(): Promise<void> {
-			reportFailures("lockAllAccounts", await lockAll(deps));
+			requireCompleteLifecycleOutcome(await lockAll(deps), {
+				operation: "Extension lockAllAccounts",
+			});
 		},
 
 		async invalidateSession(
@@ -78,21 +74,16 @@ export function createLifecycleAdapter(
 		): Promise<InvalidatedSession> {
 			const accountId =
 				fallbackAccountId ?? options.resolveFallbackAccountId?.() ?? null;
-			const resolved = toCoreTarget(target, accountId);
+			const resolved = accountId
+				? ({ accountId } satisfies InvalidationTarget)
+				: toCoreTarget(target, null);
 
-			let outcome = await invalidate(resolved, deps);
-			// `StoredSessionData.sessionId` is optional, so an id that matches no
-			// stored session returns `affected: []` with `failures: []` — success and
-			// "never found it" are the same value. Retrying by accountId closes that.
-			if (
-				outcome.affected.length === 0 &&
-				accountId &&
-				!(typeof resolved === "object" && "accountId" in resolved)
-			) {
-				outcome = await invalidate({ accountId }, deps);
-			}
+			const outcome = await invalidate(resolved, deps);
 
-			reportFailures("invalidateAccountSession", outcome);
+			requireCompleteLifecycleOutcome(outcome, {
+				operation: "Extension lockInvalidSession",
+				requireAffected: true,
+			});
 			return project(outcome);
 		},
 	};

@@ -1,13 +1,13 @@
 import type { QueryInvalidator, SyncContextValue } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext } from "react";
-import { useMobileAccountRuntime } from "../contexts/account-context";
+import { useMobileAccountRuntime } from "@/contexts/account-context";
 import { useMobileSync } from "../hooks/use-mobile-sync";
 
 /**
- * Mobile resolves its client id and active account asynchronously at boot, so like desktop it
- * publishes one member `useSync` cannot: whether that resolution has run yet. Everything else
- * is the shared shape.
+ * Mobile resolves its sync sources asynchronously (auth token + server URL per account, out
+ * of the Tauri store), so it publishes one member `useSync` cannot: whether that resolution
+ * has run yet. Everything else is the shared shape.
  */
 interface MobileSyncContextValue extends SyncContextValue {
 	isInitialized: boolean;

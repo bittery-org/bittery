@@ -1,0 +1,15 @@
+import "@bittery/core/services/account-lifecycle";
+import legacy = require("@fixture/import-equals");
+import type TypesOnly = require("@fixture/type-import-equals");
+export { type Exported } from "@fixture/type-only-reexport";
+
+const required = require("@fixture/static-require");
+void import("@fixture/dynamic-import");
+
+const computed = "@fixture/runtime-computed";
+void import(computed);
+void require(computed);
+
+void legacy;
+void required;
+type _TypesOnly = TypesOnly;

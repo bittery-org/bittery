@@ -11,9 +11,9 @@ import {
 	type SyncSource,
 } from "@bittery/sync";
 import {
-	invalidateAccountSession,
 	type LifecycleDeps,
 	type LifecycleOutcome,
+	lockInvalidSession,
 } from "./account-lifecycle";
 import {
 	AccountResolver,
@@ -52,8 +52,11 @@ export interface AccountSyncModule {
 		clientId: string;
 		activeAccountId?: ActiveAccountId;
 	}): Promise<AccountSyncAssembly | null>;
-	/** Apply the shared destructive Session invalidation, leaving UI effects to the app. */
-	invalidateSession(payload: { sessionId: string }): Promise<LifecycleOutcome>;
+	/** Lock the Account after Server Session invalidation, leaving UI effects to the app. */
+	invalidateSession(payload: {
+		sessionId: string;
+		accountId?: string;
+	}): Promise<LifecycleOutcome>;
 }
 
 export interface CreateAccountSyncOptions {
@@ -224,8 +227,10 @@ export function createAccountSync({
 
 		async invalidateSession(payload) {
 			cached = undefined;
-			return await invalidateAccountSession(
-				{ sessionId: payload.sessionId },
+			return await lockInvalidSession(
+				payload.accountId
+					? { accountId: payload.accountId }
+					: { sessionId: payload.sessionId },
 				lifecycle,
 			);
 		},

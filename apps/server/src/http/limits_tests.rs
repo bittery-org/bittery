@@ -69,12 +69,15 @@ fn registered_bounds() -> BTreeSet<u64> {
         u64::from(BULK_IMPORT_ITEMS),
         u64::from(MAX_PAGE_SIZE),
         ENCRYPTED_VAULT_KEY_BYTES as u64,
+        NAME_MIN_CHARS as u64,
         NAME_MAX_CHARS as u64,
+        ICON_MAX_CHARS as u64,
         MAX_BATCH_ITEMS as u64,
         MAX_CAPABILITIES as u64,
         SUPPORTED_MAJORS as u64,
         u64::from(MAX_AUDIT_EVENTS),
         MAX_AUDIT_SEARCH_BYTES as u64,
+        CIPHERTEXT_SHA256_HEX_CHARS as u64,
     ])
 }
 
@@ -144,6 +147,14 @@ fn key_schemas_publish_their_named_limits() {
         schemas["CreateVaultBody"]["properties"]["name"]["maxLength"],
         NAME_MAX_CHARS as u64
     );
+    assert_eq!(
+        schemas["CreateVaultBody"]["properties"]["name"]["minLength"],
+        NAME_MIN_CHARS as u64
+    );
+    assert_eq!(
+        schemas["CreateVaultBody"]["properties"]["icon"]["maxLength"],
+        ICON_MAX_CHARS as u64
+    );
     // `AuditEventsQuery` is `IntoParams`, so its bounds land on the operation's parameters.
     let audit_parameters = &document["paths"]["/api/v1/audit-events"]["get"]["parameters"];
     let audit_parameter = |name: &str| {
@@ -166,6 +177,27 @@ fn key_schemas_publish_their_named_limits() {
     );
 }
 
+/// The Client Runtime derives its accepted Import batch bound from these two published numbers.
+///
+/// It cannot import them — the crates do not depend on each other — so it mirrors the literals in
+/// `packages/client-runtime/crates/bittery-client-core/src/runtime/import.rs` and guards them
+/// there with `import_batch_bytes_fit_the_server_and_authority_ceilings`. This is the other half
+/// of that guard. If either number moves here without moving there, Runtime can accept a batch
+/// this Server will refuse with a `413`, which carries no Operation outcome, so the accepted
+/// Operation would retry forever instead of terminating.
+#[test]
+fn import_request_bounds_match_the_runtime_batch_derivation() {
+    assert_eq!(BULK_IMPORT_BYTES, 16 * 1024 * 1024);
+    assert_eq!(BULK_IMPORT_ITEMS, 200);
+
+    // The published per-Item bound deliberately does not multiply out to the body limit: at 200
+    // Items it would be about 200 MiB. The total is bounded once, at Runtime acceptance.
+    assert!(
+        u64::from(BULK_IMPORT_ITEMS) * ITEM_CIPHERTEXT_BYTES > BULK_IMPORT_BYTES,
+        "if the per-Item bounds ever fit the body limit, the Runtime batch bound can be retired",
+    );
+}
+
 /// The runtime validators and the published bounds must agree.
 #[test]
 fn published_limits_match_the_runtime_validators() {
@@ -173,7 +205,9 @@ fn published_limits_match_the_runtime_validators() {
         ENCRYPTED_VAULT_KEY_BYTES,
         crate::domains::vaults::key::ENCRYPTED_VAULT_KEY_MAX_BYTES
     );
+    assert_eq!(NAME_MIN_CHARS, crate::domains::vaults::VAULT_NAME_MIN_CHARS);
     assert_eq!(NAME_MAX_CHARS, crate::domains::vaults::VAULT_NAME_MAX_CHARS);
+    assert_eq!(ICON_MAX_CHARS, crate::domains::vaults::VAULT_ICON_MAX_CHARS);
     assert_eq!(
         ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024,
         crate::domains::vaults::http::ITEM_BODY_LIMIT_BYTES,

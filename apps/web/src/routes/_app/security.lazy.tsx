@@ -1,15 +1,18 @@
-import { useItems } from "@bittery/core/hooks";
 import { usePasswordSecurity } from "@bittery/core/hooks/use-password-security";
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { useDeferredValue, useMemo } from "react";
 import { SecurityDashboard } from "@/components/dashboard/security-dashboard";
+import { useRuntimeItems } from "@/hooks/use-runtime-items";
 
 export const Route = createLazyFileRoute("/_app/security")({
 	component: SecurityPage,
 });
 
 function SecurityPage() {
-	const { items, isLoading } = useItems();
+	const { items, state } = useRuntimeItems();
+	// Anything short of a ready projection is still loading as far as this report is
+	// concerned: a score computed over an empty list would read as "nothing at risk".
+	const isLoading = state !== "ready";
 
 	// Defer items so the skeleton renders immediately while zxcvbn runs in
 	// a lower-priority update — avoids blocking first paint.
@@ -18,7 +21,8 @@ function SecurityPage() {
 
 	const report = usePasswordSecurity(deferredItems);
 
-	// Extract unique vaults from items for the security dashboard
+	// The Vault labels the report filters by. They ride on the Items the Runtime
+	// published, so the report never asks a second source what a Vault is called.
 	const vaults = useMemo(() => {
 		const vaultMap = new Map<string, { id: string; name: string }>();
 		for (const item of items) {

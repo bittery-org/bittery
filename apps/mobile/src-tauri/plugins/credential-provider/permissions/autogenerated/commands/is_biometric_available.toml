@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-is-biometric-available"
+description = "Enables the is_biometric_available command without any pre-configured scope."
+commands.allow = ["is_biometric_available"]
+
+[[permission]]
+identifier = "deny-is-biometric-available"
+description = "Denies the is_biometric_available command without any pre-configured scope."
+commands.deny = ["is_biometric_available"]

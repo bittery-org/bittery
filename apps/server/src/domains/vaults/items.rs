@@ -6,29 +6,36 @@ use time::OffsetDateTime;
 
 use super::{
     access::{
-        assert_item_read_access, assert_item_write_access, insert_item_sync_event, load_item_row,
+        assert_item_read_access, find_item_row, find_vault_access, insert_item_sync_event,
         load_vault_access,
     },
     attachments::load_item_attachments,
     pagination::{bounded_page_ids, ByteBoundedPage, ItemPageWeight, ITEM_PAGE_QUERY_BYTES},
 };
 use super::{
-    BulkImportItemsInput, BulkImportItemsResponse, CreateItemInput, CreateItemResponse,
-    DeletedVaultItemWithVaultResponse, ItemClientInput, ItemIdInput, MoveItemInput,
-    SuccessResponse, ToggleFavoriteInput, UpdateItemInput, UpdateItemResponse, VaultIdInput,
-    VaultItemDetailsResponse, VaultItemResponse, VaultItemWithVaultResponse, VaultSummaryResponse,
+    CreateItemEffectInput, DeletedVaultItemWithVaultResponse, FavoriteItemEffectInput,
+    ImportItemsOperationInput, ItemEffect, ItemEffectInput, ItemIdInput, MoveItemEffectInput,
+    UpdateItemEffectInput, VaultIdInput, VaultItemDetailsResponse, VaultItemResponse,
+    VaultItemWithVaultResponse, VaultSummaryResponse,
 };
 use crate::{
     config::DeploymentMode,
-    db::events::{generate_resource_id, insert_audit_event, insert_sync_event},
+    db::events::{
+        begin_sync_event_transaction, generate_resource_id, insert_audit_event, insert_sync_event,
+        insert_user_sync_event,
+    },
     db::{
-        enums::{SyncEntityType, SyncEventType},
+        enums::{OperationRejectionCode, SyncEntityType, SyncEventType},
         models::{DbBootstrapItemRow, DbBootstrapVaultAccessRow, BOOTSTRAP_ITEM_COLUMNS},
     },
     domains::billing::entitlements::attachments_enabled_for_user,
+    domains::operations::{
+        import_items_operation_fingerprint, import_items_rejection_code, ImportItemsAppliedPayload,
+        ImportItemsOperationResult, OperationResolution,
+    },
     error::AppError,
     integrations::storage,
-    shared::transaction::database_error,
+    shared::transaction::{acquire_operation_lock, database_error},
 };
 
 pub(crate) async fn list_vault_items_page(
@@ -325,163 +332,389 @@ pub(crate) async fn get_vault_item(
     })
 }
 
-pub(crate) async fn create_vault_item(
-    pool: &PgPool,
+pub(crate) async fn apply_create_item(
+    transaction: &mut Transaction<'_, Postgres>,
     user_id: &str,
-    input: CreateItemInput,
-) -> Result<CreateItemResponse, AppError> {
-    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Read-only access cannot create items")?;
-    let item_id = input
-        .item_id
-        .clone()
-        .unwrap_or_else(|| generate_resource_id("item"));
-    let version = 1;
-    let mut transaction = pool
-        .begin()
+    input: CreateItemEffectInput,
+) -> Result<ItemEffect, AppError> {
+    let mut rejection = if input.encrypted_data.len() > input.ciphertext_limit {
+        Some(OperationRejectionCode::InvalidCiphertext)
+    } else {
+        writable_vault_rejection(
+            &mut **transaction,
+            &input.vault_id,
+            user_id,
+            OperationRejectionCode::VaultAccessDenied,
+            OperationRejectionCode::VaultReadOnly,
+        )
+        .await?
+    };
+
+    if rejection.is_none() {
+        let inserted = query(
+            "INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, 1, 1, $7, $7) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(&input.item_id)
+        .bind(&input.vault_id)
+        .bind(input.category)
+        .bind(&input.encrypted_data)
+        .bind(&input.encryption_iv)
+        .bind(&input.encryption_algorithm)
+        .bind(user_id)
+        .execute(&mut **transaction)
         .await
-        .map_err(|error| database_error(error, "Failed to start item transaction"))?;
-    query(
-		"INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, $7, $8, $8)",
-	)
-	.bind(&item_id)
-	.bind(&input.vault_id)
-	.bind(input.category)
-	.bind(&input.encrypted_data)
-	.bind(&input.encryption_iv)
-	.bind(&input.encryption_algorithm)
-	.bind(version)
-	.bind(user_id)
-	.execute(&mut *transaction)
-	.await
-	.map_err(|error| database_error(error, "Failed to create item"))?;
+        .map_err(|error| database_error(error, "Failed to create Item"))?;
+        if inserted.rows_affected() == 0 {
+            rejection = Some(OperationRejectionCode::ItemIdConflict);
+        }
+    }
+
+    if let Some(code) = rejection {
+        return reject_item_operation(
+            transaction,
+            "item_create_rejected",
+            &input.item_id,
+            user_id,
+            Some(&input.vault_id),
+            code,
+        )
+        .await;
+    }
+
+    let version = 1;
+    insert_item_audit_log(
+        &mut **transaction,
+        "item_created",
+        &input.item_id,
+        user_id,
+        Some(json!({ "vaultId": input.vault_id, "category": input.category })),
+    )
+    .await?;
     insert_item_sync_event(
-        &mut *transaction,
+        transaction,
         SyncEventType::ItemCreated,
-        &item_id,
+        &input.item_id,
         &input.vault_id,
         user_id,
         input.client_id.as_deref(),
         version,
     )
     .await?;
-    insert_item_audit_log(
-        &mut *transaction,
-        "item_created",
-        &item_id,
-        user_id,
-        Some(json!({ "vaultId": input.vault_id, "category": input.category })),
-    )
-    .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item creation"))?;
-
-    Ok(CreateItemResponse {
-        item_id: item_id.clone(),
-        id: item_id,
+    Ok(ItemEffect::Applied {
+        item_id: input.item_id,
+        version,
     })
 }
 
-pub(crate) async fn bulk_import_vault_items(
+/// Runs one Import batch to a terminal answer, exactly once per `(User, Operation ID)`.
+///
+/// Import retains an applied *payload* rather than an entity identity and version, so it follows
+/// the create-Vault Operation shape: validate, fingerprint, lock the Operation, probe the retained
+/// answer, then apply or reject inside the one transaction that also writes `operation_resolved`.
+/// The Vault access check lives inside that transaction on purpose — a check taken outside it
+/// could let one replay answer differently from the batch it is replaying.
+pub(crate) async fn execute_import_items_operation(
     pool: &PgPool,
     user_id: &str,
-    input: BulkImportItemsInput,
-) -> Result<BulkImportItemsResponse, AppError> {
-    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Read-only access cannot create items")?;
-    if input.items.is_empty() {
-        return Ok(BulkImportItemsResponse {
-            success: true,
-            imported_count: 0,
-            item_ids: Vec::new(),
+    input: ImportItemsOperationInput,
+) -> Result<OperationResolution, AppError> {
+    let fingerprint = import_items_operation_fingerprint(&input.vault_id, &input.raw_body);
+    let mut transaction = begin_sync_event_transaction(pool)
+        .await
+        .map_err(|error| database_error(error, "Failed to start Import Operation"))?;
+    acquire_operation_lock(
+        &mut *transaction,
+        user_id,
+        &input.operation_id,
+        "Failed to serialize Import Operation",
+    )
+    .await?;
+    if let Some(existing) = query_as::<_, (Vec<u8>,)>(
+        "SELECT request_fingerprint FROM operation_outcome WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to load Import outcome"))?
+    {
+        if existing.0 != fingerprint {
+            transaction.rollback().await.ok();
+            return Ok(OperationResolution::IdReused);
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| database_error(error, "Failed to replay Import outcome"))?;
+        let outcome =
+            crate::domains::operations::get_operation_outcome(pool, user_id, &input.operation_id)
+                .await?
+                .ok_or_else(|| AppError::internal("Retained Import outcome disappeared"))?;
+        return Ok(OperationResolution::Outcome {
+            outcome,
+            newly_committed: false,
         });
     }
-    if input.items.len() > 200 {
-        return Err(AppError::bad_request(
-            "Cannot import more than 200 items at once",
-        ));
-    }
 
-    let item_ids: Vec<String> = input
-        .items
-        .iter()
-        .map(|item| item.item_id.clone())
-        .collect();
-    let unique_ids: std::collections::HashSet<&str> =
-        item_ids.iter().map(std::string::String::as_str).collect();
-    if unique_ids.len() != item_ids.len() {
-        return Err(AppError::bad_request(
-            "Duplicate item IDs in import payload",
-        ));
-    }
-
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Failed to start bulk import transaction"))?;
-    for item in &input.items {
-        query(
-			"INSERT INTO item (id, vault_id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, 1, 1, $8, $8)",
-		)
-		.bind(&item.item_id)
-		.bind(&input.vault_id)
-		.bind(item.category)
-		.bind(item.favorite.unwrap_or(false))
-		.bind(&item.encrypted_data)
-		.bind(&item.encryption_iv)
-		.bind(&item.encryption_algorithm)
-		.bind(user_id)
-		.execute(&mut *transaction)
-		.await
-		.map_err(|error| database_error(error, "Failed to import vault items"))?;
-    }
-    insert_bulk_import_sync_event(
+    let result = apply_import_items(&mut transaction, user_id, &input, &fingerprint).await?;
+    insert_user_sync_event(
         &mut transaction,
-        &input.vault_id,
+        SyncEventType::OperationResolved,
+        &input.operation_id,
+        SyncEntityType::Operation,
         user_id,
+        1,
         input.client_id.as_deref(),
-        json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
-    )
-    .await?;
-    insert_bulk_import_audit_event(
-        &mut *transaction,
-        "vault_updated",
-        &input.vault_id,
-        user_id,
-        json!({ "reason": "bulk_import", "importedCount": item_ids.len() }),
+        None,
     )
     .await?;
     transaction
         .commit()
         .await
-        .map_err(|error| database_error(error, "Failed to commit bulk import"))?;
-
-    Ok(BulkImportItemsResponse {
-        success: true,
-        imported_count: item_ids.len(),
-        item_ids,
+        .map_err(|error| database_error(error, "Failed to commit Import Operation"))?;
+    Ok(OperationResolution::Outcome {
+        outcome: crate::domains::operations::OperationOutcome::new_import_items(
+            input.operation_id,
+            result,
+        ),
+        newly_committed: true,
     })
 }
 
-pub(crate) async fn update_vault_item(
+/// Decides one Import batch inside the caller's Operation transaction and retains the answer.
+///
+/// Every refusal here is a terminal semantic rejection, never a transport error: the request was
+/// well formed and authenticated, and the Server decided. Only a database failure leaves through
+/// `Err`, and that rolls the whole Operation back without retaining anything.
+async fn apply_import_items(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    input: &ImportItemsOperationInput,
+    fingerprint: &[u8; 32],
+) -> Result<ImportItemsOperationResult, AppError> {
+    let mut rejection = if input
+        .items
+        .iter()
+        .any(|item| oversized(Some(&item.encrypted_data), input.ciphertext_limit))
+    {
+        Some(OperationRejectionCode::InvalidCiphertext)
+    } else {
+        writable_vault_rejection(
+            &mut **transaction,
+            &input.vault_id,
+            user_id,
+            OperationRejectionCode::VaultAccessDenied,
+            OperationRejectionCode::VaultReadOnly,
+        )
+        .await?
+    };
+
+    if rejection.is_none() && !input.items.is_empty() {
+        // One statement inserts the whole batch, and a savepoint keeps it all-or-nothing.
+        //
+        // `ON CONFLICT DO NOTHING` answers both ways an identity can already be taken: an Item
+        // that exists in any Vault, and a second occurrence of the same ID inside these frozen
+        // bytes. The Server cannot tell those apart at commit time and must not answer one
+        // collision two ways, so both are `ItemIdConflict` — a retained, replayable decision
+        // rather than a request error the Runtime would retry forever. Anything skipped means the
+        // batch is not the complete set the caller asked for, so the savepoint discards the rest.
+        let mut batch = sqlx::Acquire::begin(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to open the Import batch savepoint"))?;
+        let inserted = query(
+            r#"INSERT INTO item (id, vault_id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by)
+            SELECT draft.id, $1, draft.category::item_category, draft.favorite, draft.encrypted_data, draft.encryption_iv, draft.encryption_algorithm, 1, 1, $2, $2
+            FROM UNNEST($3::text[], $4::text[], $5::bool[], $6::text[], $7::text[], $8::text[])
+                AS draft(id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm)
+            ON CONFLICT (id) DO NOTHING"#,
+        )
+        .bind(&input.vault_id)
+        .bind(user_id)
+        .bind(input.items.iter().map(|item| item.item_id.clone()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.category.as_str().to_owned()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.favorite.unwrap_or(false)).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.encrypted_data.clone()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.encryption_iv.clone()).collect::<Vec<_>>())
+        .bind(input.items.iter().map(|item| item.encryption_algorithm.clone()).collect::<Vec<_>>())
+        .execute(&mut *batch)
+        .await
+        .map_err(|error| database_error(error, "Failed to import Vault Items"))?;
+        if inserted.rows_affected() == input.items.len() as u64 {
+            batch
+                .commit()
+                .await
+                .map_err(|error| database_error(error, "Failed to close the Import batch"))?;
+        } else {
+            batch.rollback().await.map_err(|error| {
+                database_error(error, "Failed to discard the conflicted Import batch")
+            })?;
+            rejection = Some(OperationRejectionCode::ItemIdConflict);
+        }
+    }
+
+    if let Some(code) = rejection {
+        // The rejection audit row every sibling Operation writes: `vault_create_rejected` in
+        // `catalog.rs`, `share_create_rejected` in `operations/mod.rs`, `item_create_rejected`
+        // above. It records that the Server decided and why.
+        //
+        // It is on the Operation, not on the Vault, and its action is not `vault_updated`. That
+        // keeps it strictly separate from the applied batch's Vault audit row, so "an applied
+        // empty batch writes no audit and no `vault_updated`" stays exactly true.
+        insert_audit_event(
+            &mut **transaction,
+            &generate_resource_id("audit"),
+            user_id,
+            "item_import_rejected",
+            "operation",
+            &input.operation_id,
+            Some(json!({ "vaultId": input.vault_id, "code": code.as_str() })),
+        )
+        .await?;
+        query(
+            "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, rejection_code) VALUES ($1, $2, 'import_items', $3, 'rejected', $4::operation_rejection_code)",
+        )
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .bind(fingerprint.as_slice())
+        .bind(code)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to retain rejected Import outcome"))?;
+        return Ok(ImportItemsOperationResult::Rejected {
+            code: import_items_rejection_code(code)?,
+        });
+    }
+
+    let imported_count = input.items.len();
+    // An applied empty batch is a decision about the Vault, not a change to it: no Item moved, so
+    // no audit row and no `vault_updated` may claim one did.
+    if imported_count > 0 {
+        let metadata = json!({ "reason": "bulk_import", "importedCount": imported_count });
+        insert_bulk_import_sync_event(
+            transaction,
+            &input.vault_id,
+            user_id,
+            input.client_id.as_deref(),
+            metadata.clone(),
+        )
+        .await?;
+        insert_bulk_import_audit_event(
+            &mut **transaction,
+            "vault_updated",
+            &input.vault_id,
+            user_id,
+            metadata,
+        )
+        .await?;
+    }
+    let imported_count = i32::try_from(imported_count)
+        .map_err(|_| AppError::internal("Import batch size is out of range"))?;
+    let payload = serde_json::to_value(ImportItemsAppliedPayload {
+        vault_id: input.vault_id.clone(),
+        imported_count,
+    })
+    .map_err(|_| AppError::internal("Failed to encode Import outcome"))?;
+    query(
+        "INSERT INTO operation_outcome (user_id, operation_id, operation_kind, request_fingerprint, result_status, applied_payload) VALUES ($1, $2, 'import_items', $3, 'applied', $4)",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .bind(fingerprint.as_slice())
+    .bind(payload)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to retain applied Import outcome"))?;
+    Ok(ImportItemsOperationResult::Applied {
+        vault_id: input.vault_id.clone(),
+        imported_count,
+    })
+}
+
+/// Reads the authoritative state of an explicit set of Item identities inside one Vault.
+///
+/// Ordered by identity so one page's last ID is a cursor the next page strictly advances past.
+/// Identities outside this Vault, and identities that do not exist, simply do not answer.
+pub(crate) async fn list_vault_item_authority_page(
     pool: &PgPool,
     user_id: &str,
-    input: UpdateItemInput,
-) -> Result<UpdateItemResponse, AppError> {
-    let existing_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Access denied")?;
-    let expected_version = input.expected_version.unwrap_or(existing_item.version);
+    vault_id: &str,
+    item_ids: &[String],
+    after_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<VaultItemResponse>, AppError> {
+    assert_item_read_access(pool, vault_id, user_id).await?;
+    let rows = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE vault_id = $1 AND id = ANY($2) AND ($3::text IS NULL OR id > $3) ORDER BY id LIMIT $4"
+    ))
+    .bind(vault_id)
+    .bind(item_ids)
+    .bind(after_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| database_error(error, "Failed to load the Item authority page"))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| VaultItemResponse::compose(row.into()))
+        .collect())
+}
+
+/// Applies one Item update inside the caller's Operation transaction, or proves why it cannot.
+///
+/// Every refusal on this path is a terminal semantic rejection, never a transport error: the
+/// request was well formed and authenticated, and the Server decided. Only a database failure
+/// leaves through `Err`, and that rolls the whole Operation back without retaining anything.
+pub(crate) async fn apply_update_item(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    input: UpdateItemEffectInput,
+) -> Result<ItemEffect, AppError> {
+    const REJECTED: &str = "item_update_rejected";
+    if oversized(input.encrypted_data.as_deref(), input.ciphertext_limit) {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            None,
+            OperationRejectionCode::InvalidCiphertext,
+        )
+        .await;
+    }
+    let Some(existing_item) = find_item_row(&mut **transaction, &input.item_id).await? else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            None,
+            OperationRejectionCode::ItemNotFound,
+        )
+        .await;
+    };
+    if let Some(code) = writable_vault_rejection(
+        &mut **transaction,
+        &existing_item.vault_id,
+        user_id,
+        OperationRejectionCode::VaultAccessDenied,
+        OperationRejectionCode::VaultReadOnly,
+    )
+    .await?
+    {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            code,
+        )
+        .await;
+    }
+
     let updates_ciphertext = input.encrypted_data.is_some()
         || input.encryption_iv.is_some()
         || input.encryption_algorithm.is_some();
-
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Failed to start item update transaction"))?;
     let new_version = query_scalar::<_, i32>(
 		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = version + 1, encryption_version = CASE WHEN $4 THEN version + 1 ELSE encryption_version END, encrypted_by_user_id = CASE WHEN $4 THEN $5 ELSE encrypted_by_user_id END, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
@@ -492,13 +725,23 @@ pub(crate) async fn update_vault_item(
 	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
-	.bind(expected_version)
-	.fetch_optional(&mut *transaction)
+	.bind(input.expected_version)
+	.fetch_optional(&mut **transaction)
 	.await
-	.map_err(|error| database_error(error, "Failed to update item"))?
-    .ok_or_else(item_version_conflict)?;
+	.map_err(|error| database_error(error, "Failed to update item"))?;
+    let Some(new_version) = new_version else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemVersionConflict,
+        )
+        .await;
+    };
     insert_item_sync_event(
-        &mut *transaction,
+        transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
@@ -507,48 +750,113 @@ pub(crate) async fn update_vault_item(
         new_version,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item update"))?;
 
-    Ok(UpdateItemResponse {
-        success: true,
+    Ok(ItemEffect::Applied {
+        item_id: input.item_id,
         version: new_version,
     })
 }
 
-fn item_version_conflict() -> AppError {
-    AppError::conflict("Item has been modified by another client")
+/// Whether a ciphertext the caller supplied exceeds the Item ciphertext budget.
+pub(super) fn oversized(value: Option<&str>, limit: usize) -> bool {
+    value.is_some_and(|value| value.len() > limit)
 }
 
-pub(crate) async fn toggle_vault_favorite(
-    pool: &PgPool,
+/// The Vault-level refusal that stops a write, if there is one.
+async fn writable_vault_rejection<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
+    vault_id: &str,
     user_id: &str,
-    input: ToggleFavoriteInput,
-) -> Result<SuccessResponse, AppError> {
-    let existing_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Access denied")?;
+    denied: OperationRejectionCode,
+    read_only: OperationRejectionCode,
+) -> Result<Option<OperationRejectionCode>, AppError> {
+    Ok(
+        match find_vault_access(executor, vault_id, user_id).await? {
+            None => Some(denied),
+            Some(access) if !access.role.can_write() => Some(read_only),
+            Some(_) => None,
+        },
+    )
+}
 
-    let expected_version = input.expected_version.unwrap_or(existing_item.version);
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Failed to start favorite update transaction"))?;
+/// Records the rejection audit that proves the Server decided, and reports the closed code.
+async fn reject_item_operation(
+    transaction: &mut Transaction<'_, Postgres>,
+    action: &str,
+    item_id: &str,
+    user_id: &str,
+    vault_id: Option<&str>,
+    code: OperationRejectionCode,
+) -> Result<ItemEffect, AppError> {
+    let metadata = match vault_id {
+        Some(vault_id) => json!({ "vaultId": vault_id, "code": code }),
+        None => json!({ "code": code }),
+    };
+    insert_item_audit_log(&mut **transaction, action, item_id, user_id, Some(metadata)).await?;
+    Ok(ItemEffect::Rejected(code))
+}
+
+/// Applies one favorite change inside the caller's Operation transaction, or proves why it cannot.
+pub(crate) async fn apply_set_item_favorite(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    input: FavoriteItemEffectInput,
+) -> Result<ItemEffect, AppError> {
+    const REJECTED: &str = "item_favorite_rejected";
+    let Some(existing_item) = find_item_row(&mut **transaction, &input.item_id).await? else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            None,
+            OperationRejectionCode::ItemNotFound,
+        )
+        .await;
+    };
+    if let Some(code) = writable_vault_rejection(
+        &mut **transaction,
+        &existing_item.vault_id,
+        user_id,
+        OperationRejectionCode::VaultAccessDenied,
+        OperationRejectionCode::VaultReadOnly,
+    )
+    .await?
+    {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            code,
+        )
+        .await;
+    }
+
     let new_version = query_scalar::<_, i32>(
         "UPDATE item SET favorite = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND version = $4 RETURNING version",
     )
         .bind(input.favorite)
         .bind(OffsetDateTime::now_utc())
         .bind(&input.item_id)
-        .bind(expected_version)
-        .fetch_optional(&mut *transaction)
+        .bind(input.expected_version)
+        .fetch_optional(&mut **transaction)
         .await
-        .map_err(|error| database_error(error, "Failed to update favorite state"))?
-        .ok_or_else(item_version_conflict)?;
+        .map_err(|error| database_error(error, "Failed to update favorite state"))?;
+    let Some(new_version) = new_version else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemVersionConflict,
+        )
+        .await;
+    };
     insert_item_sync_event(
-        &mut *transaction,
+        transaction,
         SyncEventType::ItemUpdated,
         &input.item_id,
         &existing_item.vault_id,
@@ -557,28 +865,51 @@ pub(crate) async fn toggle_vault_favorite(
         new_version,
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit favorite update"))?;
 
-    Ok(SuccessResponse { success: true })
+    Ok(ItemEffect::Applied {
+        item_id: input.item_id,
+        version: new_version,
+    })
 }
 
-pub(crate) async fn delete_vault_item(
-    pool: &PgPool,
+/// Moves one Item to the Trash inside the caller's Operation transaction, or proves why it cannot.
+pub(crate) async fn apply_trash_item(
+    transaction: &mut Transaction<'_, Postgres>,
     user_id: &str,
-    input: ItemClientInput,
-) -> Result<SuccessResponse, AppError> {
-    let existing_item = load_item_row(pool, &input.item_id).await?;
-    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Access denied")?;
-    let expected_version = input.expected_version.unwrap_or(existing_item.version);
+    input: ItemEffectInput,
+) -> Result<ItemEffect, AppError> {
+    const REJECTED: &str = "item_delete_rejected";
+    let Some(existing_item) = find_item_row(&mut **transaction, &input.item_id).await? else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            None,
+            OperationRejectionCode::ItemNotFound,
+        )
+        .await;
+    };
+    if let Some(code) = writable_vault_rejection(
+        &mut **transaction,
+        &existing_item.vault_id,
+        user_id,
+        OperationRejectionCode::VaultAccessDenied,
+        OperationRejectionCode::VaultReadOnly,
+    )
+    .await?
+    {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            code,
+        )
+        .await;
+    }
 
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Failed to start item delete transaction"))?;
     let new_version = query_scalar::<_, i32>(
         "UPDATE item SET deleted_at = $1, version = version + 1, last_modified_by = $2, updated_at = $3 WHERE id = $4 AND version = $5 RETURNING version",
     )
@@ -586,13 +917,23 @@ pub(crate) async fn delete_vault_item(
         .bind(user_id)
         .bind(OffsetDateTime::now_utc())
         .bind(&input.item_id)
-        .bind(expected_version)
-        .fetch_optional(&mut *transaction)
+        .bind(input.expected_version)
+        .fetch_optional(&mut **transaction)
         .await
-        .map_err(|error| database_error(error, "Failed to delete item"))?
-        .ok_or_else(item_version_conflict)?;
+        .map_err(|error| database_error(error, "Failed to delete item"))?;
+    let Some(new_version) = new_version else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemVersionConflict,
+        )
+        .await;
+    };
     insert_item_sync_event(
-        &mut *transaction,
+        transaction,
         SyncEventType::ItemDeleted,
         &input.item_id,
         &existing_item.vault_id,
@@ -602,19 +943,18 @@ pub(crate) async fn delete_vault_item(
     )
     .await?;
     insert_item_audit_log(
-        &mut *transaction,
+        &mut **transaction,
         "item_deleted",
         &input.item_id,
         user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": new_version })),
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item delete"))?;
 
-    Ok(SuccessResponse { success: true })
+    Ok(ItemEffect::Applied {
+        item_id: input.item_id,
+        version: new_version,
+    })
 }
 
 pub(crate) async fn list_deleted_vault_items_page(
@@ -681,36 +1021,78 @@ pub(crate) async fn list_deleted_vault_items_page(
     })
 }
 
-pub(crate) async fn restore_vault_item(
-    pool: &PgPool,
+/// Restores one trashed Item inside the caller's Operation transaction, or proves why it cannot.
+pub(crate) async fn apply_restore_item(
+    transaction: &mut Transaction<'_, Postgres>,
     user_id: &str,
-    input: ItemClientInput,
-) -> Result<SuccessResponse, AppError> {
-    let existing_item = load_item_row(pool, &input.item_id).await?;
+    input: ItemEffectInput,
+) -> Result<ItemEffect, AppError> {
+    const REJECTED: &str = "item_restore_rejected";
+    let Some(existing_item) = find_item_row(&mut **transaction, &input.item_id).await? else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            None,
+            OperationRejectionCode::ItemNotFound,
+        )
+        .await;
+    };
     if existing_item.deleted_at.is_none() {
-        return Err(AppError::bad_request("Item is not deleted"));
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemNotTrashed,
+        )
+        .await;
     }
-    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Access denied")?;
-    let expected_version = input.expected_version.unwrap_or(existing_item.version);
+    if let Some(code) = writable_vault_rejection(
+        &mut **transaction,
+        &existing_item.vault_id,
+        user_id,
+        OperationRejectionCode::VaultAccessDenied,
+        OperationRejectionCode::VaultReadOnly,
+    )
+    .await?
+    {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            code,
+        )
+        .await;
+    }
 
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| database_error(error, "Failed to start item restore transaction"))?;
     let new_version = query_scalar::<_, i32>(
         "UPDATE item SET deleted_at = NULL, version = version + 1, last_modified_by = $1, updated_at = $2 WHERE id = $3 AND version = $4 RETURNING version",
     )
     .bind(user_id)
     .bind(OffsetDateTime::now_utc())
     .bind(&input.item_id)
-    .bind(expected_version)
-    .fetch_optional(&mut *transaction)
+    .bind(input.expected_version)
+    .fetch_optional(&mut **transaction)
     .await
-    .map_err(|error| database_error(error, "Failed to restore item"))?
-    .ok_or_else(item_version_conflict)?;
+    .map_err(|error| database_error(error, "Failed to restore item"))?;
+    let Some(new_version) = new_version else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemVersionConflict,
+        )
+        .await;
+    };
     insert_item_sync_event(
-        &mut *transaction,
+        transaction,
         SyncEventType::ItemRestored,
         &input.item_id,
         &existing_item.vault_id,
@@ -720,67 +1102,378 @@ pub(crate) async fn restore_vault_item(
     )
     .await?;
     insert_item_audit_log(
-        &mut *transaction,
+        &mut **transaction,
         "item_restored",
         &input.item_id,
         user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": new_version })),
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item restore"))?;
 
-    Ok(SuccessResponse { success: true })
+    Ok(ItemEffect::Applied {
+        item_id: input.item_id,
+        version: new_version,
+    })
 }
 
-pub(crate) async fn move_vault_item(
-    pool: &PgPool,
+async fn reject_move_operation(
+    transaction: &mut Transaction<'_, Postgres>,
     user_id: &str,
-    input: MoveItemInput,
-) -> Result<UpdateItemResponse, AppError> {
-    let existing_item = load_item_row(pool, &input.item_id).await?;
+    operation_id: &str,
+    has_staging: bool,
+    item_id: &str,
+    vault_id: Option<&str>,
+    code: OperationRejectionCode,
+) -> Result<ItemEffect, AppError> {
+    if has_staging {
+        enqueue_attachment_move_staging_cleanup(transaction, user_id, operation_id).await?;
+    }
+    delete_attachment_move_generation(transaction, user_id, operation_id).await?;
+    reject_item_operation(
+        transaction,
+        "item_move_rejected",
+        item_id,
+        user_id,
+        vault_id,
+        code,
+    )
+    .await
+}
+
+/// Moves one Item between Vaults inside the caller's Operation transaction, or proves why it cannot.
+///
+/// A move is the one Item Operation with two Vaults, so the destination keeps its own refusals.
+/// Collapsing them into the source codes would tell a client to look at the wrong Vault.
+pub(crate) async fn apply_move_item(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    input: MoveItemEffectInput,
+) -> Result<ItemEffect, AppError> {
+    crate::shared::transaction::acquire_item_attachment_writer_lock(
+        &mut **transaction,
+        &input.item_id,
+        "Failed to lock Item Attachment writer",
+    )
+    .await?;
+    let has_staging = query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2)",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to inspect Attachment Move staging"))?;
+    let prepared = match &input.finalization {
+        super::MoveItemFinalizationInput::Prepared {
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+            attachments,
+        } => Some((
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+            attachments,
+        )),
+        super::MoveItemFinalizationInput::RejectStaleAuthority { .. } => None,
+    };
+    if prepared.is_some_and(|(encrypted_data, _, _, _)| {
+        oversized(Some(encrypted_data), input.ciphertext_limit)
+    }) {
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            None,
+            OperationRejectionCode::InvalidCiphertext,
+        )
+        .await;
+    }
+    let Some(existing_item) = find_item_row(&mut **transaction, &input.item_id).await? else {
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            None,
+            OperationRejectionCode::ItemNotFound,
+        )
+        .await;
+    };
     if existing_item.vault_id != input.source_vault_id {
-        return Err(AppError::bad_request(
-            "Item does not belong to the source vault",
-        ));
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::SourceVaultMismatch,
+        )
+        .await;
     }
     if existing_item.deleted_at.is_some() {
-        return Err(AppError::bad_request(
-            "Cannot move items that are in trash. Restore first.",
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemTrashed,
+        )
+        .await;
+    }
+    if let Some(code) = writable_vault_rejection(
+        &mut **transaction,
+        &input.source_vault_id,
+        user_id,
+        OperationRejectionCode::VaultAccessDenied,
+        OperationRejectionCode::VaultReadOnly,
+    )
+    .await?
+    {
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            Some(&input.source_vault_id),
+            code,
+        )
+        .await;
+    }
+    if let Some(code) = writable_vault_rejection(
+        &mut **transaction,
+        &input.target_vault_id,
+        user_id,
+        OperationRejectionCode::TargetVaultAccessDenied,
+        OperationRejectionCode::TargetVaultReadOnly,
+    )
+    .await?
+    {
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            Some(&input.target_vault_id),
+            code,
+        )
+        .await;
+    }
+
+    let current_attachments = query_as::<_, (String, i32, String)>(
+        "SELECT id, envelope_version, storage_key FROM item_attachment WHERE item_id = $1 ORDER BY id FOR UPDATE",
+    )
+    .bind(&input.item_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to lock Move Attachments"))?;
+    let mut expected_attachments = match &input.finalization {
+        super::MoveItemFinalizationInput::Prepared { attachments, .. } => attachments
+            .iter()
+            .map(|attachment| {
+                (
+                    attachment.attachment_id.clone(),
+                    attachment.expected_envelope_version,
+                )
+            })
+            .collect::<Vec<_>>(),
+        super::MoveItemFinalizationInput::RejectStaleAuthority { attachments } => attachments
+            .iter()
+            .map(|attachment| {
+                (
+                    attachment.attachment_id.clone(),
+                    attachment.expected_envelope_version,
+                )
+            })
+            .collect::<Vec<_>>(),
+    };
+    expected_attachments.sort();
+    let current_identity = current_attachments
+        .iter()
+        .map(|(id, version, _)| (id.clone(), *version))
+        .collect::<Vec<_>>();
+    if matches!(
+        &input.finalization,
+        super::MoveItemFinalizationInput::RejectStaleAuthority { .. }
+    ) {
+        if existing_item.version != input.expected_version {
+            return reject_move_operation(
+                transaction,
+                user_id,
+                &input.operation_id,
+                has_staging,
+                &input.item_id,
+                Some(&input.source_vault_id),
+                OperationRejectionCode::ItemVersionConflict,
+            )
+            .await;
+        }
+        if current_identity != expected_attachments {
+            return reject_move_operation(
+                transaction,
+                user_id,
+                &input.operation_id,
+                has_staging,
+                &input.item_id,
+                Some(&input.source_vault_id),
+                OperationRejectionCode::AttachmentStateConflict,
+            )
+            .await;
+        }
+        return Err(AppError::attachment_staging_incomplete(
+            "Attachment Move preparation is still required.",
         ));
     }
-    let source_access = load_vault_access(pool, &input.source_vault_id, user_id).await?;
-    assert_item_write_access(
-        source_access.role,
-        "Cannot move items from a read-only vault",
-    )?;
-    let target_access = load_vault_access(pool, &input.target_vault_id, user_id).await?;
-    assert_item_write_access(target_access.role, "Cannot move items to a read-only vault")?;
-    let expected_version = input.expected_version.unwrap_or(existing_item.version);
-
-    let mut transaction = pool
-        .begin()
+    let manifest = query_as::<_, (String, String, String)>(
+        "SELECT item_id, source_vault_id, target_vault_id FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2 AND expires_at > $3",
+    )
+    .bind(user_id)
+    .bind(&input.operation_id)
+    .bind(OffsetDateTime::now_utc())
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to validate Attachment Move manifest"))?;
+    let (_, _, _, attachments) = prepared.expect("prepared Move checked above");
+    if !attachments.is_empty() {
+        let manifest_attachments = query_as::<_, (String, i32)>(
+            "SELECT attachment_id, expected_envelope_version FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ORDER BY attachment_id",
+        )
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .fetch_all(&mut **transaction)
         .await
-        .map_err(|error| database_error(error, "Failed to start item move transaction"))?;
+        .map_err(|error| database_error(error, "Failed to validate Attachment Move intent"))?;
+        let Some((manifest_item_id, manifest_source_id, manifest_target_id)) = manifest else {
+            return Err(AppError::attachment_staging_incomplete(
+                "Attachment Move staging is missing, expired, or incomplete.",
+            ));
+        };
+        let manifest_intent_matches = manifest_item_id == input.item_id
+            && manifest_source_id == input.source_vault_id
+            && manifest_target_id == input.target_vault_id
+            && manifest_attachments == expected_attachments;
+        if !manifest_intent_matches {
+            return Err(AppError::attachment_staging_mismatch(
+                "Attachment Move Finalize intent does not match its manifest.",
+            ));
+        }
+    }
+    if current_identity != expected_attachments {
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            Some(&input.source_vault_id),
+            OperationRejectionCode::AttachmentStateConflict,
+        )
+        .await;
+    }
+    let (encrypted_data, encryption_iv, encryption_algorithm, attachments) =
+        prepared.expect("prepared Move checked above");
     let new_version = query_scalar::<_, i32>(
 		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = $4, version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $5, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
 	.bind(&input.target_vault_id)
-	.bind(&input.encrypted_data)
-	.bind(&input.encryption_iv)
-	.bind(&input.encryption_algorithm)
+	.bind(encrypted_data)
+	.bind(encryption_iv)
+	.bind(encryption_algorithm)
 	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
-	.bind(expected_version)
-	.fetch_optional(&mut *transaction)
+	.bind(input.expected_version)
+	.fetch_optional(&mut **transaction)
 	.await
-	.map_err(|error| database_error(error, "Failed to move item"))?
-    .ok_or_else(item_version_conflict)?;
+	.map_err(|error| database_error(error, "Failed to move item"))?;
+    let Some(new_version) = new_version else {
+        return reject_move_operation(
+            transaction,
+            user_id,
+            &input.operation_id,
+            has_staging,
+            &input.item_id,
+            Some(&input.source_vault_id),
+            OperationRejectionCode::ItemVersionConflict,
+        )
+        .await;
+    };
+    for attachment in attachments {
+        let staged = query_as::<_, (String, i64)>(
+            "SELECT storage_key, storage_size FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 AND attachment_id = $3 AND expected_envelope_version = $4",
+        )
+        .bind(user_id)
+        .bind(&input.operation_id)
+        .bind(&attachment.attachment_id)
+        .bind(attachment.expected_envelope_version)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to resolve staged Attachment"))?;
+        let Some((staged_storage_key, staged_storage_size)) = staged else {
+            return Err(AppError::internal(
+                "Verified Attachment Move staging disappeared",
+            ));
+        };
+        let updated = query(
+            "UPDATE item_attachment SET vault_id = $1, storage_key = $2, encrypted_attachment_key = $3, attachment_key_iv = $4, attachment_key_algorithm = $5, envelope_version = envelope_version + 1, encrypted_name = $6, encrypted_content_type = $7, encryption_iv = $8, encrypted_content_type_iv = $9, encryption_algorithm = $10, storage_size = $11 WHERE id = $12 AND item_id = $13 AND envelope_version = $14",
+        )
+        .bind(&input.target_vault_id)
+        .bind(staged_storage_key)
+        .bind(&attachment.encrypted_attachment_key)
+        .bind(&attachment.attachment_key_iv)
+        .bind(&attachment.attachment_key_algorithm)
+        .bind(&attachment.encrypted_name)
+        .bind(&attachment.encrypted_content_type)
+        .bind(&attachment.encryption_iv)
+        .bind(&attachment.encrypted_content_type_iv)
+        .bind(&attachment.encryption_algorithm)
+        .bind(staged_storage_size)
+        .bind(&attachment.attachment_id)
+        .bind(&input.item_id)
+        .bind(attachment.expected_envelope_version)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| database_error(error, "Failed to finalize staged Attachment"))?;
+        if updated.rows_affected() != 1 {
+            return Err(AppError::internal(
+                "Locked Attachment Move authority changed",
+            ));
+        }
+    }
+    for (_, _, old_storage_key) in &current_attachments {
+        query("INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .bind(old_storage_key)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to enqueue old Attachment cleanup"))?;
+    }
+    if !attachments.is_empty() {
+        query("DELETE FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2")
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to consume Attachment Move staging"))?;
+        query("DELETE FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+            .bind(user_id)
+            .bind(&input.operation_id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to close Attachment Move manifest"))?;
+    }
+    delete_attachment_move_generation(transaction, user_id, &input.operation_id).await?;
     insert_item_sync_event_with_metadata(
-        &mut transaction,
+        transaction,
         SyncEventType::ItemMoved,
         &input.item_id,
         &input.target_vault_id,
@@ -791,7 +1484,7 @@ pub(crate) async fn move_vault_item(
     )
     .await?;
     insert_item_audit_log(
-        &mut *transaction,
+        &mut **transaction,
         "item_moved",
         &input.item_id,
         user_id,
@@ -802,47 +1495,121 @@ pub(crate) async fn move_vault_item(
         })),
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit item move"))?;
 
-    Ok(UpdateItemResponse {
-        success: true,
+    Ok(ItemEffect::Applied {
+        item_id: input.item_id,
         version: new_version,
     })
 }
 
-pub(crate) async fn permanently_delete_vault_item(
-    pool: &PgPool,
+async fn delete_attachment_move_generation(
+    transaction: &mut Transaction<'_, Postgres>,
     user_id: &str,
-    input: ItemClientInput,
-) -> Result<SuccessResponse, AppError> {
-    let existing_item = load_item_row(pool, &input.item_id).await?;
-    if existing_item.deleted_at.is_none() {
-        return Err(AppError::bad_request(
-            "Can only permanently delete items in trash",
-        ));
-    }
-    let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
-    assert_item_write_access(access.role, "Access denied")?;
-    let expected_version = input.expected_version.unwrap_or(existing_item.version);
+    operation_id: &str,
+) -> Result<(), AppError> {
+    query(
+        "DELETE FROM attachment_move_staging_generation WHERE user_id = $1 AND operation_id = $2",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to close Attachment Move generation"))?;
+    Ok(())
+}
 
-    let mut transaction = pool
-        .begin()
+async fn enqueue_attachment_move_staging_cleanup(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    operation_id: &str,
+) -> Result<(), AppError> {
+    query(
+        "INSERT INTO attachment_move_cleanup (user_id, operation_id, storage_key) SELECT user_id, operation_id, storage_key FROM attachment_move_staging WHERE user_id = $1 AND operation_id = $2 ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(operation_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to enqueue staged Attachment cleanup"))?;
+    query("DELETE FROM attachment_move_manifest WHERE user_id = $1 AND operation_id = $2")
+        .bind(user_id)
+        .bind(operation_id)
+        .execute(&mut **transaction)
         .await
-        .map_err(|error| database_error(error, "Failed to start permanent delete transaction"))?;
+        .map_err(|error| database_error(error, "Failed to close rejected Attachment Move"))?;
+    Ok(())
+}
+
+/// Deletes one trashed Item forever inside the caller's Operation transaction, or proves why it cannot.
+pub(crate) async fn apply_permanently_delete_item(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    input: ItemEffectInput,
+) -> Result<ItemEffect, AppError> {
+    const REJECTED: &str = "item_permanent_delete_rejected";
+    let Some(existing_item) = find_item_row(&mut **transaction, &input.item_id).await? else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            None,
+            OperationRejectionCode::ItemNotFound,
+        )
+        .await;
+    };
+    if existing_item.deleted_at.is_none() {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemNotTrashed,
+        )
+        .await;
+    }
+    if let Some(code) = writable_vault_rejection(
+        &mut **transaction,
+        &existing_item.vault_id,
+        user_id,
+        OperationRejectionCode::VaultAccessDenied,
+        OperationRejectionCode::VaultReadOnly,
+    )
+    .await?
+    {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            code,
+        )
+        .await;
+    }
+
     let deleted_version = query_scalar::<_, i32>(
         "DELETE FROM item WHERE id = $1 AND version = $2 RETURNING version + 1",
     )
     .bind(&input.item_id)
-    .bind(expected_version)
-    .fetch_optional(&mut *transaction)
+    .bind(input.expected_version)
+    .fetch_optional(&mut **transaction)
     .await
-    .map_err(|error| database_error(error, "Failed to permanently delete item"))?
-    .ok_or_else(item_version_conflict)?;
+    .map_err(|error| database_error(error, "Failed to permanently delete item"))?;
+    let Some(deleted_version) = deleted_version else {
+        return reject_item_operation(
+            transaction,
+            REJECTED,
+            &input.item_id,
+            user_id,
+            Some(&existing_item.vault_id),
+            OperationRejectionCode::ItemVersionConflict,
+        )
+        .await;
+    };
     insert_item_sync_event(
-        &mut *transaction,
+        transaction,
         SyncEventType::ItemPermanentlyDeleted,
         &input.item_id,
         &existing_item.vault_id,
@@ -852,19 +1619,18 @@ pub(crate) async fn permanently_delete_vault_item(
     )
     .await?;
     insert_item_audit_log(
-        &mut *transaction,
+        &mut **transaction,
         "item_permanently_deleted",
         &input.item_id,
         user_id,
         Some(json!({ "vaultId": existing_item.vault_id, "version": deleted_version })),
     )
     .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit permanent delete"))?;
 
-    Ok(SuccessResponse { success: true })
+    Ok(ItemEffect::Applied {
+        item_id: input.item_id,
+        version: deleted_version,
+    })
 }
 
 async fn insert_bulk_import_sync_event(
@@ -875,7 +1641,7 @@ async fn insert_bulk_import_sync_event(
     metadata: serde_json::Value,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         SyncEventType::VaultUpdated,
         vault_id,
         SyncEntityType::Vault,
@@ -919,7 +1685,7 @@ async fn insert_item_sync_event_with_metadata(
     metadata: serde_json::Value,
 ) -> Result<(), AppError> {
     insert_sync_event(
-        &mut **transaction,
+        transaction,
         event_type,
         item_id,
         SyncEntityType::Item,

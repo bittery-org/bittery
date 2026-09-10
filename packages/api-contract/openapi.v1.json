@@ -2465,43 +2465,26 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same queued mutation outcome for 24 hours when preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2520,38 +2503,8 @@
               }
             }
           },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2581,7 +2534,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2591,7 +2544,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2602,24 +2555,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2661,13 +2596,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -2683,31 +2615,17 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateItemResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2726,38 +2644,8 @@
               }
             }
           },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2787,7 +2675,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2797,7 +2685,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2808,24 +2696,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3367,6 +3237,101 @@
         ]
       }
     },
+    "/api/v1/items/{itemId}/authority": {
+      "get": {
+        "tags": [
+          "sync"
+        ],
+        "operationId": "getItemAuthority",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete Item authority using Bootstrap visibility, within the Bootstrap Item byte budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapItemResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid Item identity",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Item access denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Complete Item exceeds the response byte budget",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/items/{itemId}/favorite": {
       "patch": {
         "tags": [
@@ -3394,13 +3359,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3416,31 +3378,17 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3459,38 +3407,8 @@
               }
             }
           },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3520,7 +3438,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3530,7 +3448,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3541,24 +3459,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3602,13 +3502,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3624,31 +3521,17 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateItemResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3667,38 +3550,8 @@
               }
             }
           },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3728,7 +3581,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3738,7 +3591,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3749,24 +3602,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3810,43 +3645,26 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same queued mutation outcome for 24 hours when preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Final strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3865,38 +3683,8 @@
               }
             }
           },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3926,7 +3714,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3936,7 +3724,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3947,24 +3735,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4008,43 +3778,26 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same outcome for 24 hours when preconditions match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Updated strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request, Operation ID, or If-Match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4063,38 +3816,8 @@
               }
             }
           },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
+            "description": "Attachment Move staging is incomplete",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4124,7 +3847,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4134,7 +3857,7 @@
             }
           },
           "428": {
-            "description": "If-Match is required",
+            "description": "If-Match is required for this Item mutation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4145,24 +3868,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4308,13 +4013,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Not accepted because this operation returns a one-time secret",
-            "required": false,
+            "description": "Stable Client Runtime Operation identity",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -4329,12 +4031,12 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateShareLinkResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -4390,7 +4092,7 @@
             }
           },
           "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+            "description": "Operation identity was reused for different immutable bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4419,6 +4121,946 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operationId}": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "operationId": "getOperationOutcome",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retained semantic Operation outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed Operation ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No outcome exists for this User and Operation ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operationId}/attachment-move-manifest": {
+      "put": {
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "createAttachmentMoveManifest",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentMoveManifestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stable staging identities and renewed upload credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentMoveManifestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Item version does not match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operationId}/vault-image-staging": {
+      "delete": {
+        "tags": [
+          "vaults"
+        ],
+        "operationId": "cleanupVaultImageStaging",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultImageStagingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Item version does not match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operationId}/vault-image-staging/confirmations": {
+      "post": {
+        "tags": [
+          "vaults"
+        ],
+        "operationId": "confirmVaultImageStaging",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultImageStagingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultImageStagingStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Item version does not match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operationId}/vault-image-staging/grants": {
+      "post": {
+        "tags": [
+          "vaults"
+        ],
+        "operationId": "grantVaultImageStaging",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultImageStagingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultImageStagingGrantResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Item version does not match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operationId}/vault-image-staging/status": {
+      "post": {
+        "tags": [
+          "vaults"
+        ],
+        "operationId": "getVaultImageStagingStatus",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultImageStagingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultImageStagingStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Item version does not match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5829,6 +6471,18 @@
         ],
         "operationId": "bootstrapSync",
         "parameters": [
+          {
+            "name": "phase",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "vaults",
+                "items"
+              ]
+            }
+          },
           {
             "name": "cursor",
             "in": "query",
@@ -7376,7 +8030,7 @@
     "/api/v1/teams/{teamId}/leave-rotation-plans": {
       "post": {
         "tags": [
-          "teams"
+          "vault-key-rotation"
         ],
         "operationId": "createTeamLeaveRotationPlans",
         "parameters": [
@@ -7391,30 +8045,19 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -7460,7 +8103,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7490,7 +8133,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7501,24 +8144,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7538,7 +8163,7 @@
     "/api/v1/teams/{teamId}/leave-rotation-plans/finalize": {
       "post": {
         "tags": [
-          "teams"
+          "vault-key-rotation"
         ],
         "operationId": "finalizeTeamLeaveRotationPlans",
         "parameters": [
@@ -7553,12 +8178,9 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -7575,18 +8197,10 @@
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FinalizePlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -7632,7 +8246,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7662,7 +8276,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7673,24 +8287,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7982,7 +8578,7 @@
     "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans": {
       "post": {
         "tags": [
-          "team-members"
+          "vault-key-rotation"
         ],
         "operationId": "createTeamMemberRemovalRotationPlans",
         "parameters": [
@@ -8005,30 +8601,19 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -8074,7 +8659,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8104,7 +8689,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8115,24 +8700,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8152,7 +8719,7 @@
     "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize": {
       "post": {
         "tags": [
-          "team-members"
+          "vault-key-rotation"
         ],
         "operationId": "finalizeTeamMemberRemovalRotationPlans",
         "parameters": [
@@ -8175,12 +8742,9 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -8197,18 +8761,10 @@
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FinalizePlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -8254,7 +8810,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8284,7 +8840,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8295,24 +8851,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8843,6 +9381,17 @@
       },
       "delete": {
         "operationId": "deleteAccount",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required canonical UUID v4 deletion request identity",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8856,10 +9405,18 @@
         "responses": {
           "200": {
             "description": "",
+            "headers": {
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a retained exact replay"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/DeleteAccountResponse"
                 }
               }
             }
@@ -8875,16 +9432,6 @@
             }
           },
           "401": {
-            "description": "",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
             "description": "",
             "content": {
               "application/problem+json": {
@@ -8914,6 +9461,16 @@
                 "description": "Seconds before retrying"
               }
             },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9737,7 +10294,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9767,7 +10324,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9778,24 +10335,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9905,7 +10444,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9935,7 +10474,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9946,24 +10485,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10059,7 +10580,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10089,7 +10610,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10100,24 +10621,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10635,6 +11138,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required stable Operation ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -10649,11 +11161,11 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateVaultResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -11480,6 +11992,190 @@
         ]
       }
     },
+    "/api/v1/vaults/{vaultId}/item-authority-pages": {
+      "post": {
+        "tags": [
+          "items"
+        ],
+        "operationId": "getVaultItemAuthorityPage",
+        "parameters": [
+          {
+            "name": "vaultId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemAuthorityPageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative state of the requested Items",
+            "headers": {
+              "Bittery-Next-Cursor": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Present only when another page follows"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ItemResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Item version does not match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/vaults/{vaultId}/item-imports": {
       "post": {
         "tags": [
@@ -11490,6 +12186,15 @@
           {
             "name": "vaultId",
             "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required stable Operation ID",
             "required": true,
             "schema": {
               "type": "string"
@@ -11508,11 +12213,11 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BulkImportItemsResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -12041,13 +12746,10 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Replays the same queued mutation outcome for 24 hours when request bytes match",
-            "required": false,
+            "description": "Required stable Operation ID",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -12063,31 +12765,17 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Created strong item version validator"
-              },
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
+            "description": "Retained semantic outcome",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateItemResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Malformed request or Operation ID",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12098,46 +12786,6 @@
           },
           "401": {
             "description": "Authentication required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Item version does not match",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12167,17 +12815,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "428": {
-            "description": "If-Match is required",
+            "description": "Operation ID was reused with different immutable request bytes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12188,24 +12826,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12766,7 +13386,7 @@
     "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans": {
       "post": {
         "tags": [
-          "vault-members"
+          "vault-key-rotation"
         ],
         "operationId": "createVaultMemberRemovalRotationPlans",
         "parameters": [
@@ -12789,30 +13409,19 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -12858,7 +13467,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12888,7 +13497,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12899,24 +13508,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12936,7 +13527,7 @@
     "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize": {
       "post": {
         "tags": [
-          "vault-members"
+          "vault-key-rotation"
         ],
         "operationId": "finalizeVaultMemberRemovalRotationPlans",
         "parameters": [
@@ -12959,12 +13550,9 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -12981,18 +13569,10 @@
         "responses": {
           "200": {
             "description": "",
-            "headers": {
-              "Idempotency-Replayed": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "true when this is a stored replay"
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FinalizePlanSetResponse"
+                  "$ref": "#/components/schemas/OperationOutcome"
                 }
               }
             }
@@ -13038,7 +13618,7 @@
             }
           },
           "409": {
-            "description": "Rotation plan is stale or conflicts with current state",
+            "description": "Operation ID reused or concurrent update requires retry",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13068,7 +13648,7 @@
             }
           },
           "422": {
-            "description": "Idempotency key was reused with a different request",
+            "description": "JSON body does not match the request schema",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13079,24 +13659,6 @@
           },
           "500": {
             "description": "Internal error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "An identical idempotent request is still pending",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Seconds before retrying"
-              }
-            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13534,6 +14096,12 @@
       "AttachmentDownloadResponse": {
         "type": "object",
         "required": [
+          "attachmentId",
+          "itemId",
+          "vaultId",
+          "storageKey",
+          "envelopeVersion",
+          "uploadedBy",
           "downloadUrl",
           "encryptedName",
           "encryptedContentType",
@@ -13543,6 +14111,9 @@
           "fileSize"
         ],
         "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
           "downloadUrl": {
             "type": "string"
           },
@@ -13561,9 +14132,117 @@
           "encryptionIv": {
             "type": "string"
           },
+          "envelopeVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
           "fileSize": {
             "type": "integer",
             "format": "int32"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "uploadedBy": {
+            "type": "string"
+          },
+          "vaultId": {
+            "type": "string"
+          }
+        }
+      },
+      "AttachmentMoveManifestBody": {
+        "type": "object",
+        "required": [
+          "itemId",
+          "sourceVaultId",
+          "targetVaultId",
+          "attachments"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMoveManifestEntryBody"
+            }
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "sourceVaultId": {
+            "type": "string"
+          },
+          "targetVaultId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentMoveManifestEntryBody": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "envelopeVersion",
+          "ciphertextSha256"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
+          "ciphertextSha256": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "envelopeVersion": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentMoveManifestResponse": {
+        "type": "object",
+        "required": [
+          "operationId",
+          "expiresAt",
+          "attachments"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMoveUploadResponse"
+            }
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string"
+          }
+        }
+      },
+      "AttachmentMoveUploadResponse": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "storageKey",
+          "uploadUrl"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "uploadUrl": {
+            "type": "string"
           }
         }
       },
@@ -14064,16 +14743,6 @@
           "updatedAt": {
             "type": "string"
           },
-          "vault": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/BootstrapVaultSummary"
-              }
-            ]
-          },
           "vaultId": {
             "type": "string"
           },
@@ -14084,38 +14753,90 @@
         }
       },
       "BootstrapItemsResponse": {
-        "type": "object",
-        "required": [
-          "items",
-          "hasMore"
-        ],
-        "properties": {
-          "hasMore": {
-            "type": "boolean"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BootstrapItemResponse"
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "vaults",
+              "hasMore",
+              "phase"
+            ],
+            "properties": {
+              "hasMore": {
+                "type": "boolean"
+              },
+              "nextCursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "vaults"
+                ]
+              },
+              "syncCursor": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SyncCursorResponse"
+                  }
+                ]
+              },
+              "vaults": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BootstrapVaultSummary"
+                }
+              }
             }
           },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "syncCursor": {
-            "oneOf": [
-              {
-                "type": "null"
+          {
+            "type": "object",
+            "required": [
+              "items",
+              "hasMore",
+              "phase"
+            ],
+            "properties": {
+              "hasMore": {
+                "type": "boolean"
               },
-              {
-                "$ref": "#/components/schemas/SyncCursorResponse"
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BootstrapItemResponse"
+                }
+              },
+              "nextCursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "items"
+                ]
+              },
+              "syncCursor": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SyncCursorResponse"
+                  }
+                ]
               }
-            ]
+            }
           }
-        }
+        ]
       },
       "BootstrapVaultSummary": {
         "type": "object",
@@ -14206,29 +14927,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "BulkImportItemsResponse": {
-        "type": "object",
-        "required": [
-          "success",
-          "importedCount",
-          "itemIds"
-        ],
-        "properties": {
-          "importedCount": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "itemIds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "success": {
-            "type": "boolean"
-          }
-        }
       },
       "CheckoutPlan": {
         "type": "string",
@@ -14405,24 +15103,10 @@
         },
         "additionalProperties": false
       },
-      "CreateItemResponse": {
-        "type": "object",
-        "required": [
-          "itemId",
-          "id"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "itemId": {
-            "type": "string"
-          }
-        }
-      },
       "CreateShareLinkRequest": {
         "type": "object",
         "required": [
+          "tokenHash",
           "accessMode",
           "expiresIn",
           "encryptedItemData",
@@ -14461,32 +15145,177 @@
           },
           "shareKeyIv": {
             "type": "string"
+          },
+          "tokenHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           }
         },
         "additionalProperties": false
       },
-      "CreateShareLinkResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "token",
-          "expiresAt",
-          "baseShareUrl"
-        ],
-        "properties": {
-          "baseShareUrl": {
-            "type": "string"
+      "CreateShareOperationRejectionCode": {
+        "type": "string",
+        "enum": [
+          "item_not_found",
+          "vault_read_only",
+          "share_entitlement_denied",
+          "share_limit_reached"
+        ]
+      },
+      "CreateShareOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "shareLinkId",
+              "baseShareUrl",
+              "expiresAt",
+              "status"
+            ],
+            "properties": {
+              "baseShareUrl": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": "string"
+              },
+              "shareLinkId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
           },
-          "expiresAt": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "token": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateShareOperationRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
           }
-        }
+        ],
+        "description": "The non-secret answer retained for Share creation. The raw token and Share key exist only in\nthe Account-protected Client Replica and can never be reconstructed from this value."
+      },
+      "CreateTeamLeaveRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_member_not_found",
+          "personal_team_departure_forbidden",
+          "team_owner_leave_forbidden"
+        ]
+      },
+      "CreateTeamLeaveRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "plans",
+              "status"
+            ],
+            "properties": {
+              "plans": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationPlanSnapshot"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateTeamLeaveRotationPlansRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "CreateTeamMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_member_not_found",
+          "personal_team_departure_forbidden",
+          "self_removal_forbidden",
+          "team_management_denied",
+          "team_owner_protected",
+          "team_management_entitlement_denied",
+          "vault_management_incomplete"
+        ]
+      },
+      "CreateTeamMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "plans",
+              "status"
+            ],
+            "properties": {
+              "plans": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationPlanSnapshot"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateTeamMemberRemovalRotationPlansRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ]
       },
       "CreateTeamRequest": {
         "type": "object",
@@ -14515,7 +15344,8 @@
         "required": [
           "name",
           "vaultType",
-          "encryptedVaultKey"
+          "encryptedVaultKey",
+          "icon"
         ],
         "properties": {
           "encryptedVaultKey": {
@@ -14523,10 +15353,9 @@
             "maxLength": 65536
           },
           "icon": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
           },
           "imageKey": {
             "type": [
@@ -14536,7 +15365,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 200
+            "maxLength": 200,
+            "minLength": 2
           },
           "vaultType": {
             "$ref": "#/components/schemas/VaultType"
@@ -14544,16 +15374,110 @@
         },
         "additionalProperties": false
       },
-      "CreateVaultResponse": {
-        "type": "object",
-        "required": [
-          "vaultId"
-        ],
-        "properties": {
-          "vaultId": {
-            "type": "string"
+      "CreateVaultMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "vault_access_denied",
+          "vault_member_not_found",
+          "self_removal_forbidden",
+          "vault_owner_protected",
+          "vault_admin_peer_protected",
+          "shared_vault_required",
+          "vault_sharing_entitlement_denied"
+        ]
+      },
+      "CreateVaultMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "plans",
+              "status"
+            ],
+            "properties": {
+              "plans": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationPlanSnapshot"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateVaultMemberRemovalRotationPlansRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
           }
-        }
+        ]
+      },
+      "CreateVaultOperationRejectionCode": {
+        "type": "string",
+        "enum": [
+          "vault_id_conflict",
+          "team_membership_required",
+          "vault_sharing_entitlement_denied",
+          "shared_vault_limit_reached"
+        ]
+      },
+      "CreateVaultOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "vaultId",
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              },
+              "vaultId": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CreateVaultOperationRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The closed, non-secret answer retained for Vault creation."
       },
       "CursorPage_AuthVaultKeyResponse": {
         "type": "object",
@@ -15581,6 +16505,21 @@
         },
         "additionalProperties": false
       },
+      "DeleteAccountResponse": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "outcome"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          }
+        }
+      },
       "DeletedVaultItemWithVaultResponse": {
         "type": "object",
         "required": [
@@ -15877,15 +16816,21 @@
           "INVALID_VERSION",
           "INVALID_ITEM_STATE",
           "INVALID_EMAIL",
+          "ACCOUNT_DELETION_CONFIRMATION_MISMATCH",
+          "ACCOUNT_DELETION_BLOCKED",
           "FIELD_CANNOT_BE_CLEARED",
           "SEARCH_TOO_LONG",
           "TOO_MANY_HIDDEN_VAULTS",
           "INVALID_IDEMPOTENCY_KEY",
-          "IDEMPOTENCY_KEY_REUSED",
           "IDEMPOTENCY_NOT_ALLOWED",
-          "IDEMPOTENCY_REQUEST_IN_PROGRESS",
-          "IDEMPOTENCY_OUTCOME_INDETERMINATE",
-          "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+          "INVALID_OPERATION_ID",
+          "OPERATION_ID_REUSED",
+          "OPERATION_OUTCOME_NOT_FOUND",
+          "ATTACHMENT_STAGING_INCOMPLETE",
+          "ATTACHMENT_STAGING_MISMATCH",
+          "ATTACHMENT_STAGING_BUSY",
+          "ATTACHMENT_AUTHORITY_STALE",
+          "ATTACHMENT_QUOTA_EXCEEDED",
           "ROTATION_STALE_VAULT_VERSION",
           "ROTATION_STALE_MEMBER_SET",
           "ROTATION_STALE_ITEM_STATE",
@@ -15926,49 +16871,218 @@
         },
         "additionalProperties": false
       },
-      "FinalizePlanSetResponse": {
-        "type": "object",
-        "required": [
-          "rotations"
-        ],
-        "properties": {
-          "personalTeamId": {
-            "type": [
-              "string",
-              "null"
-            ]
+      "FinalizeTeamLeaveRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_membership_changed",
+          "personal_team_departure_forbidden",
+          "team_owner_leave_forbidden",
+          "rotation_plan_unavailable",
+          "rotation_plan_mismatch",
+          "rotation_plan_incomplete",
+          "rotation_plan_stale",
+          "rotation_plan_set_mismatch"
+        ]
+      },
+      "FinalizeTeamLeaveRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "rotations",
+              "personalTeamId",
+              "status"
+            ],
+            "properties": {
+              "personalTeamId": {
+                "type": "string"
+              },
+              "rotations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationResult"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
           },
-          "rotations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FinalizeResponse"
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/FinalizeTeamLeaveRotationPlansRejectionCode"
+              },
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotationStaleDetails"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
             }
           }
-        }
+        ]
       },
-      "FinalizeResponse": {
-        "type": "object",
-        "required": [
-          "planId",
-          "vaultId",
-          "keyVersion",
-          "rotationId"
-        ],
-        "properties": {
-          "keyVersion": {
-            "type": "integer",
-            "format": "int32"
+      "FinalizeTeamMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "team_membership_changed",
+          "personal_team_departure_forbidden",
+          "self_removal_forbidden",
+          "team_management_denied",
+          "team_owner_protected",
+          "team_management_entitlement_denied",
+          "vault_management_incomplete",
+          "rotation_plan_unavailable",
+          "rotation_plan_mismatch",
+          "rotation_plan_incomplete",
+          "rotation_plan_stale",
+          "rotation_plan_set_mismatch"
+        ]
+      },
+      "FinalizeTeamMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "rotations",
+              "personalTeamId",
+              "status"
+            ],
+            "properties": {
+              "personalTeamId": {
+                "type": "string"
+              },
+              "rotations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationResult"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
           },
-          "planId": {
-            "type": "string"
-          },
-          "rotationId": {
-            "type": "string"
-          },
-          "vaultId": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/FinalizeTeamMemberRemovalRotationPlansRejectionCode"
+              },
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotationStaleDetails"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
           }
-        }
+        ]
+      },
+      "FinalizeVaultMemberRemovalRotationPlansRejectionCode": {
+        "type": "string",
+        "enum": [
+          "vault_access_denied",
+          "vault_membership_changed",
+          "self_removal_forbidden",
+          "vault_owner_protected",
+          "vault_admin_peer_protected",
+          "shared_vault_required",
+          "vault_sharing_entitlement_denied",
+          "rotation_plan_unavailable",
+          "rotation_plan_mismatch",
+          "rotation_plan_incomplete",
+          "rotation_plan_stale"
+        ]
+      },
+      "FinalizeVaultMemberRemovalRotationPlansResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "rotations",
+              "status"
+            ],
+            "properties": {
+              "rotations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RotationResult"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/FinalizeVaultMemberRemovalRotationPlansRejectionCode"
+              },
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotationStaleDetails"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ]
       },
       "FinishLoginRequest": {
         "type": "object",
@@ -16065,6 +17179,69 @@
         },
         "additionalProperties": false
       },
+      "ImportItemsOperationRejectionCode": {
+        "type": "string",
+        "enum": [
+          "invalid_ciphertext",
+          "vault_access_denied",
+          "vault_read_only",
+          "item_id_conflict"
+        ]
+      },
+      "ImportItemsOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "vaultId",
+              "importedCount",
+              "status"
+            ],
+            "properties": {
+              "importedCount": {
+                "type": "integer",
+                "format": "int32",
+                "maximum": 200,
+                "minimum": 0
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              },
+              "vaultId": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ImportItemsOperationRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The closed retained answer for one Import batch. Runtime dispatch remains gated until Ticket 57."
+      },
+      "InitialRotationPlanState": {
+        "type": "string",
+        "enum": [
+          "preparing"
+        ]
+      },
       "InvitationDetailsResponse": {
         "type": "object",
         "required": [
@@ -16153,6 +17330,40 @@
           "expired"
         ]
       },
+      "ItemAuthorityPageBody": {
+        "type": "object",
+        "description": "The Item identities one authority page asks for, plus where to continue.",
+        "required": [
+          "itemIds"
+        ],
+        "properties": {
+          "cursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          },
+          "itemIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "default": 200,
+            "maximum": 200,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
       "ItemCategory": {
         "type": "string",
         "description": "Item category — maps to PostgreSQL `item_category` enum.",
@@ -16163,6 +17374,53 @@
           "identity",
           "totp"
         ]
+      },
+      "ItemOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "itemId",
+              "version",
+              "status"
+            ],
+            "properties": {
+              "itemId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              },
+              "version": {
+                "type": "integer",
+                "format": "int32"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/OperationRejectionCode"
+              },
+              "details": {},
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What one Item Operation left behind.\n\n`Applied` retains the affected Item and the version it reached. That is exactly enough for a\nclient that lost its response to tell an applied Operation from a rejected one, and to line the\nanswer up with its own record, without replaying the effect to find out."
       },
       "ItemResponseDto": {
         "type": "object",
@@ -16601,19 +17859,41 @@
           }
         }
       },
-      "MoveItemBody": {
+      "MoveAttachmentBody": {
         "type": "object",
         "required": [
-          "sourceVaultId",
-          "targetVaultId",
-          "encryptedData",
+          "attachmentId",
+          "expectedEnvelopeVersion",
+          "encryptedAttachmentKey",
+          "attachmentKeyIv",
+          "attachmentKeyAlgorithm",
+          "encryptedName",
+          "encryptedContentType",
           "encryptionIv",
+          "encryptedContentTypeIv",
           "encryptionAlgorithm"
         ],
         "properties": {
-          "encryptedData": {
-            "type": "string",
-            "maxLength": 1048576
+          "attachmentId": {
+            "type": "string"
+          },
+          "attachmentKeyAlgorithm": {
+            "type": "string"
+          },
+          "attachmentKeyIv": {
+            "type": "string"
+          },
+          "encryptedAttachmentKey": {
+            "type": "string"
+          },
+          "encryptedContentType": {
+            "type": "string"
+          },
+          "encryptedContentTypeIv": {
+            "type": "string"
+          },
+          "encryptedName": {
+            "type": "string"
           },
           "encryptionAlgorithm": {
             "type": "string"
@@ -16621,14 +17901,478 @@
           "encryptionIv": {
             "type": "string"
           },
-          "sourceVaultId": {
-            "type": "string"
-          },
-          "targetVaultId": {
-            "type": "string"
+          "expectedEnvelopeVersion": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false
+      },
+      "MoveAttachmentIntentBody": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "expectedEnvelopeVersion"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
+          "expectedEnvelopeVersion": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MoveItemBody": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "sourceVaultId",
+              "targetVaultId",
+              "encryptedData",
+              "encryptionIv",
+              "encryptionAlgorithm",
+              "mode"
+            ],
+            "properties": {
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MoveAttachmentBody"
+                }
+              },
+              "encryptedData": {
+                "type": "string",
+                "maxLength": 1048576
+              },
+              "encryptionAlgorithm": {
+                "type": "string"
+              },
+              "encryptionIv": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "prepared"
+                ]
+              },
+              "sourceVaultId": {
+                "type": "string"
+              },
+              "targetVaultId": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sourceVaultId",
+              "targetVaultId",
+              "attachments",
+              "mode"
+            ],
+            "properties": {
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MoveAttachmentIntentBody"
+                }
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "reject_stale_authority"
+                ]
+              },
+              "sourceVaultId": {
+                "type": "string"
+              },
+              "targetVaultId": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "OperationOutcome": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "update_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "set_item_favorite"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "trash_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "restore_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "move_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "permanently_delete_item"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ItemOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_share"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateShareOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_vault"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateVaultOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "import_items"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ImportItemsOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_vault_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateVaultMemberRemovalRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "finalize_vault_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/FinalizeVaultMemberRemovalRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_team_leave_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateTeamLeaveRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "finalize_team_leave_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/FinalizeTeamLeaveRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "create_team_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/CreateTeamMemberRemovalRotationPlansResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "finalize_team_member_removal_rotation_plans"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/FinalizeTeamMemberRemovalRotationPlansResult"
+              }
+            }
+          }
+        ],
+        "description": "The one retained outcome shape, discriminated by Operation kind."
+      },
+      "OperationRejectionCode": {
+        "type": "string",
+        "description": "The Item-only rejection vocabulary. Its OpenAPI name stays stable because Client Runtime has\nalready generated this contract; Share-only failures belong to the Share result instead.",
+        "enum": [
+          "invalid_ciphertext",
+          "vault_access_denied",
+          "vault_read_only",
+          "item_id_conflict",
+          "item_not_found",
+          "item_version_conflict",
+          "item_trashed",
+          "item_not_trashed",
+          "source_vault_mismatch",
+          "target_vault_access_denied",
+          "target_vault_read_only",
+          "attachment_state_conflict"
+        ]
       },
       "PageCursor": {
         "type": "string",
@@ -16736,20 +18480,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "PlanSetResponse": {
-        "type": "object",
-        "required": [
-          "plans"
-        ],
-        "properties": {
-          "plans": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RotationPlanSummary"
-            }
-          }
-        }
       },
       "PortalSessionResponse": {
         "type": "object",
@@ -17220,7 +18950,7 @@
           }
         }
       },
-      "RotationPlanSummary": {
+      "RotationPlanSnapshot": {
         "type": "object",
         "required": [
           "id",
@@ -17251,12 +18981,54 @@
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/VaultKeyRotationPlanState"
+            "$ref": "#/components/schemas/InitialRotationPlanState"
           },
           "vaultId": {
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": false
+      },
+      "RotationResult": {
+        "type": "object",
+        "required": [
+          "planId",
+          "vaultId",
+          "keyVersion",
+          "rotationId"
+        ],
+        "properties": {
+          "keyVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "rotationId": {
+            "type": "string"
+          },
+          "vaultId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RotationStaleDetails": {
+        "type": "object",
+        "required": [
+          "planId",
+          "reason"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/VaultKeyRotationStaleReason"
+          }
+        },
+        "additionalProperties": false
       },
       "SecretKeyRotationRequest": {
         "type": "object",
@@ -17808,7 +19580,8 @@
           "vault",
           "vault_member",
           "vault_key",
-          "user"
+          "user",
+          "operation"
         ]
       },
       "SyncEventResponse": {
@@ -17877,7 +19650,8 @@
           "vault_member_added",
           "vault_member_removed",
           "vault_key_rotated",
-          "travel_mode_updated"
+          "travel_mode_updated",
+          "operation_resolved"
         ]
       },
       "TeamDetailsResponse": {
@@ -18300,22 +20074,6 @@
         },
         "additionalProperties": false
       },
-      "UpdateItemResponse": {
-        "type": "object",
-        "required": [
-          "success",
-          "version"
-        ],
-        "properties": {
-          "success": {
-            "type": "boolean"
-          },
-          "version": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
-      },
       "UpdateTeamRequest": {
         "type": "object",
         "properties": {
@@ -18541,6 +20299,193 @@
           }
         }
       },
+      "VaultImageContentType": {
+        "type": "string",
+        "enum": [
+          "image/jpeg",
+          "image/png",
+          "image/webp",
+          "image/gif",
+          "image/avif"
+        ]
+      },
+      "VaultImageStagingBody": {
+        "type": "object",
+        "required": [
+          "vaultId",
+          "byteLength",
+          "contentType",
+          "sha256"
+        ],
+        "properties": {
+          "byteLength": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "contentType": {
+            "$ref": "#/components/schemas/VaultImageContentType"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "vaultId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "VaultImageStagingGrantResponse": {
+        "type": "object",
+        "required": [
+          "objectKey",
+          "uploadUrl",
+          "generation",
+          "leaseExpiresAt",
+          "uploadHeaders"
+        ],
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "leaseExpiresAt": {
+            "type": "string"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "uploadHeaders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VaultImageStagingUploadHeader"
+            }
+          },
+          "uploadUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "VaultImageStagingStatusResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "absent"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "objectKey",
+              "generation",
+              "leaseExpiresAt",
+              "state"
+            ],
+            "properties": {
+              "generation": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "leaseExpiresAt": {
+                "type": "string"
+              },
+              "objectKey": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unconfirmed"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "objectKey",
+              "generation",
+              "leaseExpiresAt",
+              "state"
+            ],
+            "properties": {
+              "generation": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "leaseExpiresAt": {
+                "type": "string"
+              },
+              "objectKey": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "confirmed"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "objectKey",
+              "generation",
+              "leaseExpiresAt",
+              "state"
+            ],
+            "properties": {
+              "generation": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "leaseExpiresAt": {
+                "type": "string"
+              },
+              "objectKey": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "cleanup_pending"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        ],
+        "discriminator": {
+          "propertyName": "state"
+        }
+      },
+      "VaultImageStagingUploadHeader": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
       "VaultItemDetailsResponse": {
         "type": "object",
         "required": [
@@ -18682,16 +20627,13 @@
           }
         }
       },
-      "VaultKeyRotationPlanState": {
+      "VaultKeyRotationStaleReason": {
         "type": "string",
         "enum": [
-          "preparing",
-          "ready",
-          "completed",
-          "stale",
-          "failed",
-          "abandoned",
-          "expired"
+          "vault_version",
+          "member_set",
+          "item_state",
+          "attachment_state"
         ]
       },
       "VaultListEntryResponse": {

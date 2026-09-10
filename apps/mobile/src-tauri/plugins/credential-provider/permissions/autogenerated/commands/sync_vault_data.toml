@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-sync-vault-data"
+description = "Enables the sync_vault_data command without any pre-configured scope."
+commands.allow = ["sync_vault_data"]
+
+[[permission]]
+identifier = "deny-sync-vault-data"
+description = "Denies the sync_vault_data command without any pre-configured scope."
+commands.deny = ["sync_vault_data"]

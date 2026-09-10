@@ -3,9 +3,10 @@ import { createApiClient } from "../client.ts";
 import { ApiError } from "../errors.ts";
 import type {
 	ApiResult,
+	DeleteAccountResponse,
 	LoginAttempt,
+	OperationOutcome,
 	SyncChanges,
-	UpdateItemResponse,
 } from "../index.ts";
 
 function metadata() {
@@ -23,6 +24,31 @@ function metadata() {
 }
 
 describe("Bittery API facade", () => {
+	test("returns the generated typed Account deletion response", async () => {
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getAccessToken: () => "opaque-session",
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async () =>
+				Response.json({
+					requestId: "018f47a2-6f40-47da-8d53-a55e557dc723",
+					outcome: "deleted",
+				}),
+		});
+
+		const result = await client.auth.deleteAccount(
+			{ confirmEmail: "person@example.test" },
+			{ idempotencyKey: "018f47a2-6f40-47da-8d53-a55e557dc723" },
+		);
+		const response: DeleteAccountResponse = result.data;
+		expect(response.outcome).toBe("deleted");
+	});
+
 	test("drains issued vault-key pages with a request-scoped bearer token", async () => {
 		const requests: Request[] = [];
 		let providerCalls = 0;
@@ -251,17 +277,24 @@ describe("Bittery API facade", () => {
 			}),
 			fetch: async (request) => {
 				requests.push(request);
-				return new Response(JSON.stringify({}), {
-					headers: {
-						"Content-Type": "application/json",
-						ETag: '"version-7"',
-						"Bittery-Request-Id": "request-1",
+				return new Response(
+					JSON.stringify({
+						kind: "update_item",
+						operationId: "request-key-1",
+						result: { status: "applied", itemId: "item-1", version: 7 },
+					}),
+					{
+						headers: {
+							"Content-Type": "application/json",
+							ETag: '"version-7"',
+							"Bittery-Request-Id": "request-1",
+						},
 					},
-				});
+				);
 			},
 		});
 
-		const result: ApiResult<UpdateItemResponse> = await client.items.update(
+		const result: ApiResult<OperationOutcome> = await client.items.update(
 			"item-1",
 			{ encryptedData: null },
 			{ etag: '"version-6"', idempotencyKey: "request-key-1" },
@@ -276,6 +309,45 @@ describe("Bittery API facade", () => {
 		expect(request?.headers.get("Authorization")).toBe("Bearer access-token");
 		expect(request?.headers.get("Content-Type")).toBe(
 			"application/merge-patch+json",
+		);
+	});
+
+	test("fetches an authenticated retained Operation outcome through the facade", async () => {
+		const requests: Request[] = [];
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getAccessToken: () => "access-token",
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({
+					operationId: "operation-1",
+					kind: "create_item",
+					result: {
+						status: "rejected",
+						code: "vault_read_only",
+					},
+				});
+			},
+		});
+
+		const outcome = await client.operations.get("operation-1");
+
+		expect(outcome.data.result).toEqual({
+			status: "rejected",
+			code: "vault_read_only",
+		});
+		expect(requests[0]?.method).toBe("GET");
+		expect(requests[0]?.url).toBe(
+			"https://api.example.test/api/v1/operations/operation-1",
+		);
+		expect(requests[0]?.headers.get("Authorization")).toBe(
+			"Bearer access-token",
 		);
 	});
 
@@ -331,8 +403,10 @@ describe("Bittery API facade", () => {
 			}),
 			fetch: async (request) => {
 				requests.push(request);
+				const phase = new URL(request.url).searchParams.get("phase");
 				return Response.json({
-					items: [],
+					phase,
+					...(phase === "vaults" ? { vaults: [] } : { items: [] }),
 					hasMore: false,
 					syncCursor: malformed ? { id: 42 } : null,
 				});
@@ -340,6 +414,7 @@ describe("Bittery API facade", () => {
 		});
 
 		const result = await client.sync.bootstrap({
+			phase: "items",
 			cursor: "page-2",
 			syncCursor: "evt-bootstrap",
 			syncCursorCaptured: true,
@@ -347,14 +422,23 @@ describe("Bittery API facade", () => {
 		expect(result.data.syncCursor).toBeNull();
 		expect(new URL(requests[0]?.url ?? "").searchParams).toEqual(
 			new URLSearchParams({
+				phase: "items",
 				cursor: "page-2",
 				syncCursor: "evt-bootstrap",
 				syncCursorCaptured: "true",
 			}),
 		);
+		const vaultResult = await client.sync.bootstrap({
+			phase: "vaults",
+			syncCursorCaptured: true,
+		});
+		expect(vaultResult.data.phase).toBe("vaults");
+		if (vaultResult.data.phase === "vaults") {
+			expect(vaultResult.data.vaults).toEqual([]);
+		}
 
 		malformed = true;
-		await expect(client.sync.bootstrap()).rejects.toThrow(
+		await expect(client.sync.bootstrap({ phase: "items" })).rejects.toThrow(
 			"/sync/bootstrap/syncCursor/id must be a non-empty string",
 		);
 	});
@@ -404,7 +488,7 @@ describe("Bittery API facade", () => {
 		).toEqual(["Bearer expired-token", "Bearer refreshed-token"]);
 	});
 
-	test("keeps one-time share secrets and final domain operations inside the facade", async () => {
+	test("keeps final domain operations inside the facade", async () => {
 		const requests: Request[] = [];
 		const client = createApiClient({
 			serverUrl: "https://api.example.test",
@@ -416,18 +500,6 @@ describe("Bittery API facade", () => {
 			}),
 			fetch: async (request) => {
 				requests.push(request);
-				if (request.url.endsWith("/share-links")) {
-					return new Response(
-						JSON.stringify({
-							id: "share-1",
-							token: "one-time-token",
-							baseShareUrl: "https://share.example.test",
-							expiresAt: "2026-01-01T00:00:00Z",
-						}),
-						{ status: 201, headers: { "Content-Type": "application/json" } },
-					);
-				}
-
 				if (request.url.endsWith("/travel-mode")) {
 					return new Response(
 						JSON.stringify({
@@ -445,27 +517,13 @@ describe("Bittery API facade", () => {
 			},
 		});
 
-		const share = await client.share.create("item-1", {
-			accessMode: "anyone",
-			encryptedItemData: "ciphertext",
-			encryptedShareKey: "share-key",
-			encryptionIv: "iv",
-			expiresIn: "1day",
-			shareKeyIv: "share-iv",
-		});
 		const travelMode = await client.travelMode.get();
 		const audit = await client.audit.list({ actionGroup: "share", limit: 10 });
 
-		expect(share.data.token).toBe("one-time-token");
-		expect(requests).toHaveLength(3);
-		expect(requests[0]?.method).toBe("POST");
-		expect(requests[0]?.url).toBe(
-			"https://api.example.test/api/v1/items/item-1/share-links",
-		);
-		expect(requests[0]?.headers.get("Idempotency-Key")).toBeNull();
+		expect(requests).toHaveLength(2);
 		expect(travelMode.data.enabled).toBe(false);
 		expect(audit.data.events).toEqual([]);
-		expect(requests[2]?.url).toBe(
+		expect(requests[1]?.url).toBe(
 			"https://api.example.test/api/v1/audit-events?actionGroup=share&limit=10",
 		);
 	});

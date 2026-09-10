@@ -1,0 +1,3166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RuntimeProtocolContract",
+  "type": "object",
+  "properties": {
+    "observation": {
+      "$ref": "#/$defs/ObservationRequest"
+    },
+    "outcome": {
+      "$ref": "#/$defs/RuntimeOutcome"
+    },
+    "projection": {
+      "$ref": "#/$defs/RuntimeProjection"
+    },
+    "request": {
+      "$ref": "#/$defs/RuntimeRequest"
+    }
+  },
+  "required": [
+    "request",
+    "outcome",
+    "observation",
+    "projection"
+  ],
+  "$defs": {
+    "AccountAccessState": {
+      "type": "string",
+      "enum": [
+        "signedOut",
+        "locked",
+        "unlocked"
+      ]
+    },
+    "AccountDisplayIdentity": {
+      "description": "The non-secret identity a host may render for one installed Account.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
+    "AccountStatus": {
+      "type": "object",
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/AccountAccessState"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "displayIdentity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AccountDisplayIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "waitingReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AccountWaitingReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accountId",
+        "replicaRevision",
+        "access",
+        "failure"
+      ]
+    },
+    "AccountWaitingReason": {
+      "type": "string",
+      "enum": [
+        "reauthenticationRequired"
+      ]
+    },
+    "Address": {
+      "type": "object",
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "street": {
+          "type": "string"
+        },
+        "zip": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "street",
+        "city",
+        "state",
+        "zip",
+        "country"
+      ]
+    },
+    "AttachmentProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "attachmentId": {
+          "type": "string"
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "fileSize": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "uploadedBy": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "attachmentId",
+        "itemId",
+        "vaultId",
+        "name",
+        "contentType",
+        "fileSize",
+        "uploadedBy",
+        "createdAt"
+      ]
+    },
+    "AuthenticatorItemData": {
+      "type": "object",
+      "properties": {
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "linkedItemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "totpSecret"
+      ]
+    },
+    "CreateShareDraft": {
+      "type": "object",
+      "properties": {
+        "accessMode": {
+          "$ref": "#/$defs/ShareAccessMode"
+        },
+        "allowedEmails": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expiresIn": {
+          "$ref": "#/$defs/ShareExpiration"
+        },
+        "isOneTimeUse": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "accessMode",
+        "expiresIn",
+        "isOneTimeUse"
+      ]
+    },
+    "CreateVaultType": {
+      "type": "string",
+      "enum": [
+        "personal",
+        "shared"
+      ]
+    },
+    "CreditCardItemData": {
+      "type": "object",
+      "properties": {
+        "billingAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cardNumber": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cardholderName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "cvv": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiryDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "CustomField": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/CustomFieldKind"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "value",
+        "type"
+      ]
+    },
+    "CustomFieldKind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "password",
+        "email",
+        "url"
+      ]
+    },
+    "IdentityItemData": {
+      "type": "object",
+      "properties": {
+        "addresses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Address"
+          }
+        },
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "dateOfBirth": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "driversLicense": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firstName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "middleName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passportNumber": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phoneNumbers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PhoneNumber"
+          }
+        },
+        "ssn": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "ImportItemDraft": {
+      "description": "One plaintext Import draft. The host supplies only category data and Favorite; Rust owns the\nfinal Item identity, ciphertext, and immutable batch request.",
+      "type": "object",
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/ItemDraft"
+        },
+        "favorite": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "draft",
+        "favorite"
+      ]
+    },
+    "ItemDraft": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "login"
+            },
+            "data": {
+              "$ref": "#/$defs/LoginItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "secure-note"
+            },
+            "data": {
+              "$ref": "#/$defs/SecureNoteItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "credit-card"
+            },
+            "data": {
+              "$ref": "#/$defs/CreditCardItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "identity"
+            },
+            "data": {
+              "$ref": "#/$defs/IdentityItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "authenticator"
+            },
+            "data": {
+              "$ref": "#/$defs/AuthenticatorItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        }
+      ]
+    },
+    "ItemProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AttachmentProjection"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/ItemDraft"
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "favorite": {
+          "type": "boolean"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ItemProjectionStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "itemId",
+        "vaultId",
+        "data",
+        "favorite",
+        "createdAt",
+        "updatedAt",
+        "status"
+      ]
+    },
+    "ItemProjectionStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "authoritative",
+        "failed"
+      ]
+    },
+    "ItemsProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemProjection"
+          }
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "vaults": {
+          "description": "The Vaults these Items live in, so a host can name one and can tell a reader from a\nwriter without asking a second source. Present for the first slice's create affordance;\nfull Vault metadata still belongs to the read path that owns it.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VaultProjection"
+          }
+        }
+      },
+      "required": [
+        "accountId",
+        "replicaRevision",
+        "items",
+        "vaults"
+      ]
+    },
+    "LoginItemData": {
+      "type": "object",
+      "properties": {
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passkeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Passkey"
+          }
+        },
+        "password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PasswordHistoryEntry"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "ObservationRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "writableVaultCatalog"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "items"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "operations"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "pendingShareResults"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "runtimeStatus"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        }
+      ]
+    },
+    "OperationProjection": {
+      "type": "object",
+      "properties": {
+        "attemptCount": {
+          "description": "Terminal receipts do not retain historical scheduling diagnostics.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "importedCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 200,
+          "minimum": 0
+        },
+        "kind": {
+          "$ref": "#/$defs/OperationProjectionKind"
+        },
+        "nextAttemptAtMs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "rejectionCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolution": {
+          "$ref": "#/$defs/OperationResolution"
+        }
+      },
+      "required": [
+        "operationId",
+        "kind",
+        "attemptCount",
+        "nextAttemptAtMs",
+        "resolution",
+        "importedCount",
+        "rejectionCode"
+      ]
+    },
+    "OperationProjectionKind": {
+      "type": "string",
+      "enum": [
+        "createVault",
+        "createItem",
+        "updateItem",
+        "setItemFavorite",
+        "trashItem",
+        "restoreItem",
+        "moveItem",
+        "permanentlyDeleteItem",
+        "createShare",
+        "importItems"
+      ]
+    },
+    "OperationResolution": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "applied",
+        "rejected"
+      ]
+    },
+    "OperationsProjection": {
+      "description": "Non-secret progress from accepted Operations and their durable terminal receipts.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperationProjection"
+          }
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        }
+      },
+      "required": [
+        "accountId",
+        "replicaRevision",
+        "operations"
+      ]
+    },
+    "Passkey": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "credentialId": {
+          "type": "string"
+        },
+        "lastUsedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privateKey": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "rpId": {
+          "type": "string"
+        },
+        "rpName": {
+          "type": "string"
+        },
+        "signCount": {
+          "type": "integer",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PasskeyStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PasskeyStatusReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusUpdatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transports": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "userDisplayName": {
+          "type": "string"
+        },
+        "userHandle": {
+          "type": "string"
+        },
+        "userName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "credentialId",
+        "rpId",
+        "rpName",
+        "userHandle",
+        "userName",
+        "userDisplayName",
+        "privateKey",
+        "publicKey",
+        "algorithm",
+        "signCount",
+        "transports",
+        "createdAt"
+      ]
+    },
+    "PasskeyStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "suspect"
+      ]
+    },
+    "PasskeyStatusReason": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "unknown-credential",
+        "signing-error",
+        "other"
+      ]
+    },
+    "PasswordHistoryEntry": {
+      "type": "object",
+      "properties": {
+        "changedAt": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "password",
+        "changedAt"
+      ]
+    },
+    "PendingShareResult": {
+      "type": "object",
+      "properties": {
+        "expiresAt": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "shareLinkId": {
+          "type": "string"
+        },
+        "shareUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operationId",
+        "itemId",
+        "shareLinkId",
+        "shareUrl",
+        "expiresAt"
+      ]
+    },
+    "PendingShareResultsProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PendingShareResult"
+          }
+        }
+      },
+      "required": [
+        "accountId",
+        "replicaRevision",
+        "results"
+      ]
+    },
+    "PhoneNumber": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "number": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "number"
+      ]
+    },
+    "RecoveryBound": {
+      "description": "Closed recovery implementation guards; these are not Account capacity limits.",
+      "type": "string",
+      "enum": [
+        "recordBytes",
+        "archiveBytes",
+        "recordCount",
+        "artifactCount",
+        "reportBytes",
+        "summaryBytes",
+        "controlBytes",
+        "cursorBytes",
+        "chunkBytes"
+      ]
+    },
+    "RecoveryClassification": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial"
+      ]
+    },
+    "RecoveryDeviceStatus": {
+      "type": "string",
+      "enum": [
+        "freshOrUnknown",
+        "knownAccounts",
+        "storageUnavailable"
+      ]
+    },
+    "RecoveryMaintenanceStatus": {
+      "type": "string",
+      "enum": [
+        "available",
+        "unsupported",
+        "busy",
+        "unavailable"
+      ]
+    },
+    "RecoverySchemaStatus": {
+      "type": "string",
+      "enum": [
+        "supported",
+        "unsupported",
+        "unknown"
+      ]
+    },
+    "RecoveryStorageState": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "corrupt",
+        "missing",
+        "unknown",
+        "unreadable"
+      ]
+    },
+    "RuntimeError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/RuntimeErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "recoveryBound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryBound"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "RuntimeErrorCode": {
+      "type": "string",
+      "enum": [
+        "RUNTIME_CLOSED",
+        "CANCELLED",
+        "ACCOUNT_MISSING",
+        "ACCOUNT_ALREADY_INSTALLED",
+        "ACCOUNT_FAILED",
+        "AUTHENTICATION_REQUIRED",
+        "AUTHENTICATION_UNAVAILABLE",
+        "STORAGE_UNAVAILABLE",
+        "RETRYABLE_TRANSPORT",
+        "AUTHORITY_MISSING",
+        "ACCESS_DENIED",
+        "READ_ONLY",
+        "QUOTA_EXCEEDED",
+        "SIZE_REJECTED",
+        "SOURCE_FAILURE",
+        "SINK_FAILURE",
+        "INVARIANT_VIOLATION"
+      ]
+    },
+    "RuntimeOutcome": {
+      "description": "The declared envelope every external Runtime request answers with.\n\nSerde would otherwise emit its externally tagged `Result` spelling, an implicit wire shape no\ncontract describes. This adjacent tagging matches `RuntimeProjection`, and it keeps the\nsuccess payload intact: `RuntimeResponse` is itself internally tagged on `type`, so an\ninternally tagged envelope would collide with it.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "succeeded"
+            },
+            "value": {
+              "$ref": "#/$defs/RuntimeResponse"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "failed"
+            },
+            "value": {
+              "$ref": "#/$defs/RuntimeError"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        }
+      ]
+    },
+    "RuntimeProjection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "writableVaultCatalog"
+            },
+            "value": {
+              "$ref": "#/$defs/WritableVaultCatalogProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "items"
+            },
+            "value": {
+              "$ref": "#/$defs/ItemsProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "operations"
+            },
+            "value": {
+              "$ref": "#/$defs/OperationsProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "pendingShareResults"
+            },
+            "value": {
+              "$ref": "#/$defs/PendingShareResultsProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "runtimeStatus"
+            },
+            "value": {
+              "$ref": "#/$defs/RuntimeStatusProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        }
+      ]
+    },
+    "RuntimeRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rebootstrapAccountRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "inspectRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "sinkCapabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "exportAccountRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "password",
+            "sinkCapabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "sourceCapabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "repairAccountRecovery"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "password",
+            "sourceCapabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "insecureTransportConfirmed": {
+              "type": "boolean"
+            },
+            "masterPassword": {
+              "type": "string"
+            },
+            "secretKey": {
+              "type": "string"
+            },
+            "serverUrl": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "signIn"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "serverUrl",
+            "email",
+            "masterPassword",
+            "secretKey",
+            "insecureTransportConfirmed"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "masterPassword": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "quickUnlock"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "masterPassword"
+          ]
+        },
+        {
+          "description": "Retires this Account's live keys and plaintext delivery while the Device keeps the\nmaterial one master password reopens.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "lock"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "description": "Ends local ownership: the same retirement as `Lock`, and the Device forgets the\nQuick Unlock material and Session, so this Account needs a full Sign-in again.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "signOut"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "description": "Irreversibly removes exactly the explicitly named Account from this Device.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "type": {
+              "type": "string",
+              "const": "removeAccount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "description": "Uses this installed Account's Runtime-owned Session to request authoritative Server\ndeletion. The host retains the exact request identity until the workflow is closed.",
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "confirmEmail": {
+              "type": "string"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteServerAccount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "confirmEmail",
+            "requestId"
+          ]
+        },
+        {
+          "description": "Irreversibly removes every Runtime-owned Account and Device record.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "wipe"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "icon": {
+              "type": "string"
+            },
+            "imageSource": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VaultImageSourceInput"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "createVault"
+            },
+            "vaultType": {
+              "$ref": "#/$defs/CreateVaultType"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "name",
+            "vaultType",
+            "icon"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/ItemDraft"
+            },
+            "type": {
+              "type": "string",
+              "const": "createItem"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "vaultId",
+            "draft"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ImportItemDraft"
+              },
+              "maxItems": 200
+            },
+            "type": {
+              "type": "string",
+              "const": "importItems"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "vaultId",
+            "items"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/ItemDraft"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "updateItem"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "draft"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "favorite": {
+              "type": "boolean"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "setItemFavorite"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "favorite"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "trashItem"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "restoreItem"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "targetVaultId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "moveItem"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "targetVaultId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "permanentlyDeleteItem"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/CreateShareDraft"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "createShare"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "draft"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "acknowledgeShareResult"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listItemShareLinks"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listShareAccessLogs"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "revokeShareLink"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "renameAttachment"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteAttachment"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "sinkCapabilityId": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            },
+            "type": {
+              "type": "string",
+              "const": "downloadAttachment"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId",
+            "sinkCapabilityId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string",
+              "maxLength": 255,
+              "minLength": 1
+            },
+            "fileSize": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 255,
+              "minLength": 1
+            },
+            "sourceCapabilityId": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            },
+            "type": {
+              "type": "string",
+              "const": "uploadAttachment"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "name",
+            "contentType",
+            "fileSize",
+            "sourceCapabilityId"
+          ]
+        }
+      ]
+    },
+    "RuntimeResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "diagnostics": {
+              "$ref": "#/$defs/StorageRecoveryDiagnostics"
+            },
+            "type": {
+              "type": "string",
+              "const": "recoveryDiagnosed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "diagnostics"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "byteLength": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "classification": {
+              "$ref": "#/$defs/RecoveryClassification"
+            },
+            "type": {
+              "type": "string",
+              "const": "recoveryExported"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "classification",
+            "byteLength"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "recoveryRepaired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "signedIn"
+            },
+            "userId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "userId"
+          ]
+        },
+        {
+          "description": "The Account access state this Device holds after a `Lock` or `SignOut`. An Account this\nDevice does not have answers `SignedOut`, because that is what it is.",
+          "type": "object",
+          "properties": {
+            "access": {
+              "$ref": "#/$defs/AccountAccessState"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "accessChanged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "access"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "outcome": {
+              "$ref": "#/$defs/ServerAccountDeletionOutcome"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "serverAccountDeletion"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "requestId",
+            "outcome"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultCreationAccepted"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operationId",
+            "vaultId",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "itemId": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "accepted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operationId",
+            "itemId",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "itemIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "importBatchAccepted"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operationId",
+            "vaultId",
+            "itemIds",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "shareResultAcknowledged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "baseShareUrl": {
+              "type": "string"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "links": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ShareLinkSummary"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "itemShareLinks"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "links",
+            "baseShareUrl"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "logs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ShareAccessLog"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "shareAccessLogs"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId",
+            "logs"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "linkId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "shareLinkRevoked"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "linkId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "attachmentRenamed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "attachmentDeleted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "attachmentDownloaded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "attachmentId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attachmentId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "attachmentUploaded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "attachmentId",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "failures": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TeardownPhase"
+              },
+              "maxItems": 4
+            },
+            "scope": {
+              "$ref": "#/$defs/TeardownScope"
+            },
+            "status": {
+              "$ref": "#/$defs/TeardownStatus"
+            },
+            "type": {
+              "type": "string",
+              "const": "teardown"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "scope",
+            "status"
+          ]
+        }
+      ]
+    },
+    "RuntimeStatusProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountStatus"
+          }
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        }
+      },
+      "required": [
+        "accountId",
+        "revision",
+        "accounts",
+        "closed"
+      ]
+    },
+    "SecureNoteItemData": {
+      "type": "object",
+      "properties": {
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "note"
+      ]
+    },
+    "ServerAccountDeletionOutcome": {
+      "type": "string",
+      "enum": [
+        "deleted",
+        "confirmationEmailMismatch",
+        "blocked"
+      ]
+    },
+    "ShareAccessLog": {
+      "type": "object",
+      "properties": {
+        "accessedAt": {
+          "type": "string"
+        },
+        "accessedByEmail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failureReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "ipAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "userAgent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "accessedByEmail",
+        "ipAddress",
+        "userAgent",
+        "success",
+        "failureReason",
+        "accessedAt"
+      ]
+    },
+    "ShareAccessMode": {
+      "type": "string",
+      "enum": [
+        "anyone",
+        "email-restricted"
+      ]
+    },
+    "ShareAllowedEmail": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "email",
+        "verified"
+      ]
+    },
+    "ShareExpiration": {
+      "type": "string",
+      "enum": [
+        "1hour",
+        "1day",
+        "7days",
+        "14days",
+        "30days"
+      ]
+    },
+    "ShareLinkStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "expired",
+        "exhausted",
+        "revoked"
+      ]
+    },
+    "ShareLinkSummary": {
+      "type": "object",
+      "properties": {
+        "accessCount": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "accessMode": {
+          "$ref": "#/$defs/ShareAccessMode"
+        },
+        "allowedEmails": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShareAllowedEmail"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isOneTimeUse": {
+          "type": "boolean"
+        },
+        "lastAccessedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxAccessCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "status": {
+          "$ref": "#/$defs/ShareLinkStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "accessMode",
+        "isOneTimeUse",
+        "accessCount",
+        "maxAccessCount",
+        "allowedEmails",
+        "expiresAt",
+        "createdAt",
+        "lastAccessedAt"
+      ]
+    },
+    "StorageRecoveryAccount": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "canExport": {
+          "type": "boolean"
+        },
+        "canRebootstrap": {
+          "type": "boolean"
+        },
+        "canRepair": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "missingArtifacts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "operationCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "receiptCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "serverUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/RecoveryStorageState"
+        },
+        "userId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "email",
+        "serverUrl",
+        "userId",
+        "canRebootstrap",
+        "accountId",
+        "state",
+        "operationCount",
+        "receiptCount",
+        "missingArtifacts",
+        "canExport",
+        "canRepair"
+      ]
+    },
+    "StorageRecoveryDiagnostics": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StorageRecoveryAccount"
+          }
+        },
+        "device": {
+          "$ref": "#/$defs/RecoveryDeviceStatus"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maintenance": {
+          "$ref": "#/$defs/RecoveryMaintenanceStatus"
+        },
+        "schema": {
+          "$ref": "#/$defs/RecoverySchemaStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "failure",
+        "maintenance",
+        "schema",
+        "device",
+        "accounts"
+      ]
+    },
+    "TeardownPhase": {
+      "description": "Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.",
+      "type": "string",
+      "enum": [
+        "attachmentArtifacts",
+        "hostCleanup",
+        "platformStorage",
+        "replica"
+      ]
+    },
+    "TeardownScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "pattern": "^[\\s\\S]+$"
+            },
+            "type": {
+              "type": "string",
+              "const": "account"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "device"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "TeardownStatus": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "incomplete"
+      ]
+    },
+    "TotpAlgorithm": {
+      "type": "string",
+      "enum": [
+        "SHA1",
+        "SHA256",
+        "SHA512"
+      ]
+    },
+    "TotpDigits": {
+      "type": "integer",
+      "enum": [
+        6,
+        7,
+        8
+      ]
+    },
+    "VaultImageSourceInput": {
+      "type": "object",
+      "properties": {
+        "byteLength": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "capabilityId": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._~-]+$"
+        },
+        "contentType": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "capabilityId",
+        "byteLength",
+        "contentType"
+      ]
+    },
+    "VaultProjection": {
+      "description": "One Vault as an Items reader needs it: enough to label it and to know what may be written.",
+      "type": "object",
+      "properties": {
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "description": "This Account's membership in the Vault. A host derives \"may I write an Item here\"\nfrom it (anything but `ReadOnly`), and the manage affordances an Owner or Admin has\nand a Member does not. The first slice's narrower create rule filters on the Vault\ntype as well.",
+          "$ref": "#/$defs/VaultProjectionRole"
+        },
+        "vaultId": {
+          "type": "string"
+        },
+        "vaultType": {
+          "$ref": "#/$defs/VaultProjectionType"
+        }
+      },
+      "required": [
+        "vaultId",
+        "name",
+        "vaultType",
+        "role"
+      ]
+    },
+    "VaultProjectionRole": {
+      "description": "One Account's membership in one Vault.\n\nThe values are the Server's own closed `VaultRole` set, spelled the way the Server spells\nthem, so a host that already renders a role does not need a second vocabulary and a\ntranslation table between the two.",
+      "type": "string",
+      "enum": [
+        "owner",
+        "admin",
+        "member",
+        "read-only"
+      ]
+    },
+    "VaultProjectionType": {
+      "type": "string",
+      "enum": [
+        "personal",
+        "team"
+      ]
+    },
+    "WritableVaultCatalogProjection": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "vaults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WritableVaultProjection"
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "vaults"
+      ]
+    },
+    "WritableVaultProjection": {
+      "description": "Non-secret authority metadata for every currently unlocked writable Vault on this Device.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/VaultProjectionRole"
+        },
+        "vaultId": {
+          "type": "string"
+        },
+        "vaultType": {
+          "$ref": "#/$defs/VaultProjectionType"
+        }
+      },
+      "required": [
+        "accountId",
+        "vaultId",
+        "name",
+        "vaultType",
+        "role"
+      ]
+    }
+  },
+  "$id": "urn:bittery:client-runtime:runtime-protocol"
+}

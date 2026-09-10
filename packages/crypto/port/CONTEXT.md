@@ -10,7 +10,7 @@ adapter suite can and cannot establish.
                /        \
       AccountStore      CryptoPort            deep modules over a dumb, total seam
                \        /
-        PlatformPort   wasm-worker · wasm · react-native
+        PlatformPort   wasm-worker · wasm · wasm-static
                               |
                          Rust crypto core      algorithms and formats
 ```
@@ -93,16 +93,20 @@ The three production adapters and the in-memory fake share the same contract:
 
 | consumer | adapter | material behind a `KeyRef` |
 | --- | --- | --- |
-| web and desktop | `wasm-worker` | a generated UniFFI `KeyHandle` in the crypto worker; the main thread holds only its own opaque token |
-| browser extension | `wasm` | a WASM key-table handle in the same JavaScript context |
-| mobile | `react-native` | a generated UniFFI `KeyHandle` owned by the native module |
+| web, desktop and mobile | `wasm-worker` | a generated UniFFI `KeyHandle` in the crypto worker; the main thread holds only its own opaque token |
+| browser extension | `wasm-static` | a WASM key-table handle in the same JavaScript context, loaded without dynamic `import()` |
 | tests | `in-memory-crypto` | an in-process boxed value behind the same ref table; its cipher is deliberately not secure |
 
 On web, port arguments cross the main-thread/worker boundary as worker handles, not key
 bytes. When a Rust binding itself requires base64 key material, that conversion stays inside
 the worker. `decryptMany` is one worker round trip for the whole batch. Desktop uses the same
-worker adapter. The extension has no worker boundary: its ref maps directly to a handle in its
-same-context WASM table. Mobile passes only generated handles through its native module.
+worker adapter, including mobile — the Tauri app runs the same worker inside its WebView. The
+extension has no worker boundary: its ref maps directly to a handle in its same-context WASM
+table.
+
+Android's credential provider is the one crypto consumer outside this port. It runs in its own
+process, cannot reach the WebView, and calls the UniFFI Kotlin in `packages/crypto/android`
+directly.
 
 ---
 

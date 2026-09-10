@@ -267,71 +267,187 @@ pub(super) async fn get_item(
     versioned_json(item, version)
 }
 
-#[utoipa::path(put, path = "/vaults/{vaultId}/items/{itemId}", operation_id = "createItem", tag = "items", params(("vaultId" = String, Path), ("itemId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same queued mutation outcome for 24 hours when request bytes match")), request_body = CreateItemBody, responses((status = 200, description = "Success", body = CreateItemResponse, headers(("ETag" = String, description = "Created strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(put, path = "/vaults/{vaultId}/items/{itemId}", operation_id = "createItem", tag = "items", params(("vaultId" = String, Path), ("itemId" = String, Path), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = CreateItemBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemOperationErrorResponses))]
 pub(super) async fn create_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path((vault_id, item_id)): Path<(String, String)>,
     ApiJsonBytes { value: body, bytes }: ApiJsonBytes<CreateItemBody, ITEM_BODY_LIMIT_BYTES>,
-) -> Result<Response, ApiError> {
-    check_ciphertext(&body.encrypted_data)?;
-    let pool = state.db_pool.clone();
+) -> Result<Json<OperationOutcome>, ApiError> {
     let client_id = auth.effective_client_id();
-    let route_target = format!("/api/v1/vaults/{vault_id}/items/{item_id}");
-    idempotency::execute(
-        pool,
+    run_item_operation(
+        &state,
         &headers,
-        auth.session.user_id.clone(),
-        "PUT",
-        &route_target,
-        &bytes,
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::create_vault_item(
-                &operation_pool,
-                &operation_principal_id,
-                vault::CreateItemInput {
-                    item_id: Some(item_id),
-                    vault_id,
-                    category: body.category,
-                    encrypted_data: body.encrypted_data,
-                    encryption_iv: body.encryption_iv,
-                    encryption_algorithm: body.encryption_algorithm,
-                    client_id,
-                },
-            )
-            .await
-            .notify_sync(&state)?;
-            versioned_json(CreateItemResponse::from(result), 1)
-        },
+        auth.session.user_id,
+        bytes,
+        ItemOperationEffect::Create(vault::CreateItemEffectInput {
+            item_id,
+            vault_id,
+            category: body.category,
+            encrypted_data: body.encrypted_data,
+            encryption_iv: body.encryption_iv,
+            encryption_algorithm: body.encryption_algorithm,
+            client_id,
+            ciphertext_limit: ITEM_CIPHERTEXT_BYTES as usize,
+        }),
     )
     .await
 }
 
-#[utoipa::path(post, path = "/vaults/{vaultId}/item-imports", operation_id = "bulkImportItems", tag = "items", params(("vaultId" = String, Path)), request_body = BulkImportBody, responses((status = 200, description = "Success", body = BulkImportItemsResponse), VaultErrorResponses))]
+/// Runs one Item Operation and answers with the outcome the Server retained for it.
+///
+/// Every Item mutation reaches the Server through this one door: the stable Operation ID is
+/// required, the fingerprint is taken from the exact bytes and the canonical route, and the only
+/// two answers are a retained outcome or the one structured refusal that says this ID already
+/// belongs to different bytes.
+async fn run_item_operation(
+    state: &AppState,
+    headers: &HeaderMap,
+    user_id: String,
+    raw_body: Vec<u8>,
+    effect: ItemOperationEffect,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    let operation_id = crate::domains::operations::http::required_operation_id(headers)?;
+    let resolution = crate::domains::operations::execute_item_operation(
+        &state.db_pool,
+        ItemOperationInput {
+            operation_id,
+            user_id,
+            effect,
+            raw_body,
+        },
+    )
+    .await?;
+    match resolution {
+        OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
+        }
+        OperationResolution::IdReused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
+}
+
+// Import is one Operation now. The route keeps its path and its 16 MiB body limit; everything
+// else about it is the same Operation contract every Item mutation uses.
+#[utoipa::path(post, path = "/vaults/{vaultId}/item-imports", operation_id = "bulkImportItems", tag = "items", params(("vaultId" = String, Path), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = BulkImportBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), VaultErrorResponses))]
 pub(super) async fn bulk_import_items(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
+    headers: HeaderMap,
     Path(vault_id): Path<String>,
-    ApiJson(body): ApiJson<BulkImportBody>,
-) -> Result<Json<BulkImportItemsResponse>, ApiError> {
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<BulkImportBody, BULK_IMPORT_BODY_LIMIT_BYTES>,
+) -> Result<Json<OperationOutcome>, ApiError> {
+    // The one refusal on this route that is not a retained decision; `check_bulk_import` says why.
     check_bulk_import(&body)?;
-    let pool = &state.db_pool;
-    let result = vault::bulk_import_vault_items(
-        pool,
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    let resolution = vault::execute_import_items_operation(
+        &state.db_pool,
         &auth.session.user_id,
-        vault::BulkImportItemsInput {
+        vault::ImportItemsOperationInput {
+            operation_id,
             vault_id,
             client_id: auth.effective_client_id(),
+            raw_body: bytes,
             items: body.items.into_iter().map(Into::into).collect(),
+            ciphertext_limit: ITEM_CIPHERTEXT_BYTES as usize,
         },
     )
-    .await
-    .notify_sync(&state)?;
-    Ok(Json(result.into()))
+    .await?;
+    match resolution {
+        OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
+        }
+        OperationResolution::IdReused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
 }
 
-#[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body(content = UpdateItemBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(post, path = "/vaults/{vaultId}/item-authority-pages", operation_id = "getVaultItemAuthorityPage", tag = "items", params(("vaultId" = String, Path)), request_body = ItemAuthorityPageBody, responses((status = 200, description = "Authoritative state of the requested Items", body = Vec<ItemResponseDto>, headers(("Bittery-Next-Cursor" = String, description = "Present only when another page follows"))), VaultErrorResponses))]
+pub(super) async fn get_item_authority_page(
+    State(state): State<AppState>,
+    auth: AuthenticatedRequest,
+    Path(vault_id): Path<String>,
+    ApiJson(body): ApiJson<ItemAuthorityPageBody>,
+) -> Result<Response, ApiError> {
+    // Why this is a POST that reads: the caller names up to 200 Item identities at once, which no
+    // query string should carry, so the identity set travels as a request body. That is the shape
+    // `getVaultImageStagingStatus` already uses for a read. Nothing here mutates, so the route
+    // sits in the `reads` sub-router.
+    //
+    // Why `listVaultItems` cannot serve it: this body is a bare array of the attachment-free Item
+    // shape, because a client reconciles an accepted Import batch against exactly these bytes and
+    // refuses an unknown field. `listVaultItems` answers a paged envelope of the same fields plus
+    // attachments, and reads the whole Vault rather than one named set.
+    check_item_authority_page_ids(&body.item_ids)?;
+    let page = PageRequest {
+        cursor: body.cursor,
+        limit: check_item_authority_page_limit(body.limit)?,
+    };
+    // The cursor is bound to the identity set as well as the Vault, so a cursor issued for one
+    // set cannot be replayed against another and skip Items the caller named.
+    let filters = item_authority_cursor_filters(&vault_id, &body.item_ids);
+    let context = || {
+        CursorContext::new(
+            &auth.session.user_id,
+            "vault-item-authority",
+            &filters,
+            &state.config.auth.jwt_secret,
+        )
+    };
+    let after_id = decode_page_key(&page, context())?;
+    let values = vault::list_vault_item_authority_page(
+        &state.db_pool,
+        &auth.session.user_id,
+        &vault_id,
+        &body.item_ids,
+        after_id.as_deref(),
+        i64::from(page.limit) + 1,
+    )
+    .await?;
+    // Pages are ordered by identity, so a cursor always advances, and one is only ever issued
+    // when Items remain. A cursor that now selects nothing therefore did not advance: refusing it
+    // is honest, where an empty page would look like a complete answer.
+    if after_id.is_some() && values.is_empty() {
+        return Err(ApiError::bad_request(
+            ErrorCode::InvalidCursor,
+            "The page cursor is invalid for this request.",
+        ));
+    }
+    let values: Vec<ItemResponseDto> = values
+        .into_iter()
+        .map(|item| ItemResponseDto::compose(item.decompose().0))
+        .collect();
+    let page = page_prefetched(values, &page, context(), |item| item.id.clone())?;
+    // The next cursor cannot ride in the body, because the body is the bare Item array the client
+    // decodes. It rides in a response header instead, present only when another page follows.
+    let mut response = Json(page.items).into_response();
+    if let Some(cursor) = page.next_cursor {
+        response.headers_mut().insert(
+            NEXT_CURSOR_HEADER,
+            HeaderValue::from_str(cursor.as_str()).map_err(|_| ApiError::internal())?,
+        );
+    }
+    Ok(response)
+}
+
+#[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body(content = UpdateItemBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]
 pub(super) async fn update_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -341,49 +457,32 @@ pub(super) async fn update_item(
         UpdateItemBody,
         ITEM_BODY_LIMIT_BYTES,
     >,
-) -> Result<Response, ApiError> {
+) -> Result<Json<OperationOutcome>, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let encrypted_data = optional_patch_value(body.encrypted_data, "/encryptedData")?;
     let encryption_iv = optional_patch_value(body.encryption_iv, "/encryptionIv")?;
     let encryption_algorithm =
         optional_patch_value(body.encryption_algorithm, "/encryptionAlgorithm")?;
-    if let Some(value) = encrypted_data.as_deref() {
-        check_ciphertext(value)?;
-    }
-    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
-    let route_target = format!("/api/v1/items/{item_id}");
-    idempotency::execute(
-        pool,
+    run_item_operation(
+        &state,
         &headers,
-        auth.session.user_id.clone(),
-        "PATCH",
-        &route_target,
-        &bytes,
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::update_vault_item(
-                &operation_pool,
-                &operation_principal_id,
-                vault::UpdateItemInput {
-                    item_id,
-                    encrypted_data,
-                    encryption_iv,
-                    encryption_algorithm,
-                    expected_version: Some(expected_version),
-                    client_id,
-                },
-            )
-            .await
-            .notify_sync(&state)
-            .map_err(item_mutation_error)?;
-            let version = result.version;
-            versioned_json(UpdateItemResponse::from(result), version)
-        },
+        auth.session.user_id,
+        bytes,
+        ItemOperationEffect::Update(vault::UpdateItemEffectInput {
+            item_id,
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+            expected_version,
+            client_id,
+            ciphertext_limit: ITEM_CIPHERTEXT_BYTES as usize,
+        }),
     )
     .await
 }
 
-#[utoipa::path(patch, path = "/items/{itemId}/favorite", operation_id = "setItemFavorite", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body(content = FavoriteBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/items/{itemId}/favorite", operation_id = "setItemFavorite", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body(content = FavoriteBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]
 pub(super) async fn set_favorite(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -393,190 +492,274 @@ pub(super) async fn set_favorite(
         FavoriteBody,
         ITEM_BODY_LIMIT_BYTES,
     >,
-) -> Result<Response, ApiError> {
+) -> Result<Json<OperationOutcome>, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let client_id = auth.effective_client_id();
-    let pool = state.db_pool.clone();
-    let route_target = format!("/api/v1/items/{item_id}/favorite");
-    idempotency::execute(
-        pool,
+    run_item_operation(
+        &state,
         &headers,
-        auth.session.user_id.clone(),
-        "PATCH",
-        &route_target,
-        &bytes,
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::toggle_vault_favorite(
-                &operation_pool,
-                &operation_principal_id,
-                vault::ToggleFavoriteInput {
-                    item_id,
-                    favorite: body.favorite,
-                    expected_version: Some(expected_version),
-                    client_id,
-                },
-            )
-            .await
-            .notify_sync(&state)
-            .map_err(item_mutation_error)?;
-            versioned_json(SuccessResponse::from(result), expected_version + 1)
-        },
+        auth.session.user_id,
+        bytes,
+        ItemOperationEffect::SetFavorite(vault::FavoriteItemEffectInput {
+            item_id,
+            favorite: body.favorite,
+            expected_version,
+            client_id,
+        }),
     )
     .await
 }
 
-#[utoipa::path(delete, path = "/items/{itemId}", operation_id = "trashItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same queued mutation outcome for 24 hours when preconditions match")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(delete, path = "/items/{itemId}", operation_id = "trashItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]
 pub(super) async fn delete_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<OperationOutcome>, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
-    let route_target = format!("/api/v1/items/{item_id}");
-    idempotency::execute(
-        pool,
+    run_item_operation(
+        &state,
         &headers,
-        auth.session.user_id.clone(),
-        "DELETE",
-        &route_target,
-        &[],
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::delete_vault_item(
-                &operation_pool,
-                &operation_principal_id,
-                vault::ItemClientInput {
-                    item_id,
-                    expected_version: Some(expected_version),
-                    client_id,
-                },
-            )
-            .await
-            .notify_sync(&state)
-            .map_err(item_mutation_error)?;
-            versioned_json(SuccessResponse::from(result), expected_version + 1)
-        },
+        auth.session.user_id,
+        Vec::new(),
+        ItemOperationEffect::Trash(vault::ItemEffectInput {
+            item_id,
+            expected_version,
+            client_id,
+        }),
     )
     .await
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/restore", operation_id = "restoreItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when preconditions match")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/restore", operation_id = "restoreItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]
 pub(super) async fn restore_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<OperationOutcome>, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
-    let route_target = format!("/api/v1/items/{item_id}/restore");
-    idempotency::execute(
-        pool,
+    run_item_operation(
+        &state,
         &headers,
-        auth.session.user_id.clone(),
-        "POST",
-        &route_target,
-        &[],
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::restore_vault_item(
-                &operation_pool,
-                &operation_principal_id,
-                vault::ItemClientInput {
-                    item_id,
-                    expected_version: Some(expected_version),
-                    client_id,
-                },
-            )
-            .await
-            .notify_sync(&state)
-            .map_err(item_mutation_error)?;
-            versioned_json(SuccessResponse::from(result), expected_version + 1)
-        },
+        auth.session.user_id,
+        Vec::new(),
+        ItemOperationEffect::Restore(vault::ItemEffectInput {
+            item_id,
+            expected_version,
+            client_id,
+        }),
     )
     .await
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/moves", operation_id = "moveItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body = MoveItemBody, responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/moves", operation_id = "moveItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = MoveItemBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]
 pub(super) async fn move_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
     ApiJsonBytes { value: body, bytes }: ApiJsonBytes<MoveItemBody, ITEM_BODY_LIMIT_BYTES>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<OperationOutcome>, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    check_ciphertext(&body.encrypted_data)?;
-    let pool = state.db_pool.clone();
-    let client_id = auth.effective_client_id();
-    let route_target = format!("/api/v1/items/{item_id}/moves");
-    idempotency::execute(
-        pool,
-        &headers,
-        auth.session.user_id.clone(),
-        "POST",
-        &route_target,
-        &bytes,
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::move_vault_item(
-                &operation_pool,
-                &operation_principal_id,
-                vault::MoveItemInput {
-                    item_id,
-                    source_vault_id: body.source_vault_id,
-                    target_vault_id: body.target_vault_id,
-                    encrypted_data: body.encrypted_data,
-                    encryption_iv: body.encryption_iv,
-                    encryption_algorithm: body.encryption_algorithm,
-                    expected_version: Some(expected_version),
-                    client_id,
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    let retained = crate::domains::operations::get_operation_outcome(
+        &state.db_pool,
+        &auth.session.user_id,
+        &operation_id,
+    )
+    .await?
+    .is_some();
+    #[cfg(test)]
+    crate::test_support::pause_attachment_move_preflight(&operation_id).await;
+    let (source_vault_id, target_vault_id, finalization) = match body {
+        MoveItemBody::Prepared {
+            source_vault_id,
+            target_vault_id,
+            encrypted_data,
+            encryption_iv,
+            encryption_algorithm,
+            attachments,
+        } => {
+            if !retained {
+                let expected_attachments = attachments
+                    .iter()
+                    .map(|entry| (entry.attachment_id.clone(), entry.expected_envelope_version))
+                    .collect::<Vec<_>>();
+                match vault::verify_attachment_move_staging(
+                    &state.db_pool,
+                    state.object_storage.as_ref(),
+                    &auth.session.user_id,
+                    &operation_id,
+                    vault::AttachmentMoveFinalizeIntent {
+                        item_id: &item_id,
+                        source_vault_id: &source_vault_id,
+                        target_vault_id: &target_vault_id,
+                        attachments: &expected_attachments,
+                    },
+                )
+                .await?
+                {
+                    vault::AttachmentMoveStagingStatus::Ready => {}
+                    vault::AttachmentMoveStagingStatus::Absent if attachments.is_empty() => {}
+                    vault::AttachmentMoveStagingStatus::Absent
+                    | vault::AttachmentMoveStagingStatus::Incomplete
+                        if crate::domains::operations::get_operation_outcome(
+                            &state.db_pool,
+                            &auth.session.user_id,
+                            &operation_id,
+                        )
+                        .await?
+                        .is_some() => {}
+                    vault::AttachmentMoveStagingStatus::Absent
+                    | vault::AttachmentMoveStagingStatus::Incomplete => {
+                        return Err(ApiError::conflict(
+                            ErrorCode::AttachmentStagingIncomplete,
+                            "Attachment Move staging is missing, expired, or incomplete.",
+                        ));
+                    }
+                    vault::AttachmentMoveStagingStatus::Mismatch => {
+                        return Err(ApiError::conflict(
+                            ErrorCode::AttachmentStagingMismatch,
+                            "Attachment Move Finalize intent does not match its manifest.",
+                        ));
+                    }
+                }
+            }
+            (
+                source_vault_id,
+                target_vault_id,
+                vault::MoveItemFinalizationInput::Prepared {
+                    encrypted_data,
+                    encryption_iv,
+                    encryption_algorithm,
+                    attachments: attachments
+                        .into_iter()
+                        .map(|entry| vault::MoveAttachmentEffectInput {
+                            attachment_id: entry.attachment_id,
+                            expected_envelope_version: entry.expected_envelope_version,
+                            encrypted_attachment_key: entry.encrypted_attachment_key,
+                            attachment_key_iv: entry.attachment_key_iv,
+                            attachment_key_algorithm: entry.attachment_key_algorithm,
+                            encrypted_name: entry.encrypted_name,
+                            encrypted_content_type: entry.encrypted_content_type,
+                            encryption_iv: entry.encryption_iv,
+                            encrypted_content_type_iv: entry.encrypted_content_type_iv,
+                            encryption_algorithm: entry.encryption_algorithm,
+                        })
+                        .collect(),
                 },
             )
-            .await
-            .notify_sync(&state)
-            .map_err(item_mutation_error)?;
-            let version = result.version;
-            versioned_json(UpdateItemResponse::from(result), version)
-        },
+        }
+        MoveItemBody::RejectStaleAuthority {
+            source_vault_id,
+            target_vault_id,
+            attachments,
+        } => (
+            source_vault_id,
+            target_vault_id,
+            vault::MoveItemFinalizationInput::RejectStaleAuthority {
+                attachments: attachments
+                    .into_iter()
+                    .map(|entry| vault::MoveAttachmentIntentInput {
+                        attachment_id: entry.attachment_id,
+                        expected_envelope_version: entry.expected_envelope_version,
+                    })
+                    .collect(),
+            },
+        ),
+    };
+    let client_id = auth.effective_client_id();
+    run_item_operation(
+        &state,
+        &headers,
+        auth.session.user_id,
+        bytes,
+        ItemOperationEffect::Move(vault::MoveItemEffectInput {
+            operation_id,
+            item_id,
+            source_vault_id,
+            target_vault_id,
+            expected_version,
+            client_id,
+            ciphertext_limit: ITEM_CIPHERTEXT_BYTES as usize,
+            finalization,
+        }),
     )
     .await
 }
 
-#[utoipa::path(delete, path = "/items/{itemId}/permanent", operation_id = "permanentlyDeleteItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same queued mutation outcome for 24 hours when preconditions match")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Final strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(put, path = "/operations/{operationId}/attachment-move-manifest", operation_id = "createAttachmentMoveManifest", tag = "attachments", params(("operationId" = String, Path)), request_body = AttachmentMoveManifestBody, responses((status = 200, description = "Stable staging identities and renewed upload credentials", body = AttachmentMoveManifestResponse), VaultErrorResponses))]
+pub(super) async fn create_attachment_move_manifest(
+    State(state): State<AppState>,
+    auth: AuthenticatedRequest,
+    Path(operation_id): Path<String>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<
+        AttachmentMoveManifestBody,
+        ITEM_BODY_LIMIT_BYTES,
+    >,
+) -> Result<Json<AttachmentMoveManifestResponse>, ApiError> {
+    let operation_id = crate::domains::operations::http::validate_operation_id_str(&operation_id)?;
+    let response = vault::create_attachment_move_manifest(
+        &state.db_pool,
+        state.object_storage.as_ref(),
+        state.config.server.mode,
+        &auth.session.user_id,
+        vault::AttachmentMoveManifestInput {
+            operation_id,
+            item_id: body.item_id,
+            source_vault_id: body.source_vault_id,
+            target_vault_id: body.target_vault_id,
+            attachments: body
+                .attachments
+                .into_iter()
+                .map(|entry| vault::AttachmentMoveManifestEntryInput {
+                    attachment_id: entry.attachment_id,
+                    envelope_version: entry.envelope_version,
+                    ciphertext_sha256: entry.ciphertext_sha256,
+                })
+                .collect(),
+            request_bytes: bytes,
+        },
+    )
+    .await?;
+    Ok(Json(AttachmentMoveManifestResponse {
+        operation_id: response.operation_id,
+        expires_at: response.expires_at,
+        attachments: response
+            .attachments
+            .into_iter()
+            .map(|entry| AttachmentMoveUploadResponse {
+                attachment_id: entry.attachment_id,
+                storage_key: entry.storage_key,
+                upload_url: entry.upload_url,
+            })
+            .collect(),
+    }))
+}
+
+#[utoipa::path(delete, path = "/items/{itemId}/permanent", operation_id = "permanentlyDeleteItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), ItemMutationOperationErrorResponses))]
 pub(super) async fn permanently_delete_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-) -> Result<Response, ApiError> {
+) -> Result<Json<OperationOutcome>, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = state.db_pool.clone();
     let client_id = auth.effective_client_id();
-    let route_target = format!("/api/v1/items/{item_id}/permanent");
-    idempotency::execute(
-        pool,
+    run_item_operation(
+        &state,
         &headers,
-        auth.session.user_id.clone(),
-        "DELETE",
-        &route_target,
-        &[],
-        |operation_pool, operation_principal_id| async move {
-            let result = vault::permanently_delete_vault_item(
-                &operation_pool,
-                &operation_principal_id,
-                vault::ItemClientInput {
-                    item_id,
-                    expected_version: Some(expected_version),
-                    client_id,
-                },
-            )
-            .await
-            .notify_sync(&state)
-            .map_err(item_mutation_error)?;
-            versioned_json(SuccessResponse::from(result), expected_version + 1)
-        },
+        auth.session.user_id,
+        Vec::new(),
+        ItemOperationEffect::PermanentlyDelete(vault::ItemEffectInput {
+            item_id,
+            expected_version,
+            client_id,
+        }),
     )
     .await
 }

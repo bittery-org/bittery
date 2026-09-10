@@ -81,7 +81,6 @@ function main() {
 		"apps/desktop/package.json",
 		"apps/extension/package.json",
 		"apps/desktop/src-tauri/tauri.conf.json",
-		"apps/mobile/app.json",
 	]) {
 		replace(path, jsonVersion, `"version": "${version}"`);
 	}

@@ -1,0 +1,671 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplicaPersistenceContract",
+  "type": "object",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/ReplicaPersistenceRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/ReplicaPersistenceResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response"
+  ],
+  "$defs": {
+    "ExpectedReplicaHead": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "lockEpoch": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "incarnation",
+        "userId",
+        "replicaRevision",
+        "lockEpoch"
+      ]
+    },
+    "ExpectedReplicaInstall": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "missing"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "incarnation": {
+              "type": "string"
+            },
+            "lockEpoch": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "present"
+            },
+            "userId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "userId",
+            "incarnation",
+            "replicaRevision",
+            "lockEpoch"
+          ]
+        }
+      ]
+    },
+    "LockEpochAdvanceResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "lockEpoch": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "applied"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "lockEpoch"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "stale"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "missing"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "PlanResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "applied"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "actualRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "stale"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "actualRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "missing"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "PreparedLockEpochAdvance": {
+      "type": "object",
+      "properties": {
+        "expected": {
+          "$ref": "#/$defs/ExpectedReplicaHead"
+        },
+        "nextHead": {
+          "$ref": "#/$defs/ReplicaHead"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "expected",
+        "nextHead"
+      ]
+    },
+    "PreparedReplicaCommit": {
+      "type": "object",
+      "properties": {
+        "expected": {
+          "$ref": "#/$defs/ExpectedReplicaHead"
+        },
+        "nextHead": {
+          "$ref": "#/$defs/ReplicaHead"
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreparedReplicaWrite"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "expected",
+        "nextHead",
+        "writes"
+      ]
+    },
+    "PreparedReplicaInstall": {
+      "type": "object",
+      "properties": {
+        "expected": {
+          "$ref": "#/$defs/ExpectedReplicaInstall"
+        },
+        "nextHead": {
+          "$ref": "#/$defs/ReplicaHead"
+        },
+        "writes": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreparedReplicaWrite"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "expected",
+        "nextHead",
+        "writes"
+      ]
+    },
+    "PreparedReplicaWrite": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "row": {
+              "$ref": "#/$defs/StoredReplicaRow"
+            },
+            "type": {
+              "type": "string",
+              "const": "put"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "row"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/ReplicaRowKey"
+            },
+            "store": {
+              "$ref": "#/$defs/ReplicaStore"
+            },
+            "type": {
+              "type": "string",
+              "const": "delete"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "store",
+            "key"
+          ]
+        }
+      ]
+    },
+    "ReplicaHead": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "lockEpoch": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "userId",
+        "incarnation",
+        "replicaRevision",
+        "lockEpoch",
+        "failure"
+      ]
+    },
+    "ReplicaInstallResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "applied"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "stale"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ReplicaPersistenceRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "load"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "prepared": {
+              "$ref": "#/$defs/PreparedReplicaInstall"
+            },
+            "type": {
+              "type": "string",
+              "const": "install"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "prepared"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "prepared": {
+              "$ref": "#/$defs/PreparedReplicaCommit"
+            },
+            "type": {
+              "type": "string",
+              "const": "commit"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "prepared"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "prepared": {
+              "$ref": "#/$defs/PreparedLockEpochAdvance"
+            },
+            "type": {
+              "type": "string",
+              "const": "advanceLockEpoch"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "prepared"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteAccount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "wipeDevice"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ReplicaPersistenceResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "head": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ReplicaHead"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/StoredReplicaRow"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "loaded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "head",
+            "rows"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ReplicaInstallResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "installed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/PlanResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "committed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/LockEpochAdvanceResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "lockEpochAdvanced"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "accountDeleted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "deviceWiped"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ReplicaRowKey": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "recordId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "recordId"
+      ]
+    },
+    "ReplicaStore": {
+      "type": "string",
+      "enum": [
+        "optimisticItems",
+        "operations",
+        "attachmentMovePreparations",
+        "shareCapabilities",
+        "operationReceipts",
+        "replicaMetadata",
+        "bootstrapGenerations",
+        "bootstrapPages",
+        "authorityVaults",
+        "authorityItems"
+      ]
+    },
+    "RuntimeErrorCode": {
+      "type": "string",
+      "enum": [
+        "RUNTIME_CLOSED",
+        "CANCELLED",
+        "ACCOUNT_MISSING",
+        "ACCOUNT_ALREADY_INSTALLED",
+        "ACCOUNT_FAILED",
+        "AUTHENTICATION_REQUIRED",
+        "AUTHENTICATION_UNAVAILABLE",
+        "STORAGE_UNAVAILABLE",
+        "RETRYABLE_TRANSPORT",
+        "AUTHORITY_MISSING",
+        "ACCESS_DENIED",
+        "READ_ONLY",
+        "QUOTA_EXCEEDED",
+        "SIZE_REJECTED",
+        "SOURCE_FAILURE",
+        "SINK_FAILURE",
+        "INVARIANT_VIOLATION"
+      ]
+    },
+    "StoredReplicaRow": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/ReplicaRowKey"
+        },
+        "payloadJson": {
+          "type": "string"
+        },
+        "store": {
+          "$ref": "#/$defs/ReplicaStore"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "store",
+        "key",
+        "payloadJson"
+      ]
+    }
+  },
+  "$id": "urn:bittery:client-runtime:persistence"
+}

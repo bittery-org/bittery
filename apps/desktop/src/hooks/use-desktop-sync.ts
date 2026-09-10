@@ -1,5 +1,8 @@
 import { isUnauthorizedApiError } from "@bittery/api-contract";
-import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
+import {
+	type LifecycleOutcome,
+	requireCompleteLifecycleOutcome,
+} from "@bittery/core/services/account-lifecycle";
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountSync } from "@bittery/core/services/account-sync";
 import { AccountSyncLifecycle } from "@bittery/core/services/account-sync-lifecycle";
@@ -127,6 +130,10 @@ export function useDesktopSync(
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
 		async (outcome: LifecycleOutcome) => {
+			requireCompleteLifecycleOutcome(outcome, {
+				operation: "Desktop session invalidation",
+				requireAffected: true,
+			});
 			const invalidated = outcome.affected[0];
 			if (!invalidated) {
 				return null;
@@ -144,9 +151,9 @@ export function useDesktopSync(
 	);
 
 	const handleAccountSessionInvalidation = useCallback(
-		async (sessionId: string) => {
+		async (sessionId: string, accountId: string) => {
 			await applyInvalidatedSession(
-				await accountSync.invalidateSession({ sessionId }),
+				await accountSync.invalidateSession({ sessionId, accountId }),
 			);
 			lifecycle.clear();
 		},
@@ -155,15 +162,28 @@ export function useDesktopSync(
 
 	const onSessionRevoked = useCallback(
 		async (payload: { sessionId: string }) => {
-			const revoked = await applyInvalidatedSession(
-				await accountSync.invalidateSession(payload),
-			);
-			if (!revoked) {
+			const accountId = assembly?.sources[0]?.itemCacheAccountId;
+			if (!accountId) {
+				toast.error(m.toast_auth_session_lock_failed());
 				return;
 			}
-			lifecycle.clear();
+			try {
+				await applyInvalidatedSession(
+					await accountSync.invalidateSession({ ...payload, accountId }),
+				);
+				lifecycle.clear();
+			} catch (error) {
+				console.error("[desktop-sync] Session revocation failed:", error);
+				toast.error(m.toast_auth_session_lock_failed());
+			}
 		},
-		[accountSync, applyInvalidatedSession, lifecycle],
+		[
+			accountSync,
+			applyInvalidatedSession,
+			assembly,
+			lifecycle,
+			m.toast_auth_session_lock_failed,
+		],
 	);
 
 	// Revalidate persisted sessions on startup/interval when online.
@@ -206,21 +226,33 @@ export function useDesktopSync(
 						continue;
 					}
 
-					await handleAccountSessionInvalidation(sessionData.sessionId);
+					await handleAccountSessionInvalidation(
+						sessionData.sessionId,
+						account.accountId,
+					);
 				}
 			}
 		};
+		const reportRevalidationFailure = (error: unknown) => {
+			console.error("[desktop-sync] Session revalidation failed:", error);
+			toast.error(m.toast_auth_session_lock_failed());
+		};
 
-		void revalidateSessions();
+		void revalidateSessions().catch(reportRevalidationFailure);
 		const interval = setInterval(() => {
-			void revalidateSessions();
+			void revalidateSessions().catch(reportRevalidationFailure);
 		}, SESSION_REVALIDATION_INTERVAL_MS);
 
 		return () => {
 			cancelled = true;
 			clearInterval(interval);
 		};
-	}, [enabled, handleAccountSessionInvalidation, isInitialized]);
+	}, [
+		enabled,
+		handleAccountSessionInvalidation,
+		isInitialized,
+		m.toast_auth_session_lock_failed,
+	]);
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const onTerminalCommandFailure = useCallback(() => {

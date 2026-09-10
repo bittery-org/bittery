@@ -1,19 +1,5 @@
 //! Canonical field lists for the share-link surface.
 
-/// A freshly created share link.
-macro_rules! create_share_link_shape {
-    ($emit:ident $args:tt) => {
-        $crate::shapes::$emit! { $args {
-            id: String,
-            // `token` is the only time the raw token is ever disclosed. The database holds just
-            // its digest, so a link that is not copied here cannot be reconstructed later.
-            token: String,
-            expires_at: String,
-            base_share_url: String,
-        } }
-    };
-}
-
 /// One address on a share link's allow list, and whether it has passed the email challenge.
 macro_rules! allowed_email_shape {
     ($emit:ident $args:tt) => {
@@ -114,7 +100,7 @@ macro_rules! email_verification_shape {
 }
 
 pub(crate) use {
-    allowed_email_shape, create_share_link_shape, email_verification_shape,
-    public_share_access_shape, public_share_info_shape, share_access_log_shape,
-    share_link_list_entry_shape, share_link_list_shape,
+    allowed_email_shape, email_verification_shape, public_share_access_shape,
+    public_share_info_shape, share_access_log_shape, share_link_list_entry_shape,
+    share_link_list_shape,
 };
