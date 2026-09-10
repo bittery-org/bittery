@@ -1,6 +1,6 @@
 # Security
 
-Bittery is a zero-knowledge password manager. The server never has access to your passwords, encryption keys, or any plaintext vault data. All encryption and decryption happens on your device.
+Bittery encrypts and decrypts vault data on your device. Your account password, full Secret Key, and Master Unlock Key are not sent to the server. Shared-vault confidentiality currently depends on the server providing authentic recipient public keys; see [Shared Vaults (Teams)](#shared-vaults-teams).
 
 This document describes the security architecture, cryptographic design, and vulnerability reporting process.
 
@@ -18,7 +18,7 @@ We appreciate responsible disclosure and will credit reporters (with permission)
 
 ## Security Model Overview
 
-Bittery uses a **dual-key architecture**: your master password and a randomly generated **Secret Key** are both required to derive encryption keys. This means that even if the server database is fully compromised, an attacker cannot decrypt your data without both factors — neither of which the server ever sees.
+Bittery uses a **dual-key architecture**: your master password and a randomly generated **Secret Key** are both required to derive your account encryption keys. A stolen database snapshot alone does not provide either factor or enable decryption of your vault data. This protection does not cover an active attacker substituting recipient public keys during shared-vault sharing or key rotation.
 
 ### What the Server Stores
 
@@ -29,12 +29,14 @@ Bittery uses a **dual-key architecture**: your master password and a randomly ge
 | SRP salt and verifier | Hex strings | Cannot recover password |
 | RSA public key | PEM plaintext | Yes (needed for sharing) |
 | RSA private key | AES-GCM-AAD-V1 encrypted | No |
-| Vault encryption keys | AES-GCM-AAD-V1 or RSA-OAEP encrypted | No |
-| Vault item data | AES-GCM-AAD-V1 encrypted | No |
+| Vault encryption keys | AES-GCM-AAD-V1 or RSA-OAEP encrypted | Not from stored ciphertext alone; see shared-vault limitation below |
+| Vault item data | AES-GCM-AAD-V1 encrypted | Not from stored ciphertext alone; see shared-vault limitation below |
 | Shared item snapshots | AES-GCM-AAD-V1 encrypted | No |
 | Session tokens | SHA-256 hashed | No (only hash stored) |
 
-### What Never Leaves Your Device (Unencrypted)
+Shared-vault sharing and key rotation trust the server to provide authentic recipient public keys. A malicious or compromised server can substitute a public key, obtain the affected vault key, and decrypt vault contents. See [Shared Vaults (Teams)](#shared-vaults-teams).
+
+### What Clients Do Not Send to the Server in Plaintext
 
 - Account password
 - Full Secret Key
@@ -158,7 +160,7 @@ The client bounds come from `packages/crypto/kdf-policy.json`, which the crypto 
 Account Password + Secret Key + Email
         │
         ▼
-   PBKDF2-SHA256 (310k iterations)
+   PBKDF2-SHA256 (600k iterations)
         │
         ▼
    HKDF-SHA256 split
@@ -195,7 +197,11 @@ When you share a vault with another user:
 2. The encrypted vault key is stored in the `vaultKey` table for the recipient
 3. The recipient decrypts the vault key using their RSA private key (which they decrypt using their own Master Unlock Key)
 
-This means vault sharing never exposes the vault key to the server — only the recipient's public key is used, and only they hold the corresponding private key.
+The client obtains the recipient's public key from the server. It currently has no independent recipient-key verification or contact-key pinning. If the server supplies the authentic key, only the recipient holds the private key needed to decrypt that wrapped copy of the vault key.
+
+A malicious server operator or an attacker able to tamper with the server's public-key responses can instead supply a key they control. When a client shares a vault or rotates its key, the attacker can decrypt the resulting wrapped vault key and access vault contents encrypted under that key. The attacker can also re-encrypt the vault key to the real recipient, allowing sharing to appear successful.
+
+This is an active key-substitution attack, not an attack enabled by a stolen database snapshot alone. The trust assumption also applies to self-hosted deployments if their server is compromised. Key rotation uses the same server-provided recipient keys and does not by itself remove this limitation.
 
 ### Key Rotation
 
