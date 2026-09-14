@@ -17,7 +17,7 @@ uniffi = { version = "=0.31.2", features = ["tokio", "wasm-unstable-single-threa
 zeroize.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "=1.47.1", features = ["rt", "sync"] }
+tokio = { version = "=1.53.1", features = ["rt", "sync"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom.workspace = true
