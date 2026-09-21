@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: UniFFI WASM builder
 # ============================================================
-FROM node:24-bookworm AS wasm-builder
+FROM node:25-bookworm AS wasm-builder
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential curl \
@@ -28,7 +28,7 @@ RUN packages/crypto/core/build-wasm.sh
 # ============================================================
 # Stage 2: JS builder — install deps and build Vite SPA
 # ============================================================
-FROM node:24-bookworm-slim AS js-builder
+FROM node:25-bookworm-slim AS js-builder
 
 RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
