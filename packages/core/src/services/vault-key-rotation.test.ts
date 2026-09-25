@@ -2,9 +2,20 @@ import { describe, expect, test } from "bun:test";
 import type { EncryptionContext, ItemData, KeyRef } from "@bittery/crypto-port";
 import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import {
-	createVaultKeyRotationCeremony,
+	createVaultKeyRotationCeremony as createCeremony,
 	type RotationPlanClient,
+	type VaultKeyRotationDeps,
 } from "./vault-key-rotation";
+
+function createVaultKeyRotationCeremony(
+	deps: Omit<VaultKeyRotationDeps, "verifiedMemberKey"> &
+		Partial<Pick<VaultKeyRotationDeps, "verifiedMemberKey">>,
+) {
+	return createCeremony({
+		verifiedMemberKey: async (member) => member.publicKey,
+		...deps,
+	});
+}
 
 const attachmentContext: EncryptionContext = {
 	vaultId: "vault-1",
@@ -36,6 +47,115 @@ function item(
 }
 
 describe("VaultKeyRotationCeremony", () => {
+	test("unverified rotation recipients produce no wrapper or staged page", async () => {
+		const crypto = createInMemoryCryptoPort();
+		let sealed = 0;
+		let staged = 0;
+		let finalized = 0;
+		let abandoned = 0;
+		let verificationCalls = 0;
+		const seal = crypto.encryptVaultKeyForMember.bind(crypto);
+		crypto.encryptVaultKeyForMember = async (...args) => {
+			sealed++;
+			return seal(...args);
+		};
+		const client = {
+			start: async () => [
+				{ planId: "plan", vaultId: "vault", expectedKeyVersion: 1 },
+			],
+			getPreparationPage: async () => ({
+				records: [
+					{
+						id: "recipient",
+						expectedVersion: 1,
+						payload: { userId: "recipient", publicKey: "attacker-key" },
+					},
+					{
+						id: "second",
+						expectedVersion: 1,
+						payload: { userId: "second", publicKey: "second-key" },
+					},
+				],
+				nextCursor: null,
+			}),
+			stage: async () => {
+				staged++;
+			},
+			abandon: async () => {
+				abandoned++;
+			},
+			finalize: async () => {
+				finalized++;
+				return { rotationId: "rotation" };
+			},
+			refresh: async () => {},
+			markUnavailable: async () => {},
+		} as unknown as RotationPlanClient;
+		const ceremony = createCeremony({
+			crypto,
+			client,
+			openVaultKey: () => crypto.generateEncryptionKey(),
+			getMasterUnlockKey: async () => null,
+			verifiedMemberKey: async () => {
+				verificationCalls++;
+				throw new Error("recipient requires verification");
+			},
+		});
+		await expect(
+			ceremony.rotate({
+				intent: { kind: "member-removal" },
+				currentUserId: "owner",
+			}),
+		).rejects.toThrow("requires verification");
+		expect([sealed, staged, finalized, abandoned]).toEqual([0, 0, 0, 1]);
+		expect(verificationCalls).toBe(1);
+		expect(crypto.liveKeyCount).toBe(0);
+	});
+
+	test("rotation seals to the approved key instead of the directory candidate", async () => {
+		const crypto = createInMemoryCryptoPort();
+		const approved = await crypto.generateRsaKeyPair();
+		const used: string[] = [];
+		const seal = crypto.encryptVaultKeyForMember.bind(crypto);
+		crypto.encryptVaultKeyForMember = async (key, pem) => {
+			used.push(pem);
+			return seal(key, pem);
+		};
+		const client = {
+			start: async () => [
+				{ planId: "plan", vaultId: "vault", expectedKeyVersion: 1 },
+			],
+			getPreparationPage: async (_plan: string, kind: string) => ({
+				records:
+					kind === "member"
+						? [
+								{
+									id: "recipient",
+									expectedVersion: 1,
+									payload: {
+										userId: "recipient",
+										publicKey: "untrusted-directory-candidate",
+									},
+								},
+							]
+						: [],
+				nextCursor: null,
+			}),
+			stage: async () => {},
+			abandon: async () => {},
+			finalize: async () => ({ rotationId: "rotation" }),
+			refresh: async () => {},
+			markUnavailable: async () => {},
+		} as unknown as RotationPlanClient;
+		await createCeremony({
+			crypto,
+			client,
+			openVaultKey: () => crypto.generateEncryptionKey(),
+			getMasterUnlockKey: async () => null,
+			verifiedMemberKey: async () => approved.publicKey,
+		}).rotate({ intent: { kind: "member-removal" }, currentUserId: "owner" });
+		expect(used).toEqual([approved.publicKey]);
+	});
 	test("uses one new vault key across preparation pages", async () => {
 		const crypto = createInMemoryCryptoPort();
 		const oldVaultKey = await crypto.generateEncryptionKey();

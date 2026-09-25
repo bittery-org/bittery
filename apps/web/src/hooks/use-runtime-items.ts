@@ -2,11 +2,11 @@ import {
 	useRuntimeItems as useRuntimeItemsSnapshot,
 	useRuntimeSession,
 } from "@bittery/client-runtime/react";
-import { useMemo } from "react";
 import {
 	deriveRuntimeItemsView,
 	type RuntimeItemsView,
-} from "@/lib/runtime-items";
+} from "@bittery/ui/runtime-presentation";
+import { useMemo } from "react";
 
 /**
  * Observe Runtime Items for the Account the Device session points at, in the shape the

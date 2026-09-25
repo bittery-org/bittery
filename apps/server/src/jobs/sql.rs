@@ -119,7 +119,7 @@ pub async fn cleanup_pending_attachment_uploads(
     loop {
         let now = OffsetDateTime::now_utc();
         let expired_reservations = query_as::<_, DbPendingAttachmentUploadRow>(
-			"SELECT id, storage_key FROM pending_attachment_upload WHERE consumed_at IS NULL AND expires_at < $1 LIMIT $2",
+			"SELECT id, storage_key FROM pending_attachment_upload WHERE durable_request_fingerprint IS NULL AND consumed_at IS NULL AND expires_at < $1 LIMIT $2",
 		)
 		.bind(now)
 		.bind(PENDING_ATTACHMENT_UPLOAD_BATCH_SIZE)
@@ -153,6 +153,13 @@ pub async fn cleanup_pending_attachment_uploads(
             break;
         }
     }
+
+    total_deleted += crate::domains::vaults::cleanup_durable_attachment_uploads(
+        pool,
+        object_storage,
+        PENDING_ATTACHMENT_UPLOAD_BATCH_SIZE,
+    )
+    .await?;
 
     if total_deleted > 0 {
         info!(
@@ -374,15 +381,24 @@ pub async fn cleanup_vault_image_staging(
             transaction.rollback().await?;
             continue;
         };
+        crate::domains::vaults::vault_image_cleanup::lock_objects(&mut transaction, &[&object_key])
+            .await?;
         #[cfg(test)]
         crate::test_support::fail_vault_image_database_boundary(
             &operation_id,
             crate::test_support::VaultImageDatabaseBoundary::RowSelection,
         )?;
-        if let Err(error) = object_storage.delete(&object_key).await {
-            transaction.rollback().await?;
-            error!(%error, %object_key, "vault-image-staging cleanup will retry object deletion");
-            continue;
+        if !crate::domains::vaults::vault_image_cleanup::is_referenced(
+            &mut transaction,
+            &object_key,
+        )
+        .await?
+        {
+            if let Err(error) = object_storage.delete(&object_key).await {
+                transaction.rollback().await?;
+                error!(%error, %object_key, "vault-image-staging cleanup will retry object deletion");
+                continue;
+            }
         }
         let result = query("DELETE FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND generation = $3 AND state = 'cleanup_pending'")
             .bind(&user_id)
@@ -403,6 +419,8 @@ pub async fn cleanup_vault_image_staging(
         transaction.commit().await?;
         deleted += result.rows_affected();
     }
+    deleted +=
+        crate::domains::vaults::vault_image_cleanup::cleanup_pending(pool, object_storage).await?;
     Ok(deleted)
 }
 

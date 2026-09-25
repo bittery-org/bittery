@@ -830,6 +830,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				return { ...result, data: result.data };
 			case "create_share":
 			case "create_vault":
+			case "update_vault":
+			case "delete_vault":
 			case "import_items":
 			case "create_vault_member_removal_rotation_plans":
 			case "finalize_vault_member_removal_rotation_plans":

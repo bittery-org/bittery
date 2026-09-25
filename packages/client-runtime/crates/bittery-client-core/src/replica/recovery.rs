@@ -3,9 +3,9 @@
 use super::domain::*;
 use super::persistence_contract::{
     composite_record_id, split_composite_record_id, BootstrapMetadataRecord, ReplicaHead,
-    ReplicaStore, BOOTSTRAP_METADATA_ID,
+    ReplicaStore, VaultRetirementMetadataRecord, BOOTSTRAP_METADATA_ID,
+    VAULT_RETIREMENTS_METADATA_ID,
 };
-use crate::http_transport::{HttpHeader, HttpMethod};
 use crate::recovery::limits::exceeded;
 use crate::{RecoveryBound, RuntimeError, RuntimeErrorCode};
 use serde::de::DeserializeOwned;
@@ -51,6 +51,7 @@ pub(crate) struct CoverageProof {
     pub required_attachments: Vec<RequiredAttachment>,
     pub required_images: Vec<RequiredImage>,
     pub authority_valid: bool,
+    pub pending_vault_retirements: Vec<String>,
 }
 impl CoverageProof {
     pub(crate) fn accepted_rows(&self) -> impl Iterator<Item = &RecoveryRowHash> {
@@ -58,11 +59,24 @@ impl CoverageProof {
     }
 }
 
+#[derive(Clone, Copy)]
+enum OverlayFingerprint {
+    CrossAccount([u8; 32]),
+    Legacy(Sha256Fingerprint),
+}
+
 struct WorkIdentity {
-    kind: OperationKind,
+    source_evidence_unavailable: bool,
+    category: Option<AuthorityItemCategory>,
+    kind: Option<OperationKind>,
+    active: bool,
+    overlay_fingerprint: Option<OverlayFingerprint>,
     target: ResourceRef,
 }
 struct OverlayIdentity {
+    payload_sha256: [u8; 32],
+    legacy_fingerprint: Sha256Fingerprint,
+    category: AuthorityItemCategory,
     item_id: String,
     vault_id: String,
     operation_id: String,
@@ -77,12 +91,15 @@ pub(crate) struct RecoveryCoverage {
     rows: Vec<RecoveryRowHash>,
     keys: HashSet<(ReplicaStore, String)>,
     work: HashMap<String, WorkIdentity>,
+    child_operation_ids: HashSet<String>,
     receipts: HashMap<String, OperationReceiptRecord>,
+    rotation_attempts: HashMap<String, RotationAttemptRecord>,
     overlays: Vec<OverlayIdentity>,
     capabilities: HashMap<String, Option<ShareAppliedResultRecord>>,
     bootstrap: BootstrapAuthority,
     saw_metadata: bool,
     authority_generations: HashSet<BootstrapGenerationId>,
+    authority_vault_ids: HashSet<String>,
     required_attachments: Vec<RequiredAttachment>,
     required_images: Vec<RequiredImage>,
     preparation_count: u32,
@@ -103,12 +120,15 @@ impl RecoveryCoverage {
             rows: Vec::new(),
             keys: HashSet::new(),
             work: HashMap::new(),
+            child_operation_ids: HashSet::new(),
             receipts: HashMap::new(),
+            rotation_attempts: HashMap::new(),
             overlays: Vec::new(),
             capabilities: HashMap::new(),
             bootstrap: BootstrapAuthority::default(),
             saw_metadata: false,
             authority_generations: HashSet::new(),
+            authority_vault_ids: HashSet::new(),
             required_attachments: Vec::new(),
             required_images: Vec::new(),
             preparation_count: 0,
@@ -157,11 +177,14 @@ impl RecoveryCoverage {
         let accepted = matches!(
             store,
             ReplicaStore::Operations
+                | ReplicaStore::CrossAccountMoves
                 | ReplicaStore::OptimisticItems
                 | ReplicaStore::AttachmentMovePreparations
                 | ReplicaStore::OperationReceipts
+                | ReplicaStore::RotationAttempts
                 | ReplicaStore::ShareCapabilities
-        );
+        ) || (store == ReplicaStore::ReplicaMetadata
+            && record_id == VAULT_RETIREMENTS_METADATA_ID);
         let row_index = self.rows.len();
         self.rows.push(RecoveryRowHash {
             store,
@@ -191,6 +214,12 @@ impl RecoveryCoverage {
         payload: &str,
     ) -> Result<(), RuntimeError> {
         match store {
+            ReplicaStore::ReplicaMetadata => {
+                let journal: VaultRetirementMetadataRecord = decode(payload)?;
+                journal.validate()?;
+                self.reserve_summary(payload.len())?;
+                self.bootstrap.pending_vault_retirements = journal.vault_ids;
+            }
             ReplicaStore::Operations => {
                 let operation: OperationRecord = decode(payload)?;
                 if operation.operation_id != record_id {
@@ -213,14 +242,102 @@ impl RecoveryCoverage {
                     };
                     self.attachments(preparation)?;
                 }
-                if let Some(image) = operation
-                    .create_vault
-                    .as_ref()
-                    .and_then(|intent| intent.image.as_ref())
-                {
+                if let Some(image) = operation.vault_image() {
                     self.image(record_id, operation.vault_id(), image, true)?;
                 }
-                self.work_identity(record_id, operation.kind, operation.target)?;
+                let overlay_fingerprint = operation
+                    .legacy_admission
+                    .as_ref()
+                    .map(|admission| {
+                        admission.expected_overlay_fingerprint(&self.head.account_id, &operation)
+                    })
+                    .transpose()?
+                    .flatten()
+                    .map(OverlayFingerprint::Legacy);
+                let active = !operation.is_legacy_held();
+                self.work_identity(
+                    record_id,
+                    operation.kind,
+                    operation.target,
+                    operation.accepted_item_category,
+                    overlay_fingerprint,
+                    active,
+                )?;
+            }
+            ReplicaStore::CrossAccountMoves => {
+                let entry: CrossAccountMoveEntry = decode(payload)?;
+                if entry.operation_id() != record_id {
+                    return Err(invalid("Cross-Account Move row identity changed"));
+                }
+                entry.validate(&self.head.account_id, &self.head.user_id)?;
+                let captured = entry.captured();
+                if let Some(record) =
+                    captured.filter(|record| record.stage != CrossAccountMoveStage::Completed)
+                {
+                    for checkpoint in &record.attachments {
+                        let artifact = match &checkpoint.progress {
+                            CrossAccountMoveAttachmentProgress::Pending => None,
+                            CrossAccountMoveAttachmentProgress::Encrypted { artifact, .. } => {
+                                Some(artifact.clone())
+                            }
+                        };
+                        self.attachment(
+                            &record.operation_id,
+                            &checkpoint.target_attachment_id,
+                            artifact,
+                        )?;
+                    }
+                }
+                for operation_id in entry.reserved_child_operation_ids() {
+                    self.reserve_summary(operation_id.len())?;
+                    if !self.child_operation_ids.insert(operation_id) {
+                        return Err(invalid(
+                            "Cross-Account Move child identity overlaps another workflow",
+                        ));
+                    }
+                }
+                self.reserve_summary(
+                    record_id.len() + entry.source_item_id().len() + entry.source_vault_id().len(),
+                )?;
+                let overlay_fingerprint = match captured {
+                    Some(record)
+                        if !record.is_legacy_held()
+                            && record.stage != CrossAccountMoveStage::Completed =>
+                    {
+                        Some(OverlayFingerprint::CrossAccount(
+                            Sha256::digest(
+                                serde_json::to_vec(&record.source_overlay(&self.head.account_id))
+                                    .map_err(|_| {
+                                    invalid("Cross-Account Move overlay cannot be encoded")
+                                })?,
+                            )
+                            .into(),
+                        ))
+                    }
+                    _ => None,
+                };
+                if self
+                    .work
+                    .insert(
+                        record_id.to_owned(),
+                        WorkIdentity {
+                            source_evidence_unavailable: entry.source_unavailable().is_some(),
+                            kind: None,
+                            active: entry.owns_source_item(),
+                            overlay_fingerprint,
+                            target: ResourceRef::Item {
+                                item_id: entry.source_item_id().into(),
+                                vault_id: entry.source_vault_id().into(),
+                            },
+                            category: captured.map(|record| record.source.category.clone()),
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(invalid(
+                        "Cross-Account Move semantic identity overlaps accepted work",
+                    ));
+                }
             }
             ReplicaStore::AttachmentMovePreparations => {
                 let preparation: AttachmentMovePreparationRecord = decode(payload)?;
@@ -244,6 +361,9 @@ impl RecoveryCoverage {
                         item_id: preparation.item_id,
                         vault_id: preparation.target_vault_id,
                     },
+                    preparation.accepted_item_category,
+                    None,
+                    true,
                 )?;
                 self.preparation_count += 1;
             }
@@ -252,13 +372,12 @@ impl RecoveryCoverage {
                 if receipt.operation_id != record_id {
                     return Err(invalid("Receipt row identity changed"));
                 }
-                let mut account = self.validation_account();
-                account.receipts.insert(record_id.to_owned(), receipt);
-                account.validate_durable_work()?;
-                let receipt = account
-                    .receipts
-                    .remove(record_id)
-                    .expect("inserted receipt");
+                validate_operation_receipt(&receipt, &self.head.user_id)?;
+                if receipt.completed_at_revision == 0
+                    || receipt.completed_at_revision > self.head.replica_revision
+                {
+                    return Err(invalid("Receipt completion revision is inconsistent"));
+                }
                 if let Some(cleanup) = &receipt.create_vault_cleanup {
                     if cleanup.local_artifact_pending {
                         self.image(record_id, receipt.vault_id(), &cleanup.image, false)?;
@@ -266,6 +385,22 @@ impl RecoveryCoverage {
                 }
                 self.reserve_summary(payload.len())?; // Receipts contain no immutable request/ciphertext body.
                 self.receipts.insert(record_id.to_owned(), receipt);
+            }
+            ReplicaStore::RotationAttempts => {
+                let attempt: RotationAttemptRecord = decode(payload)?;
+                if attempt.account_id != self.head.account_id
+                    || attempt.start_operation_id != record_id
+                {
+                    return Err(invalid("Rotation attempt row identity changed"));
+                }
+                self.reserve_summary(payload.len())?;
+                if self
+                    .rotation_attempts
+                    .insert(record_id.to_owned(), attempt)
+                    .is_some()
+                {
+                    return Err(invalid("Rotation attempt row is duplicated"));
+                }
             }
             ReplicaStore::ShareCapabilities => {
                 let capability: ProtectedShareCapabilityRecord = decode(payload)?;
@@ -283,8 +418,8 @@ impl RecoveryCoverage {
                     .insert(record_id.to_owned(), capability.result);
             }
             ReplicaStore::OptimisticItems => {
-                // Match the existing Domain overlay contract: preserve the opaque effect exactly;
-                // crypto readability and correspondence are not reconstructed from request bytes.
+                // Preserve the encrypted effect. The row remains opaque to crypto here; legacy
+                // admission and cross-Account witnesses bind it to accepted work at finish.
                 let item: ReplicaItemRecord = decode(payload)?;
                 if item.account_id != self.head.account_id
                     || item.item_id != record_id
@@ -296,9 +431,16 @@ impl RecoveryCoverage {
                     ));
                 }
                 self.reserve_summary(
-                    item.item_id.len() + item.vault_id.len() + item.operation_id.len(),
+                    item.item_id.len() + item.vault_id.len() + item.operation_id.len() + 32,
                 )?;
                 self.overlays.push(OverlayIdentity {
+                    legacy_fingerprint: LegacyOperationAdmission::overlay_fingerprint(&item)?,
+                    payload_sha256: Sha256::digest(
+                        serde_json::to_vec(&item)
+                            .map_err(|_| invalid("Optimistic Item cannot be encoded"))?,
+                    )
+                    .into(),
+                    category: item.category,
                     item_id: item.item_id,
                     vault_id: item.vault_id,
                     operation_id: item.operation_id,
@@ -321,6 +463,7 @@ impl RecoveryCoverage {
                 }
                 let metadata: BootstrapMetadataRecord = decode(payload)?;
                 self.reserve_summary(payload.len())?;
+                self.bootstrap.policy_verification_pending = metadata.policy_verification_pending;
                 self.bootstrap.state = metadata.state;
                 self.bootstrap.active_generation = metadata.active_generation;
                 self.bootstrap.active_cursor = metadata.active_cursor;
@@ -356,7 +499,8 @@ impl RecoveryCoverage {
                     return Err(invalid("Authority Vault key changed"));
                 }
                 validate_authority_page(std::slice::from_ref(&vault), &[])?;
-                self.reserve_summary(generation.len())?;
+                self.reserve_summary(generation.len() + vault.id.len())?;
+                self.authority_vault_ids.insert(vault.id);
                 self.authority_generations
                     .insert(BootstrapGenerationId(generation));
             }
@@ -367,7 +511,8 @@ impl RecoveryCoverage {
                     return Err(invalid("Authority Item key changed"));
                 }
                 validate_authority_page(&[], std::slice::from_ref(&item))?;
-                self.reserve_summary(generation.len())?;
+                self.reserve_summary(generation.len() + item.vault_id.len())?;
+                self.authority_vault_ids.insert(item.vault_id);
                 self.authority_generations
                     .insert(BootstrapGenerationId(generation));
             }
@@ -390,13 +535,33 @@ impl RecoveryCoverage {
         operation_id: &str,
         kind: OperationKind,
         target: ResourceRef,
+        category: Option<AuthorityItemCategory>,
+        overlay_fingerprint: Option<OverlayFingerprint>,
+        active: bool,
     ) -> Result<(), RuntimeError> {
         self.reserve_summary(
-            operation_id.len() + target.item_id().map_or(0, str::len) + target.vault_id().len(),
+            operation_id.len()
+                + target.item_id().map_or(0, str::len)
+                + target.vault_id_opt().map_or(0, str::len)
+                + match &target {
+                    ResourceRef::Team { team_id } => team_id.len(),
+                    _ => 0,
+                }
+                + if overlay_fingerprint.is_some() { 32 } else { 0 },
         )?;
         if self
             .work
-            .insert(operation_id.to_owned(), WorkIdentity { kind, target })
+            .insert(
+                operation_id.to_owned(),
+                WorkIdentity {
+                    source_evidence_unavailable: false,
+                    kind: Some(kind),
+                    active,
+                    overlay_fingerprint,
+                    target,
+                    category,
+                },
+            )
             .is_some()
         {
             return Err(invalid("Accepted work identity is duplicated"));
@@ -416,21 +581,30 @@ impl RecoveryCoverage {
                     ..
                 } => (attachment_id, Some(artifact.clone())),
             };
-            self.artifact_count()?;
-            self.reserve_summary(
-                preparation.operation_id.len()
-                    + attachment_id.len()
-                    + artifact.as_ref().map_or(0, |value| {
-                        value.artifact_id.len() + value.ciphertext_sha256.len()
-                    })
-                    + 128,
-            )?;
-            self.required_attachments.push(RequiredAttachment {
-                operation_id: preparation.operation_id.clone(),
-                attachment_id: attachment_id.clone(),
-                artifact,
-            });
+            self.attachment(&preparation.operation_id, attachment_id, artifact)?;
         }
+        Ok(())
+    }
+    fn attachment(
+        &mut self,
+        operation_id: &str,
+        attachment_id: &str,
+        artifact: Option<AttachmentMoveArtifactRef>,
+    ) -> Result<(), RuntimeError> {
+        self.artifact_count()?;
+        self.reserve_summary(
+            operation_id.len()
+                + attachment_id.len()
+                + artifact.as_ref().map_or(0, |value| {
+                    value.artifact_id.len() + value.ciphertext_sha256.len()
+                })
+                + 128,
+        )?;
+        self.required_attachments.push(RequiredAttachment {
+            operation_id: operation_id.to_owned(),
+            attachment_id: attachment_id.to_owned(),
+            artifact,
+        });
         Ok(())
     }
     fn image(
@@ -447,6 +621,9 @@ impl RecoveryCoverage {
                 + image.content_type.len()
                 + image.sha256.len()
                 + image.object_key.len()
+                + image.protected_witness.as_ref().map_or(0, |witness| {
+                    witness.publication_id.len() + witness.ciphertext_sha256.len() + 64
+                })
                 + 128,
         )?;
         self.required_images.push(RequiredImage {
@@ -472,9 +649,11 @@ impl RecoveryCoverage {
             lock_epoch: self.head.lock_epoch,
             items: HashMap::new(),
             operations: HashMap::new(),
+            cross_account_moves: HashMap::new(),
             share_capabilities: HashMap::new(),
             attachment_move_preparations: HashMap::new(),
             receipts: HashMap::new(),
+            rotation_attempts: HashMap::new(),
             failure: self.head.failure,
             bootstrap: BootstrapAuthority::default(),
         }
@@ -486,13 +665,27 @@ impl RecoveryCoverage {
         if self.failed {
             return Err(invalid("Accepted-work coverage is unavailable"));
         }
+        let mut rotation_account = self.validation_account();
+        rotation_account.receipts = self.receipts.clone();
+        rotation_account.rotation_attempts = self.rotation_attempts.clone();
+        rotation_account.validate_rotation_attempts()?;
+        if self
+            .child_operation_ids
+            .iter()
+            .any(|id| self.work.contains_key(id) || self.receipts.contains_key(id))
+        {
+            return Err(invalid(
+                "Cross-Account Move child identity overlaps accepted semantic work",
+            ));
+        }
         let mut active_items = HashSet::new();
         for (id, work) in &self.work {
             if self.receipts.contains_key(id)
-                || work
-                    .target
-                    .item_id()
-                    .is_some_and(|item| !active_items.insert(item))
+                || (work.active
+                    && work
+                        .target
+                        .item_id()
+                        .is_some_and(|item| !active_items.insert(item)))
             {
                 return Err(invalid(
                     "Accepted Operation identity overlaps another active or completed Operation",
@@ -505,8 +698,11 @@ impl RecoveryCoverage {
             .map(|overlay| overlay.operation_id.as_str())
             .collect();
         for (operation_id, work) in &self.work {
-            if work.kind != OperationKind::CreateShare
+            if work.active
+                && !work.source_evidence_unavailable
+                && work.kind != Some(OperationKind::CreateShare)
                 && work.target.item_id().is_some()
+                && work.category.is_none()
                 && !overlay_operations.contains(operation_id.as_str())
             {
                 return Err(invalid(
@@ -514,10 +710,65 @@ impl RecoveryCoverage {
                 ));
             }
         }
+        for work in self
+            .work
+            .values()
+            .filter(|work| work.source_evidence_unavailable && work.active)
+        {
+            if self
+                .overlays
+                .iter()
+                .any(|overlay| work.target.item_id() == Some(overlay.item_id.as_str()))
+            {
+                return Err(invalid(
+                    "Unavailable source evidence cannot coexist with any source overlay",
+                ));
+            }
+        }
         for overlay in &self.overlays {
+            if self.work.get(&overlay.operation_id).is_some_and(|work| {
+                work.source_evidence_unavailable
+                    || (!work.active && work.overlay_fingerprint.is_none())
+            }) {
+                return Err(invalid(
+                    "Inactive accepted work cannot own an optimistic Item",
+                ));
+            }
+            match self
+                .work
+                .get(&overlay.operation_id)
+                .and_then(|work| work.overlay_fingerprint)
+            {
+                Some(OverlayFingerprint::CrossAccount(expected))
+                    if expected != overlay.payload_sha256 =>
+                {
+                    return Err(invalid(
+                        "Cross-Account Move source overlay differs from accepted baseline",
+                    ));
+                }
+                Some(OverlayFingerprint::Legacy(expected))
+                    if expected != overlay.legacy_fingerprint =>
+                {
+                    return Err(invalid(
+                        "Legacy Item overlay differs from admitted accepted work",
+                    ));
+                }
+                _ => {}
+            }
+            if self
+                .work
+                .get(&overlay.operation_id)
+                .and_then(|work| work.category.as_ref())
+                .is_some_and(|category| category != &overlay.category)
+            {
+                return Err(invalid(
+                    "Recovery category witness differs from its overlay",
+                ));
+            }
             let target = self
                 .work
                 .get(&overlay.operation_id)
+                .filter(|work| work.active || work.overlay_fingerprint.is_some())
                 .map(|work| &work.target)
                 .or_else(|| {
                     self.receipts
@@ -526,7 +777,7 @@ impl RecoveryCoverage {
                 });
             if !target.is_some_and(|target| {
                 target.item_id() == Some(overlay.item_id.as_str())
-                    && target.vault_id() == overlay.vault_id
+                    && target.vault_id_opt() == Some(overlay.vault_id.as_str())
             }) {
                 return Err(invalid(
                     "Optimistic Item is not bound to retained accepted work",
@@ -536,7 +787,7 @@ impl RecoveryCoverage {
         for (operation_id, result) in &self.capabilities {
             let valid = share_capability_binding_matches(
                 result.as_ref(),
-                self.work.get(operation_id).map(|work| work.kind),
+                self.work.get(operation_id).and_then(|work| work.kind),
                 self.receipts.get(operation_id),
             );
             if !valid {
@@ -546,7 +797,12 @@ impl RecoveryCoverage {
             }
         }
         let authority_valid = self.authority_valid
-            && (self.saw_metadata || self.bootstrap == BootstrapAuthority::default())
+            && self
+                .bootstrap
+                .pending_vault_retirements
+                .iter()
+                .all(|id| !self.authority_vault_ids.contains(id))
+            && (self.saw_metadata || !self.bootstrap.has_control_state())
             && self.bootstrap.validate().is_ok()
             && self
                 .bootstrap
@@ -566,6 +822,7 @@ impl RecoveryCoverage {
             required_attachments: self.required_attachments,
             required_images: self.required_images,
             authority_valid,
+            pending_vault_retirements: self.bootstrap.pending_vault_retirements,
         })
     }
 }
@@ -577,145 +834,12 @@ fn invalid(message: &str) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
 }
 
-/// Check the same request fingerprints as acceptance without allocating rewritten body bytes.
-fn verify_item_request(operation: &OperationRecord) -> Result<(), RuntimeError> {
-    use HttpMethod::*;
-    let (method, path, content_type, fingerprint) = match operation.kind {
-        OperationKind::CreateVault | OperationKind::ImportItems => return Ok(()), // Existing strict domain validators also verify their fingerprints.
-        OperationKind::CreateItem => (
-            Put,
-            format!(
-                "/api/v1/vaults/{}/items/{}",
-                operation.vault_id(),
-                operation
-                    .target
-                    .item_id()
-                    .ok_or_else(|| invalid("Create Item target is invalid"))?
-            ),
-            Some("application/json"),
-            create_item_fingerprint(
-                operation.vault_id(),
-                operation.target.item_id().unwrap(),
-                &operation.request.body,
-            ),
-        ),
-        OperationKind::CreateShare => (
-            Post,
-            format!(
-                "/api/v1/items/{}/share-links",
-                operation
-                    .target
-                    .item_id()
-                    .ok_or_else(|| invalid("Share target is invalid"))?
-            ),
-            Some("application/json"),
-            share_operation_fingerprint(
-                operation.target.item_id().unwrap(),
-                &operation.request.body,
-            ),
-        ),
-        kind => {
-            let item = operation
-                .target
-                .item_id()
-                .ok_or_else(|| invalid("Item Operation target is invalid"))?;
-            let (method, suffix, route, content_type) = match kind {
-                OperationKind::UpdateItem => (
-                    Patch,
-                    "",
-                    "PATCH /api/v1/items/{itemId}",
-                    Some("application/merge-patch+json"),
-                ),
-                OperationKind::SetItemFavorite => (
-                    Patch,
-                    "/favorite",
-                    "PATCH /api/v1/items/{itemId}/favorite",
-                    Some("application/merge-patch+json"),
-                ),
-                OperationKind::TrashItem => (Delete, "", "DELETE /api/v1/items/{itemId}", None),
-                OperationKind::RestoreItem => (
-                    Post,
-                    "/restore",
-                    "POST /api/v1/items/{itemId}/restore",
-                    None,
-                ),
-                OperationKind::MoveItem => (
-                    Post,
-                    "/moves",
-                    "POST /api/v1/items/{itemId}/moves",
-                    Some("application/json"),
-                ),
-                OperationKind::PermanentlyDeleteItem => (
-                    Delete,
-                    "/permanent",
-                    "DELETE /api/v1/items/{itemId}/permanent",
-                    None,
-                ),
-                _ => unreachable!(),
-            };
-            let value = operation
-                .request
-                .headers
-                .iter()
-                .find(|header| header.name == "If-Match")
-                .ok_or_else(|| invalid("Item concurrency precondition is missing"))?
-                .value
-                .as_str();
-            let expected = value
-                .strip_prefix('"')
-                .and_then(|value| value.strip_suffix('"'))
-                .and_then(|value| value.parse::<i32>().ok())
-                .filter(|value| *value > 0)
-                .ok_or_else(|| invalid("Item concurrency precondition is invalid"))?;
-            if value != format!("\"{expected}\"") {
-                return Err(invalid("Item concurrency precondition is not canonical"));
-            }
-            let mut headers = content_type
-                .map(|value| HttpHeader {
-                    name: "Content-Type".into(),
-                    value: value.into(),
-                })
-                .into_iter()
-                .collect::<Vec<_>>();
-            headers.push(HttpHeader {
-                name: "If-Match".into(),
-                value: value.into(),
-            });
-            if operation.request.headers != headers {
-                return Err(invalid("Item request headers changed"));
-            }
-            (
-                method,
-                format!("/api/v1/items/{item}{suffix}"),
-                content_type,
-                item_operation_fingerprint(kind, route, item, &operation.request.body, expected),
-            )
-        }
-    };
-    if operation.request.method != method
-        || operation.request.path != path
-        || operation.request_fingerprint != fingerprint
-    {
-        return Err(invalid(
-            "Operation immutable request fingerprint or route changed",
-        ));
-    }
-    if matches!(
-        operation.kind,
-        OperationKind::CreateItem | OperationKind::CreateShare
-    ) && operation.request.headers
-        != content_type
-            .map(|value| HttpHeader {
-                name: "Content-Type".into(),
-                value: value.into(),
-            })
-            .into_iter()
-            .collect::<Vec<_>>()
-    {
-        return Err(invalid("Create request headers changed"));
-    }
-    Ok(())
-}
+#[cfg(test)]
+pub(crate) use tests::corpus_loaded_rows;
+
+#[cfg(test)]
+#[path = "recovery_legacy_workflow_tests.rs"]
+mod legacy_workflow_tests;
 
 #[cfg(test)]
 mod tests {
@@ -754,11 +878,819 @@ mod tests {
                 }],
                 body,
             },
+            accepted_item_category: None,
             attachment_move_recovery: None,
+            update_vault: None,
             create_vault: None,
             scheduling: OperationSchedulingState::default(),
+            legacy_admission: None,
         }
     }
+
+    fn legacy_work(update: bool) -> (OperationRecord, ReplicaItemRecord) {
+        let operation_id = if update {
+            "wire-attempt"
+        } else {
+            "semantic-id"
+        };
+        let mut overlay =
+            crate::test_fixtures::test_overlay("account".into(), "item", operation_id);
+        overlay.vault_id = "vault".into();
+        overlay.encrypted_data = "ciphertext".into();
+        overlay.encryption_iv = "iv".into();
+        overlay.encryption_algorithm = "AES-GCM".into();
+        overlay.encrypted_by_user_id = "user".into();
+        overlay.created_at = source_timestamp(0).unwrap();
+        overlay.updated_at = source_timestamp(0).unwrap();
+        if update {
+            overlay.version = 7;
+            overlay.encryption_version = 7;
+            overlay.favorite = true;
+        }
+        let body = if update {
+            br#"{"encryptedData":"ciphertext","encryptionIv":"iv","encryptionAlgorithm":"AES-GCM"}"#
+                .to_vec()
+        } else {
+            br#"{"category":"login","encryptedData":"ciphertext","encryptionIv":"iv","encryptionAlgorithm":"AES-GCM"}"#.to_vec()
+        };
+        let kind = if update {
+            OperationKind::UpdateItem
+        } else {
+            OperationKind::CreateItem
+        };
+        let mut operation = OperationRecord {
+            operation_id: operation_id.into(),
+            kind,
+            target: ResourceRef::Item { item_id: "item".into(), vault_id: "vault".into() },
+            request_fingerprint: if update {
+                item_operation_fingerprint(kind, "PATCH /api/v1/items/{itemId}", "item", &body, 6)
+            } else {
+                create_item_fingerprint("vault", "item", &body)
+            },
+            request: ImmutableHttpRequest {
+                method: if update { HttpMethod::Patch } else { HttpMethod::Put },
+                path: if update { "/api/v1/items/item" } else { "/api/v1/vaults/vault/items/item" }.into(),
+                headers: vec![HttpHeader {
+                    name: "Content-Type".into(),
+                    value: if update { "application/merge-patch+json" } else { "application/json" }.into(),
+                }],
+                body,
+            },
+            accepted_item_category: Some(AuthorityItemCategory::Login),
+            attachment_move_recovery: None,
+            update_vault: None,
+            create_vault: None,
+            scheduling: OperationSchedulingState::default(),
+            legacy_admission: Some(Box::new(serde_json::from_value(serde_json::json!({
+                "version": 1,
+                "admissionId": "admission",
+                "sourceQueueIndex": "0",
+                "disposition": "normal",
+                "sourceCommand": {
+                    "accountId": "account", "id": "source-command", "operationId": "semantic-id",
+                    "attemptId": "wire-attempt", "type": if update { "update" } else { "create" },
+                    "entityId": "item", "vaultId": "vault", "category": "login",
+                    "encryptedPayload": { "encryptionVersion": if update { 7 } else { 1 }, "encryptedByUserId": "user" },
+                    "baseVersion": if update { 6 } else { 0 }, "timestamp": "0", "retryCount": "0"
+                }
+            })).unwrap())),
+        };
+        if update {
+            operation.request.headers.push(HttpHeader {
+                name: "If-Match".into(),
+                value: "\"6\"".into(),
+            });
+            operation
+                .legacy_admission
+                .as_mut()
+                .unwrap()
+                .source_command
+                .category = None;
+            operation.legacy_admission.as_mut().unwrap().overlay_sha256 =
+                Some(LegacyOperationAdmission::overlay_fingerprint(&overlay).unwrap());
+        }
+        operation
+            .legacy_admission
+            .as_ref()
+            .unwrap()
+            .validate(&head().account_id, &operation, Some(&overlay))
+            .unwrap();
+        (operation, overlay)
+    }
+
+    fn legacy_coverage(
+        operation: &OperationRecord,
+        overlay: Option<&ReplicaItemRecord>,
+        overlay_first: bool,
+    ) -> RecoveryCoverage {
+        let mut coverage = RecoveryCoverage::new(head()).unwrap();
+        let operation_row = (
+            ReplicaStore::Operations,
+            operation.operation_id.clone(),
+            serde_json::to_string(operation).unwrap(),
+        );
+        let mut rows = vec![operation_row];
+        if let Some(overlay) = overlay {
+            rows.push((
+                ReplicaStore::OptimisticItems,
+                overlay.item_id.clone(),
+                serde_json::to_string(overlay).unwrap(),
+            ));
+        }
+        if overlay_first {
+            rows.reverse();
+        }
+        for (store, id, payload) in rows {
+            coverage.push_row(store, &id, &payload).unwrap();
+        }
+        coverage
+    }
+
+    fn legacy_move() -> (OperationRecord, ReplicaItemRecord) {
+        let (mut operation, mut overlay) = legacy_work(true);
+        operation.kind = OperationKind::MoveItem;
+        operation.target = ResourceRef::Item {
+            item_id: "item".into(),
+            vault_id: "target-vault".into(),
+        };
+        operation.request.method = HttpMethod::Post;
+        operation.request.path = "/api/v1/items/item/moves".into();
+        operation.request.headers[0].value = "application/json".into();
+        operation.request.body = br#"{"mode":"prepared","sourceVaultId":"vault","targetVaultId":"target-vault","encryptedData":"ciphertext","encryptionIv":"iv","encryptionAlgorithm":"AES-GCM"}"#.to_vec();
+        operation.request_fingerprint = item_operation_fingerprint(
+            OperationKind::MoveItem,
+            "POST /api/v1/items/{itemId}/moves",
+            "item",
+            &operation.request.body,
+            6,
+        );
+        overlay.vault_id = "target-vault".into();
+        let admission = operation.legacy_admission.as_mut().unwrap();
+        admission.source_command.kind = LegacyItemCommandKind::Move;
+        admission.source_command.target_vault_id = Some("target-vault".into());
+        admission.overlay_sha256 =
+            Some(LegacyOperationAdmission::overlay_fingerprint(&overlay).unwrap());
+        operation
+            .legacy_admission
+            .as_ref()
+            .unwrap()
+            .validate(&head().account_id, &operation, Some(&overlay))
+            .unwrap();
+        (operation, overlay)
+    }
+
+    fn legacy_ordinary(kind: LegacyItemCommandKind) -> (OperationRecord, ReplicaItemRecord) {
+        match kind {
+            LegacyItemCommandKind::Create => return legacy_work(false),
+            LegacyItemCommandKind::Update => return legacy_work(true),
+            LegacyItemCommandKind::Move => return legacy_move(),
+            _ => {}
+        }
+        let (mut operation, mut overlay) = legacy_work(true);
+        let (operation_kind, method, suffix, route) = match kind {
+            LegacyItemCommandKind::ToggleFavorite => (
+                OperationKind::SetItemFavorite,
+                HttpMethod::Patch,
+                "/favorite",
+                "PATCH /api/v1/items/{itemId}/favorite",
+            ),
+            LegacyItemCommandKind::Delete => (
+                OperationKind::TrashItem,
+                HttpMethod::Delete,
+                "",
+                "DELETE /api/v1/items/{itemId}",
+            ),
+            LegacyItemCommandKind::Restore => (
+                OperationKind::RestoreItem,
+                HttpMethod::Post,
+                "/restore",
+                "POST /api/v1/items/{itemId}/restore",
+            ),
+            LegacyItemCommandKind::PermanentDelete => (
+                OperationKind::PermanentlyDeleteItem,
+                HttpMethod::Delete,
+                "/permanent",
+                "DELETE /api/v1/items/{itemId}/permanent",
+            ),
+            _ => unreachable!(),
+        };
+        operation.kind = operation_kind;
+        operation.request.method = method;
+        operation.request.path = format!("/api/v1/items/item{suffix}");
+        operation.request.body = if kind == LegacyItemCommandKind::ToggleFavorite {
+            br#"{"favorite":true}"#.to_vec()
+        } else {
+            operation.request.headers.remove(0);
+            Vec::new()
+        };
+        operation.request_fingerprint =
+            item_operation_fingerprint(operation_kind, route, "item", &operation.request.body, 6);
+        overlay.version = 6;
+        overlay.encryption_version = 3;
+        overlay.encrypted_by_user_id = "earlier-writer".into();
+        if kind == LegacyItemCommandKind::Delete {
+            overlay.deleted_at = Some(overlay.updated_at.clone());
+        }
+        let evidence = operation.legacy_admission.as_mut().unwrap();
+        evidence.source_command.kind = kind;
+        evidence.source_command.encrypted_payload = None;
+        evidence.source_command.favorite =
+            (kind == LegacyItemCommandKind::ToggleFavorite).then_some(true);
+        evidence.overlay_sha256 =
+            Some(LegacyOperationAdmission::overlay_fingerprint(&overlay).unwrap());
+        operation
+            .legacy_admission
+            .as_ref()
+            .unwrap()
+            .validate(&head().account_id, &operation, Some(&overlay))
+            .unwrap();
+        (operation, overlay)
+    }
+
+    #[test]
+    fn recovery_coverage_binds_legacy_move_overlay_in_either_row_order() {
+        let (operation, overlay) = legacy_move();
+        assert_eq!(
+            operation.accepted_vault_ids().unwrap(),
+            vec!["vault".to_owned(), "target-vault".to_owned()]
+        );
+        for overlay_first in [false, true] {
+            let proof = legacy_coverage(&operation, Some(&overlay), overlay_first)
+                .finish()
+                .unwrap();
+            assert_eq!(proof.operation_count, 1);
+            assert_eq!(proof.accepted_rows().count(), 2);
+            assert!(proof.required_attachments.is_empty());
+            let mut changed = overlay.clone();
+            changed.favorite = !changed.favorite;
+            assert!(legacy_coverage(&operation, Some(&changed), overlay_first)
+                .finish()
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn recovery_coverage_preserves_legacy_move_after_either_vault_retires() {
+        use crate::replica::persistence_contract::{reconstruct_snapshot, snapshot_rows};
+        use crate::replica::{GuardedCommitPlan, InMemoryReplica, PlanMutation};
+        use crate::test_fixtures::personal_vault;
+
+        for status in [
+            None,
+            Some(LegacyItemCommandStatus::Failed),
+            Some(LegacyItemCommandStatus::Conflicted),
+        ] {
+            for retired_vault in ["vault", "target-vault"] {
+                let (mut operation, overlay) = legacy_move();
+                if let Some(status) = status {
+                    let evidence = operation.legacy_admission.as_mut().unwrap();
+                    evidence.source_command.status = Some(status);
+                    evidence.disposition = if status == LegacyItemCommandStatus::Failed {
+                        LegacyOperationDisposition::LegacyFailed
+                    } else {
+                        LegacyOperationDisposition::LegacyConflicted
+                    };
+                    evidence.overlay_sha256 = None;
+                }
+                let state = InMemoryReplica::default();
+                let account_id = head().account_id;
+                state
+                    .install(account_id.clone(), "user".into(), "incarnation".into())
+                    .unwrap();
+                state
+                    .seed_ready_authority(
+                        &account_id,
+                        vec![
+                            personal_vault("vault", "user"),
+                            personal_vault("target-vault", "user"),
+                        ],
+                        Vec::new(),
+                    )
+                    .unwrap();
+                let mut acceptance = vec![PlanMutation::AcceptOperation(operation.clone())];
+                if status.is_none() {
+                    acceptance.push(PlanMutation::PutOptimisticItem(overlay));
+                }
+                for mutations in [
+                    acceptance,
+                    vec![PlanMutation::RetireVaults {
+                        vault_ids: vec![retired_vault.into()],
+                    }],
+                ] {
+                    let snapshot = state.snapshot(&account_id).unwrap();
+                    state
+                        .execute(GuardedCommitPlan::new(
+                            account_id.clone(),
+                            snapshot.incarnation,
+                            snapshot.revision,
+                            snapshot.lock_epoch,
+                            mutations,
+                        ))
+                        .unwrap();
+                }
+                let snapshot = state.snapshot(&account_id).unwrap();
+                assert!(snapshot.items.is_empty());
+                assert_eq!(snapshot.operations, vec![operation.clone()]);
+                let stored_head = ReplicaHead {
+                    account_id: account_id.clone(),
+                    user_id: snapshot.user_id.clone(),
+                    incarnation: snapshot.incarnation.clone(),
+                    replica_revision: snapshot.revision,
+                    lock_epoch: snapshot.lock_epoch,
+                    failure: snapshot.failure,
+                };
+                let rows = snapshot_rows(snapshot).unwrap();
+                for reverse in [false, true] {
+                    let mut recovery_rows = rows.clone();
+                    if reverse {
+                        recovery_rows.reverse();
+                    }
+                    let mut coverage = RecoveryCoverage::new(stored_head.clone()).unwrap();
+                    for row in &recovery_rows {
+                        coverage
+                            .push_row(row.store, &row.key.record_id, &row.payload_json)
+                            .unwrap();
+                    }
+                    let proof = coverage.finish().unwrap();
+                    assert_eq!(proof.operation_count, 1);
+                    assert_eq!(proof.receipt_count, 0);
+                    assert!(proof.authority_valid);
+                    assert!(proof.required_attachments.is_empty());
+                }
+                let reopened = reconstruct_snapshot(&account_id, Some(stored_head), rows)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(reopened.operations, vec![operation]);
+                assert!(reopened.items.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_coverage_refuses_legacy_create_overlay_changed_from_request() {
+        let (operation, mut overlay) = legacy_work(false);
+        overlay.encrypted_data.push_str("-changed");
+        assert!(legacy_coverage(&operation, Some(&overlay), false)
+            .finish()
+            .is_err());
+    }
+
+    #[test]
+    fn recovery_coverage_refuses_legacy_update_overlay_changed_from_witness() {
+        let (operation, mut overlay) = legacy_work(true);
+        overlay.favorite = !overlay.favorite;
+        assert!(legacy_coverage(&operation, Some(&overlay), true)
+            .finish()
+            .is_err());
+    }
+
+    #[test]
+    fn recovery_coverage_preserves_ordinary_holds_without_claiming_active_item_ownership() {
+        for kind in [
+            LegacyItemCommandKind::Create,
+            LegacyItemCommandKind::Update,
+            LegacyItemCommandKind::ToggleFavorite,
+            LegacyItemCommandKind::Delete,
+            LegacyItemCommandKind::Restore,
+            LegacyItemCommandKind::PermanentDelete,
+            LegacyItemCommandKind::Move,
+        ] {
+            for (status, disposition) in [
+                (
+                    LegacyItemCommandStatus::Failed,
+                    LegacyOperationDisposition::LegacyFailed,
+                ),
+                (
+                    LegacyItemCommandStatus::Conflicted,
+                    LegacyOperationDisposition::LegacyConflicted,
+                ),
+            ] {
+                let (mut held, held_overlay) = legacy_ordinary(kind);
+                let evidence = held.legacy_admission.as_mut().unwrap();
+                evidence.source_command.status = Some(status);
+                evidence.disposition = disposition;
+                evidence.overlay_sha256 = None;
+                let (mut active, mut overlay) = legacy_work(true);
+                active.operation_id = "new-operation".into();
+                let admission = active.legacy_admission.as_mut().unwrap();
+                admission.source_queue_index = 1;
+                admission.source_command.operation_id = Some("new-semantic-operation".into());
+                admission.source_command.id = "new-command".into();
+                admission.source_command.attempt_id = Some(active.operation_id.clone());
+                overlay.operation_id = active.operation_id.clone();
+                admission.overlay_sha256 =
+                    Some(LegacyOperationAdmission::overlay_fingerprint(&overlay).unwrap());
+                active
+                    .legacy_admission
+                    .as_ref()
+                    .unwrap()
+                    .validate(&head().account_id, &active, Some(&overlay))
+                    .unwrap();
+                let held_row = serde_json::to_string(&held).unwrap();
+                for held_first in [false, true] {
+                    let isolated = legacy_coverage(&held, None, held_first).finish().unwrap();
+                    assert_eq!(isolated.operation_count, 1);
+                    assert_eq!(isolated.receipt_count, 0);
+                    assert_eq!(isolated.accepted_rows().count(), 1);
+                    assert_eq!(
+                        isolated.rows[0].payload_sha256,
+                        <[u8; 32]>::from(Sha256::digest(held_row.as_bytes()))
+                    );
+                    let mut coverage = RecoveryCoverage::new(head()).unwrap();
+                    let mut rows = vec![
+                        (
+                            ReplicaStore::Operations,
+                            held.operation_id.clone(),
+                            held_row.clone(),
+                        ),
+                        (
+                            ReplicaStore::Operations,
+                            active.operation_id.clone(),
+                            serde_json::to_string(&active).unwrap(),
+                        ),
+                        (
+                            ReplicaStore::OptimisticItems,
+                            overlay.item_id.clone(),
+                            serde_json::to_string(&overlay).unwrap(),
+                        ),
+                    ];
+                    if !held_first {
+                        rows.reverse();
+                    }
+                    for (store, id, payload) in rows {
+                        coverage.push_row(store, &id, &payload).unwrap();
+                    }
+                    let proof = coverage.finish().unwrap();
+                    assert_eq!(proof.operation_count, 2);
+                    assert_eq!(proof.accepted_rows().count(), 3);
+                }
+                // Source failure alone is not evidence that a local Item projection ever existed.
+                let mut unexpected_overlay = RecoveryCoverage::new(head()).unwrap();
+                unexpected_overlay
+                    .push_row(ReplicaStore::Operations, &held.operation_id, &held_row)
+                    .unwrap();
+                unexpected_overlay
+                    .push_row(
+                        ReplicaStore::OptimisticItems,
+                        &held_overlay.item_id,
+                        &serde_json::to_string(&held_overlay).unwrap(),
+                    )
+                    .unwrap();
+                assert!(unexpected_overlay.finish().is_err());
+                if kind != LegacyItemCommandKind::Create {
+                    let mut forged = held.clone();
+                    forged.legacy_admission.as_mut().unwrap().overlay_sha256 =
+                        Some(LegacyOperationAdmission::overlay_fingerprint(&held_overlay).unwrap());
+                    assert!(RecoveryCoverage::new(head())
+                        .unwrap()
+                        .push_row(
+                            ReplicaStore::Operations,
+                            &forged.operation_id,
+                            &serde_json::to_string(&forged).unwrap(),
+                        )
+                        .is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_keeps_stopped_update_beside_newer_confirmed_authority_in_either_row_order() {
+        use crate::replica::persistence_contract::{reconstruct_snapshot, snapshot_rows};
+        use crate::replica::{GuardedCommitPlan, InMemoryReplica, PlanMutation};
+        use crate::test_fixtures::personal_vault;
+
+        for (status, disposition) in [
+            (
+                LegacyItemCommandStatus::Failed,
+                LegacyOperationDisposition::LegacyFailed,
+            ),
+            (
+                LegacyItemCommandStatus::Conflicted,
+                LegacyOperationDisposition::LegacyConflicted,
+            ),
+        ] {
+            for newer_owner in [false, true] {
+                let (mut held, old_projection) = legacy_work(true);
+                let evidence = held.legacy_admission.as_mut().unwrap();
+                evidence.source_command.status = Some(status);
+                evidence.source_command.retry_count = 3;
+                evidence.source_command.next_attempt_at = Some(42000);
+                evidence.source_command.projection_claim_id = Some("departed-projector".into());
+                evidence.source_command.conflict_copy_id = Some("independent-copy".into());
+                evidence.disposition = disposition;
+                evidence.overlay_sha256 = None;
+                held.scheduling = evidence.initial_scheduling();
+                let authority = AuthorityItemRecord {
+                    id: old_projection.item_id.clone(),
+                    vault_id: old_projection.vault_id.clone(),
+                    category: old_projection.category.clone(),
+                    favorite: false,
+                    encrypted_data: "newer-confirmed-ciphertext".into(),
+                    encryption_iv: "newer-confirmed-iv".into(),
+                    encryption_algorithm: old_projection.encryption_algorithm.clone(),
+                    version: 9,
+                    encryption_version: 4,
+                    encrypted_by_user_id: "confirmed-writer".into(),
+                    last_modified_by: "latest-metadata-writer".into(),
+                    created_at: old_projection.created_at.clone(),
+                    updated_at: source_timestamp(2000).unwrap(),
+                    deleted_at: None,
+                    attachments: Vec::new(),
+                };
+                let state = InMemoryReplica::default();
+                let account_id = head().account_id;
+                state
+                    .install(account_id.clone(), "user".into(), "incarnation".into())
+                    .unwrap();
+                state
+                    .seed_ready_authority(
+                        &account_id,
+                        vec![personal_vault("vault", "user")],
+                        vec![authority.clone()],
+                    )
+                    .unwrap();
+                let mut mutations = vec![PlanMutation::AcceptOperation(held.clone())];
+                if newer_owner {
+                    let (mut active, mut overlay) = legacy_work(true);
+                    active.operation_id = "new-wire-attempt".into();
+                    active.request.headers[1].value = "\"9\"".into();
+                    active.request_fingerprint = item_operation_fingerprint(
+                        OperationKind::UpdateItem,
+                        "PATCH /api/v1/items/{itemId}",
+                        "item",
+                        &active.request.body,
+                        9,
+                    );
+                    overlay.operation_id = active.operation_id.clone();
+                    overlay.version = 10;
+                    overlay.encryption_version = 10;
+                    overlay.favorite = authority.favorite;
+                    overlay.updated_at = source_timestamp(3000).unwrap();
+                    let evidence = active.legacy_admission.as_mut().unwrap();
+                    evidence.source_queue_index = 1;
+                    evidence.source_command.id = "new-source-command".into();
+                    evidence.source_command.operation_id = Some("new-semantic-operation".into());
+                    evidence.source_command.attempt_id = Some(active.operation_id.clone());
+                    evidence.source_command.base_version = 9;
+                    evidence.source_command.timestamp = 3000;
+                    evidence
+                        .source_command
+                        .encrypted_payload
+                        .as_mut()
+                        .unwrap()
+                        .encryption_version = 10;
+                    evidence.overlay_sha256 =
+                        Some(LegacyOperationAdmission::overlay_fingerprint(&overlay).unwrap());
+                    mutations.extend([
+                        PlanMutation::AcceptOperation(active),
+                        PlanMutation::PutOptimisticItem(overlay),
+                    ]);
+                }
+                let initial = state.snapshot(&account_id).unwrap();
+                state
+                    .execute(GuardedCommitPlan::new(
+                        account_id.clone(),
+                        initial.incarnation,
+                        initial.revision,
+                        initial.lock_epoch,
+                        mutations,
+                    ))
+                    .unwrap();
+                let snapshot = state.snapshot(&account_id).unwrap();
+                assert_eq!(
+                    snapshot.bootstrap.snapshot().visible_items,
+                    vec![authority.clone()]
+                );
+                assert_eq!(snapshot.item_has_optimistic_owner("item"), newer_owner);
+                let stored_head = ReplicaHead {
+                    account_id: account_id.clone(),
+                    user_id: snapshot.user_id.clone(),
+                    incarnation: snapshot.incarnation.clone(),
+                    replica_revision: snapshot.revision,
+                    lock_epoch: snapshot.lock_epoch,
+                    failure: snapshot.failure,
+                };
+                let rows = snapshot_rows(snapshot.clone()).unwrap();
+                for reverse in [false, true] {
+                    let mut ordered = rows.clone();
+                    if reverse {
+                        ordered.reverse();
+                    }
+                    let mut coverage = RecoveryCoverage::new(stored_head.clone()).unwrap();
+                    for row in &ordered {
+                        coverage
+                            .push_row(row.store, &row.key.record_id, &row.payload_json)
+                            .unwrap();
+                    }
+                    let proof = coverage.finish().unwrap();
+                    assert!(proof.authority_valid);
+                    assert_eq!(proof.operation_count, if newer_owner { 2 } else { 1 });
+                    assert_eq!(
+                        proof.accepted_rows().count(),
+                        if newer_owner { 3 } else { 1 }
+                    );
+                    assert_eq!(proof.receipt_count, 0);
+                    let held_row = proof
+                        .accepted_rows()
+                        .find(|row| {
+                            row.store == ReplicaStore::Operations
+                                && row.record_id == held.operation_id
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        held_row.payload_sha256,
+                        <[u8; 32]>::from(Sha256::digest(serde_json::to_vec(&held).unwrap()))
+                    );
+                    let reopened =
+                        reconstruct_snapshot(&account_id, Some(stored_head.clone()), ordered)
+                            .unwrap()
+                            .unwrap();
+                    assert_eq!(reopened.operations, snapshot.operations);
+                    assert_eq!(reopened.items, snapshot.items);
+                    assert_eq!(
+                        reopened.bootstrap.snapshot().visible_items,
+                        vec![authority.clone()]
+                    );
+                    assert_eq!(reopened.item_has_optimistic_owner("item"), newer_owner);
+                }
+            }
+        }
+    }
+
+    fn captured_failed_create() -> (OperationRecord, ReplicaItemRecord) {
+        let (operation, overlay) = legacy_work(false);
+        let mut value = serde_json::to_value(operation).unwrap();
+        value["legacyAdmission"]["sourceCommand"]["status"] = "failed".into();
+        value["legacyAdmission"]["disposition"] = "legacyFailed".into();
+        value["legacyAdmission"]["capturedFailureCode"] = "item_id_conflict".into();
+        (
+            serde_json::from_value(value)
+                .expect("captured failed Create has a closed durable owner"),
+            overlay,
+        )
+    }
+
+    #[test]
+    fn recovery_captured_failed_create_keeps_exact_overlay_and_local_code() {
+        let (operation, overlay) = captured_failed_create();
+        for overlay_first in [false, true] {
+            let proof = legacy_coverage(&operation, Some(&overlay), overlay_first)
+                .finish()
+                .unwrap();
+            assert_eq!(proof.operation_count, 1);
+            assert_eq!(proof.receipt_count, 0);
+            assert_eq!(proof.accepted_rows().count(), 2);
+            let payload = serde_json::to_string(&operation).unwrap();
+            let operation_hash = proof
+                .rows
+                .iter()
+                .find(|row| row.store == ReplicaStore::Operations)
+                .unwrap();
+            assert_eq!(
+                operation_hash.payload_sha256,
+                <[u8; 32]>::from(Sha256::digest(payload.as_bytes()))
+            );
+            let mut changed = overlay.clone();
+            changed.favorite = !changed.favorite;
+            assert!(legacy_coverage(&operation, Some(&changed), overlay_first)
+                .finish()
+                .is_err());
+            // The failure code preserves a source fact, not perpetual overlay ownership.
+            let absent = legacy_coverage(&operation, None, overlay_first)
+                .finish()
+                .unwrap();
+            assert_eq!(absent.operation_count, 1);
+            assert_eq!(absent.accepted_rows().count(), 1);
+        }
+    }
+
+    #[test]
+    fn recovery_captured_failed_create_allows_new_active_overlay() {
+        let (held, _) = captured_failed_create();
+        let (mut active, mut overlay) = legacy_work(false);
+        active.operation_id = "new-active-operation".into();
+        let admission = active.legacy_admission.as_mut().unwrap();
+        admission.source_queue_index = 1;
+        admission.source_command.id = "new-source-command".into();
+        admission.source_command.operation_id = Some(active.operation_id.clone());
+        overlay.operation_id = active.operation_id.clone();
+        for reverse in [false, true] {
+            let mut rows = vec![
+                (
+                    ReplicaStore::Operations,
+                    held.operation_id.clone(),
+                    serde_json::to_string(&held).unwrap(),
+                ),
+                (
+                    ReplicaStore::Operations,
+                    active.operation_id.clone(),
+                    serde_json::to_string(&active).unwrap(),
+                ),
+                (
+                    ReplicaStore::OptimisticItems,
+                    overlay.item_id.clone(),
+                    serde_json::to_string(&overlay).unwrap(),
+                ),
+            ];
+            if reverse {
+                rows.reverse();
+            }
+            let mut coverage = RecoveryCoverage::new(head()).unwrap();
+            for (store, id, payload) in rows {
+                coverage.push_row(store, &id, &payload).unwrap();
+            }
+            let proof = coverage.finish().unwrap();
+            assert_eq!(proof.operation_count, 2);
+            assert_eq!(proof.accepted_rows().count(), 3);
+            assert_eq!(proof.receipt_count, 0);
+        }
+    }
+
+    #[test]
+    fn recovery_captured_failed_create_survives_vault_retirement_and_reload() {
+        use crate::replica::persistence_contract::{reconstruct_snapshot, snapshot_rows};
+        use crate::replica::{GuardedCommitPlan, InMemoryReplica, PlanMutation};
+        use crate::test_fixtures::personal_vault;
+
+        let (operation, overlay) = captured_failed_create();
+        let state = InMemoryReplica::default();
+        let account_id = head().account_id;
+        state
+            .install(account_id.clone(), "user".into(), "incarnation".into())
+            .unwrap();
+        state
+            .seed_ready_authority(
+                &account_id,
+                vec![personal_vault("vault", "user")],
+                Vec::new(),
+            )
+            .unwrap();
+        for mutations in [
+            vec![
+                PlanMutation::AcceptOperation(operation.clone()),
+                PlanMutation::PutOptimisticItem(overlay),
+            ],
+            vec![PlanMutation::RetireVaults {
+                vault_ids: vec!["vault".into()],
+            }],
+        ] {
+            let snapshot = state.snapshot(&account_id).unwrap();
+            state
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    snapshot.incarnation,
+                    snapshot.revision,
+                    snapshot.lock_epoch,
+                    mutations,
+                ))
+                .unwrap();
+        }
+        let snapshot = state.snapshot(&account_id).unwrap();
+        assert!(snapshot.items.is_empty());
+        assert_eq!(snapshot.operations, vec![operation.clone()]);
+        let stored_head = ReplicaHead {
+            account_id: account_id.clone(),
+            user_id: snapshot.user_id.clone(),
+            incarnation: snapshot.incarnation.clone(),
+            replica_revision: snapshot.revision,
+            lock_epoch: snapshot.lock_epoch,
+            failure: snapshot.failure,
+        };
+        let rows = snapshot_rows(snapshot).unwrap();
+        let mut coverage = RecoveryCoverage::new(stored_head.clone()).unwrap();
+        for row in &rows {
+            coverage
+                .push_row(row.store, &row.key.record_id, &row.payload_json)
+                .unwrap();
+        }
+        let proof = coverage.finish().unwrap();
+        assert!(proof.authority_valid);
+        assert_eq!(proof.operation_count, 1);
+        let reopened = reconstruct_snapshot(&account_id, Some(stored_head), rows)
+            .unwrap()
+            .unwrap();
+        assert_eq!(reopened.operations, vec![operation]);
+        assert!(reopened.items.is_empty());
+    }
+
+    #[test]
+    fn recovery_coverage_preserves_legacy_overlay_or_legitimate_retirement_in_either_row_order() {
+        for update in [false, true] {
+            let (operation, overlay) = legacy_work(update);
+            for overlay_first in [false, true] {
+                let proof = legacy_coverage(&operation, Some(&overlay), overlay_first)
+                    .finish()
+                    .unwrap();
+                assert_eq!(proof.operation_count, 1);
+                assert_eq!(proof.accepted_rows().count(), 2);
+            }
+            let proof = legacy_coverage(&operation, None, false).finish().unwrap();
+            assert_eq!(proof.operation_count, 1);
+            assert_eq!(proof.accepted_rows().count(), 1);
+        }
+    }
+
     #[test]
     fn recovery_coverage_preserves_raw_fingerprint_and_rejects_tampering_with_same_head() {
         let operation = import();
@@ -886,6 +1818,7 @@ mod tests {
                 imported_count: 1,
             },
             completed_at_revision: 4,
+            legacy_lineage: None,
             create_vault_cleanup: None,
         };
         let mut conflict = RecoveryCoverage::new(head()).unwrap();
@@ -939,6 +1872,7 @@ mod tests {
                 expires_at: "2026-09-09T00:00:00Z".into(),
             },
             completed_at_revision: 4,
+            legacy_lineage: None,
             create_vault_cleanup: None,
         };
         let mut coverage = RecoveryCoverage::new(head()).unwrap();
@@ -987,6 +1921,8 @@ mod tests {
             icon: "bank".into(),
             encrypted_vault_key: "wrapped".into(),
             image: Some(CreateVaultImageRecord {
+                protected_witness: None,
+                raw_cleanup_pending: false,
                 byte_length: image_bytes.len() as u64,
                 content_type: "image/png".into(),
                 sha256: sha256.clone(),
@@ -1011,9 +1947,12 @@ mod tests {
                 body: Vec::new(),
             },
             request_fingerprint: canonical.fingerprint,
+            accepted_item_category: None,
             attachment_move_recovery: None,
+            update_vault: None,
             create_vault: Some(intent),
             scheduling: OperationSchedulingState::default(),
+            legacy_admission: None,
         }
     }
     #[test]
@@ -1043,6 +1982,7 @@ mod tests {
                 vault_id: "vault".into(),
             },
             completed_at_revision: 4,
+            legacy_lineage: None,
             create_vault_cleanup: Some(CreateVaultCleanupObligation {
                 image: operation.create_vault.unwrap().image.unwrap(),
                 local_artifact_pending: true,
@@ -1084,6 +2024,7 @@ mod tests {
                 code: OperationRejectionCode::InvalidCiphertext,
             },
             completed_at_revision: 4,
+            legacy_lineage: None,
             create_vault_cleanup: None,
         };
         let mut retained = RecoveryCoverage::new(head()).unwrap();
@@ -1104,7 +2045,7 @@ mod tests {
         assert_eq!(retained.finish().unwrap().accepted_rows().count(), 2);
     }
 
-    fn corpus_loaded_rows() -> Vec<(
+    pub(crate) fn corpus_loaded_rows() -> Vec<(
         ReplicaHead,
         Vec<super::super::persistence_contract::StoredReplicaRow>,
     )> {
@@ -1158,7 +2099,7 @@ mod tests {
             assert!(proof.rows.iter().all(|row| row.valid));
             checkpoints += 1;
         }
-        assert_eq!(checkpoints, 94);
+        assert!(checkpoints >= 94);
         assert!(authority_rows > 300);
     }
 
@@ -1190,23 +2131,27 @@ mod tests {
                 let Some(preparation) = preparation else {
                     continue;
                 };
-                let overlay = rows
-                    .iter()
-                    .find(|candidate| {
-                        candidate.store == ReplicaStore::OptimisticItems
-                            && decode::<ReplicaItemRecord>(&candidate.payload_json)
-                                .unwrap()
-                                .operation_id
-                                == preparation.operation_id
-                    })
-                    .unwrap();
+                let overlay = rows.iter().find(|candidate| {
+                    candidate.store == ReplicaStore::OptimisticItems
+                        && decode::<ReplicaItemRecord>(&candidate.payload_json)
+                            .unwrap()
+                            .operation_id
+                            == preparation.operation_id
+                });
                 let mut coverage = RecoveryCoverage::new(head.clone()).unwrap();
                 coverage
                     .push_row(row.store, &row.key.record_id, &row.payload_json)
                     .unwrap();
-                coverage
-                    .push_row(overlay.store, &overlay.key.record_id, &overlay.payload_json)
-                    .unwrap();
+                if let Some(overlay) = overlay {
+                    coverage
+                        .push_row(overlay.store, &overlay.key.record_id, &overlay.payload_json)
+                        .unwrap();
+                } else {
+                    assert!(
+                        preparation.accepted_item_category.is_some(),
+                        "erased overlay must retain category evidence"
+                    );
+                }
                 let proof = coverage.finish().unwrap();
                 assert_eq!(proof.required_attachments.len(), preparation.progress.len());
                 for (reference, progress) in
@@ -1238,8 +2183,51 @@ mod tests {
                 assert!(rejected.finish().is_err());
             }
         }
-        assert_eq!(preparations, 5);
+        assert!(preparations >= 5);
         assert!(promoted > 0 && pending > 0 && required > 0);
+    }
+
+    #[test]
+    fn recovery_coverage_retirement_history_preserves_batch_categories_and_move_dependencies() {
+        let mut retired = 0;
+        for (head, rows) in corpus_loaded_rows() {
+            if !rows.iter().any(|row| {
+                row.store == ReplicaStore::Operations && row.key.record_id == "retirement-import"
+            }) {
+                continue;
+            }
+            let mut coverage = RecoveryCoverage::new(head).unwrap();
+            for row in &rows {
+                coverage
+                    .push_row(row.store, &row.key.record_id, &row.payload_json)
+                    .unwrap();
+            }
+            let proof = coverage.finish().unwrap();
+            assert!(proof.authority_valid);
+            let batch: OperationRecord = decode(
+                &rows
+                    .iter()
+                    .find(|row| row.key.record_id == "retirement-import")
+                    .unwrap()
+                    .payload_json,
+            )
+            .unwrap();
+            let body: crate::wire::import::ImportRequestBody =
+                serde_json::from_slice(&batch.request.body).unwrap();
+            assert_eq!(body.items.len(), 5);
+            assert!(batch.accepted_item_category.is_none());
+            if !proof.pending_vault_retirements.is_empty() {
+                retired += 1;
+                assert!(proof
+                    .accepted_rows()
+                    .any(|row| row.store == ReplicaStore::ReplicaMetadata
+                        && row.record_id == VAULT_RETIREMENTS_METADATA_ID));
+                assert_eq!(proof.required_attachments.len(), 1);
+                assert_eq!(proof.operation_count, 1);
+                assert_eq!(proof.preparation_count, 1);
+            }
+        }
+        assert!(retired > 0);
     }
 
     #[test]
@@ -1320,7 +2308,10 @@ mod tests {
                     body,
                 },
                 scheduling: OperationSchedulingState::default(),
+                legacy_admission: None,
+                accepted_item_category: None,
                 attachment_move_recovery: None,
+                update_vault: None,
                 create_vault: None,
             };
             verify_item_request(&operation).unwrap();

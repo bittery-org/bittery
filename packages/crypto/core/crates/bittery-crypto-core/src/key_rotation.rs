@@ -5,13 +5,13 @@
 //! with a new key to ensure the removed member cannot decrypt future data.
 
 use crate::encryption::{
-    decrypt_with_aad, encrypt_with_aad, generate_encryption_key, AadContext, EncryptedData,
+    decrypt, decrypt_with_aad, encrypt_with_aad, generate_encryption_key, AadContext, EncryptedData,
 };
 use crate::error::CryptoError;
-use crate::rsa::rsa_encrypt;
+use crate::rsa::{rsa_decrypt, rsa_encrypt};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Item data for re-encryption
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +118,32 @@ pub fn encrypt_vault_key_for_member(
     let encrypted = rsa_encrypt(&vault_key_base64, member_public_key);
     vault_key_base64.zeroize();
     encrypted
+}
+
+/// Opens the existing RSA member wrapper through its encrypted private-key envelope.
+/// The optional private-key context preserves the existing crypto API contract.
+/// No plaintext PEM or intermediate base64 key survives an error return.
+pub fn decrypt_rsa_wrapped_key(
+    ciphertext: &str,
+    encrypted_private_key: &EncryptedData,
+    private_key_wrapping_key: &[u8],
+    private_key_context: Option<&AadContext>,
+) -> Result<Vec<u8>, CryptoError> {
+    let private_key = Zeroizing::new(match private_key_context {
+        Some(context) => {
+            decrypt_with_aad(encrypted_private_key, private_key_wrapping_key, context)?
+        }
+        None => decrypt(encrypted_private_key, private_key_wrapping_key)?,
+    });
+    let unwrapped = Zeroizing::new(rsa_decrypt(ciphertext, &private_key)?);
+    let decoded = Zeroizing::new(BASE64.decode(unwrapped.as_bytes())?);
+    if decoded.len() != 32 {
+        return Err(CryptoError::InvalidKeyLength {
+            expected: 32,
+            actual: decoded.len(),
+        });
+    }
+    Ok(decoded.to_vec())
 }
 
 /// Encrypt a vault key with AES-GCM (for the owner using Master Unlock Key)

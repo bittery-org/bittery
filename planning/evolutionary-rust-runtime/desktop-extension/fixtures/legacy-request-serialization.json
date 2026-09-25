@@ -1,0 +1,326 @@
+{
+	"purpose": "Synthetic byte serialization only; ciphertext intentionally invalid and no Server/network called",
+	"entrypoints": [
+		"packages/sync/src/outbound-queue.ts:ItemSyncEngine.enqueue/drain",
+		"packages/api-contract/src/client.ts:createApiClient"
+	],
+	"captures": [
+		{
+			"name": "create-unicode-order",
+			"method": "PUT",
+			"path": "/api/v1/vaults/source-vault/items/source-item",
+			"operationId": "semantic-create-unicode-order",
+			"ifMatch": null,
+			"body": "{\"category\":\"login\",\"encryptedData\":\"synthetic:é😀\\n\\\"\\\\\",\"encryptionIv\":\"synthetic-iv\",\"encryptionAlgorithm\":\"AES-GCM\"}"
+		},
+		{
+			"name": "update-unicode-order",
+			"method": "PATCH",
+			"path": "/api/v1/items/source-item",
+			"operationId": "attempt-update-unicode-order",
+			"ifMatch": "\"42\"",
+			"body": "{\"encryptedData\":\"synthetic:é😀\\n\\\"\\\\\",\"encryptionIv\":\"synthetic-iv\",\"encryptionAlgorithm\":\"AES-GCM\"}"
+		},
+		{
+			"name": "favorite-false",
+			"method": "PATCH",
+			"path": "/api/v1/items/source-item/favorite",
+			"operationId": "attempt-favorite-false",
+			"ifMatch": "\"7\"",
+			"body": "{\"favorite\":false}"
+		},
+		{
+			"name": "favorite-omitted",
+			"method": "PATCH",
+			"path": "/api/v1/items/source-item/favorite",
+			"operationId": "attempt-favorite-omitted",
+			"ifMatch": "\"8\"",
+			"body": "{\"favorite\":false}"
+		},
+		{
+			"name": "trash",
+			"method": "DELETE",
+			"path": "/api/v1/items/source-item",
+			"operationId": "attempt-trash",
+			"ifMatch": "\"9\"",
+			"body": ""
+		},
+		{
+			"name": "permanent",
+			"method": "DELETE",
+			"path": "/api/v1/items/source-item/permanent",
+			"operationId": "attempt-permanent",
+			"ifMatch": "\"10\"",
+			"body": ""
+		},
+		{
+			"name": "restore",
+			"method": "POST",
+			"path": "/api/v1/items/source-item/restore",
+			"operationId": "attempt-restore",
+			"ifMatch": "\"11\"",
+			"body": ""
+		},
+		{
+			"name": "move-order",
+			"method": "POST",
+			"path": "/api/v1/items/source-item/moves",
+			"operationId": "attempt-move-order",
+			"ifMatch": "\"12\"",
+			"body": "{\"mode\":\"prepared\",\"sourceVaultId\":\"source-vault\",\"targetVaultId\":\"target-vault\",\"encryptedData\":\"synthetic:é😀\\n\\\"\\\\\",\"encryptionIv\":\"synthetic-iv\",\"encryptionAlgorithm\":\"AES-GCM\"}"
+		},
+		{
+			"name": "create-opaque-path",
+			"method": "PUT",
+			"path": "/api/v1/vaults/vault%3A%C3%A9%F0%9F%98%80%2F%25%3F%23%20!'()*-._~/items/item%3A%C3%A9%F0%9F%98%80%2F%25%3F%23%20!'()*-._~",
+			"operationId": "semantic-create-opaque-path",
+			"ifMatch": null,
+			"body": "{\"category\":\"login\",\"encryptedData\":\"synthetic:é😀\\n\\\"\\\\\",\"encryptionIv\":\"synthetic-iv\",\"encryptionAlgorithm\":\"AES-GCM\"}"
+		},
+		{
+			"name": "update-opaque-path",
+			"method": "PATCH",
+			"path": "/api/v1/items/item%3A%C3%A9%F0%9F%98%80%2F%25%3F%23%20!'()*-._~",
+			"operationId": "attempt-update-opaque-path",
+			"ifMatch": "\"42\"",
+			"body": "{\"encryptedData\":\"synthetic:é😀\\n\\\"\\\\\",\"encryptionIv\":\"synthetic-iv\",\"encryptionAlgorithm\":\"AES-GCM\"}"
+		},
+		{
+			"name": "create-original-id-fallback",
+			"method": "PUT",
+			"path": "/api/v1/vaults/source-vault/items/source-item",
+			"operationId": "original-create-original-id-fallback",
+			"ifMatch": null,
+			"body": "{\"category\":\"login\",\"encryptedData\":\"synthetic:é😀\\n\\\"\\\\\",\"encryptionIv\":\"synthetic-iv\",\"encryptionAlgorithm\":\"AES-GCM\"}"
+		},
+		{
+			"name": "update-original-id-fallback",
+			"method": "PATCH",
+			"path": "/api/v1/items/source-item",
+			"operationId": "original-update-original-id-fallback",
+			"ifMatch": "\"42\"",
+			"body": "{\"encryptedData\":\"synthetic:é😀\\n\\\"\\\\\",\"encryptionIv\":\"synthetic-iv\",\"encryptionAlgorithm\":\"AES-GCM\"}"
+		}
+	],
+	"sourceSha256": {
+		"packages/sync/src/outbound-queue.ts": "ceccc3734942672b4e9ef01a9b6e7f70672029b2a7f81863d1958b1240584523",
+		"packages/api-contract/src/client.ts": "ac43e3a10ba40a2632c038fc72a624ddc50e56ecc9f9c19a76715e7682a1fe6a",
+		"packages/api-contract/src/transport.ts": "8e04942715c67f46f8bfac146216700b9464298e755a555336af79f67735dac9"
+	},
+	"syntheticInput": {
+		"accountId": "source-account",
+		"entityId": "source-item",
+		"vaultId": "source-vault",
+		"targetVaultId": "target-vault",
+		"category": "login",
+		"encryptedPayload": {
+			"encryptionAlgorithm": "AES-GCM",
+			"encryptionIv": "synthetic-iv",
+			"encryptedData": "synthetic:é😀\n\"\\"
+		},
+		"timestamp": 1,
+		"retryCount": 0
+	},
+	"limitations": [
+		"Synthetic primitive in-memory queue storage; actual public enqueue/drain and API fetch Request serialization used",
+		"Fetch captured Request and threw before any network call; no Server, crypto validity, old-profile admission or retry acceptance",
+		"Numeric baseVersion becomes strong If-Match; ciphertext request bodies have no numeric fields",
+		"Cross-Account semantic executor and attachment steps remain separate required vectors"
+	],
+	"sourceCommands": {
+		"create-unicode-order": {
+			"accountId": "source-account",
+			"id": "command-create-unicode-order",
+			"operationId": "semantic-create-unicode-order",
+			"attemptId": "attempt-create-unicode-order",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "create",
+			"baseVersion": 0,
+			"category": "login",
+			"encryptedPayload": {
+				"encryptedByUserId": "source-user",
+				"encryptionVersion": 1,
+				"encryptionAlgorithm": "AES-GCM",
+				"encryptionIv": "synthetic-iv",
+				"encryptedData": "synthetic:é😀\n\"\\"
+			}
+		},
+		"update-unicode-order": {
+			"accountId": "source-account",
+			"id": "command-update-unicode-order",
+			"operationId": "semantic-update-unicode-order",
+			"attemptId": "attempt-update-unicode-order",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "update",
+			"baseVersion": 42,
+			"encryptedPayload": {
+				"encryptedByUserId": "source-user",
+				"encryptionVersion": 43,
+				"encryptionAlgorithm": "AES-GCM",
+				"encryptionIv": "synthetic-iv",
+				"encryptedData": "synthetic:é😀\n\"\\"
+			}
+		},
+		"favorite-false": {
+			"accountId": "source-account",
+			"id": "command-favorite-false",
+			"operationId": "semantic-favorite-false",
+			"attemptId": "attempt-favorite-false",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "toggle_favorite",
+			"baseVersion": 7,
+			"favorite": false
+		},
+		"favorite-omitted": {
+			"accountId": "source-account",
+			"id": "command-favorite-omitted",
+			"operationId": "semantic-favorite-omitted",
+			"attemptId": "attempt-favorite-omitted",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "toggle_favorite",
+			"baseVersion": 8
+		},
+		"trash": {
+			"accountId": "source-account",
+			"id": "command-trash",
+			"operationId": "semantic-trash",
+			"attemptId": "attempt-trash",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "delete",
+			"baseVersion": 9
+		},
+		"permanent": {
+			"accountId": "source-account",
+			"id": "command-permanent",
+			"operationId": "semantic-permanent",
+			"attemptId": "attempt-permanent",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "permanent_delete",
+			"baseVersion": 10
+		},
+		"restore": {
+			"accountId": "source-account",
+			"id": "command-restore",
+			"operationId": "semantic-restore",
+			"attemptId": "attempt-restore",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "restore",
+			"baseVersion": 11
+		},
+		"move-order": {
+			"accountId": "source-account",
+			"id": "command-move-order",
+			"operationId": "semantic-move-order",
+			"attemptId": "attempt-move-order",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "move",
+			"baseVersion": 12,
+			"targetVaultId": "target-vault",
+			"encryptedPayload": {
+				"encryptedByUserId": "source-user",
+				"encryptionVersion": 13,
+				"encryptionAlgorithm": "AES-GCM",
+				"encryptionIv": "synthetic-iv",
+				"encryptedData": "synthetic:é😀\n\"\\"
+			}
+		},
+		"create-opaque-path": {
+			"accountId": "source-account",
+			"id": "id-create-opaque-path",
+			"operationId": "semantic-create-opaque-path",
+			"attemptId": "attempt-create-opaque-path",
+			"entityId": "item:é😀/%?# !'()*-._~",
+			"vaultId": "vault:é😀/%?# !'()*-._~",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "create",
+			"baseVersion": 0,
+			"category": "login",
+			"encryptedPayload": {
+				"encryptedByUserId": "source-user",
+				"encryptionVersion": 1,
+				"encryptionAlgorithm": "AES-GCM",
+				"encryptionIv": "synthetic-iv",
+				"encryptedData": "synthetic:é😀\n\"\\"
+			}
+		},
+		"update-opaque-path": {
+			"accountId": "source-account",
+			"id": "id-update-opaque-path",
+			"operationId": "semantic-update-opaque-path",
+			"attemptId": "attempt-update-opaque-path",
+			"entityId": "item:é😀/%?# !'()*-._~",
+			"vaultId": "vault:é😀/%?# !'()*-._~",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "update",
+			"baseVersion": 42,
+			"encryptedPayload": {
+				"encryptedByUserId": "source-user",
+				"encryptionVersion": 43,
+				"encryptionAlgorithm": "AES-GCM",
+				"encryptionIv": "synthetic-iv",
+				"encryptedData": "synthetic:é😀\n\"\\"
+			}
+		},
+		"create-original-id-fallback": {
+			"accountId": "source-account",
+			"id": "original-create-original-id-fallback",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "create",
+			"baseVersion": 0,
+			"category": "login",
+			"encryptedPayload": {
+				"encryptedByUserId": "source-user",
+				"encryptionVersion": 1,
+				"encryptionAlgorithm": "AES-GCM",
+				"encryptionIv": "synthetic-iv",
+				"encryptedData": "synthetic:é😀\n\"\\"
+			}
+		},
+		"update-original-id-fallback": {
+			"accountId": "source-account",
+			"id": "original-update-original-id-fallback",
+			"entityId": "source-item",
+			"vaultId": "source-vault",
+			"timestamp": 1,
+			"retryCount": 0,
+			"type": "update",
+			"baseVersion": 42,
+			"encryptedPayload": {
+				"encryptedByUserId": "source-user",
+				"encryptionVersion": 43,
+				"encryptionAlgorithm": "AES-GCM",
+				"encryptionIv": "synthetic-iv",
+				"encryptedData": "synthetic:é😀\n\"\\"
+			}
+		}
+	}
+}

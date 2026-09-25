@@ -1,15 +1,15 @@
 import type {
-	ItemDraft,
+	EditableItemDraft,
 	ItemProjection,
 } from "@bittery/client-runtime/protocol";
 import { useRuntimeClient } from "@bittery/client-runtime/react";
-import type { DecryptedItemData } from "@bittery/shared/types";
-import { useRuntimeMutation } from "./use-runtime-mutation";
+import type { PublicDecryptedItemData } from "@bittery/shared/types";
+import { useRuntimeMutation } from "@bittery/ui/runtime-presentation";
 
 export interface UpdateItemInput {
 	itemId: string;
 	vaultId: string;
-	data: Partial<DecryptedItemData>;
+	data: Partial<PublicDecryptedItemData>;
 	accountId: string;
 }
 
@@ -35,9 +35,21 @@ export interface MoveItemInput {
 
 export function mergeRuntimeItemDraft(
 	item: ItemProjection,
-	data: Partial<DecryptedItemData>,
-): ItemDraft {
-	return { ...item.data, data: { ...item.data.data, ...data } } as ItemDraft;
+	data: Partial<PublicDecryptedItemData>,
+): EditableItemDraft {
+	if (item.data.category === "login") {
+		if (Object.hasOwn(data, "passkeys"))
+			throw new Error("Use the credential command to change a passkey");
+		const { passkeys: _publicCredentials, ...editable } = item.data.data;
+		return {
+			category: "login",
+			data: { ...editable, ...data },
+		} as EditableItemDraft;
+	}
+	return {
+		...item.data,
+		data: { ...item.data.data, ...data },
+	} as EditableItemDraft;
 }
 
 export function useUpdateItem() {
@@ -53,10 +65,13 @@ export function useUpdateItem() {
 						)
 					: undefined;
 			if (!item) throw new Error("Runtime Item authority is unavailable");
+			if (!item.editGuard)
+				throw new Error("Runtime Item edit authority is unavailable");
 			return runtime.updateItem(
 				{
 					accountId: input.accountId,
 					itemId: input.itemId,
+					guard: item.editGuard,
 					draft: mergeRuntimeItemDraft(item, input.data),
 				},
 				{ signal },

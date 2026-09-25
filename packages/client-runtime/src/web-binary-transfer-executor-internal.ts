@@ -434,11 +434,15 @@ export class ConfigurableWebBinaryTransferExecutor {
 		this.#assertUnused(request.transferId);
 		const expectedBytes = decimal(request.byteLength);
 		const expectedByteLength = safeNumber(expectedBytes);
-		assertUploadHeaders(request.headers, request.ciphertextSha256);
+		const headers = uploadHeaders(
+			request.headers,
+			request.ciphertextSha256,
+			request.byteLength,
+		);
 		const controller = new AbortController();
 		const chunks = new UploadChunkQueue();
 		const result = this.#runUpload(
-			request,
+			{ ...request, headers },
 			expectedByteLength,
 			controller,
 			chunks,
@@ -814,20 +818,34 @@ function assertHeadersPreserved(
 	}
 }
 
-function assertUploadHeaders(
+function uploadHeaders(
 	headers: readonly { name: string; value: string }[],
 	digest: string,
-): void {
+	byteLength: string,
+): { name: string; value: string }[] {
+	headerEntries(headers);
 	const values = new Map(
 		headers.map(({ name, value }) => [name.toLowerCase(), value]),
 	);
+	const checksum = btoa(
+		String.fromCharCode(
+			...(digest.match(/.{2}/g) ?? []).map((byte) => Number.parseInt(byte, 16)),
+		),
+	);
 	if (
-		values.has("content-length") ||
+		(values.has("content-length") &&
+			(values.get("content-length") !== byteLength ||
+				values.get("x-amz-checksum-sha256") !== checksum)) ||
+		(values.has("x-amz-checksum-sha256") &&
+			values.get("x-amz-checksum-sha256") !== checksum) ||
 		values.get("content-type") !== "application/octet-stream" ||
 		values.get("x-amz-content-sha256") !== digest
 	) {
 		throw new BinaryTransferInvocationError();
 	}
+	// Fetch owns this forbidden header. The checked OPFS File supplies exactly the signed length;
+	// all other invocation headers must survive Request construction byte for byte.
+	return headers.filter(({ name }) => name.toLowerCase() !== "content-length");
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {

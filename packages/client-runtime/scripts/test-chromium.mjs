@@ -4,10 +4,13 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 const allSuites = [
+	"tests/web-device-timer.chromium.test.ts",
 	"tests/web-account-lease.chromium.test.ts",
 	"tests/web-binary-transfer.chromium.test.ts",
 	"tests/web-attachment-download-sink.chromium.test.ts",
 	"tests/web-attachment-upload.chromium.test.ts",
+	"tests/web-attachment-artifact-recovery.chromium.test.ts",
+	"tests/web-attachment-sweep-close.chromium.test.ts",
 	"tests/opfs-upload-spool.chromium.test.ts",
 	"tests/web-vault-image-artifact.chromium.test.ts",
 	"tests/web-vault-image-http.chromium.test.ts",
@@ -15,12 +18,20 @@ const allSuites = [
 	"../../apps/web/tests/browser/runtime-import-progress.chromium.test.ts",
 ];
 const selectors = new Map([
+	["device-timer", ["tests/web-device-timer.chromium.test.ts"]],
 	["binary-transfer", ["tests/web-binary-transfer.chromium.test.ts"]],
 	[
 		"attachment-download-sink",
 		["tests/web-attachment-download-sink.chromium.test.ts"],
 	],
 	["attachment-upload", ["tests/web-attachment-upload.chromium.test.ts"]],
+	[
+		"attachment-artifact",
+		[
+			"tests/web-attachment-artifact-recovery.chromium.test.ts",
+			"tests/web-attachment-sweep-close.chromium.test.ts",
+		],
+	],
 	["vault-image-artifact", ["tests/web-vault-image-artifact.chromium.test.ts"]],
 	["vault-image-http", ["tests/web-vault-image-http.chromium.test.ts"]],
 	["create-vault", ["tests/web-create-vault.chromium.test.ts"]],
@@ -35,7 +46,7 @@ const suites =
 
 if (suites === undefined) {
 	console.error(
-		"Usage: node ./scripts/test-chromium.mjs [binary-transfer|attachment-download-sink|attachment-upload|vault-image-artifact|vault-image-http|create-vault]",
+		"Usage: node ./scripts/test-chromium.mjs [device-timer|binary-transfer|attachment-download-sink|attachment-upload|attachment-artifact|vault-image-artifact|vault-image-http|create-vault]",
 	);
 	process.exit(2);
 }
@@ -62,7 +73,10 @@ let joinedUploadBindingsRoot;
 if (
 	suites.some((suite) =>
 		[
+			"tests/web-device-timer.chromium.test.ts",
 			"tests/web-attachment-upload.chromium.test.ts",
+			"tests/web-attachment-artifact-recovery.chromium.test.ts",
+			"tests/web-attachment-sweep-close.chromium.test.ts",
 			"tests/web-create-vault.chromium.test.ts",
 		].includes(suite),
 	)

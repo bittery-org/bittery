@@ -1,7 +1,11 @@
-import { validateRuntimeRequest } from "../generated/runtime-protocol/validator";
+import type { ObservationControl } from "../generated/runtime-protocol/contract";
+import {
+	validateObservationRequest,
+	validateRuntimeRequest,
+} from "../generated/runtime-protocol/validator";
 import { takeFullOwnedUint8ArrayIntrinsic } from "./binary-intrinsics";
 import type { ForegroundUploadOutcome } from "./web-binary-transfer-executor";
-import type { WorkerRpcChannel } from "./worker/owner";
+import type { WorkerRpcChannel, WorkerRpcError } from "./worker/owner";
 
 export interface ReplicaExecutor {
 	invoke(requestJson: string): Promise<string>;
@@ -36,9 +40,15 @@ interface WebClientRuntimeLike {
 		observationId: string,
 		requestJson: string,
 		callback: (projectionJson: string) => void,
+		controlCallback?: (controlJson: string) => void,
 	): void;
 	request_json(requestId: string, requestJson: string): Promise<string>;
 	unobserve(observationId: string): void;
+	begin_vault_export_output(observationId: string): string;
+	finish_vault_export_output(
+		observationId: string,
+		outputLeaseId: string,
+	): void;
 }
 
 interface RuntimeIncarnation {
@@ -223,13 +233,17 @@ type RuntimeCommand =
 	| { type: "request"; requestId: string; requestJson: string }
 	| { type: "observe"; observationId: string; requestJson: string }
 	| { type: "unobserve"; observationId: string }
+	| { type: "beginVaultExportOutput"; observationId: string }
+	| {
+			type: "finishVaultExportOutput";
+			observationId: string;
+			outputLeaseId: string;
+	  }
 	| { type: "normalizeAccountEmail"; value: string };
 
-type RuntimeNotification = {
-	type: "observation";
-	observationId: string;
-	projectionJson: string;
-};
+type RuntimeNotification =
+	| { type: "observation"; observationId: string; projectionJson: string }
+	| { type: "observationControl"; observationId: string; controlJson: string };
 
 function invalidInput(message: string): Error {
 	return Object.assign(new Error(message), { code: "invalid-input" });
@@ -355,12 +369,20 @@ function parseCommand(value: unknown): RuntimeCommand {
 		return command as RuntimeCommand;
 	}
 	if (
-		command.type === "unobserve" &&
+		(command.type === "unobserve" ||
+			command.type === "beginVaultExportOutput") &&
 		typeof command.observationId === "string" &&
 		hasExactKeys(command, ["type", "observationId"])
 	) {
 		return command as RuntimeCommand;
 	}
+	if (
+		command.type === "finishVaultExportOutput" &&
+		typeof command.observationId === "string" &&
+		typeof command.outputLeaseId === "string" &&
+		hasExactKeys(command, ["type", "observationId", "outputLeaseId"])
+	)
+		return command as RuntimeCommand;
 	throw invalidInput("Unknown or malformed Runtime worker command.");
 }
 
@@ -709,7 +731,39 @@ export function createRuntimeWorkerService(
 	return {
 		async request(payload, signal, notify) {
 			const command = parseCommand(payload);
+			if (
+				command.type === "beginVaultExportOutput" ||
+				command.type === "finishVaultExportOutput"
+			) {
+				// A connection-owned handle can exist only on the Runtime already created here.
+				// Output admission/cleanup must never initialize or replace that owner.
+				if (runtimeTask === undefined)
+					throw invalidInput("No Runtime observation is available.");
+				if (signal.aborted)
+					throw invalidInput("Export output command was cancelled.");
+				const ready = await runtimeTask;
+				if (signal.aborted)
+					throw invalidInput("Export output command was cancelled.");
+				if (command.type === "beginVaultExportOutput") {
+					if (closing) throw terminalFailure ?? closed();
+					return ready.runtime.begin_vault_export_output(command.observationId);
+				}
+				ready.runtime.finish_vault_export_output(
+					command.observationId,
+					command.outputLeaseId,
+				);
+				return undefined;
+			}
+			if (closing && command.type === "unobserve") {
+				// Cleanup uses the already-created Runtime and its exact observation table. It
+				// must never call runtime(), which may initialize or replace an incarnation.
+				if (runtimeTask === undefined) throw terminalFailure ?? closed();
+				const ready = await runtimeTask;
+				ready.runtime.unobserve(command.observationId);
+				return undefined;
+			}
 			if (command.type === "normalizeAccountEmail") {
+				if (closing) throw terminalFailure ?? closed();
 				if (signal.aborted)
 					throw invalidInput("Account email normalization was cancelled.");
 				const wasm = await deps.loadWasm();
@@ -763,7 +817,7 @@ export function createRuntimeWorkerService(
 				}
 				const ready = incarnation.runtime;
 				if (recoveryRequest) incarnation.recoveryOnly = true;
-				if (closing) throw closed();
+				if (closing && command.type !== "unobserve") throw closed();
 				if (command.type === "observe") {
 					if (signal.aborted) return undefined;
 					let cancelled = false;
@@ -781,6 +835,12 @@ export function createRuntimeWorkerService(
 								type: "observation",
 								observationId: command.observationId,
 								projectionJson,
+							} satisfies RuntimeNotification),
+						(controlJson) =>
+							notify({
+								type: "observationControl",
+								observationId: command.observationId,
+								controlJson,
 							} satisfies RuntimeNotification),
 					);
 					if (signal.aborted) cancel();
@@ -868,32 +928,90 @@ export interface WorkerRuntime {
 		observationId: string,
 		requestJson: string,
 		listener: (projectionJson: string) => void,
-		options?: { signal?: AbortSignal },
+		options?: {
+			signal?: AbortSignal;
+			onControl?: (controlJson: string) => void;
+			onError?: (error: unknown) => void;
+		},
 	): Promise<void>;
 	unobserve(observationId: string): Promise<void>;
+	beginVaultExportOutput(observationId: string): Promise<string>;
+	finishVaultExportOutput(
+		observationId: string,
+		outputLeaseId: string,
+	): Promise<void>;
 	close(): Promise<void>;
 }
 
 function notification(value: unknown): RuntimeNotification | null {
 	if (typeof value !== "object" || value === null) return null;
 	const candidate = value as Partial<RuntimeNotification>;
-	return candidate.type === "observation" &&
-		typeof candidate.observationId === "string" &&
-		typeof candidate.projectionJson === "string"
-		? (candidate as RuntimeNotification)
-		: null;
+	if (typeof candidate.observationId !== "string") return null;
+	if (
+		(candidate.type === "observation" &&
+			typeof candidate.projectionJson === "string") ||
+		(candidate.type === "observationControl" &&
+			typeof candidate.controlJson === "string")
+	)
+		return candidate as RuntimeNotification;
+	return null;
 }
 
 export function createWorkerRuntime(
 	channel: WorkerRpcChannel,
 	closeOwner: () => Promise<void>,
 ): WorkerRuntime {
-	const observations = new Map<string, (projectionJson: string) => void>();
-	const detach = channel.subscribe((value) => {
-		const event = notification(value);
-		if (event === null) return;
-		observations.get(event.observationId)?.(event.projectionJson);
-	});
+	const observations = new Map<
+		string,
+		{
+			listener: (projectionJson: string) => void;
+			onControl?: (controlJson: string) => void;
+			onError?: (error: unknown) => void;
+			isExport: boolean;
+			retired: boolean;
+			delivered: boolean;
+		}
+	>();
+	let connectionFailure: WorkerRpcError | undefined;
+	const detach = channel.subscribe(
+		(value) => {
+			if (connectionFailure !== undefined) return;
+			const event = notification(value);
+			if (event === null) return;
+			const observation = observations.get(event.observationId);
+			if (observation === undefined || observation.retired) return;
+			if (event.type === "observation") {
+				observation.listener(event.projectionJson);
+				// Queueing in the Worker is not successful delivery to this host consumer.
+				observation.delivered = true;
+			} else {
+				observation.retired = true;
+				observation.onControl?.(event.controlJson);
+			}
+		},
+		(error) => {
+			if (connectionFailure !== undefined) return;
+			connectionFailure = error;
+			const retired = [...observations.values()];
+			observations.clear();
+			const control: ObservationControl = {
+				type: "vaultExportRetired",
+				reason: "connectionClosed",
+			};
+			const json = JSON.stringify(control);
+			for (const observation of retired) {
+				if (observation.retired) continue;
+				observation.retired = true;
+				try {
+					if (observation.isExport) observation.onControl?.(json);
+					else observation.onError?.(error);
+				} catch {
+					// Preserve delivery to other captures. Connection failure never acknowledges
+					// that a throwing host callback disposed its payload.
+				}
+			}
+		},
+	);
 	let closeTask: Promise<void> | undefined;
 
 	return {
@@ -907,6 +1025,7 @@ export function createWorkerRuntime(
 			);
 		},
 		async observe(observationId, requestJson, listener, options) {
+			if (connectionFailure !== undefined) throw connectionFailure;
 			// Replacing here would silently destroy the first consumer's observation and
 			// leave its `unobserve` to cancel the second's. A minted id makes this
 			// unreachable, so reaching it is a defect and says so.
@@ -915,7 +1034,23 @@ export function createWorkerRuntime(
 					`Observation ${observationId} is already installed.`,
 				);
 			}
-			observations.set(observationId, listener);
+			let isExport = false;
+			try {
+				const request: unknown = JSON.parse(requestJson);
+				isExport =
+					validateObservationRequest(request) && request.type === "vaultExport";
+			} catch {
+				/* The ordinary Runtime request path reports malformed input. */
+			}
+			const observation = {
+				listener,
+				onControl: options?.onControl,
+				onError: options?.onError,
+				isExport,
+				retired: false,
+				delivered: false,
+			};
+			observations.set(observationId, observation);
 			try {
 				await channel.request(
 					{
@@ -926,7 +1061,7 @@ export function createWorkerRuntime(
 					options,
 				);
 			} catch (error) {
-				if (observations.get(observationId) === listener) {
+				if (observations.get(observationId) === observation) {
 					observations.delete(observationId);
 				}
 				if (options?.signal?.aborted) {
@@ -943,18 +1078,60 @@ export function createWorkerRuntime(
 				throw error;
 			}
 		},
+		async beginVaultExportOutput(observationId) {
+			if (connectionFailure !== undefined) throw connectionFailure;
+			const observation = observations.get(observationId);
+			if (
+				!observation?.isExport ||
+				observation.retired ||
+				!observation.delivered
+			)
+				throw invalidInput(
+					"The Export snapshot has not been delivered or is retired.",
+				);
+			const lease = await channel.request<string>({
+				type: "beginVaultExportOutput",
+				observationId,
+			} satisfies RuntimeCommand);
+			if (observations.get(observationId) !== observation)
+				throw invalidInput(
+					"The Export observation was released during admission.",
+				);
+			return lease;
+		},
+		async finishVaultExportOutput(observationId, outputLeaseId) {
+			const observation = observations.get(observationId);
+			if (!observation?.isExport)
+				throw invalidInput("No Export observation is available.");
+			await channel.request({
+				type: "finishVaultExportOutput",
+				observationId,
+				outputLeaseId,
+			} satisfies RuntimeCommand);
+			if (observations.get(observationId) === observation)
+				observations.delete(observationId);
+		},
 		async unobserve(observationId) {
-			observations.delete(observationId);
+			const observation = observations.get(observationId);
 			await channel.request({
 				type: "unobserve",
 				observationId,
 			} satisfies RuntimeCommand);
+			if (observations.get(observationId) === observation)
+				observations.delete(observationId);
 		},
 		close() {
 			if (closeTask === undefined) {
-				detach();
-				observations.clear();
-				closeTask = closeOwner();
+				const closing = closeOwner().then(() => {
+					detach();
+					observations.clear();
+				});
+				closeTask = closing;
+				void closing.catch(() => {
+					// An incomplete host cleanup must keep terminal delivery and the existing
+					// owner's close retry available; rejection is not a cleanup acknowledgement.
+					if (closeTask === closing) closeTask = undefined;
+				});
 			}
 			return closeTask;
 		},

@@ -3,9 +3,9 @@ import {
 	IconLock as Lock,
 	IconTriangleAlert as TriangleAlert,
 } from "@bittery/ui/icons";
+import type { RuntimeItemsState } from "@bittery/ui/runtime-presentation";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import type { RuntimeItemsState } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 /**

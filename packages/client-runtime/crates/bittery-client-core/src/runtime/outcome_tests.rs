@@ -63,6 +63,7 @@ impl OrdinaryItemCase {
     fn request(self, account_id: AccountId) -> RuntimeRequest {
         match self {
             Self::Update => RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                 account_id,
                 item_id: "item-existing".into(),
                 draft: draft(),
@@ -84,6 +85,7 @@ impl OrdinaryItemCase {
                 account_id,
                 item_id: "item-existing".into(),
                 target_vault_id: "vault-2".into(),
+                target_account_id: None,
             },
             Self::PermanentlyDelete => RuntimeRequest::PermanentlyDeleteItem {
                 account_id,
@@ -208,9 +210,288 @@ async fn each_ordinary_item_kind_accepts_its_exact_tagged_applied_outcome() {
 }
 
 #[tokio::test]
+async fn retained_item_result_preserves_a_later_visible_server_version() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+        .await;
+    harness.server.lose_next_response();
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    assert_eq!(harness.snapshot().operations.len(), 1);
+    {
+        // A later client changes the unencrypted favorite flag. The Server Item revision
+        // advances independently from its unchanged ciphertext/encryption revision.
+        let mut items = harness.server.created_items.lock().unwrap();
+        assert_eq!(items[0].version, 2);
+        items[0].version = 3;
+        items[0].favorite = false;
+    }
+    harness.clock.advance(1_000);
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+
+    let snapshot = harness.snapshot();
+    assert_eq!(
+        snapshot.failure, None,
+        "a later edit does not contradict the old result"
+    );
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.items.is_empty());
+    assert_eq!(snapshot.receipts.len(), 1);
+    assert_eq!(
+        snapshot.receipts[0].result,
+        OperationOutcomeResult::Applied {
+            entity_id: "item-existing".into(),
+            version: 2,
+        }
+    );
+    let authority = harness.authority_items();
+    assert_eq!(authority[0].version, 3);
+    assert!(!authority[0].favorite);
+    assert_eq!(
+        harness.server.created_items.lock().unwrap()[0].version,
+        3,
+        "replay never reapplies the old edit"
+    );
+}
+
+#[tokio::test]
+async fn retained_item_result_preserves_a_later_move_into_another_visible_vault() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+        .await;
+    harness.server.lose_next_response();
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let encrypted = bittery_crypto_core::encrypt_with_aad(
+        &super::create::item_plaintext(&draft()).unwrap(),
+        &crate::test_fixtures::TEST_VAULT_KEY,
+        &bittery_crypto_core::AadContext {
+            vault_id: "vault-2".into(),
+            entity_id: "item-existing".into(),
+            entity_type: "item".into(),
+            version: 3,
+            user_id: USER.into(),
+        },
+    )
+    .unwrap();
+    {
+        let mut items = harness.server.created_items.lock().unwrap();
+        items[0].version = 3;
+        items[0].vault_id = "vault-2".into();
+        items[0].encryption_version = 3;
+        items[0].encrypted_data = encrypted.ciphertext;
+        items[0].encryption_iv = encrypted.iv;
+        items[0].encryption_algorithm = encrypted.algorithm;
+    }
+    harness.clock.advance(1_000);
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let snapshot = harness.snapshot();
+    assert_eq!(
+        snapshot.failure, None,
+        "later visible location is current authority"
+    );
+    assert!(snapshot.operations.is_empty());
+    assert_eq!(
+        snapshot.receipts[0].vault_id(),
+        TEST_VAULT_ID,
+        "the original accepted scope remains in the receipt"
+    );
+    let authority = harness.authority_items();
+    assert_eq!(authority[0].version, 3);
+    assert_eq!(authority[0].vault_id, "vault-2");
+}
+
+#[tokio::test]
+async fn retained_item_completion_cannot_rebase_over_a_concurrent_current_authority_commit() {
+    use crate::replica::{Replica, SerializedReplicaPersistence};
+
+    struct ConcurrentAuthorityReplica {
+        inner: Arc<PlainReplica>,
+        item: Mutex<Option<crate::replica::AuthorityItemRecord>>,
+        account_id: AccountId,
+    }
+    #[async_trait]
+    impl crate::replica::SerializedReplicaExecutor for ConcurrentAuthorityReplica {
+        async fn invoke(&self, request: String) -> Result<String, RuntimeError> {
+            let parsed: crate::replica::ReplicaPersistenceRequest =
+                serde_json::from_str(&request).unwrap();
+            let replacement = if matches!(
+                parsed,
+                crate::replica::ReplicaPersistenceRequest::Commit { .. }
+            ) {
+                self.item.lock().unwrap().take()
+            } else {
+                None
+            };
+            if let Some(item) = replacement {
+                // Another physical writer installs a newer verified Item after this completion
+                // prepared its response, but before its physical guarded commit reaches storage.
+                let other = Replica::new(Arc::new(SerializedReplicaPersistence::new(
+                    self.inner.clone(),
+                )));
+                let snapshot = other.load(&self.account_id).await?.unwrap();
+                let result = other
+                    .apply_sync_item_authority(
+                        crate::replica::BootstrapGuard {
+                            account_id: self.account_id.clone(),
+                            user_id: snapshot.user_id,
+                            incarnation: snapshot.incarnation,
+                            expected_replica_revision: snapshot.revision,
+                            expected_lock_epoch: snapshot.lock_epoch,
+                        },
+                        snapshot.bootstrap.active_cursor,
+                        item.id.clone(),
+                        Some(item),
+                    )
+                    .await?;
+                assert!(matches!(result, PlanResult::Applied { .. }));
+            }
+            crate::replica::SerializedReplicaExecutor::invoke(self.inner.as_ref(), request).await
+        }
+    }
+    for corrupt in [false, true] {
+        let harness = seeded_with_existing_item(false, false).await;
+        let (operation_id, _) = harness
+            .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+            .await;
+        harness.server.lose_next_response();
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        if corrupt {
+            harness.server.created_items.lock().unwrap()[0].encrypted_data =
+                "corrupt-current-ciphertext".into();
+        } else {
+            harness.server.created_items.lock().unwrap().clear();
+        }
+        let persistence = Arc::new(ConcurrentAuthorityReplica {
+            inner: harness.replica.clone(),
+            item: Mutex::new(None),
+            account_id: harness.account_id.clone(),
+        });
+        let runtime = Runtime::with_test_dispatch_environment(
+            persistence.clone(),
+            harness.platform.clone(),
+            harness.server.clone(),
+            auth_config(),
+            harness.clock.clone(),
+            TestTimer::advancing(harness.clock.clone()),
+        );
+        runtime.replica.load(&harness.account_id).await.unwrap();
+        runtime.unlock_account(&harness.account_id).await.unwrap();
+        let mut newer = harness.authority_items()[0].clone();
+        newer.version = 3;
+        newer.favorite = false;
+        *persistence.item.lock().unwrap() = Some(newer.clone());
+        harness.clock.advance(1_000);
+        runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        let snapshot = runtime
+            .replica
+            .load(&harness.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            snapshot.bootstrap.snapshot().visible_items,
+            vec![newer],
+            "a stale response never erases a newer physical commit"
+        );
+        assert_eq!(
+            snapshot.operations.len(),
+            1,
+            "a stale completion remains owed"
+        );
+        assert!(snapshot.receipts.is_empty());
+        assert_eq!(
+            snapshot.failure, None,
+            "a stale response cannot fail a newer head; corrupt={corrupt}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn retained_item_result_receipts_hidden_authority_without_decrypting_or_reinstalling_it() {
+    for rejected in [false, true] {
+        let harness = seeded_with_existing_item(false, false).await;
+        let (operation_id, _) = harness
+            .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+            .await;
+        if rejected {
+            harness.server.reject_next("item_version_conflict");
+        }
+        harness.server.lose_next_response();
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        let snapshot = harness.snapshot();
+        harness
+            .runtime
+            .replica
+            .execute_exact(GuardedCommitPlan::new(
+                harness.account_id.clone(),
+                snapshot.incarnation,
+                snapshot.revision,
+                snapshot.lock_epoch,
+                vec![PlanMutation::RetireVaults {
+                    vault_ids: vec![TEST_VAULT_ID.into()],
+                }],
+            ))
+            .await
+            .unwrap();
+        // Retired ciphertext is not current key authority, even though the point endpoint still
+        // returns it. The completion must not try to decrypt or install this unavailable Item.
+        harness.server.created_items.lock().unwrap()[0].encrypted_data = "not-decryptable".into();
+        harness.clock.advance(1_000);
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+
+        let snapshot = harness.snapshot();
+        assert_eq!(
+            snapshot.failure, None,
+            "hidden response is never decrypted using retained material"
+        );
+        assert!(snapshot.operations.is_empty());
+        assert!(snapshot.items.is_empty());
+        assert_eq!(snapshot.receipts.len(), 1);
+        assert_eq!(
+            snapshot.bootstrap.state,
+            crate::replica::ReplicaState::RefreshRequired
+        );
+        assert_eq!(
+            snapshot.bootstrap.pending_vault_retirements,
+            vec![TEST_VAULT_ID]
+        );
+        assert!(harness.authority_items().is_empty());
+        assert_eq!(
+            snapshot.bootstrap.snapshot().visible_vaults[0].id,
+            "vault-2"
+        );
+    }
+}
+
+#[tokio::test]
 async fn all_six_ordinary_item_outcomes_reconcile_authority_overlay_and_validator_atomically() {
     for case in OrdinaryItemCase::ALL {
         let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
+        let authority_before = harness.authority_items();
         let (operation_id, item_id) = harness
             .accept_existing(case.request(harness.account_id.clone()))
             .await;
@@ -237,7 +518,14 @@ async fn all_six_ordinary_item_outcomes_reconcile_authority_overlay_and_validato
         );
         let authority = harness.authority_items();
         if matches!(case, OrdinaryItemCase::PermanentlyDelete) {
-            assert!(authority.is_empty(), "permanent deletion removes authority");
+            assert_eq!(
+                authority, authority_before,
+                "retained deletion receipts before fresh current authority"
+            );
+            assert_eq!(
+                snapshot.bootstrap.state,
+                crate::replica::ReplicaState::RefreshRequired
+            );
         } else {
             assert_eq!(authority.len(), 1, "{case:?} writes one authority");
             assert_eq!(authority[0].id, "item-existing");
@@ -246,6 +534,79 @@ async fn all_six_ordinary_item_outcomes_reconcile_authority_overlay_and_validato
                 assert_eq!(authority[0].vault_id, "vault-2");
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn locked_item_outcomes_retain_work_until_authority_can_be_validated_after_unlock() {
+    for (create, rejected) in [(false, false), (true, false), (false, true)] {
+        let harness = if create {
+            seeded(false).await
+        } else {
+            seeded_with_existing_item(false, false).await
+        };
+        if rejected {
+            harness.server.reject_next("item_version_conflict");
+        }
+        let (operation_id, _) = if create {
+            harness.accept_create().await
+        } else {
+            harness
+                .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+                .await
+        };
+        let accepted = harness.operation().unwrap();
+        harness
+            .runtime
+            .request(
+                RuntimeRequest::Lock {
+                    account_id: harness.account_id.clone(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        let locked = harness.snapshot();
+        assert_eq!(
+            locked.failure, None,
+            "missing live keys are a lifecycle state, not corruption"
+        );
+        assert_eq!(locked.operations.len(), 1);
+        assert_eq!(locked.operations[0].request, accepted.request);
+        assert!(locked.receipts.is_empty());
+        harness
+            .runtime
+            .unlock_account(&harness.account_id)
+            .await
+            .unwrap();
+        harness.clock.advance(1_000);
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        let completed = harness.snapshot();
+        assert_eq!(completed.failure, None);
+        assert!(completed.operations.is_empty());
+        assert_eq!(completed.receipts[0].operation_id, operation_id);
+        assert_eq!(
+            harness.authority_items()[0].vault_id,
+            if create || rejected {
+                TEST_VAULT_ID
+            } else {
+                "vault-2"
+            }
+        );
+        assert_eq!(
+            matches!(
+                completed.receipts[0].result,
+                OperationOutcomeResult::Rejected { .. }
+            ),
+            rejected
+        );
     }
 }
 
@@ -358,7 +719,7 @@ async fn every_category_dispatches_validates_and_reconciles_its_authoritative_pr
             .await;
         let visible = harness.visible_items();
         assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].data, draft);
+        assert_eq!(visible[0].data, crate::PublicItemDraft::from(&draft));
         assert_eq!(visible[0].status, ItemProjectionStatus::Authoritative);
         assert!(harness.snapshot().operations.is_empty());
         assert!(harness.snapshot().items.is_empty());
@@ -796,6 +1157,71 @@ async fn unknown_outcomes_retry_but_parsable_cross_kind_and_invalid_kind_rejecti
 }
 
 #[tokio::test]
+async fn exact_team_leave_start_answer_retains_the_authoritative_empty_plan_set() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let operation: crate::replica::OperationRecord = serde_json::from_value(serde_json::json!({
+        "operationId": "rotation-start-outcome",
+        "kind": "create_team_leave_rotation_plans",
+        "target": {"type": "team", "teamId": "team-1"},
+        "request": {
+            "method": "POST",
+            "path": "/api/v1/teams/team-1/leave-rotation-plans",
+            "headers": [],
+            "body": []
+        },
+        "requestFingerprint": "7a6deb2215d2e2f11538109abe9d6195e32123b831bebc09a9140b975c20106a",
+        "scheduling": {"attemptCount": "0", "notBeforeMs": "0"}
+    }))
+    .unwrap();
+    let answer = serde_json::to_vec(&serde_json::json!({
+        "operationId": "rotation-start-outcome",
+        "kind": "create_team_leave_rotation_plans",
+        "result": {"status": "applied", "plans": []}
+    }))
+    .unwrap();
+    assert!(matches!(
+        harness.runtime.read_dispatch_answer(&operation, 200, &answer),
+        super::outcome::SemanticAnswer::Outcome(observed)
+            if observed.operation_id == operation.operation_id
+                && observed.request_fingerprint == operation.request_fingerprint
+                && matches!(&observed.result,
+                    OperationOutcomeResult::RotationStartApplied { plans } if plans.is_empty())
+    ));
+
+    let changed_operation = serde_json::to_vec(&serde_json::json!({
+        "operationId": "another-rotation-start",
+        "kind": "create_team_leave_rotation_plans",
+        "result": {"status": "applied", "plans": []}
+    }))
+    .unwrap();
+    assert!(matches!(
+        harness
+            .runtime
+            .read_dispatch_answer(&operation, 200, &changed_operation),
+        super::outcome::SemanticAnswer::IdentityReused
+    ));
+
+    let plan = serde_json::json!({
+        "id": "plan-1", "vaultId": "vault-1", "initiatorUserId": "user-1",
+        "expectedKeyVersion": 1, "state": "preparing",
+        "idleExpiresAt": "2026-09-23T12:00:00Z",
+        "absoluteExpiresAt": "2026-09-23T12:00:00Z"
+    });
+    let repeated_plan = serde_json::to_vec(&serde_json::json!({
+        "operationId": "rotation-start-outcome",
+        "kind": "create_team_leave_rotation_plans",
+        "result": {"status": "applied", "plans": [plan.clone(), plan]}
+    }))
+    .unwrap();
+    assert!(matches!(
+        harness
+            .runtime
+            .read_dispatch_answer(&operation, 200, &repeated_plan),
+        super::outcome::SemanticAnswer::IdentityReused
+    ));
+}
+
+#[tokio::test]
 async fn create_vault_outcomes_parse_closed_but_cannot_match_an_accepted_runtime_operation() {
     let harness = seeded_with_existing_item(false, false).await;
     harness
@@ -960,39 +1386,30 @@ async fn foreign_operation_id_from_dispatch_or_lookup_fails_without_discard_or_e
 }
 
 #[tokio::test]
-async fn applied_authority_presence_must_match_permanent_deletion_semantics() {
-    for permanent in [false, true] {
-        let case = if permanent {
-            OrdinaryItemCase::PermanentlyDelete
-        } else {
-            OrdinaryItemCase::Update
-        };
-        let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
-        let (operation_id, _) = harness
-            .accept_existing(case.request(harness.account_id.clone()))
-            .await;
-        harness
-            .server
-            .answer_next_mutation_with(ordinary_applied_body(&operation_id, case.wire_kind(), 2));
-        if !permanent {
-            harness.server.created_items.lock().unwrap().clear();
-        }
-        harness
-            .runtime
-            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
-            .await;
+async fn applied_permanent_deletion_with_present_authority_remains_an_invariant_failure() {
+    let case = OrdinaryItemCase::PermanentlyDelete;
+    let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
+    let (operation_id, _) = harness
+        .accept_existing(case.request(harness.account_id.clone()))
+        .await;
+    harness
+        .server
+        .answer_next_mutation_with(ordinary_applied_body(&operation_id, case.wire_kind(), 2));
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
 
-        let snapshot = harness.snapshot();
-        assert_eq!(snapshot.failure, Some(RuntimeErrorCode::InvariantViolation));
-        assert_eq!(snapshot.operations.len(), 1);
-        assert_eq!(snapshot.items.len(), 1);
-        assert!(snapshot.receipts.is_empty());
-        assert_eq!(
-            harness.authority_items().len(),
-            1,
-            "mismatched Server authority cannot move local authority"
-        );
-    }
+    let snapshot = harness.snapshot();
+    assert_eq!(snapshot.failure, Some(RuntimeErrorCode::InvariantViolation));
+    assert_eq!(snapshot.operations.len(), 1);
+    assert_eq!(snapshot.items.len(), 1);
+    assert!(snapshot.receipts.is_empty());
+    assert_eq!(
+        harness.authority_items().len(),
+        1,
+        "mismatched Server authority cannot move local authority"
+    );
 }
 
 #[tokio::test]
@@ -1116,7 +1533,10 @@ struct TwoRuntimeBarrierHttp {
 
 #[async_trait]
 impl crate::http_transport::SerializedHttpExecutor for TwoRuntimeBarrierHttp {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
         if (request["method"] == "PUT"
             && request["url"]
@@ -1408,9 +1828,10 @@ async fn ordinary_item_fetch_and_commit_failures_preserve_accepted_work_until_re
 }
 
 #[tokio::test]
-async fn item_not_found_rejection_atomically_removes_stale_authority_with_the_overlay() {
+async fn item_not_found_rejection_receipts_and_refreshes_without_rewriting_current_authority() {
     for case in OrdinaryItemCase::ALL {
         let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
+        let authority_before = harness.authority_items();
         harness.server.reject_next("item_not_found");
         harness.server.created_items.lock().unwrap().clear();
         let (operation_id, _) = harness
@@ -1424,7 +1845,11 @@ async fn item_not_found_rejection_atomically_removes_stale_authority_with_the_ov
         let snapshot = harness.snapshot();
         assert!(snapshot.operations.is_empty(), "{case:?}");
         assert!(snapshot.items.is_empty(), "{case:?}");
-        assert!(harness.authority_items().is_empty(), "{case:?}");
+        assert_eq!(harness.authority_items(), authority_before, "{case:?}");
+        assert_eq!(
+            snapshot.bootstrap.state,
+            crate::replica::ReplicaState::RefreshRequired
+        );
         assert_eq!(snapshot.receipts.len(), 1, "{case:?}");
         assert_eq!(
             snapshot.receipts[0].result,
@@ -1436,7 +1861,7 @@ async fn item_not_found_rejection_atomically_removes_stale_authority_with_the_ov
 }
 
 #[tokio::test]
-async fn a_lost_first_success_response_is_recovered_by_looking_the_outcome_up() {
+async fn a_lost_first_success_response_is_recovered_by_lookup_and_exact_replay() {
     let harness = seeded(false).await;
     // The Server commits the Item and the client never sees the answer.
     harness.server.lose_next_response();
@@ -1451,8 +1876,8 @@ async fn a_lost_first_success_response_is_recovered_by_looking_the_outcome_up() 
 
     assert_eq!(
         harness.server.creates(),
-        1,
-        "the effect was already committed, so the bytes are not sent again"
+        2,
+        "the retained hint is proved by exact replay without a second Item effect"
     );
     assert!(
         harness.server.outcome_lookups() >= 1,
@@ -1682,6 +2107,20 @@ async fn a_single_operation_sync_page_reconciles_then_advances_its_terminal_curs
     harness
         .server
         .script_operation_event(&operation_id, "sync-7");
+    harness
+        .runtime
+        .bootstrap_account(&harness.account_id, RequestCancellation::new())
+        .await
+        .unwrap();
+
+    assert_eq!(harness.snapshot().operations.len(), 1);
+    assert!(harness.snapshot().receipts.is_empty());
+    assert_eq!(
+        harness.active_cursor(),
+        crate::replica::SyncCursor::CapturedEmpty,
+        "a lookup hint cannot bypass the exact replay's persisted backoff"
+    );
+    harness.clock.advance(1_000);
     harness
         .runtime
         .bootstrap_account(&harness.account_id, RequestCancellation::new())
@@ -2820,6 +3259,7 @@ async fn sync_reconciliation_keeps_the_session_renewed_by_an_authoritative_fetch
         .await;
     assert_eq!(harness.server.created_items(), vec![item_id.clone()]);
 
+    harness.clock.advance(1_000);
     harness.server.script_item_faults([Fault::Status(401)]);
     *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
     harness
@@ -3035,4 +3475,615 @@ async fn remote_rotation_resolution_events_advance_sync_without_lookup_or_accoun
         );
     }
     assert_eq!(harness.server.outcome_lookups(), lookups_before);
+}
+
+/// The retained action and current Item visibility are separate Server facts. The fake transport
+/// applies/retains the actual command before response loss, then removes the Item or refuses its read.
+async fn assert_retained_applied_item_completes_without_current_authority(
+    case: Option<OrdinaryItemCase>,
+    unavailable: bool,
+) {
+    let harness = seeded_with_existing_item(
+        false,
+        case.is_some_and(OrdinaryItemCase::needs_deleted_authority),
+    )
+    .await;
+    let before = harness.snapshot();
+    let vaults = before.bootstrap.snapshot().visible_vaults;
+    harness.server.lose_next_response();
+    let (operation_id, item_id) = match case {
+        Some(case) => {
+            harness
+                .accept_existing(case.request(harness.account_id.clone()))
+                .await
+        }
+        None => harness.accept_create().await,
+    };
+    let accepted = harness.operation().unwrap();
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    assert_eq!(
+        harness.snapshot().operations.len(),
+        1,
+        "lost response leaves accepted work"
+    );
+    assert!(
+        harness
+            .server
+            .outcomes
+            .lock()
+            .unwrap()
+            .contains_key(&operation_id),
+        "the Server retained the actual applied action before the Item disappeared"
+    );
+    if unavailable {
+        harness.server.script_item_faults([Fault::Status(403)]);
+    } else {
+        harness
+            .server
+            .created_items
+            .lock()
+            .unwrap()
+            .retain(|item| item.id != item_id);
+    }
+    harness.clock.advance(1_000);
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let completed = harness.snapshot();
+    assert_eq!(
+        completed.failure, None,
+        "{case:?}: unavailable current authority must not fail the Account"
+    );
+    assert!(
+        completed.operations.is_empty(),
+        "{case:?}: exact retained action must finish despite unavailable current authority"
+    );
+    assert!(
+        completed.items.is_empty(),
+        "{case:?}: the completed overlay must not resurrect the Item"
+    );
+    assert_eq!(completed.receipts.len(), 1);
+    let receipt = &completed.receipts[0];
+    assert_eq!(receipt.operation_id, operation_id);
+    assert_eq!(receipt.kind, accepted.kind);
+    assert_eq!(receipt.request_fingerprint, accepted.request_fingerprint);
+    assert_eq!(
+        receipt.result,
+        OperationOutcomeResult::Applied {
+            entity_id: item_id.clone(),
+            version: if case.is_some() { 2 } else { 1 }
+        }
+    );
+    assert_eq!(
+        harness.authority_items(),
+        before.bootstrap.snapshot().visible_items,
+        "receipt-only completion preserves cached authority until fresh Bootstrap"
+    );
+    assert_eq!(
+        completed.bootstrap.state,
+        crate::replica::ReplicaState::RefreshRequired
+    );
+    assert_eq!(
+        completed.bootstrap.snapshot().visible_vaults,
+        vaults,
+        "a current Item read failure makes no Vault-wide authority claim"
+    );
+    if case.is_none() {
+        assert!(
+            harness
+                .authority_items()
+                .iter()
+                .any(|item| item.id == "item-existing"),
+            "another Item in the same Vault retains its authority"
+        );
+    }
+    assert!(
+        harness.server.outcome_lookups() >= 1,
+        "completion uses the retained outcome after response loss"
+    );
+    let requests = if case.is_some() {
+        harness.server.existing_item_mutation_requests()
+    } else {
+        harness.server.create_requests()
+    };
+    assert_eq!(
+        requests.len(),
+        2,
+        "the lost answer is recovered through exact immutable replay"
+    );
+    harness.runtime.close().await;
+}
+
+#[tokio::test]
+async fn retained_applied_create_completes_after_current_item_absence() {
+    assert_retained_applied_item_completes_without_current_authority(None, false).await;
+}
+
+#[tokio::test]
+async fn retained_applied_ordinary_items_complete_after_current_item_absence() {
+    for case in OrdinaryItemCase::ALL {
+        assert_retained_applied_item_completes_without_current_authority(Some(case), false).await;
+    }
+}
+
+async fn assert_create_hint_cannot_complete_other_request_bytes(sync: bool, unavailable: bool) {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness.server.lose_next_response();
+    let (operation_id, item_id) = harness.accept_create().await;
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    harness
+        .server
+        .outcomes
+        .lock()
+        .unwrap()
+        .get_mut(&operation_id)
+        .unwrap()
+        .fingerprint = [99; 32];
+    if unavailable {
+        harness.server.script_item_faults([Fault::Status(403)]);
+    } else {
+        harness
+            .server
+            .created_items
+            .lock()
+            .unwrap()
+            .retain(|item| item.id != item_id);
+    }
+    harness.clock.advance(1_000);
+    harness
+        .server
+        .script_operation_event(&operation_id, "must-not-pass-unproved-create");
+    let before = harness.snapshot();
+    let reads_before = harness
+        .server
+        .item_calls
+        .load(std::sync::atomic::Ordering::SeqCst);
+    if sync {
+        let _ = harness
+            .runtime
+            .bootstrap_account(&harness.account_id, RequestCancellation::new())
+            .await;
+    } else {
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+    }
+    let after = harness.snapshot();
+    assert_eq!(
+        after.failure,
+        Some(RuntimeErrorCode::InvariantViolation),
+        "lookup supplies no request fingerprint; only exact replay proves identity"
+    );
+    assert_eq!(after.operations, before.operations);
+    assert_eq!(after.items, before.items);
+    assert!(after.receipts.is_empty());
+    assert_eq!(
+        after.bootstrap.active_cursor,
+        before.bootstrap.active_cursor
+    );
+    assert_eq!(
+        harness
+            .server
+            .item_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        reads_before,
+        "unproved request identity cannot be rescued by any current read"
+    );
+    harness.runtime.close().await;
+}
+
+#[tokio::test]
+async fn absent_create_sync_hint_cannot_complete_other_request_bytes() {
+    assert_create_hint_cannot_complete_other_request_bytes(true, false).await;
+}
+
+#[tokio::test]
+async fn absent_create_dispatch_hint_cannot_complete_other_request_bytes() {
+    assert_create_hint_cannot_complete_other_request_bytes(false, false).await;
+}
+
+#[tokio::test]
+async fn retired_move_source_uses_current_category_witness_for_a_pre_retirement_clone() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Move.request(harness.account_id.clone()))
+        .await;
+    let mut old_clone = harness.operation().unwrap();
+    old_clone.accepted_item_category = None;
+    harness.server.lose_next_response();
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let snapshot = harness.snapshot();
+    assert_eq!(
+        snapshot.operations.len(),
+        1,
+        "Server effect survived its lost answer"
+    );
+    harness
+        .runtime
+        .replica
+        .execute_exact(GuardedCommitPlan::new(
+            harness.account_id.clone(),
+            snapshot.incarnation.clone(),
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![PlanMutation::RetireVaults {
+                vault_ids: vec![TEST_VAULT_ID.into()],
+            }],
+        ))
+        .await
+        .unwrap();
+    assert!(harness.snapshot().items.is_empty());
+    assert_eq!(
+        harness.snapshot().operations[0].accepted_item_category,
+        Some(crate::replica::AuthorityItemCategory::Login)
+    );
+    let mut session = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &snapshot.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    let http = AuthHttpClient::new(
+        &harness.runtime.http_transport,
+        SERVER_URL,
+        false,
+        auth_config(),
+    )
+    .unwrap();
+    let result = harness
+        .runtime
+        .complete_operation(
+            &harness.account_id,
+            &old_clone,
+            crate::replica::ObservedOutcome {
+                operation_id: operation_id.clone(),
+                request_fingerprint: old_clone.request_fingerprint,
+                result: OperationOutcomeResult::Applied {
+                    entity_id: "item-existing".into(),
+                    version: 2,
+                },
+            },
+            &http,
+            &mut session,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        result,
+        super::outcome::CompletionResult::Completed
+    ));
+    let snapshot = harness.snapshot();
+    assert!(snapshot.operations.is_empty());
+    assert!(snapshot.failure.is_none());
+    assert_eq!(snapshot.receipts[0].operation_id, operation_id);
+    assert_eq!(harness.authority_items()[0].vault_id, "vault-2");
+}
+
+#[tokio::test]
+async fn retained_item_absence_receipts_without_deleting_cached_current_authority() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+        .await;
+    harness.server.lose_next_response();
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let before = harness.authority_items();
+    harness.server.created_items.lock().unwrap().clear();
+    harness.clock.advance(1_000);
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let after = harness.snapshot();
+    assert!(after.operations.is_empty());
+    assert_eq!(after.receipts.len(), 1);
+    assert_eq!(
+        harness.authority_items(),
+        before,
+        "a retained receipt installs no absence into current authority"
+    );
+    assert_eq!(
+        after.bootstrap.state,
+        crate::replica::ReplicaState::RefreshRequired
+    );
+}
+
+#[tokio::test]
+async fn retained_duplicate_completion_uses_existing_receipt_without_a_current_authority_fetch() {
+    let harness = seeded_with_existing_item(false, false).await;
+    let (operation_id, _) = harness
+        .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+        .await;
+    let operation = harness.operation().unwrap();
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let snapshot = harness.snapshot();
+    let receipt = &snapshot.receipts[0];
+    let mut session = harness
+        .runtime
+        .platform_storage
+        .load_current_session(&harness.account_id, &snapshot.incarnation)
+        .await
+        .unwrap()
+        .unwrap();
+    let http = AuthHttpClient::new(
+        &harness.runtime.http_transport,
+        SERVER_URL,
+        false,
+        auth_config(),
+    )
+    .unwrap();
+    let request_count = harness.server.requests.lock().unwrap().len();
+    let completed = harness
+        .runtime
+        .complete_operation(
+            &harness.account_id,
+            &operation,
+            crate::replica::ObservedOutcome {
+                operation_id: receipt.operation_id.clone(),
+                request_fingerprint: receipt.request_fingerprint,
+                result: receipt.result.clone(),
+            },
+            &http,
+            &mut session,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        completed,
+        super::outcome::CompletionResult::Completed
+    ));
+    assert_eq!(harness.snapshot(), snapshot);
+    assert_eq!(harness.server.requests.lock().unwrap().len(), request_count);
+}
+
+async fn assert_retained_sync_result_reaches_refresh_with_one_renewal_budget(unavailable: bool) {
+    use crate::http_transport::SerializedHttpExecutor;
+    struct BootstrapBoundary {
+        server: std::sync::Arc<FakeServer>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl SerializedHttpExecutor for BootstrapBoundary {
+        async fn invoke(
+            &self,
+            request: zeroize::Zeroizing<String>,
+        ) -> Result<String, RuntimeError> {
+            let value: serde_json::Value = serde_json::from_str(&request).unwrap();
+            if value["url"].as_str().unwrap().contains("/sync/bootstrap") {
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Ok(completed(401, b"{}".to_vec()).to_string());
+            }
+            self.server.invoke(request).await
+        }
+        fn cancel(&self, id: &str) {
+            self.server.cancel(id);
+        }
+    }
+    for structural in [false, true] {
+        let harness = seeded_with_existing_item(false, false).await;
+        let (operation_id, _) = harness
+            .accept_existing(OrdinaryItemCase::Favorite.request(harness.account_id.clone()))
+            .await;
+        harness.server.lose_next_response();
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        if unavailable {
+            harness.server.script_item_faults([Fault::Status(403)]);
+        } else {
+            let before = harness.snapshot();
+            harness
+                .runtime
+                .replica
+                .execute_exact(GuardedCommitPlan::new(
+                    harness.account_id.clone(),
+                    before.incarnation,
+                    before.revision,
+                    before.lock_epoch,
+                    vec![PlanMutation::RetireVaults {
+                        vault_ids: vec![TEST_VAULT_ID.into()],
+                    }],
+                ))
+                .await
+                .unwrap();
+        }
+        harness
+            .server
+            .script_operation_event(&operation_id, "resolved-before-refresh");
+        let events = harness.server.sync_events.lock().unwrap().clone();
+        harness.server.sync_pages.lock().unwrap().push_back(serde_json::json!({"events":events,"cursor":{"id":"resolved-before-refresh"},"hasMore":false,"requiresFullRefresh":structural}));
+        *harness.server.refresh.lock().unwrap() = RefreshBehavior::Renews(SECOND_TOKEN);
+        harness
+            .server
+            .outcome_faults
+            .lock()
+            .unwrap()
+            .push_back(Fault::Status(401));
+        let http = std::sync::Arc::new(BootstrapBoundary {
+            server: harness.server.clone(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let runtime = Runtime::with_test_dispatch_environment(
+            harness.replica.clone(),
+            harness.platform.clone(),
+            http.clone(),
+            auth_config(),
+            harness.clock.clone(),
+            harness.timer.clone(),
+        );
+        runtime.replica.load(&harness.account_id).await.unwrap();
+        runtime.unlock_account(&harness.account_id).await.unwrap();
+        harness.clock.advance(1_000);
+        let result = runtime
+            .bootstrap_account(&harness.account_id, RequestCancellation::new())
+            .await;
+        assert_eq!(
+            http.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "receipt refresh must reach fresh Bootstrap in this pass; structural={structural}"
+        );
+        assert!(matches!(
+            result,
+            Err(RuntimeError {
+                code: RuntimeErrorCode::AuthenticationRequired,
+                ..
+            })
+        ));
+        assert_eq!(
+            harness
+                .server
+                .refresh_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the same bounded pass cannot renew again after replay consumed its budget"
+        );
+        let after = runtime.replica.snapshot(&harness.account_id).unwrap();
+        assert!(after.operations.is_empty());
+        assert_eq!(after.receipts.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn retained_identity_failure_commit_error_keeps_a_durable_retry_schedule() {
+    let harness = seeded_with_existing_item(false, false).await;
+    harness.server.lose_next_response();
+    let (operation_id, _) = harness.accept_create().await;
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    harness
+        .server
+        .outcomes
+        .lock()
+        .unwrap()
+        .get_mut(&operation_id)
+        .unwrap()
+        .fingerprint = [99; 32];
+    harness.clock.advance(1_000);
+    let before = harness.operation().unwrap();
+    harness.replica.fail_next_commits(1);
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    let after = harness.snapshot();
+    assert!(after.failure.is_none());
+    assert_eq!(after.operations.len(), 1);
+    assert!(
+        after.operations[0].scheduling.attempt_count > before.scheduling.attempt_count,
+        "a failed failure commit needs the existing bounded retry wake"
+    );
+    harness.clock.advance(10_000);
+    harness
+        .runtime
+        .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+        .await;
+    assert_eq!(
+        harness.snapshot().failure,
+        Some(RuntimeErrorCode::InvariantViolation)
+    );
+}
+
+#[tokio::test]
+async fn retained_applied_create_completes_after_current_item_access_refusal() {
+    assert_retained_applied_item_completes_without_current_authority(None, true).await;
+}
+
+#[tokio::test]
+async fn retained_applied_ordinary_items_complete_after_current_item_access_refusal() {
+    for case in OrdinaryItemCase::ALL {
+        assert_retained_applied_item_completes_without_current_authority(Some(case), true).await;
+    }
+}
+
+#[tokio::test]
+async fn retained_rejected_items_complete_after_current_item_access_refusal() {
+    for case in OrdinaryItemCase::ALL {
+        let harness = seeded_with_existing_item(false, case.needs_deleted_authority()).await;
+        let before = harness.snapshot();
+        harness.server.reject_next("vault_access_denied");
+        harness.server.lose_next_response();
+        let (operation_id, _) = harness
+            .accept_existing(case.request(harness.account_id.clone()))
+            .await;
+        let accepted = harness.operation().unwrap();
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        assert_eq!(harness.snapshot().operations.len(), 1);
+        harness.server.script_item_faults([Fault::Status(403)]);
+        harness.clock.advance(1_000);
+        harness
+            .runtime
+            .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
+            .await;
+        let after = harness.snapshot();
+        assert_eq!(after.failure, None, "{case:?}");
+        assert!(after.operations.is_empty(), "{case:?}");
+        assert!(after.items.is_empty(), "{case:?}");
+        assert_eq!(
+            after.bootstrap.snapshot().visible_items,
+            before.bootstrap.snapshot().visible_items
+        );
+        assert_eq!(
+            after.bootstrap.snapshot().visible_vaults,
+            before.bootstrap.snapshot().visible_vaults
+        );
+        assert_eq!(
+            after.bootstrap.state,
+            crate::replica::ReplicaState::RefreshRequired
+        );
+        assert_eq!(after.receipts.len(), 1);
+        assert_eq!(after.receipts[0].operation_id, operation_id);
+        assert_eq!(
+            after.receipts[0].request_fingerprint,
+            accepted.request_fingerprint
+        );
+        assert_eq!(
+            after.receipts[0].result,
+            OperationOutcomeResult::Rejected {
+                code: OperationRejectionCode::VaultAccessDenied,
+            }
+        );
+        assert_eq!(harness.server.existing_item_mutation_requests().len(), 2);
+        harness.runtime.close().await;
+    }
+}
+
+#[tokio::test]
+async fn retained_sync_result_refreshes_in_the_same_pass_with_one_renewal_budget() {
+    assert_retained_sync_result_reaches_refresh_with_one_renewal_budget(false).await;
+}
+
+#[tokio::test]
+async fn retained_item_access_refusal_reaches_sync_refresh_with_one_renewal_budget() {
+    assert_retained_sync_result_reaches_refresh_with_one_renewal_budget(true).await;
+}
+
+#[tokio::test]
+async fn unavailable_item_cannot_rescue_an_unproved_retained_create_hint() {
+    for sync in [false, true] {
+        assert_create_hint_cannot_complete_other_request_bytes(sync, true).await;
+    }
 }

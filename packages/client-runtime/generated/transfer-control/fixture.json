@@ -1,4 +1,84 @@
 {
+  "attachmentDownloadSinkAnswers": [
+    {
+      "type": "begun"
+    },
+    {
+      "type": "written"
+    },
+    {
+      "type": "committed"
+    },
+    {
+      "type": "discarded"
+    },
+    {
+      "type": "retired"
+    },
+    {
+      "type": "retirementCompleted"
+    },
+    {
+      "type": "sinkFailure"
+    },
+    {
+      "type": "cancelled"
+    },
+    {
+      "type": "invariantViolation"
+    }
+  ],
+  "attachmentDownloadSinkControls": [
+    {
+      "accountId": "account-1",
+      "attachmentId": "attachment-1",
+      "capabilityId": "sink-1",
+      "requestScope": "request-1",
+      "type": "begin",
+      "vaultId": "vault-1"
+    },
+    {
+      "capabilityId": "sink-1",
+      "type": "write"
+    },
+    {
+      "capabilityId": "sink-1",
+      "type": "commit"
+    },
+    {
+      "capabilityId": "sink-1",
+      "type": "discard"
+    },
+    {
+      "accountId": "account-1",
+      "type": "retireAccount"
+    },
+    {
+      "accountId": "account-1",
+      "type": "completeAccountRetirement"
+    },
+    {
+      "accountId": "account-1",
+      "type": "retireVaults",
+      "vaultIds": [
+        "vault-1"
+      ]
+    },
+    {
+      "accountId": "account-1",
+      "type": "completeVaultRetirement",
+      "vaultIds": [
+        "vault-1"
+      ]
+    },
+    {
+      "accountId": "account-1",
+      "type": "forgetAccountVaultRetirements"
+    },
+    {
+      "type": "retireRuntime"
+    }
+  ],
   "attachmentUploadSourceAnswers": [
     {
       "type": "claimed"
@@ -36,7 +116,8 @@
       "expectedBytes": "3",
       "itemId": "item-1",
       "name": "secret.txt",
-      "type": "claim"
+      "type": "claim",
+      "vaultId": "vault-1"
     },
     {
       "capabilityId": "source-1",
@@ -54,6 +135,24 @@
     {
       "accountId": "account-1",
       "type": "completeAccountRetirement"
+    },
+    {
+      "accountId": "account-1",
+      "type": "retireVaults",
+      "vaultIds": [
+        "vault-1"
+      ]
+    },
+    {
+      "accountId": "account-1",
+      "type": "completeVaultRetirement",
+      "vaultIds": [
+        "vault-1"
+      ]
+    },
+    {
+      "accountId": "account-1",
+      "type": "forgetAccountVaultRetirements"
     },
     {
       "type": "retireRuntime"

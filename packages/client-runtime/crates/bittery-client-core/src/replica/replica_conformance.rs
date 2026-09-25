@@ -37,6 +37,9 @@ use super::{BootstrapAuthority, InMemoryReplica, ReplicaPersistence, SqliteRepli
 #[cfg(test)]
 use std::sync::Arc;
 
+#[path = "cross_account_move_conformance.rs"]
+mod cross_account_move_conformance;
+
 const FORMAT_VERSION: u32 = 1;
 const KNOWN_PLAINTEXT_MARKER: &str = "KNOWN-PLAINTEXT-LOGIN-PASSWORD-DO-NOT-PERSIST";
 
@@ -404,7 +407,9 @@ fn canonicalize_request(mut request: ReplicaPersistenceRequest) -> ReplicaPersis
         ReplicaPersistenceRequest::Install { prepared } => &mut prepared.writes,
         ReplicaPersistenceRequest::Commit { prepared } => &mut prepared.writes,
         ReplicaPersistenceRequest::Load { .. }
+        | ReplicaPersistenceRequest::Inventory { .. }
         | ReplicaPersistenceRequest::AdvanceLockEpoch { .. }
+        | ReplicaPersistenceRequest::DeleteAccountIfUnchanged { .. }
         | ReplicaPersistenceRequest::DeleteAccount { .. }
         | ReplicaPersistenceRequest::WipeDevice => return request,
     };
@@ -451,6 +456,8 @@ fn store_order(store: ReplicaStore) -> u8 {
         ReplicaStore::AuthorityItems => 7,
         ReplicaStore::AttachmentMovePreparations => 8,
         ReplicaStore::ShareCapabilities => 9,
+        ReplicaStore::CrossAccountMoves => 10,
+        ReplicaStore::RotationAttempts => 11,
     }
 }
 
@@ -482,9 +489,12 @@ fn operation(operation_id: &str, item_id: &str) -> OperationRecord {
             body: body.clone(),
         },
         request_fingerprint: Sha256Fingerprint::of_bytes(&body),
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: None,
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     }
 }
 
@@ -517,9 +527,12 @@ fn create_vault_operation(account_id: &str) -> OperationRecord {
         },
         request,
         request_fingerprint: canonical.fingerprint,
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: Some(intent),
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     }
 }
 
@@ -554,6 +567,7 @@ fn vault(account_id: &str) -> AuthorityVaultRecord {
         image_url: None,
         encrypted_vault_key: format!("opaque-wrapped-vault-key-{account_id}"),
         role: AuthorityVaultRole::Owner,
+        key_version: None,
     }
 }
 
@@ -603,6 +617,7 @@ fn authority_attachment(account_id: &str, item_id: &str) -> AuthorityAttachmentR
 
 fn attachment_move_preparation() -> AttachmentMovePreparationRecord {
     let mut preparation = AttachmentMovePreparationRecord {
+        accepted_item_category: None,
         account_id: AccountId::from("account-operations"),
         operation_id: "operation-attachment-move".into(),
         item_id: "existing-item".into(),
@@ -670,6 +685,7 @@ fn stage_page(
         raw_response_fingerprint: Sha256Fingerprint::of_bytes(item_id.as_bytes()),
         pinned_watermark: watermark,
         continuation,
+        vault_key_version_included: false,
         vaults: (phase == super::BootstrapPhase::Vaults)
             .then(|| vault(account_id))
             .into_iter()
@@ -802,12 +818,15 @@ fn vault_target_operation_history() -> Result<History, RuntimeError> {
     history.promote_bootstrap(
         "promote Vault-operation Bootstrap authority",
         PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard(account_id, 1, 0),
             generation_id: BootstrapGenerationId("generation-1".to_owned()),
         },
     )?;
     let mut final_operation = create_vault_operation(account_id);
     final_operation.create_vault.as_mut().unwrap().image = Some(CreateVaultImageRecord {
+        protected_witness: None,
+            raw_cleanup_pending: false,
         byte_length: 11,
         content_type: "image/png".to_owned(),
         sha256: "0".repeat(64),
@@ -879,6 +898,7 @@ fn vault_target_operation_history() -> Result<History, RuntimeError> {
                     image_url: Some("https://example.invalid/vault-image".to_owned()),
                     encrypted_vault_key: "opaque-created-key".to_owned(),
                     role: AuthorityVaultRole::Owner,
+                    key_version: None,
                 }),
             }],
         ),
@@ -947,6 +967,7 @@ fn import_batch_history() -> Result<History, RuntimeError> {
     history.promote_bootstrap(
         "promote Import Bootstrap authority",
         PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard(account_id, 1, 0),
             generation_id: BootstrapGenerationId("generation-1".into()),
         },
@@ -970,9 +991,12 @@ fn import_batch_history() -> Result<History, RuntimeError> {
             body,
         },
         request_fingerprint,
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: None,
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     };
     history.commit_plan(
         "atomically accept empty Import request and local progress ownership",
@@ -1064,9 +1088,12 @@ fn import_operation(
             body,
         },
         request_fingerprint,
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: None,
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     })
 }
 
@@ -1130,6 +1157,7 @@ fn import_reconciliation_history() -> Result<History, RuntimeError> {
     history.promote_bootstrap(
         "promote Import batch Bootstrap authority",
         PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard(account_id, 1, 0),
             generation_id: BootstrapGenerationId("generation-1".into()),
         },
@@ -1315,6 +1343,7 @@ fn bootstrap_history() -> Result<History, RuntimeError> {
     history.promote_bootstrap(
         "promote captured-empty Bootstrap generation atomically",
         PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard("account-bootstrap", 1, 0),
             generation_id: BootstrapGenerationId("generation-1".to_owned()),
         },
@@ -1380,6 +1409,7 @@ fn five_category_authority_history() -> Result<History, RuntimeError> {
     history.promote_bootstrap(
         "promote five-category authority atomically",
         PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard("account-categories", 1, 0),
             generation_id: BootstrapGenerationId("generation-1".to_owned()),
         },
@@ -1427,6 +1457,7 @@ fn ready_operation_history(history: &mut HistoryBuilder) -> Result<(), RuntimeEr
     history.promote_bootstrap(
         "promote ready Operation Account authority",
         PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard("account-operations", 1, 0),
             generation_id: BootstrapGenerationId("generation-1".to_owned()),
         },
@@ -1840,6 +1871,216 @@ fn ordinary_item_reconciliation_history() -> Result<History, RuntimeError> {
     Ok(history.finish())
 }
 
+fn vault_retirement_history() -> Result<History, RuntimeError> {
+    let account = "account-operations";
+    let mut history = HistoryBuilder::new(
+        "vault-retirement-preserves-accepted-work",
+        &[
+            "all-generation authority retirement",
+            "accepted Move category witness",
+            "atomic overlay erasure",
+            "durable cleanup journal",
+            "stale cleanup completion",
+            "Account isolation",
+        ],
+        &[account, "unrelated-account"],
+    );
+    history.install("install unrelated Account", "unrelated-account", "first")?;
+    ready_operation_history(&mut history)?;
+    let import = import_operation("retirement-import", &[0, 1, 2, 3, 4])?;
+    let snapshot = history.snapshot(account).unwrap();
+    history.commit_plan(
+        "accept all five Import categories without optimistic rows",
+        GuardedCommitPlan::new(
+            snapshot.account_id.clone(),
+            snapshot.incarnation.clone(),
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![PlanMutation::AcceptOperation(import.clone())],
+        ),
+    )?;
+    let preparation = attachment_move_preparation();
+    let accepted = preparation.clone();
+    let snapshot = history.snapshot(account).unwrap();
+    history.commit_plan(
+        "accept Move with opaque attachment dependencies",
+        GuardedCommitPlan::new(
+            snapshot.account_id.clone(),
+            snapshot.incarnation.clone(),
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![
+                PlanMutation::AcceptAttachmentMovePreparation(preparation),
+                PlanMutation::PutOptimisticItem(attachment_move_overlay()),
+            ],
+        ),
+    )?;
+    let snapshot = history.snapshot(account).unwrap();
+    history.commit_plan(
+        "retire hidden source and erase visible-target overlay atomically",
+        GuardedCommitPlan::new(
+            snapshot.account_id.clone(),
+            snapshot.incarnation.clone(),
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![PlanMutation::RetireVaults {
+                vault_ids: vec!["vault-1".into()],
+            }],
+        ),
+    )?;
+    let snapshot = history.snapshot(account).unwrap();
+    assert!(snapshot.items.is_empty());
+    assert_eq!(snapshot.operations, [import]);
+    assert!(snapshot.bootstrap.vaults.is_empty());
+    let mut expected = accepted;
+    expected.accepted_item_category = Some(AuthorityItemCategory::Login);
+    assert_eq!(snapshot.attachment_move_preparations, [expected]);
+    let complete = history.commit_plan(
+        "complete only captured cleanup duty",
+        GuardedCommitPlan::new(
+            snapshot.account_id.clone(),
+            snapshot.incarnation.clone(),
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![PlanMutation::CompleteVaultRetirements {
+                vault_ids: vec!["vault-1".into()],
+            }],
+        ),
+    )?;
+    let snapshot = history.snapshot(account).unwrap();
+    history.commit_plan(
+        "retire same identity again after earlier cleanup",
+        GuardedCommitPlan::new(
+            snapshot.account_id.clone(),
+            snapshot.incarnation.clone(),
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![PlanMutation::RetireVaults {
+                vault_ids: vec!["vault-1".into()],
+            }],
+        ),
+    )?;
+    let revision = history.snapshot(account).unwrap().revision;
+    history.replay(
+        "old physical completion cannot clear new duty",
+        complete,
+        ReplicaPersistenceResponse::Committed {
+            result: PlanResult::Stale {
+                actual_revision: revision,
+            },
+        },
+    )?;
+    history.load(
+        "restart retains second cleanup duty and accepted Move",
+        account,
+    )?;
+    Ok(history.finish())
+}
+
+fn retained_result_history() -> Result<History, RuntimeError> {
+    let account = "account-operations";
+    let mut history = HistoryBuilder::new(
+        "retained-results-preserve-current-authority",
+        &[
+            "exact Import count receipt",
+            "CreateVault receipt without key readmission",
+            "pre-proof staging abandonment",
+            "unchanged current authority",
+            "restart with durable refresh",
+        ],
+        &[account],
+    );
+    ready_operation_history(&mut history)?;
+    let import = import_operation("retained-import", &[0, 1, 2, 3, 4])?;
+    let create = create_vault_operation(account);
+    let snapshot = history.snapshot(account).unwrap();
+    let original_authority = snapshot.bootstrap.snapshot().visible_vaults;
+    history.commit_plan(
+        "accept independent Import and CreateVault exact requests",
+        GuardedCommitPlan::new(
+            snapshot.account_id.clone(),
+            snapshot.incarnation.clone(),
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![
+                PlanMutation::AcceptOperation(import.clone()),
+                PlanMutation::AcceptOperation(create.clone()),
+            ],
+        ),
+    )?;
+    let snapshot = history.snapshot(account).unwrap();
+    history.begin_bootstrap(
+        "start authority before retained proof",
+        BeginBootstrapPlan {
+            guard: BootstrapGuard {
+                account_id: snapshot.account_id.clone(),
+                user_id: snapshot.user_id.clone(),
+                incarnation: snapshot.incarnation.clone(),
+                expected_replica_revision: snapshot.revision,
+                expected_lock_epoch: snapshot.lock_epoch,
+            },
+            generation_id: BootstrapGenerationId("pre-proof".into()),
+        },
+    )?;
+    for (operation, result) in [
+        (
+            &import,
+            OperationOutcomeResult::ImportApplied {
+                vault_id: import.vault_id().into(),
+                imported_count: 5,
+            },
+        ),
+        (
+            &create,
+            OperationOutcomeResult::VaultApplied {
+                vault_id: create.vault_id().into(),
+            },
+        ),
+    ] {
+        let snapshot = history.snapshot(account).unwrap();
+        let request = history.commit_plan(
+            "receipt original result without current authority writes",
+            GuardedCommitPlan::new(
+                snapshot.account_id.clone(),
+                snapshot.incarnation.clone(),
+                snapshot.revision,
+                snapshot.lock_epoch,
+                vec![PlanMutation::ReconcileRetainedResult {
+                    outcome: ObservedOutcome {
+                        operation_id: operation.operation_id.clone(),
+                        request_fingerprint: operation.request_fingerprint,
+                        result,
+                    },
+                }],
+            ),
+        )?;
+        let snapshot = history.snapshot(account).unwrap();
+        assert_eq!(
+            snapshot.bootstrap.state,
+            super::ReplicaState::RefreshRequired
+        );
+        assert!(snapshot.bootstrap.staging_generation.is_none());
+        assert_eq!(
+            snapshot.bootstrap.snapshot().visible_vaults,
+            original_authority
+        );
+        history.replay(
+            "old completion cannot rebase its physical writes",
+            request,
+            ReplicaPersistenceResponse::Committed {
+                result: PlanResult::Stale {
+                    actual_revision: snapshot.revision,
+                },
+            },
+        )?;
+        history.load(
+            "restart preserves receipt and Bootstrap refresh duty",
+            account,
+        )?;
+    }
+    Ok(history.finish())
+}
+
 fn build_corpus() -> Result<Corpus, RuntimeError> {
     Ok(Corpus {
         format_version: FORMAT_VERSION,
@@ -1856,6 +2097,10 @@ fn build_corpus() -> Result<Corpus, RuntimeError> {
             five_category_authority_history()?,
             operation_history()?,
             ordinary_item_reconciliation_history()?,
+            vault_retirement_history()?,
+            retained_result_history()?,
+            cross_account_move_conformance::history()?,
+            cross_account_move_conformance::attachment_history::history()?,
         ],
     })
 }
@@ -1945,9 +2190,11 @@ fn known_plaintext_marker_is_encrypted_before_the_create_plan_reaches_durable_ro
         lock_epoch: 0,
         items: Vec::new(),
         operations: Vec::new(),
+        cross_account_moves: Vec::new(),
         share_capabilities: Vec::new(),
         attachment_move_preparations: Vec::new(),
         receipts: Vec::new(),
+        rotation_attempts: Vec::new(),
         failure: None,
         bootstrap: BootstrapAuthority::default(),
     };
@@ -1989,9 +2236,12 @@ fn known_plaintext_marker_is_encrypted_before_the_create_plan_reaches_durable_ro
                     body,
                 },
                 request_fingerprint,
+                accepted_item_category: None,
                 attachment_move_recovery: None,
+                update_vault: None,
                 create_vault: None,
                 scheduling: OperationSchedulingState::default(),
+                legacy_admission: None,
             }),
             PlanMutation::PutOptimisticItem(ReplicaItemRecord {
                 account_id,
@@ -2194,6 +2444,9 @@ fn generator_sort_preserves_same_key_effect_order_and_all_guards() {
             "stable sorting must preserve Put/Delete/Put on the same key"
         );
         *canonical_writes = original_writes.clone();
-        assert_eq!(canonical, original, "canonicalization may change only write order, never guards, identity, next head or payloads");
+        assert_eq!(
+            canonical, original,
+            "canonicalization may change only write order, never guards, identity, next head or payloads"
+        );
     }
 }

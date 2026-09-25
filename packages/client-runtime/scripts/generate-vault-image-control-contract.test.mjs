@@ -44,3 +44,32 @@ test("generated Vault-image control is closed and keeps plaintext binary out of 
 		true,
 	);
 });
+
+test("selective image retirement is a closed Rust-defined Vault capability primitive", () => {
+	for (const type of ["retireVaults", "completeVaultRetirement"]) {
+		assert.equal(
+			validateVaultImageSourceControlRequest({
+				type,
+				accountId: "account",
+				vaultIds: ["vault"],
+			}),
+			true,
+		);
+		assert.equal(
+			validateVaultImageSourceControlRequest({
+				type,
+				accountId: "account",
+				vaultIds: ["vault"],
+				hidden: true,
+			}),
+			false,
+		);
+	}
+	assert.equal(
+		validateVaultImageSourceControlRequest({
+			type: "forgetAccountVaultRetirements",
+			accountId: "account",
+		}),
+		true,
+	);
+});

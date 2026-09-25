@@ -31,14 +31,18 @@
  */
 
 import type { AccountSessionManager } from "@bittery/core/services/account-session-manager";
+import type { MaterialPublication } from "@bittery/core/services/material-publication";
 import type { KeyRef } from "@bittery/crypto-port";
 import { storage } from "../../lib/storage";
+import { localMaterialPublication } from "../local-material-publication";
 
 export interface RestoredSessions {
 	/** Restored accountIds; newest-first is not guaranteed. */
 	accountIds: string[];
 	/** The device-wide key seeded from the first restored account, if any. */
 	muk: KeyRef | null;
+	/** Captured before restore, retained for the caller's UI publication. */
+	publication: MaterialPublication | null;
 }
 
 /**
@@ -52,19 +56,24 @@ export async function restoreUnlockedSessions(
 ): Promise<RestoredSessions> {
 	const restoredAccountIds: string[] = [];
 	let muk: KeyRef | null = null;
+	const publication = await localMaterialPublication.capture();
 
 	try {
 		const accounts = await storage.getAccountsList();
 		if (accounts.length === 0) {
-			return { accountIds: restoredAccountIds, muk };
+			return { accountIds: restoredAccountIds, muk, publication };
 		}
 
 		for (const account of accounts) {
 			try {
-				if (await sessions.unlockAccount(account.accountId, false)) {
+				publication.check();
+				if (
+					await sessions.unlockAccount(account.accountId, false, publication)
+				) {
 					restoredAccountIds.push(account.accountId);
 				}
 			} catch (error) {
+				publication.check();
 				console.error(
 					`[session-restore] Failed to restore session for ${account.email}:`,
 					error,
@@ -75,10 +84,12 @@ export async function restoreUnlockedSessions(
 		const firstRestoredAccountId = restoredAccountIds[0];
 		if (firstRestoredAccountId) {
 			muk = await storage.getMasterUnlockKey(firstRestoredAccountId);
+			publication.check();
 		}
 	} catch (error) {
+		publication.check();
 		console.error("[session-restore] Failed to restore sessions:", error);
 	}
 
-	return { accountIds: restoredAccountIds, muk };
+	return { accountIds: restoredAccountIds, muk, publication };
 }

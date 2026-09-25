@@ -23,6 +23,57 @@ use ts_rs::TS;
 
 use crate::desktop_ipc::DesktopTheme;
 
+/// A renderer attachment identifies callers, never a Runtime owner.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RuntimeBridgeAttachment {
+    pub connection_id: String,
+    pub event_name: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RuntimeBridgeConnectionArgs {
+    pub connection_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RuntimeBridgeCallArgs {
+    pub connection_id: String,
+    pub call_id: String,
+    pub payload_json: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RuntimeBridgeCancelArgs {
+    pub connection_id: String,
+    pub call_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub struct RuntimeBridgeMessage {
+    pub connection_id: String,
+    pub call_id: String,
+    pub payload_json: String,
+    pub kind: RuntimeBridgeMessageKind,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/tauri-commands.ts")]
+pub enum RuntimeBridgeMessageKind {
+    Projection,
+    Response,
+}
+
 /// `keychain_set(key, value)`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "../../src/generated/tauri-commands.ts")]

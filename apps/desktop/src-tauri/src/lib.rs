@@ -3,7 +3,9 @@ mod ipc_security;
 mod keychain;
 mod native_host_crypto;
 mod native_messaging_installer;
+mod native_runtime_ipc;
 mod record_store;
+mod runtime_host;
 mod tauri_api;
 
 use base64::Engine;

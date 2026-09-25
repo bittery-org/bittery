@@ -20,12 +20,7 @@ import {
 	SelectValue,
 } from "../select";
 import { toast } from "../sonner";
-import {
-	IconImagePlus,
-	IconUser,
-	IconUsers,
-	IconX,
-} from "../../icons";
+import { IconImagePlus, IconUser, IconUsers, IconX } from "../../icons";
 import { VaultAvatar, vaultIconOptions } from "../vault-avatar";
 
 export interface AccountOption {
@@ -42,6 +37,8 @@ interface CreateVaultDialogProps {
 	onSubmit: (data: CreateVaultFormValue) => Promise<void>;
 	accounts: AccountOption[];
 	defaultAccountId: string;
+	/** Capture the host capability generation before the OS picker opens. */
+	prepareImageSelection?: (accountId: string) => (file: File) => void;
 }
 
 export interface CreateVaultFormValue {
@@ -58,6 +55,7 @@ export function CreateVaultDialog({
 	onSubmit,
 	accounts,
 	defaultAccountId,
+	prepareImageSelection,
 }: CreateVaultDialogProps) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -68,6 +66,7 @@ export function CreateVaultDialog({
 					onSubmit={onSubmit}
 					accounts={accounts}
 					defaultAccountId={defaultAccountId}
+					prepareImageSelection={prepareImageSelection}
 				/>
 			) : null}
 		</Dialog>
@@ -79,6 +78,7 @@ function CreateVaultDialogForm({
 	onSubmit,
 	accounts,
 	defaultAccountId,
+	prepareImageSelection,
 }: Omit<CreateVaultDialogProps, "open"> & {
 	defaultAccountId: string;
 }) {
@@ -94,6 +94,9 @@ function CreateVaultDialogForm({
 		(account) => account.accountId === selectedAccountId,
 	);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const pendingImageSelection = useRef<((file: File) => void) | undefined>(
+		undefined,
+	);
 
 	const updateImagePreview = useCallback((nextPreview: string | null) => {
 		setImagePreview((previousPreview) => {
@@ -142,7 +145,7 @@ function CreateVaultDialogForm({
 	};
 
 	const processFile = useCallback(
-		(file: File | undefined) => {
+		(file: File | undefined, selection?: (file: File) => void) => {
 			if (!file) {
 				setImageFile(undefined);
 				updateImagePreview(null);
@@ -159,6 +162,14 @@ function CreateVaultDialogForm({
 				return false;
 			}
 
+			try {
+				if (prepareImageSelection && !selection)
+					throw new Error("Image selection scope is missing");
+				selection?.(file);
+			} catch {
+				toast.error(m.vaults_create_dialog_toast_create_failed());
+				return false;
+			}
 			setImageFile(file);
 			updateImagePreview(URL.createObjectURL(file));
 			return true;
@@ -167,12 +178,16 @@ function CreateVaultDialogForm({
 			m.vaults_create_dialog_toast_image_too_large,
 			m.vaults_create_dialog_toast_invalid_image_file,
 			updateImagePreview,
+			prepareImageSelection,
+			m.vaults_create_dialog_toast_create_failed,
 		],
 	);
 
 	const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0];
-		if (!processFile(file)) {
+		const selection = pendingImageSelection.current;
+		pendingImageSelection.current = undefined;
+		if (!processFile(file, selection)) {
 			event.currentTarget.value = "";
 		}
 	};
@@ -182,9 +197,21 @@ function CreateVaultDialogForm({
 			e.preventDefault();
 			setIsDragging(false);
 			const file = e.dataTransfer.files[0];
-			processFile(file);
+			try {
+				const selection = selectedAccountId
+					? prepareImageSelection?.(selectedAccountId)
+					: undefined;
+				processFile(file, selection);
+			} catch {
+				toast.error(m.vaults_create_dialog_toast_create_failed());
+			}
 		},
-		[processFile],
+		[
+			processFile,
+			selectedAccountId,
+			prepareImageSelection,
+			m.vaults_create_dialog_toast_create_failed,
+		],
 	);
 
 	const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -230,7 +257,17 @@ function CreateVaultDialogForm({
 								onDrop={handleDrop}
 								onDragOver={handleDragOver}
 								onDragLeave={handleDragLeave}
-								onClick={() => fileInputRef.current?.click()}
+								onClick={() => {
+									try {
+										pendingImageSelection.current = selectedAccountId
+											? prepareImageSelection?.(selectedAccountId)
+											: undefined;
+										fileInputRef.current?.click();
+									} catch {
+										pendingImageSelection.current = undefined;
+										toast.error(m.vaults_create_dialog_toast_create_failed());
+									}
+								}}
 							>
 								<VaultAvatar
 									name={name || m.vaults_create_dialog_avatar_fallback()}
@@ -317,7 +354,16 @@ function CreateVaultDialogForm({
 						{hasAccountChoice(accounts) ? (
 							<Select
 								value={selectedAccountId}
-								onValueChange={setSelectedAccountId}
+								onValueChange={(accountId) => {
+									try {
+										if (imageFile)
+											prepareImageSelection?.(accountId)?.(imageFile);
+										pendingImageSelection.current = undefined;
+										setSelectedAccountId(accountId);
+									} catch {
+										toast.error(m.vaults_create_dialog_toast_create_failed());
+									}
+								}}
 								disabled={form.state.isSubmitting}
 							>
 								<SelectTrigger id="account" className="h-12">

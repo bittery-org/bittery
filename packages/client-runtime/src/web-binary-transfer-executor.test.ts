@@ -943,19 +943,52 @@ test("rejects malformed upload headers and same-length chunk corruption before a
 	await expect(
 		control(executor, {
 			type: "beginUpload",
-			transferId: "forbidden-length",
+			transferId: "mismatched-signed-length",
 			...uploadScope,
 			url: "https://objects.example/upload",
 			headers: [
-				{ name: "content-length", value: "3" },
+				{ name: "content-length", value: "4" },
 				{ name: "content-type", value: "application/octet-stream" },
 				{ name: "x-amz-content-sha256", value: digest123 },
+				{
+					name: "x-amz-checksum-sha256",
+					value: "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=",
+				},
 			],
 			ciphertextSha256: digest123,
 			byteLength: "3",
 			maxChunkBytes: 3,
 		}),
 	).rejects.toThrow("Binary transfer invocation failed");
+	expect(fetches).toBe(0);
+
+	for (const [transferId, extraHeaders] of [
+		[
+			"bad-provider-checksum",
+			[{ name: "x-amz-checksum-sha256", value: "incorrect" }],
+		],
+		[
+			"duplicate-signed-type",
+			[{ name: "Content-Type", value: "application/octet-stream" }],
+		],
+	] as const) {
+		await expect(
+			control(executor, {
+				type: "beginUpload",
+				transferId,
+				...uploadScope,
+				url: "https://objects.example/upload",
+				headers: [
+					{ name: "content-type", value: "application/octet-stream" },
+					{ name: "x-amz-content-sha256", value: digest123 },
+					...extraHeaders,
+				],
+				ciphertextSha256: digest123,
+				byteLength: "3",
+				maxChunkBytes: 3,
+			}),
+		).rejects.toThrow("Binary transfer invocation failed");
+	}
 	expect(fetches).toBe(0);
 
 	await control(executor, {

@@ -39,6 +39,11 @@ Object.assign(globalThis, {
 				() => undefined,
 			);
 			const capabilityId = composition.attachmentUploadSources.grant({
+				scope: composition.attachmentUploadSources.captureScope(
+					accountId,
+					"vault-1",
+				),
+				vaultId: "vault-1",
 				accountId,
 				itemId,
 				name: `${failure}.txt`,
@@ -75,6 +80,8 @@ Object.assign(globalThis, {
 				failed = response.type === "failed";
 			} catch {
 				failed = true;
+			} finally {
+				await composition.attachmentUploadSources.release(capabilityId);
 			}
 			await composition.runtime.unobserve(observationId);
 			await composition.runtime.request(
@@ -105,6 +112,11 @@ Object.assign(globalThis, {
 			(json) => projections.push(JSON.parse(json) as Record<string, unknown>),
 		);
 		const capabilityId = composition.attachmentUploadSources.grant({
+			scope: composition.attachmentUploadSources.captureScope(
+				"account-1",
+				"vault-1",
+			),
+			vaultId: "vault-1",
 			accountId: "account-1",
 			itemId: "item-existing",
 			name: "joined.txt",

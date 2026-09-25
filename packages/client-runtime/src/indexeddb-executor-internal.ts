@@ -19,7 +19,7 @@ import {
 
 const DATABASE_NAME = "bittery_replica";
 /** Physical versions are independent of the Rust logical Replica/serialized contract. */
-const DATABASE_VERSION = 8;
+const DATABASE_VERSION = 10;
 // v5 (c463ab3a) and v6 (2059ed62) are the supported legacy physical layouts.
 // Earlier logical formats require a separate migration, never missing-field defaults.
 const VERSION_FIVE_STORES = [
@@ -33,14 +33,23 @@ const VERSION_FIVE_STORES = [
 	"authority_vaults",
 	"authority_items",
 ] as const;
+const VERSION_SEVEN_STORES = [
+	...VERSION_FIVE_STORES,
+	"attachment_move_preparations",
+	"share_capabilities",
+];
+const VERSION_EIGHT_STORES = [...VERSION_SEVEN_STORES, "recovery_input"];
+const VERSION_NINE_STORES = [...VERSION_EIGHT_STORES, "cross_account_moves"];
 const ACCOUNT_INDEX = "by_account";
 const MAX_U64 = 18_446_744_073_709_551_615n;
 export const REPLICA_STORE_MAP = {
 	optimisticItems: "optimistic_items",
 	operations: "operations",
+	crossAccountMoves: "cross_account_moves",
 	attachmentMovePreparations: "attachment_move_preparations",
 	shareCapabilities: "share_capabilities",
 	operationReceipts: "operation_receipts",
+	rotationAttempts: "rotation_attempts",
 	replicaMetadata: "replica_metadata",
 	bootstrapGenerations: "bootstrap_generations",
 	bootstrapPages: "bootstrap_pages",
@@ -87,9 +96,19 @@ export class ConfigurableIndexedDbReplicaExecutor {
 							? await commit(database, request.prepared, failure)
 							: request.type === "advanceLockEpoch"
 								? await advanceLockEpoch(database, request.prepared, failure)
-								: request.type === "deleteAccount"
-									? await deleteAccount(database, request.accountId, failure)
-									: await wipeDevice(database, failure);
+								: request.type === "deleteAccountIfUnchanged"
+									? await deleteAccountIfUnchanged(
+											database,
+											request.accountId,
+											request.expectedHead,
+											request.expectedRows,
+											failure,
+										)
+									: request.type === "deleteAccount"
+										? await deleteAccount(database, request.accountId, failure)
+										: request.type === "wipeDevice"
+											? await wipeDevice(database, failure)
+											: unsupportedRequest();
 			if (!validateReplicaPersistenceResponse(response)) {
 				throw new Error(
 					"persistence response does not match the generated contract",
@@ -100,6 +119,10 @@ export class ConfigurableIndexedDbReplicaExecutor {
 			database.close();
 		}
 	}
+}
+
+function unsupportedRequest(): never {
+	throw new Error("Replica persistence request is not implemented");
 }
 
 function parseRequest(requestJson: string): ReplicaPersistenceRequest {
@@ -142,7 +165,11 @@ function assertLegacySchema(
 	version: number,
 ): void {
 	if (
-		(version !== 5 && version !== 6 && version !== 7) ||
+		(version !== 5 &&
+			version !== 6 &&
+			version !== 7 &&
+			version !== 8 &&
+			version !== 9) ||
 		transaction === null
 	) {
 		throw new StorageUnavailableError("unsupported_version");
@@ -152,14 +179,22 @@ function assertLegacySchema(
 			? [...VERSION_FIVE_STORES]
 			: version === 6
 				? [...VERSION_FIVE_STORES, "attachment_move_preparations"]
-				: [...STORE_NAMES];
+				: version === 7
+					? [...VERSION_SEVEN_STORES]
+					: version === 8
+						? [...VERSION_EIGHT_STORES]
+						: [...VERSION_NINE_STORES];
 	if (
 		JSON.stringify([...database.objectStoreNames].sort()) !==
 		JSON.stringify(expected.sort())
 	) {
 		throw new StorageUnavailableError("unsupported_version");
 	}
-	assertStoreLayouts(transaction, expected);
+	assertStoreLayouts(
+		transaction,
+		expected.filter((store) => store !== RECOVERY_INPUT_STORE),
+	);
+	if (version >= 8) assertRecoveryInputLayout(transaction);
 }
 
 function createSchema(
@@ -213,6 +248,10 @@ function assertSchema(database: IDBDatabase, upgrade?: IDBTransaction): void {
 	const transaction =
 		upgrade ?? database.transaction(PHYSICAL_STORES, "readonly");
 	assertStoreLayouts(transaction, STORE_NAMES);
+	assertRecoveryInputLayout(transaction);
+}
+
+function assertRecoveryInputLayout(transaction: IDBTransaction): void {
 	const input = transaction.objectStore(RECOVERY_INPUT_STORE);
 	if (
 		JSON.stringify(input.keyPath) !==
@@ -249,9 +288,16 @@ function assertStoreLayouts(
 		}
 		if (storeName !== "heads") {
 			const index = store.index(ACCOUNT_INDEX);
+			if (
+				JSON.stringify([...store.indexNames].sort()) !==
+				JSON.stringify([ACCOUNT_INDEX])
+			)
+				throw new StorageUnavailableError("unavailable");
 			if (index.keyPath !== "accountId" || index.unique || index.multiEntry) {
 				throw new StorageUnavailableError("unavailable");
 			}
+		} else if (store.indexNames.length !== 0) {
+			throw new StorageUnavailableError("unavailable");
 		}
 	}
 }
@@ -480,6 +526,165 @@ async function deleteAccount(
 		await completed.catch(() => undefined);
 		throw error;
 	}
+}
+
+async function deleteAccountIfUnchanged(
+	database: IDBDatabase,
+	accountId: string,
+	expectedHead: ReplicaHead,
+	expectedRows: StoredReplicaRow[],
+	failure: WriteFailureInjection,
+): Promise<ReplicaPersistenceResponse> {
+	assertIdentifier(accountId, "guarded delete Account");
+	assertGuardedDeletionScope(accountId, expectedHead, expectedRows);
+	const transaction = database.transaction(PHYSICAL_STORES, "readwrite");
+	const completed = transactionDone(transaction);
+	const rowStoreNames = PHYSICAL_STORES.filter((name) => name !== "heads");
+	try {
+		const [headValue, ...scans] = await Promise.all([
+			requestResult(transaction.objectStore("heads").get(accountId)),
+			...rowStoreNames.map((storeName) =>
+				requestResult(
+					transaction
+						.objectStore(storeName)
+						.index(ACCOUNT_INDEX)
+						.getAll(accountId),
+				),
+			),
+			...rowStoreNames.map((storeName) =>
+				requestResult(
+					transaction
+						.objectStore(storeName)
+						.index(ACCOUNT_INDEX)
+						.getAllKeys(accountId),
+				),
+			),
+		]);
+		const rowValues = scans.slice(0, rowStoreNames.length) as unknown[][];
+		const rowKeys = scans.slice(rowStoreNames.length) as IDBValidKey[][];
+		if (
+			headValue === undefined &&
+			rowValues.every((values) => values.length === 0)
+		) {
+			await completed;
+			return {
+				type: "accountDeletion",
+				result: { type: "alreadyAbsent" },
+			};
+		}
+
+		let actualHead: ReplicaHead | undefined;
+		let actualRows: StoredReplicaRow[] = [];
+		let malformed = false;
+		try {
+			actualHead =
+				headValue === undefined
+					? undefined
+					: parseStoredHead(headValue, accountId);
+			const stores = Object.keys(REPLICA_STORE_MAP) as ReplicaStore[];
+			actualRows = stores.flatMap((store, index) => {
+				const values = rowValues[index];
+				if (values === undefined) {
+					throw new Error("guarded Replica deletion scan is incomplete");
+				}
+				return values.map((value) => parseStoredRow(value, store, accountId));
+			});
+		} catch {
+			// Malformed owned state is a conflict. Guarded deletion must preserve it.
+			malformed = true;
+		}
+		const recoveryValues = rowValues[rowStoreNames.length - 1];
+		if (
+			malformed ||
+			actualHead === undefined ||
+			recoveryValues === undefined ||
+			recoveryValues.length !== 0 ||
+			!replicaHeadEquals(expectedHead, actualHead) ||
+			!replicaRowsEqual(expectedRows, actualRows)
+		) {
+			await completed;
+			return { type: "accountDeletion", result: { type: "conflict" } };
+		}
+
+		for (const [index, storeName] of rowStoreNames.entries()) {
+			const store = transaction.objectStore(storeName);
+			const keys = rowKeys[index];
+			if (keys === undefined) {
+				throw new Error("guarded Replica deletion key scan is incomplete");
+			}
+			for (const key of keys) store.delete(key);
+			failure.afterWrite();
+		}
+		transaction.objectStore("heads").delete(accountId);
+		failure.afterWrite();
+		await completed;
+		return { type: "accountDeletion", result: { type: "deleted" } };
+	} catch (error) {
+		abort(transaction);
+		await completed.catch(() => undefined);
+		throw error;
+	}
+}
+
+function assertGuardedDeletionScope(
+	accountId: string,
+	expectedHead: ReplicaHead,
+	expectedRows: StoredReplicaRow[],
+): void {
+	if (expectedHead.accountId !== accountId) {
+		throw new Error("guarded Replica deletion identity disagrees");
+	}
+	const keys = new Set<string>();
+	for (const row of expectedRows) {
+		const identity = JSON.stringify([row.store, row.key.recordId]);
+		if (row.key.accountId !== accountId || keys.has(identity)) {
+			throw new Error(
+				"guarded Replica deletion rows have invalid scope or duplicate keys",
+			);
+		}
+		keys.add(identity);
+	}
+}
+
+function replicaHeadEquals(left: ReplicaHead, right: ReplicaHead): boolean {
+	return (
+		left.accountId === right.accountId &&
+		left.userId === right.userId &&
+		left.incarnation === right.incarnation &&
+		left.replicaRevision === right.replicaRevision &&
+		left.lockEpoch === right.lockEpoch &&
+		left.failure === right.failure
+	);
+}
+
+function replicaRowsEqual(
+	left: StoredReplicaRow[],
+	right: StoredReplicaRow[],
+): boolean {
+	const compare = (left: string, right: string) =>
+		left < right ? -1 : left > right ? 1 : 0;
+	const canonical = (rows: StoredReplicaRow[]) =>
+		[...rows].sort(
+			(a, b) =>
+				compare(a.store, b.store) ||
+				compare(a.key.accountId, b.key.accountId) ||
+				compare(a.key.recordId, b.key.recordId),
+		);
+	const expected = canonical(left);
+	const actual = canonical(right);
+	return (
+		expected.length === actual.length &&
+		expected.every((row, index) => {
+			const candidate = actual[index];
+			return (
+				candidate !== undefined &&
+				row.store === candidate.store &&
+				row.key.accountId === candidate.key.accountId &&
+				row.key.recordId === candidate.key.recordId &&
+				row.payloadJson === candidate.payloadJson
+			);
+		})
+	);
 }
 
 async function wipeDevice(

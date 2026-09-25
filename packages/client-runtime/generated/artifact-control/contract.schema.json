@@ -323,6 +323,23 @@
               "type": "string"
             },
             "type": {
+              "const": "listArtifactOwners",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
               "const": "listArtifactIds",
               "type": "string"
             }
@@ -402,6 +419,19 @@
           "required": [
             "type",
             "recovery"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "provisionalRecoveryUnavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "type": "object"
         },
@@ -530,6 +560,33 @@
           },
           "required": [
             "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "owners": {
+              "items": {
+                "$ref": "#/$defs/ArtifactOwnerControl"
+              },
+              "type": "array"
+            },
+            "provisional": {
+              "items": {
+                "$ref": "#/$defs/ProvisionalArtifactTokenControl"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "artifactOwners",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owners",
+            "provisional"
           ],
           "type": "object"
         },

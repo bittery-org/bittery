@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
+import { ItemCommands } from "@bittery/core/services/item-commands";
 import type { ItemSyncCommand } from "@bittery/types";
+import { createExtensionItem } from "../../src/background/extension-item-mutations";
+import { NativeMessagingClient } from "../../src/background/native-messaging-client";
 
 const backgroundDir = path.resolve(import.meta.dir, "../../src/background");
 const localStorage = new Map<string, unknown>();
@@ -26,6 +29,11 @@ const locks = {
 };
 
 let releaseFirstRequest: (() => void) | undefined;
+let releaseReconnectRequest: (() => void) | undefined;
+let reconnectRequestStarted!: () => void;
+const reconnectStarted = new Promise<void>((resolve) => {
+	reconnectRequestStarted = resolve;
+});
 let markFirstRequestStarted: (() => void) | undefined;
 const firstRequestStarted = new Promise<void>((resolve) => {
 	markFirstRequestStarted = resolve;
@@ -35,6 +43,12 @@ const apiClient = {
 	items: {
 		create: async (_vaultId: string, itemId: string) => {
 			sentItemIds.push(itemId);
+			if (itemId === "item-c") {
+				reconnectRequestStarted();
+				await new Promise<void>((resolve) => {
+					releaseReconnectRequest = resolve;
+				});
+			}
 			if (itemId === "item-a") {
 				markFirstRequestStarted?.();
 				await new Promise<void>((resolve) => {
@@ -172,5 +186,111 @@ describe("background outbound drain ownership", () => {
 			conflicted: 0,
 			failed: 0,
 		});
+	});
+
+	test("an actual Extension create keeps its accepted Operation through native reconnect", async () => {
+		const ids = ["item-c", "command-c"];
+		const commands = new ItemCommands({
+			queue: { enqueue: enqueueOutboundCommand },
+			repository: {
+				findAccountForVault: () => ({ accountId: "account-a" }),
+				getAccountInfo: () => ({ email: "a@example.com" }),
+				getById: () => undefined,
+				getDeleted: () => [],
+				encryptForVault: async () => ({
+					encryptedData: "cipher-c",
+					encryptionIv: "iv-c",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+				}),
+			},
+			resolveUserId: async () => "user-a",
+			generateId: async () => ids.shift() ?? "unexpected-id",
+			now: () => 3,
+		});
+		const created = await createExtensionItem(
+			{
+				vaultId: "vault-a",
+				accountId: "account-a",
+				category: "login",
+				data: { title: "Retained local create" } as never,
+			},
+			commands,
+		);
+		expect(created.itemId).toBe("item-c");
+		await reconnectStarted;
+		const accepted = await getOutboundCommandSummary();
+		expect(accepted.pending + accepted.retrying).toBeGreaterThan(0);
+
+		const ports: Array<{
+			disconnect: () => void;
+			reply: (message: unknown) => void;
+			requestId: () => string;
+		}> = [];
+		const native = new NativeMessagingClient({
+			connectNative: () => {
+				let reply = (_message: unknown) => {};
+				let disconnected = () => {};
+				let requestId = "";
+				const port = {
+					onMessage: {
+						addListener(listener: (message: unknown) => void) {
+							reply = listener;
+						},
+					},
+					onDisconnect: {
+						addListener(listener: () => void) {
+							disconnected = listener;
+						},
+					},
+					postMessage(message: { requestId: string }) {
+						requestId = message.requestId;
+					},
+					disconnect() {
+						disconnected();
+					},
+				} as unknown as chrome.runtime.Port;
+				ports.push({
+					disconnect: () => disconnected(),
+					reply: (message) => reply(message),
+					requestId: () => requestId,
+				});
+				return port;
+			},
+		});
+		void native.request({ type: "PING" }).catch(() => {});
+		ports[0]?.disconnect();
+		const fresh = native.request({ type: "PING" });
+		ports[1]?.reply({
+			protocolVersion: 1,
+			requestId: ports[1].requestId(),
+			type: "PONG",
+		});
+		await fresh;
+		expect(ports).toHaveLength(2);
+		expect(
+			(await getOutboundCommandSummary()).pending +
+				(await getOutboundCommandSummary()).retrying,
+		).toBeGreaterThan(0);
+
+		releaseReconnectRequest?.();
+		await drainOutboundQueue();
+		expect(sentItemIds).toContain("item-c");
+		expect(await getOutboundCommandSummary()).toEqual({
+			pending: 0,
+			retrying: 0,
+			conflicted: 0,
+			failed: 0,
+		});
+		expect(
+			runtimeMessages
+				.filter(
+					(message): message is { type: string; command: ItemSyncCommand } =>
+						!!message &&
+						typeof message === "object" &&
+						(message as { type?: string }).type ===
+							"SYNC_ITEM_COMMAND_ACKNOWLEDGED",
+				)
+				.map((message) => message.command.operationId),
+		).toContain("command-c");
 	});
 });

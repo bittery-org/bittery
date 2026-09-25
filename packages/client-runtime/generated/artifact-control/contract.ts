@@ -57,6 +57,9 @@ type: "deleteAccount"
 type: "wipeDevice"
 } | {
 accountId: string
+type: "listArtifactOwners"
+} | {
+accountId: string
 type: "listArtifactIds"
 } | {
 accountId: string
@@ -71,6 +74,8 @@ type: "provisionalBegun"
 } | {
 recovery: ProvisionalArtifactTokenControl
 type: "provisionalRecoveryAvailable"
+} | {
+type: "provisionalRecoveryUnavailable"
 } | {
 owner: ArtifactOwnerControl
 state: ProvisionalPublicationStateControl
@@ -93,6 +98,10 @@ type: "publicationFinished"
 type: "accountDeleted"
 } | {
 type: "deviceWiped"
+} | {
+owners: ArtifactOwnerControl[]
+provisional: ProvisionalArtifactTokenControl[]
+type: "artifactOwners"
 } | {
 artifactIds: string[]
 provisional: ProvisionalArtifactTokenControl[]

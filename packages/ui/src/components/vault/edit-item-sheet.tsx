@@ -1,5 +1,9 @@
 import { useI18n } from "@bittery/i18n/react";
-import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
+import type {
+	DecryptedItemData,
+	ItemCategory,
+	PublicDecryptedItemData,
+} from "@bittery/shared/types";
 import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
 import { DialogBrandAccent } from "../dialog";
@@ -12,7 +16,7 @@ import {
 } from "../sheet";
 import { ItemForm } from "./item-form";
 
-type EditableItem = DecryptedItemData & {
+type EditableItem = PublicDecryptedItemData & {
 	category: ItemCategory;
 	vaultId: string;
 };

@@ -43,6 +43,101 @@ function sink(state: SinkState) {
 }
 
 Object.assign(globalThis, {
+	async exerciseSelectiveVaultSinks() {
+		const composition = createWebClientRuntime({
+			createWorker: () => new Worker("/worker.js", { type: "module" }),
+		});
+		await composition.runtime.request("scope-warmup", "warmup");
+		const grants = composition.attachmentDownloadSinks;
+		const oldScope = grants.captureScope("account-one", "hidden");
+		const cleaned: string[] = [];
+		const add = (
+			accountId: string,
+			vaultId: string,
+			scope = grants.captureScope(accountId, vaultId),
+		) =>
+			grants.grant({
+				scope,
+				accountId,
+				vaultId,
+				attachmentId: "same-attachment",
+				sink: {
+					write: async () => {},
+					commit: async () => {},
+					discard: async () => {
+						cleaned.push(`${accountId}/${vaultId}`);
+					},
+				},
+			});
+		let next = 0;
+		const send = (control: object) =>
+			composition.runtime
+				.request(
+					`scope-${next++}`,
+					JSON.stringify({ type: "sinkControl", control }),
+				)
+				.then(JSON.parse);
+		try {
+			add("account-one", "hidden", oldScope);
+			const visible = add("account-one", "visible");
+			add("account-two", "hidden");
+			const retirement = await send({
+				type: "retireVaults",
+				accountId: "account-one",
+				vaultIds: ["hidden"],
+			});
+			const cleanedAfterRetire = [...cleaned];
+			let blocked = false;
+			try {
+				add("account-one", "hidden");
+			} catch {
+				blocked = true;
+			}
+			const visibleBegin = await send({
+				type: "begin",
+				capabilityId: visible,
+				requestScope: visible,
+				accountId: "account-one",
+				vaultId: "visible",
+				attachmentId: "same-attachment",
+			});
+			await send({ type: "retireAccount", accountId: "account-one" });
+			await send({
+				type: "completeAccountRetirement",
+				accountId: "account-one",
+			});
+			let stillHidden = false;
+			try {
+				add("account-one", "hidden");
+			} catch {
+				stillHidden = true;
+			}
+			await send({
+				type: "completeVaultRetirement",
+				accountId: "account-one",
+				vaultIds: ["hidden"],
+			});
+			let oldRejected = false;
+			try {
+				add("account-one", "hidden", oldScope);
+			} catch {
+				oldRejected = true;
+			}
+			const fresh = add("account-one", "hidden");
+			await grants.release(fresh);
+			await grants.release(fresh);
+			return {
+				retirement,
+				cleanedAfterRetire,
+				blocked,
+				visibleBegin,
+				stillHidden,
+				oldRejected,
+			};
+		} finally {
+			await composition.close();
+		}
+	},
 	async exerciseAttachmentDownloadOpenFailureWipe() {
 		const bindingsUrl = "/real-core-bindings.js";
 		const bindings = await import(bindingsUrl);
@@ -153,6 +248,8 @@ Object.assign(globalThis, {
 		let uploadGrantSucceeded = true;
 		try {
 			registry.grant({
+				scope: registry.captureScope("account-one", "vault-one"),
+				vaultId: "vault-one",
 				accountId: "account-one",
 				attachmentId: "attachment-one",
 				sink: sink({
@@ -167,6 +264,8 @@ Object.assign(globalThis, {
 		}
 		try {
 			uploadRegistry.grant({
+				scope: uploadRegistry.captureScope("account-one", "vault-one"),
+				vaultId: "vault-one",
 				accountId: "account-one",
 				itemId: "item-one",
 				name: "report.txt",
@@ -224,6 +323,11 @@ Object.assign(globalThis, {
 			let grantRejected = false;
 			try {
 				composition.attachmentDownloadSinks.grant({
+					scope: composition.attachmentDownloadSinks.captureScope(
+						"account-one",
+						"vault-one",
+					),
+					vaultId: "vault-one",
 					accountId: "account-one",
 					attachmentId: "attachment-one",
 					sink: sink({
@@ -247,6 +351,11 @@ Object.assign(globalThis, {
 		let grantRejected = false;
 		try {
 			composition.attachmentDownloadSinks.grant({
+				scope: composition.attachmentDownloadSinks.captureScope(
+					"account-one",
+					"vault-one",
+				),
+				vaultId: "vault-one",
 				accountId: "account-one",
 				attachmentId: "attachment-one",
 				sink: sink({
@@ -274,6 +383,11 @@ Object.assign(globalThis, {
 		};
 		await composition.runtime.request("warmup", "warmup");
 		const capabilityId = composition.attachmentDownloadSinks.grant({
+			scope: composition.attachmentDownloadSinks.captureScope(
+				"account-one",
+				"vault-one",
+			),
+			vaultId: "vault-one",
 			accountId: "account-one",
 			attachmentId: "attachment-one",
 			sink: sink(state),
@@ -301,6 +415,11 @@ Object.assign(globalThis, {
 			retained: [],
 		};
 		const cleanupCapabilityId = composition.attachmentDownloadSinks.grant({
+			scope: composition.attachmentDownloadSinks.captureScope(
+				"account-one",
+				"vault-one",
+			),
+			vaultId: "vault-one",
 			accountId: "account-one",
 			attachmentId: "attachment-two",
 			sink: sink(cleanup),
@@ -334,6 +453,7 @@ Object.assign(globalThis, {
 });
 
 declare global {
+	var exerciseSelectiveVaultSinks: () => Promise<unknown>;
 	var exerciseAttachmentDownloadSink: (downloadUrl: string) => Promise<unknown>;
 	var exerciseAttachmentDownloadTimerProbe: (mode: string) => Promise<unknown>;
 	var exerciseAttachmentDownloadOpenFailureWipe: () => Promise<unknown>;

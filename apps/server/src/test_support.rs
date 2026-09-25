@@ -89,6 +89,50 @@ pub(crate) struct AttachmentMovePreflightControl {
     release: tokio::sync::Notify,
 }
 
+#[derive(Default)]
+pub(crate) struct DurableAttachmentCleanupControl {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl DurableAttachmentCleanupControl {
+    pub(crate) async fn wait_until_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+static DURABLE_ATTACHMENT_CLEANUP_HOOKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<DurableAttachmentCleanupControl>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn install_durable_attachment_cleanup_after_fence_hook(
+    attachment_id: &str,
+) -> std::sync::Arc<DurableAttachmentCleanupControl> {
+    let control = std::sync::Arc::new(DurableAttachmentCleanupControl::default());
+    DURABLE_ATTACHMENT_CLEANUP_HOOKS
+        .lock()
+        .expect("cleanup hooks lock")
+        .insert(attachment_id.to_owned(), control.clone());
+    control
+}
+
+pub(crate) async fn pause_durable_attachment_cleanup_after_fence(attachment_id: &str) {
+    let control = DURABLE_ATTACHMENT_CLEANUP_HOOKS
+        .lock()
+        .expect("cleanup hooks lock")
+        .remove(attachment_id);
+    if let Some(control) = control {
+        control.entered.notify_one();
+        control.release.notified().await;
+    }
+}
+
 impl AttachmentMovePreflightControl {
     pub(crate) async fn wait_until_entered(&self) {
         self.entered.notified().await;
@@ -325,9 +369,19 @@ pub(crate) struct RecordingObjectStorage {
     object_sha256: Option<String>,
     upload_key_override: Option<String>,
     object_present: bool,
+    object_presence: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     fail_delete: bool,
     delete_started: Option<std::sync::Arc<tokio::sync::Notify>>,
     delete_release: Option<std::sync::Arc<tokio::sync::Notify>>,
+    head_started: Option<std::sync::Arc<tokio::sync::Notify>>,
+    head_release: Option<std::sync::Arc<tokio::sync::Notify>>,
+    late_delete: Option<RecordedLateDelete>,
+}
+
+struct RecordedLateDelete {
+    presence: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    release: std::sync::Arc<tokio::sync::Notify>,
+    completed: std::sync::Arc<tokio::sync::Notify>,
 }
 
 pub(crate) type RecordedUploadRequest = (String, String, Option<i64>, Option<String>);
@@ -344,9 +398,13 @@ impl RecordingObjectStorage {
             object_sha256: None,
             upload_key_override: None,
             object_present: true,
+            object_presence: None,
             fail_delete: false,
             delete_started: None,
             delete_release: None,
+            head_started: None,
+            head_release: None,
+            late_delete: None,
         }
     }
     pub(crate) fn succeeding_with_object_size(object_size: i64) -> Self {
@@ -373,9 +431,30 @@ impl RecordingObjectStorage {
             ..Self::succeeding(None)
         }
     }
+    pub(crate) fn succeeding_with_delayed_exact_head(
+        object_size: i64,
+        content_type: &str,
+        sha256: &str,
+        head_started: std::sync::Arc<tokio::sync::Notify>,
+        head_release: std::sync::Arc<tokio::sync::Notify>,
+    ) -> Self {
+        Self {
+            head_started: Some(head_started),
+            head_release: Some(head_release),
+            ..Self::succeeding_exact_object(object_size, content_type, sha256)
+        }
+    }
     pub(crate) fn succeeding_with_absent_object() -> Self {
         Self {
             object_present: false,
+            ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn succeeding_with_object_presence(
+        presence: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self {
+            object_presence: Some(presence),
             ..Self::succeeding(None)
         }
     }
@@ -383,6 +462,22 @@ impl RecordingObjectStorage {
         Self {
             fail_delete: true,
             ..Self::succeeding(None)
+        }
+    }
+    pub(crate) fn failing_delete_with_delayed_effect(
+        presence: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        release: std::sync::Arc<tokio::sync::Notify>,
+        completed: std::sync::Arc<tokio::sync::Notify>,
+    ) -> Self {
+        Self {
+            object_presence: Some(presence.clone()),
+            fail_delete: true,
+            late_delete: Some(RecordedLateDelete {
+                presence,
+                release,
+                completed,
+            }),
+            ..Self::succeeding_exact_object(102, "application/octet-stream", &"a".repeat(64))
         }
     }
     pub(crate) fn succeeding_with_delayed_delete(
@@ -510,7 +605,16 @@ impl ObjectStorage for RecordingObjectStorage {
     }
     async fn head(&self, key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
         self.record(format!("head:{key}"))?;
-        if !self.object_present {
+        if let (Some(started), Some(release)) = (&self.head_started, &self.head_release) {
+            started.notify_one();
+            release.notified().await;
+        }
+        if !self.object_present
+            || self
+                .object_presence
+                .as_ref()
+                .is_some_and(|presence| !presence.load(std::sync::atomic::Ordering::SeqCst))
+        {
             return Ok(None);
         }
         Ok(Some(StorageObjectHead {
@@ -522,6 +626,18 @@ impl ObjectStorage for RecordingObjectStorage {
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         self.record(format!("delete:{key}"))?;
         if self.fail_delete {
+            if let Some(effect) = &self.late_delete {
+                let presence = effect.presence.clone();
+                let release = effect.release.clone();
+                let completed = effect.completed.clone();
+                // Model a provider accepting DELETE while its response is lost. The remote
+                // effect survives the caller's returned error and finishes independently.
+                tokio::spawn(async move {
+                    release.notified().await;
+                    presence.store(false, std::sync::atomic::Ordering::SeqCst);
+                    completed.notify_one();
+                });
+            }
             return Err(StorageError::DeleteObject(
                 "injected delete failure".to_owned(),
             ));
@@ -529,6 +645,9 @@ impl ObjectStorage for RecordingObjectStorage {
         if let (Some(started), Some(release)) = (&self.delete_started, &self.delete_release) {
             started.notify_one();
             release.notified().await;
+        }
+        if let Some(presence) = &self.object_presence {
+            presence.store(false, std::sync::atomic::Ordering::SeqCst);
         }
         Ok(())
     }

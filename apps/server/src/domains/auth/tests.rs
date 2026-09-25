@@ -1260,6 +1260,278 @@ async fn auth_session_management_and_account_deletion_flow() {
     .await;
 }
 
+async fn seed_account_deletion_attachment(
+    pool: &PgPool,
+    attachment: &str,
+    item: &str,
+    vault: &str,
+    user: &str,
+) {
+    query("INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, file_size, uploaded_by, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm) VALUES ($1, $2, $3, 'fixture-storage', 'encrypted-name', 'encrypted-type', 'name-iv', 'type-iv', 3, $4, 'wrapped-key', 'key-iv', 'AES-GCM-AAD-V1')")
+        .bind(attachment).bind(item).bind(vault).bind(user).execute(pool).await.unwrap();
+}
+
+#[tokio::test]
+async fn account_deletion_removes_populated_personal_ownership_and_replays() {
+    with_api_test_app("account_deletion_populated_personal", |app| async move {
+        let user = "usr_delete_populated";
+        let email = "delete-populated@example.com";
+        seed_user(&app.pool, user, "Delete populated", email).await;
+        seed_team(
+            &app.pool,
+            "team_delete_personal",
+            "Personal",
+            user,
+            "personal",
+            "free",
+            "active",
+        )
+        .await;
+        assign_user_to_team(&app.pool, user, "team_delete_personal", "owner").await;
+        seed_vault(
+            &app.pool,
+            "vault_delete_personal",
+            "Personal Vault",
+            "personal",
+            user,
+            None,
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "vk_delete_personal",
+            "vault_delete_personal",
+            user,
+            "encrypted-key",
+            "owner",
+        )
+        .await;
+        crate::test_support::seed_item(
+            &app.pool,
+            "item_delete_personal",
+            "vault_delete_personal",
+            "login",
+            "encrypted-item",
+            "item-iv",
+            user,
+        )
+        .await;
+        seed_account_deletion_attachment(
+            &app.pool,
+            "att_delete_personal",
+            "item_delete_personal",
+            "vault_delete_personal",
+            user,
+        )
+        .await;
+        seed_user(
+            &app.pool,
+            "usr_delete_unrelated",
+            "Unrelated",
+            "unrelated@example.com",
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            "vault_delete_unrelated",
+            "Unrelated Vault",
+            "personal",
+            "usr_delete_unrelated",
+            None,
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "vk_delete_unrelated",
+            "vault_delete_unrelated",
+            "usr_delete_unrelated",
+            "unrelated-key",
+            "owner",
+        )
+        .await;
+        crate::test_support::seed_item(
+            &app.pool,
+            "item_delete_unrelated",
+            "vault_delete_unrelated",
+            "login",
+            "unrelated-ciphertext",
+            "unrelated-iv",
+            "usr_delete_unrelated",
+        )
+        .await;
+        let unrelated_session = app.issue_session("usr_delete_unrelated").await;
+        let session = app.issue_session(user).await;
+        let request = "018f05c4-7b6a-4a89-9237-2e612fa96d01";
+        let response = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                Some(json!({"confirmEmail":email})),
+                account_deletion_headers(&session.token, request),
+            )
+            .await;
+        assert_eq!(
+            response.status,
+            StatusCode::OK,
+            "populated personal Account deletion failed: {}",
+            response.body
+        );
+        assert_eq!(
+            response.body,
+            json!({"requestId":request,"outcome":"deleted"})
+        );
+        for (table, expected) in [
+            ("user", 1),
+            ("team", 0),
+            ("vault", 1),
+            ("vault_key", 1),
+            ("item", 1),
+            ("item_attachment", 0),
+            ("session", 1),
+        ] {
+            let count =
+                query_scalar::<_, i64>(&format!("SELECT COUNT(*)::bigint FROM \"{table}\""))
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                count, expected,
+                "unexpected Account ownership count in {table}"
+            );
+        }
+        let unrelated = app
+            .api_json(
+                Method::GET,
+                "/api/v1/users/me",
+                None,
+                authenticated_json_headers(&unrelated_session.token),
+            )
+            .await;
+        assert_eq!(unrelated.status, StatusCode::OK);
+        assert_eq!(
+            query_scalar::<_, String>(
+                "SELECT encrypted_data FROM item WHERE id = 'item_delete_unrelated'"
+            )
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+            "unrelated-ciphertext"
+        );
+        let replay = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                Some(json!({"confirmEmail":email})),
+                account_deletion_headers(&session.token, request),
+            )
+            .await;
+        assert_eq!(replay.status, StatusCode::OK);
+        assert_eq!(replay.body, response.body);
+        assert_eq!(replay.headers["idempotency-replayed"], "true");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn account_deletion_preserves_foreign_vault_references_and_rolls_back_owned_data() {
+    with_api_test_app("account_deletion_foreign_reference", |app| async move {
+        seed_user(
+            &app.pool,
+            "usr_delete_foreign_author",
+            "Author",
+            "author@example.com",
+        )
+        .await;
+        seed_user(
+            &app.pool,
+            "usr_delete_foreign_owner",
+            "Owner",
+            "owner@example.com",
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            "vault_delete_author",
+            "Author Vault",
+            "personal",
+            "usr_delete_foreign_author",
+            None,
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            "vault_delete_foreign",
+            "Foreign Vault",
+            "personal",
+            "usr_delete_foreign_owner",
+            None,
+        )
+        .await;
+        crate::test_support::seed_item(
+            &app.pool,
+            "item_delete_author",
+            "vault_delete_author",
+            "login",
+            "owned-ciphertext",
+            "own-iv",
+            "usr_delete_foreign_author",
+        )
+        .await;
+        crate::test_support::seed_item(
+            &app.pool,
+            "item_delete_foreign",
+            "vault_delete_foreign",
+            "login",
+            "foreign-ciphertext",
+            "foreign-iv",
+            "usr_delete_foreign_author",
+        )
+        .await;
+        let session = app.issue_session("usr_delete_foreign_author").await;
+        let request = "018f05c4-7b6a-4a89-9237-2e612fa96d02";
+        let response = app
+            .api_json(
+                Method::DELETE,
+                "/api/v1/users/me",
+                Some(json!({"confirmEmail":"author@example.com"})),
+                account_deletion_headers(&session.token, request),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        for (item, ciphertext) in [
+            ("item_delete_author", "owned-ciphertext"),
+            ("item_delete_foreign", "foreign-ciphertext"),
+        ] {
+            assert_eq!(
+                query_scalar::<_, String>("SELECT encrypted_data FROM item WHERE id = $1")
+                    .bind(item)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap(),
+                ciphertext
+            );
+        }
+        let retained = query_scalar::<_, i64>(
+            "SELECT COUNT(*)::bigint FROM account_deletion_outcome WHERE request_id = $1::uuid",
+        )
+        .bind(request)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(retained, 0);
+        let user = app
+            .api_json(
+                Method::GET,
+                "/api/v1/users/me",
+                None,
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(user.status, StatusCode::OK);
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn account_deletion_block_is_retained_across_team_state_changes() {
     with_api_test_app("account_deletion_retained_team_block", |app| async move {
@@ -1371,6 +1643,9 @@ async fn account_deletion_outcome_and_cascade_roll_back_together() {
             "rollback@example.com",
         )
         .await;
+        seed_vault(&app.pool, "vault_delete_rollback", "Rollback Vault", "personal", "usr_delete_rollback", None).await;
+        crate::test_support::seed_item(&app.pool, "item_delete_rollback", "vault_delete_rollback", "login", "rollback-ciphertext", "rollback-iv", "usr_delete_rollback").await;
+        seed_account_deletion_attachment(&app.pool, "att_delete_rollback", "item_delete_rollback", "vault_delete_rollback", "usr_delete_rollback").await;
         let session = app.issue_session("usr_delete_rollback").await;
         query(
             r#"CREATE FUNCTION reject_ticket48_user_delete() RETURNS trigger
@@ -1421,6 +1696,12 @@ async fn account_deletion_outcome_and_cascade_roll_back_together() {
         .await
         .expect("audit count should load");
         assert_eq!((retained, users, audits), (0, 1, 0));
+        let owned_vaults = query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE id = 'vault_delete_rollback'").fetch_one(&app.pool).await.unwrap();
+        let owned_item = query_scalar::<_, String>("SELECT encrypted_data FROM item WHERE id = 'item_delete_rollback'").fetch_one(&app.pool).await.unwrap();
+        assert_eq!(owned_vaults, 1);
+        assert_eq!(owned_item, "rollback-ciphertext");
+        let owned_attachments = query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM item_attachment WHERE id = 'att_delete_rollback'").fetch_one(&app.pool).await.unwrap();
+        assert_eq!(owned_attachments, 1);
     })
     .await;
 }

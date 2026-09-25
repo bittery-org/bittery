@@ -21,6 +21,13 @@ export type ScheduledCancel = () => void;
  */
 export type Schedule = (run: () => void, delayMs: number) => ScheduledCancel;
 
+// A fixed Export capture belongs to one connection/cleanup lifetime; it cannot share or
+// outlive a reusable, reference-counted store entry.
+type SharedObservationRequest = Exclude<
+	ObservationRequest,
+	{ type: "vaultExport" }
+>;
+
 export const DEFAULT_RELEASE_GRACE_MS = 250;
 
 const defaultSchedule: Schedule = (run, delayMs) => {
@@ -83,7 +90,7 @@ export class ObservationRegistry {
 	 * The store for one logical observation. Same request, same store instance, for the
 	 * lifetime of the client. Nothing is sent until something subscribes.
 	 */
-	store<T>(request: ObservationRequest): RuntimeStore<T> {
+	store<T>(request: SharedObservationRequest): RuntimeStore<T> {
 		const key = observationKey(request);
 		const existing = this.#entries.get(key);
 		if (existing !== undefined) return existing.store as RuntimeStore<T>;
@@ -172,6 +179,19 @@ export class ObservationRegistry {
 					if (entry.observationId !== observationId) return;
 					this.#deliver(entry, projectionJson);
 				},
+				{
+					onError: (error) => {
+						// Terminal loss invalidates only this admitted observation. A delayed error
+						// cannot replace a successor's snapshot or reopen released work.
+						if (entry.observationId !== observationId) return;
+						entry.observationId = undefined;
+						// Release grace can finish while the installation ACK still holds the queue.
+						// Its Idle snapshot already retired this answer; terminal loss only drops routing.
+						if (entry.refCount === 0 && entry.cancelTeardown === undefined)
+							return;
+						this.#publish(entry, failedSnapshot<T>(transportErrorCode(error)));
+					},
+				},
 			);
 		} catch (error) {
 			if (entry.observationId !== observationId) return;
@@ -199,12 +219,14 @@ export class ObservationRegistry {
 	}
 }
 
-function observationKey(request: ObservationRequest): string {
+function observationKey(request: SharedObservationRequest): string {
 	switch (request.type) {
 		case "writableVaultCatalog":
 			return "writableVaultCatalog";
 		case "items":
 			return `items:${request.accountId}`;
+		case "travelMode":
+			return `travelMode:${request.accountId}`;
 		case "operations":
 			return `operations:${request.accountId}`;
 		case "pendingShareResults":
@@ -215,7 +237,7 @@ function observationKey(request: ObservationRequest): string {
 }
 
 function projectionTypeFor(
-	request: ObservationRequest,
+	request: SharedObservationRequest,
 ): RuntimeProjection["type"] {
 	return request.type;
 }

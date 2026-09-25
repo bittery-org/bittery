@@ -5,7 +5,7 @@ pub(super) async fn create_attachment_upload(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(item_id): Path<String>,
-    ApiJson(body): ApiJson<AttachmentUploadBody>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<AttachmentUploadBody, ITEM_BODY_LIMIT_BYTES>,
 ) -> Result<Json<AttachmentUploadResponse>, ApiError> {
     let pool = &state.db_pool;
     let result = vault::create_vault_attachment_upload(
@@ -19,6 +19,13 @@ pub(super) async fn create_attachment_upload(
             file_name: body.file_name,
             content_type: body.content_type,
             file_size: body.file_size,
+            durable_upload: body.durable_upload.map(|durable| {
+                vault::DurableAttachmentUploadInput {
+                    attachment_id: durable.attachment_id,
+                    ciphertext_sha256: durable.ciphertext_sha256,
+                }
+            }),
+            request_bytes: bytes,
         },
     )
     .await?;
@@ -26,6 +33,14 @@ pub(super) async fn create_attachment_upload(
         attachment_id: result.attachment_id,
         key: result.storage_key,
         upload_url: result.upload_url,
+        upload_headers: result
+            .upload_headers
+            .into_iter()
+            .map(|header| AttachmentUploadHeader {
+                name: header.name,
+                value: header.value,
+            })
+            .collect(),
     }))
 }
 

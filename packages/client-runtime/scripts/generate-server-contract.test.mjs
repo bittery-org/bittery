@@ -36,7 +36,15 @@ test("generation is deterministic and contains only the recursive allowlist", as
 		assert.match(first, new RegExp(`(?:struct|enum|type) ${rustName}`));
 	}
 	assert.doesNotMatch(first, /CheckoutSessionResponse/);
-	assert.doesNotMatch(first, /derive\([^)]*Debug/);
+	assert.doesNotMatch(first, /derive\([^)]*Debug[^)]*\)\]\npub struct/);
+	for (const name of ["ErrorCode", "InvitationStatus"]) {
+		assert.match(
+			first,
+			new RegExp(
+				`derive\\([^)]*Debug[^)]*\\)\\]\\n#\\[cfg_attr\\(feature = "runtime-protocol-contract-schema", derive\\(schemars::JsonSchema\\)\\)\\]\\npub enum ${name}`,
+			),
+		);
+	}
 	assert.match(
 		first,
 		/#\[serde\(deny_unknown_fields\)\]\npub struct LoginAttemptResponse/,

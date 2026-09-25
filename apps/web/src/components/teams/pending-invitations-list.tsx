@@ -1,5 +1,5 @@
+import { useRuntimeClient } from "@bittery/client-runtime/react";
 import { formatDate } from "@bittery/i18n/format/browser";
-import { useApiClient } from "@bittery/shared/api";
 import { Badge, Button, cn, copyWithToast, toast } from "@bittery/ui";
 import {
 	IconClock as Clock,
@@ -8,7 +8,7 @@ import {
 	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 
@@ -25,17 +25,44 @@ interface Invitation {
 interface PendingInvitationsListProps {
 	invitations: Invitation[];
 	canManage: boolean;
+	accountId: string;
 	teamId: string;
 }
 
 export function PendingInvitationsList({
 	invitations,
 	canManage,
+	accountId,
 	teamId,
 }: PendingInvitationsListProps) {
-	const api = useApiClient();
+	const runtime = useRuntimeClient();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
+	const inFlight = useRef(new Map<string, Set<AbortController>>());
+	useEffect(
+		() => () => {
+			for (const controller of inFlight.current.get(accountId) ?? [])
+				controller.abort();
+		},
+		[accountId],
+	);
+	const withCurrentCaller = async <T,>(
+		call: (signal: AbortSignal) => Promise<T>,
+	): Promise<T> => {
+		const controller = new AbortController();
+		let accountFlights = inFlight.current.get(accountId);
+		if (!accountFlights) {
+			accountFlights = new Set();
+			inFlight.current.set(accountId, accountFlights);
+		}
+		accountFlights.add(controller);
+		try {
+			return await call(controller.signal);
+		} finally {
+			accountFlights.delete(controller);
+			if (accountFlights.size === 0) inFlight.current.delete(accountId);
+		}
+	};
 	// Resending rotates the token, so the server hands back a brand new link that
 	// exists nowhere else. Keep it visible until the admin has copied it.
 	const [resentLink, setResentLink] = useState<{
@@ -58,31 +85,49 @@ export function PendingInvitationsList({
 
 	const cancelMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			api.teams.invitations.cancel(teamId, input.invitationId),
+			withCurrentCaller(async (signal) => {
+				const result = await runtime.cancelTeamInvitation(
+					{ accountId, teamId, invitationId: input.invitationId },
+					{ signal },
+				);
+				if (result.type === "teamInvitationAdminUncertain")
+					throw new Error(m.team_invitations_action_incomplete());
+				return result;
+			}),
 		onSuccess: async () => {
+			setResentLink(null);
 			toast.success(m.team_invitations_toast_cancelled());
-			await invalidator.invalidateTeam();
+			await invalidator.invalidateTeamInvitations();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
+			void invalidator.invalidateTeamInvitations();
 		},
 	});
 
 	const resendMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			api.teams.invitations
-				.resend(teamId, input.invitationId)
-				.then((r) => r.data),
+			withCurrentCaller(async (signal) => {
+				const result = await runtime.resendTeamInvitation(
+					{ accountId, teamId, invitationId: input.invitationId },
+					{ signal },
+				);
+				if (result.type === "teamInvitationAdminUncertain")
+					throw new Error(m.team_invitations_action_incomplete());
+				return result;
+			}),
 		onSuccess: async (data) => {
 			setResentLink({
 				invitationId: data.invitationId,
 				url: `${window.location.origin}/invite/${data.token}`,
 			});
 			toast.success(m.team_invitations_toast_resent());
-			await invalidator.invalidateTeam();
+			await invalidator.invalidateTeamInvitations();
 		},
 		onError: (error: Error) => {
+			setResentLink(null);
 			toast.error(error.message);
+			void invalidator.invalidateTeamInvitations();
 		},
 	});
 
@@ -184,7 +229,9 @@ export function PendingInvitationsList({
 										onClick={() =>
 											resendMutation.mutate({ invitationId: invitation.id })
 										}
-										disabled={resendMutation.isPending}
+										disabled={
+											resendMutation.isPending || cancelMutation.isPending
+										}
 										title={m.team_invitations_action_resend_title()}
 									>
 										<RefreshCw className="h-3.5 w-3.5" />
@@ -197,7 +244,9 @@ export function PendingInvitationsList({
 										onClick={() =>
 											cancelMutation.mutate({ invitationId: invitation.id })
 										}
-										disabled={cancelMutation.isPending}
+										disabled={
+											cancelMutation.isPending || resendMutation.isPending
+										}
 										title={m.team_invitations_action_cancel_title()}
 									>
 										<X className="h-3.5 w-3.5" />

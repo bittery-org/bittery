@@ -81,7 +81,7 @@ struct PlatformPort {
     values: Mutex<HashMap<(String, String), String>>,
     fail: AtomicBool,
     events: Arc<Mutex<Vec<&'static str>>>,
-    fail_catalog_store: AtomicBool,
+    fail_catalog_detach: AtomicBool,
     invocations: AtomicUsize,
 }
 
@@ -101,15 +101,30 @@ impl SerializedPlatformStorageExecutor for PlatformPort {
             }
             "set" => {
                 let key = request["key"].as_str().unwrap().to_owned();
-                if key.ends_with("device-catalog")
-                    && self.fail_catalog_store.swap(false, Ordering::SeqCst)
-                {
+                let value = request["value"].as_str().unwrap().to_owned();
+                let detaches_account = key.ends_with("device-catalog")
+                    && self
+                        .values
+                        .lock()
+                        .unwrap()
+                        .get(&(area.clone(), key.clone()))
+                        .is_some_and(|previous| {
+                            let previous: DeviceCatalogDocument =
+                                serde_json::from_str(previous).unwrap();
+                            let next: DeviceCatalogDocument = serde_json::from_str(&value).unwrap();
+                            previous.accounts.iter().any(|account| {
+                                !next
+                                    .accounts
+                                    .iter()
+                                    .any(|next| next.account_id == account.account_id)
+                            })
+                        });
+                if detaches_account && self.fail_catalog_detach.swap(false, Ordering::SeqCst) {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
                         "SECRET_CATALOG_STORE_DETAIL",
                     ));
                 }
-                let value = request["value"].as_str().unwrap().to_owned();
                 self.values.lock().unwrap().insert((area, key), value);
                 Ok(Zeroizing::new(json!({"type":"done"}).to_string()))
             }
@@ -269,6 +284,12 @@ pub(super) fn create_vault_teardown_harness(
     (harness.runtime, harness.persistence, harness.replica_port)
 }
 
+pub(super) fn unopened_create_vault_teardown_harness(
+) -> (Arc<Runtime>, Arc<InMemoryReplica>, Arc<ReplicaPort>) {
+    let harness = build_teardown_harness(Fault::None, false);
+    (harness.runtime, harness.persistence, harness.replica_port)
+}
+
 /// A Runtime that has not finished `open()`. A user reaches for "wipe this Device" exactly here,
 /// so every Device phase has to work with no restored Account and no Replica cache.
 fn wedged_teardown_harness(fault: Fault) -> Harness {
@@ -317,7 +338,7 @@ fn build_teardown_harness(fault: Fault, opened: bool) -> Harness {
         ])),
         fail: AtomicBool::new(matches!(fault, Fault::Platform | Fault::PlatformAndReplica)),
         events: Arc::clone(&events),
-        fail_catalog_store: AtomicBool::new(matches!(fault, Fault::CatalogDetach)),
+        fail_catalog_detach: AtomicBool::new(matches!(fault, Fault::CatalogDetach)),
         invocations: AtomicUsize::new(0),
     });
     let artifacts = Arc::new(ArtifactPort {
@@ -364,6 +385,7 @@ fn seed_restartable_catalog(harness: &Harness) {
     let catalog = DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
         account_id: account_id.clone(),
         active_incarnation: Some(incarnation.clone()),
+        pending_retirement: None,
         pending_install: None,
     }])
     .unwrap();
@@ -432,12 +454,8 @@ async fn remove_account_is_an_explicit_closed_runtime_request() {
                 account_id: AccountId::from("account-1")
             },
             status: TeardownStatus::Incomplete,
-            failures: vec![
-                TeardownPhase::AttachmentArtifacts,
-                TeardownPhase::HostCleanup,
-                TeardownPhase::PlatformStorage,
-                TeardownPhase::Replica
-            ],
+            // An unreadable retirement inventory stops before any destructive phase.
+            failures: vec![TeardownPhase::PlatformStorage],
         }
     );
 }
@@ -632,19 +650,25 @@ async fn wipe_is_explicit_and_deletes_all_known_and_orphan_device_authorities() 
                 AccountId::from("account-1"),
                 AccountDisplayIdentity {
                     email: "one@example.test".into(),
-                },
+                    ..AccountDisplayIdentity::default()
+                }
+                .into(),
             ),
             (
                 AccountId::from("account-2"),
                 AccountDisplayIdentity {
                     email: "two@example.test".into(),
-                },
+                    ..AccountDisplayIdentity::default()
+                }
+                .into(),
             ),
             (
                 AccountId::from("identity-only"),
                 AccountDisplayIdentity {
                     email: "orphan@example.test".into(),
-                },
+                    ..AccountDisplayIdentity::default()
+                }
+                .into(),
             ),
         ]);
     harness.platform.values.lock().unwrap().insert(
@@ -698,7 +722,9 @@ async fn close_retires_every_cached_account_display_identity() {
         AccountId::from("account-1"),
         AccountDisplayIdentity {
             email: "person@example.test".into(),
-        },
+            ..AccountDisplayIdentity::default()
+        }
+        .into(),
     );
 
     runtime.close().await;
@@ -1384,6 +1410,7 @@ async fn a_wedged_device_is_still_wipeable_after_open_fails() {
     let catalog = DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
         account_id: AccountId::from("account-3"),
         active_incarnation: Some(crate::protocol::Incarnation::from("incarnation-3")),
+        pending_retirement: None,
         pending_install: None,
     }])
     .unwrap();

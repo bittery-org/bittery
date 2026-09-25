@@ -1,3 +1,8 @@
+mod mutations;
+pub(crate) use mutations::{
+    delete_vault, execute_delete_vault_operation, execute_update_vault_operation, update_vault,
+    DeleteVaultOperationInput, UpdateVaultOperationInput,
+};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
@@ -77,23 +82,10 @@ struct DbVaultGetRow {
     created_at: OffsetDateTime,
 }
 #[derive(Debug, sqlx::FromRow)]
-struct DbManagedVaultRow {
-    name: String,
-    icon: Option<String>,
-    image_key: Option<String>,
-    role: VaultRole,
-}
-#[derive(Debug, sqlx::FromRow)]
 pub(super) struct DbVaultOwnerAccessRow {
     pub(super) vault_type: VaultType,
     pub(super) team_id: Option<String>,
     pub(super) role: VaultRole,
-}
-#[derive(Debug, sqlx::FromRow)]
-struct DbVaultDeleteRow {
-    image_key: Option<String>,
-    team_id: Option<String>,
-    role: VaultRole,
 }
 #[derive(Debug, sqlx::FromRow)]
 struct DbVaultMemberAccessRow {
@@ -311,20 +303,14 @@ pub(crate) async fn execute_create_vault_operation(
 	}
 
     if let Some(image_key) = input.vault.image_key.as_deref() {
-        let confirmed = query_scalar::<_, bool>(
-			"SELECT EXISTS(SELECT 1 FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND vault_id = $3 AND object_key = $4 AND state = 'confirmed' AND lease_expires_at > NOW())",
-		)
-		.bind(user_id)
-		.bind(&input.operation_id)
-		.bind(vault_id)
-		.bind(image_key)
-		.fetch_one(&mut *transaction)
-		.await
-		.map_err(|error| database_error(error, "Failed to verify Vault image staging"))?;
-        if !confirmed {
-            transaction.rollback().await.ok();
-            return Err(AppError::conflict("Vault image staging is incomplete"));
-        }
+        super::vault_image_staging::require_confirmed_publication(
+            &mut transaction,
+            user_id,
+            &input.operation_id,
+            vault_id,
+            image_key,
+        )
+        .await?;
     }
 
     // Operation identity is User-scoped, while the Vault primary key is global. Distinct
@@ -453,9 +439,13 @@ pub(crate) async fn execute_create_vault_operation(
 			.execute(&mut *transaction).await
 			.map_err(|error| database_error(error, "Failed to retain rejected create-Vault outcome"))?;
         if input.vault.image_key.is_some() {
-            query("UPDATE vault_image_staging SET state = 'cleanup_pending', updated_at = NOW() WHERE user_id = $1 AND operation_id = $2")
-				.bind(user_id).bind(&input.operation_id).execute(&mut *transaction).await
-				.map_err(|error| database_error(error, "Failed to mark rejected Vault image cleanup"))?;
+            super::vault_image_staging::resolve_publication(
+                &mut transaction,
+                user_id,
+                &input.operation_id,
+                false,
+            )
+            .await?;
         }
         CreateVaultOperationResult::Rejected { code: wire_code }
     } else {
@@ -491,9 +481,13 @@ pub(crate) async fn execute_create_vault_operation(
 			.execute(&mut *transaction).await
 			.map_err(|error| database_error(error, "Failed to retain applied create-Vault outcome"))?;
         if input.vault.image_key.is_some() {
-            query("DELETE FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 AND state = 'confirmed'")
-				.bind(user_id).bind(&input.operation_id).execute(&mut *transaction).await
-				.map_err(|error| database_error(error, "Failed to promote Vault image staging"))?;
+            super::vault_image_staging::resolve_publication(
+                &mut transaction,
+                user_id,
+                &input.operation_id,
+                true,
+            )
+            .await?;
         }
         CreateVaultOperationResult::Applied {
             vault_id: vault_id.to_owned(),
@@ -538,86 +532,6 @@ fn validate_create_vault_intent(vault_id: &str, input: &CreateVaultInput) -> Res
         return Err(AppError::bad_request("Invalid params"));
     }
     Ok(())
-}
-
-pub(crate) async fn update_vault(
-    pool: &PgPool,
-    object_storage: &dyn storage::ObjectStorage,
-    user_id: &str,
-    request_client_id: Option<&str>,
-    input: UpdateVaultInput,
-) -> Result<UpdateVaultResponse, AppError> {
-    if let Some(name) = input.name.as_deref() {
-        if name.trim().is_empty() || name.chars().count() > VAULT_NAME_MAX_CHARS {
-            return Err(AppError::bad_request("Invalid params"));
-        }
-    }
-    let Some(current_vault) = query_as::<_, DbManagedVaultRow>(
-		"SELECT v.id, v.name, v.icon, v.image_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
-	)
-	.bind(&input.vault_id)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|error| database_error(error, "Failed to load vault"))?
-	else {
-		return Err(AppError::forbidden("Access denied"));
-	};
-    if !current_vault.role.can_manage() {
-        return Err(AppError::forbidden("Access denied"));
-    }
-
-    let old_image_key = current_vault.image_key.clone();
-    let updated_name = input
-        .name
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or(current_vault.name.as_str())
-        .to_string();
-    let updated_icon = input.icon.clone().unwrap_or(current_vault.icon.clone());
-    let updated_image_key = input
-        .image_key
-        .clone()
-        .unwrap_or(current_vault.image_key.clone());
-
-    let mut transaction = begin_sync_event_transaction(pool)
-        .await
-        .map_err(|error| database_error(error, "Failed to start vault transaction"))?;
-    query("UPDATE vault SET name = $1, icon = $2, image_key = $3, updated_at = $4 WHERE id = $5")
-        .bind(&updated_name)
-        .bind(updated_icon.as_deref())
-        .bind(updated_image_key.as_deref())
-        .bind(OffsetDateTime::now_utc())
-        .bind(&input.vault_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to update vault"))?;
-    insert_vault_updated_sync_event(
-        &mut transaction,
-        &input.vault_id,
-        user_id,
-        input.client_id.as_deref().or(request_client_id),
-    )
-    .await?;
-    insert_vault_updated_audit_log(&mut *transaction, &input.vault_id, user_id).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit vault update"))?;
-    if let Some(old_image_key) = old_image_key {
-        if Some(old_image_key.as_str()) != updated_image_key.as_deref() {
-            let _ = object_storage.delete(&old_image_key).await;
-        }
-    }
-
-    Ok(UpdateVaultResponse {
-        id: input.vault_id,
-        name: updated_name,
-        icon: updated_icon,
-        image_url: updated_image_key
-            .as_deref()
-            .and_then(|key| object_storage.public_url(key)),
-    })
 }
 
 pub(crate) async fn convert_vault_type(
@@ -770,106 +684,6 @@ pub(crate) async fn convert_vault_type(
     })
 }
 
-pub(crate) async fn delete_vault(
-    pool: &PgPool,
-    object_storage: &dyn storage::ObjectStorage,
-    user_id: &str,
-    request_client_id: Option<&str>,
-    input: VaultIdInput,
-) -> Result<SuccessResponse, AppError> {
-    let Some(vault) = query_as::<_, DbVaultDeleteRow>(
-		"SELECT v.id, v.name, v.type::text AS vault_type, v.image_key, v.team_id, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
-	)
-	.bind(&input.vault_id)
-	.bind(user_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|error| database_error(error, "Failed to load vault"))?
-	else {
-		return Err(AppError::forbidden("Only the vault owner can delete the vault"));
-	};
-    if vault.role != VaultRole::Owner {
-        return Err(AppError::forbidden(
-            "Only the vault owner can delete the vault",
-        ));
-    }
-
-    let member_rows = query_as::<_, DbVaultMemberAccessRow>(
-        "SELECT user_id FROM vault_key WHERE vault_id = $1 ORDER BY created_at ASC",
-    )
-    .bind(&input.vault_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| database_error(error, "Failed to load vault members"))?;
-
-    let mut transaction = begin_sync_event_transaction(pool)
-        .await
-        .map_err(|error| database_error(error, "Failed to start vault delete transaction"))?;
-    if let Some(team_id) = vault.team_id.as_deref() {
-        acquire_user_authority_lock(
-            &mut transaction,
-            user_id,
-            "Failed to lock Team Vault deleter authority",
-        )
-        .await?;
-        acquire_team_authority_lock(
-            &mut *transaction,
-            team_id,
-            "Failed to lock Team Vault deletion authority",
-        )
-        .await?;
-    }
-    insert_vault_deleted_sync_event(
-        &mut transaction,
-        &input.vault_id,
-        user_id,
-        request_client_id,
-    )
-    .await?;
-    for member in member_rows {
-        if member.user_id == user_id {
-            continue;
-        }
-        insert_vault_access_revoked_sync_event(
-            &mut transaction,
-            &input.vault_id,
-            &member.user_id,
-            request_client_id,
-        )
-        .await?;
-    }
-    query("DELETE FROM item_attachment WHERE vault_id = $1")
-        .bind(&input.vault_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to delete vault attachments"))?;
-    query("DELETE FROM item WHERE vault_id = $1")
-        .bind(&input.vault_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to delete vault items"))?;
-    query("DELETE FROM vault_key WHERE vault_id = $1")
-        .bind(&input.vault_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to delete vault memberships"))?;
-    query("DELETE FROM vault WHERE id = $1")
-        .bind(&input.vault_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| database_error(error, "Failed to delete vault"))?;
-    insert_vault_deleted_audit_log(&mut *transaction, &input.vault_id, user_id).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| database_error(error, "Failed to commit vault deletion"))?;
-    if let Some(image_key) = vault.image_key {
-        let _ = object_storage.delete(&image_key).await;
-    }
-
-    Ok(SuccessResponse { success: true })
-}
-
 pub(crate) async fn get_vault_stats(
     pool: &PgPool,
     user_id: &str,
@@ -910,6 +724,8 @@ async fn insert_vault(
     team_id: Option<&str>,
     input: &CreateVaultInput,
 ) -> Result<(), AppError> {
+    super::vault_image_cleanup::prepare_change(transaction, None, input.image_key.as_deref())
+        .await?;
     query(
 		"INSERT INTO vault (id, name, type, icon, image_key, created_by_id, team_id, created_at, updated_at) VALUES ($1, $2, $3::vault_type, $4, $5, $6, $7, $8, $8)",
 	)

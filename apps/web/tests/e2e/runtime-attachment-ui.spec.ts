@@ -26,7 +26,14 @@ test("foreground Attachment upload, download, rename and delete use the live Run
 	const bytes = Buffer.from(
 		"Runtime attachment plaintext — retained exactly\n",
 	);
-	await pane.locator('input[type="file"]').setInputFiles({
+	const choosingFile = page.waitForEvent("filechooser");
+	await pane
+		.getByRole("button", {
+			name: uiText("vaults_detail_items_attachments_action_attach_file"),
+			exact: true,
+		})
+		.click();
+	await (await choosingFile).setFiles({
 		name: "original.txt",
 		mimeType: "text/plain",
 		buffer: bytes,

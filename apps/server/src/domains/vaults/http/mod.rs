@@ -173,6 +173,24 @@ struct UpdateVaultBody {
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VaultDeletionBody {}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VaultMetadataUpdateBody {
+    #[serde(default)]
+    #[schema(value_type = Option<String>, nullable = true, max_length = 200)]
+    name: PatchField<String>,
+    #[serde(default)]
+    #[schema(value_type = Option<String>, nullable = true)]
+    icon: PatchField<String>,
+    #[serde(default)]
+    #[schema(value_type = Option<String>, nullable = true)]
+    image_key: PatchField<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ConvertVaultBody {
     target_type: VaultType,
     #[schema(max_length = 65536)]
@@ -419,6 +437,15 @@ struct AttachmentUploadBody {
     file_name: String,
     content_type: String,
     file_size: i32,
+    #[serde(default)]
+    durable_upload: Option<DurableAttachmentUploadBody>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DurableAttachmentUploadBody {
+    attachment_id: String,
+    ciphertext_sha256: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -444,6 +471,15 @@ struct AttachmentUploadResponse {
     attachment_id: String,
     key: String,
     upload_url: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    upload_headers: Vec<AttachmentUploadHeader>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentUploadHeader {
+    name: String,
+    value: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -935,6 +971,8 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(members::available_team_members));
     let ordinary_writes = OpenApiRouter::new()
         .routes(routes!(catalog::create_vault))
+        .routes(routes!(catalog::update_vault_metadata))
+        .routes(routes!(catalog::delete_vault_operation))
         .routes(routes!(catalog::update_vault))
         .routes(routes!(catalog::convert_vault))
         .routes(routes!(catalog::delete_vault))
@@ -1393,7 +1431,7 @@ mod tests {
         let rendered = openapi["paths"].to_string();
         // Counted over `paths` alone: the retained Operation outcome schema carries an
         // `operationId` property of its own, and that is a field name, not a route.
-        assert_eq!(rendered.matches("operationId").count(), 47);
+        assert_eq!(rendered.matches("operationId").count(), 49);
         assert!(rendered.contains("listAllTrashedItems"));
         assert!(rendered.contains("getVaultItemAuthorityPage"));
         assert!(rendered.contains("/items/trashed"));

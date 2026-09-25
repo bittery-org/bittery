@@ -26,6 +26,7 @@ const validators = [
 	"http-transport",
 	"persistence",
 	"platform-storage",
+	"profile-admission",
 	"runtime-protocol",
 	"recovery-control",
 	"transfer-control",
@@ -42,3 +43,33 @@ for (const validator of validators) {
 		}
 	});
 }
+
+test("generated platform storage requests enforce nullable cursor bounds", async () => {
+	const { validatePlatformStorageRequest } = await import(
+		"../generated/platform-storage/validator.js"
+	);
+	const acceptsCursor = (cursor) =>
+		validatePlatformStorageRequest({
+			type: "listKeys",
+			area: "devicePlain",
+			prefix: "bittery:runtime:platform-storage:",
+			cursor,
+		});
+
+	assert.deepEqual(
+		{
+			initial: acceptsCursor(null),
+			nonempty: acceptsCursor("opaque-continuation"),
+			maximum: acceptsCursor("x".repeat(98304)),
+			empty: acceptsCursor(""),
+			oversized: acceptsCursor("x".repeat(98305)),
+		},
+		{
+			initial: true,
+			nonempty: true,
+			maximum: true,
+			empty: false,
+			oversized: false,
+		},
+	);
+});

@@ -16,6 +16,7 @@ import type {
 	RuntimeResponse,
 	RuntimeStatusProjection,
 	StorageRecoveryDiagnostics,
+	VaultExportProjection,
 	WritableVaultCatalogProjection,
 } from "../../generated/runtime-protocol/contract";
 import {
@@ -30,6 +31,17 @@ import {
 	type RuntimeSessionSnapshot,
 } from "./session";
 import type { RuntimeStore, Subscribable } from "./store";
+import {
+	observeVaultExport,
+	type RuntimeVaultExportHandle,
+	type RuntimeVaultExportOptions,
+} from "./vault-export";
+
+export type {
+	RuntimeVaultExportHandle,
+	RuntimeVaultExportOptions,
+} from "./vault-export";
+
 import { RuntimeRequestError, type RuntimeTransport } from "./transport";
 
 export type {
@@ -37,9 +49,14 @@ export type {
 	AuthenticatorItemData,
 	CreateVaultType,
 	CreditCardItemData,
+	DuplicateSourceGuard,
+	EditableItemDraft,
+	EditableLoginItemData,
 	IdentityItemData,
 	ImportItemDraft,
 	ItemDraft,
+	ItemDuplicateGuard,
+	ItemEditGuard,
 	ItemProjection,
 	LoginItemData,
 	OperationProjection,
@@ -49,6 +66,9 @@ export type {
 	PasskeyStatusReason,
 	PasswordHistoryEntry,
 	PhoneNumber,
+	PublicItemDraft,
+	PublicLoginItemData,
+	PublicPasskey,
 	RecoveryBound,
 	SecureNoteItemData,
 	ShareAccessLog,
@@ -57,6 +77,8 @@ export type {
 	StorageRecoveryDiagnostics,
 	TotpAlgorithm,
 	TotpDigits,
+	VaultExportItem,
+	VaultExportProjection,
 	VaultImageSourceInput,
 	WritableVaultCatalogProjection,
 	WritableVaultProjection,
@@ -124,6 +146,14 @@ export type UpdateItemInput = Omit<
 	Extract<RuntimeRequest, { type: "updateItem" }>,
 	"type"
 >;
+export type RemovePasskeyInput = Omit<
+	Extract<RuntimeRequest, { type: "removePasskey" }>,
+	"type"
+>;
+export type DuplicateItemInput = Omit<
+	Extract<RuntimeRequest, { type: "duplicateItem" }>,
+	"type"
+>;
 export type CreateVaultInput = Omit<
 	Extract<RuntimeRequest, { type: "createVault" }>,
 	"type"
@@ -148,6 +178,14 @@ export type MoveItemInput = Omit<
 	Extract<RuntimeRequest, { type: "moveItem" }>,
 	"type"
 >;
+export type PrepareCrossAccountMoveResumeInput = Omit<
+	Extract<RuntimeRequest, { type: "prepareCrossAccountMoveResume" }>,
+	"type"
+>;
+export type CrossAccountMoveResumeGuard = Extract<
+	RuntimeResponse,
+	{ type: "crossAccountMoveResumePrepared" }
+>["guard"];
 export type PermanentlyDeleteItemInput = Omit<
 	Extract<RuntimeRequest, { type: "permanentlyDeleteItem" }>,
 	"type"
@@ -171,6 +209,103 @@ export type RuntimeImportBatchAccepted = Omit<
 export type ListItemShareLinksInput = Omit<
 	Extract<RuntimeRequest, { type: "listItemShareLinks" }>,
 	"type"
+>;
+export type RuntimeTeamPage = Extract<
+	RuntimeResponse,
+	{ type: "teamPage" }
+>["page"];
+export type RuntimeAvailableVaultMembers = Extract<
+	RuntimeResponse,
+	{ type: "availableVaultMembers" }
+>["members"];
+export type RuntimeVaultMembers = Extract<
+	RuntimeResponse,
+	{ type: "vaultMembers" }
+>["members"];
+export type RuntimeVaultMemberAdd = Extract<
+	RuntimeResponse,
+	{ type: "vaultMemberAdded" | "vaultMemberAddUncertain" }
+>;
+export type RuntimeMyTeamInvitations = Extract<
+	RuntimeResponse,
+	{ type: "myTeamInvitations" }
+>["invitations"];
+export type RuntimeMyTeamInvitationAccept = Extract<
+	RuntimeResponse,
+	{
+		type:
+			| "myTeamInvitationAccepted"
+			| "myTeamInvitationAcceptRefreshRequired"
+			| "myTeamInvitationUncertain";
+	}
+>;
+export type RuntimeMyTeamInvitationDecline = Extract<
+	RuntimeResponse,
+	{ type: "myTeamInvitationDeclined" | "myTeamInvitationUncertain" }
+>;
+export type RuntimeInvitationComposer = Extract<
+	RuntimeResponse,
+	{ type: "invitationComposer" }
+>["composer"];
+export type RuntimeInvitationCreation = Extract<
+	RuntimeResponse,
+	{ type: "teamInvitationCreated" | "teamInvitationUncertain" }
+>;
+export type RuntimeInvitationProvision = Extract<
+	RuntimeResponse,
+	{
+		type:
+			| "teamInvitationProvisioned"
+			| "teamInvitationProvisioningNotRequired"
+			| "teamInvitationUncertain";
+	}
+>;
+export type RuntimeInvitationCancel = Extract<
+	RuntimeResponse,
+	{ type: "teamInvitationCancelled" | "teamInvitationAdminUncertain" }
+>;
+export type RuntimeInvitationResend = Extract<
+	RuntimeResponse,
+	{ type: "teamInvitationResent" | "teamInvitationAdminUncertain" }
+>;
+export type RuntimeRotationPreparation = Extract<
+	RuntimeResponse,
+	{
+		type:
+			| "rotationPrepared"
+			| "rotationStartPending"
+			| "rotationStartRejected"
+			| "rotationPreparationRequiresCrypto";
+	}
+>;
+export type RuntimeRotationInspection = Extract<
+	RuntimeResponse,
+	{
+		type:
+			| "rotationPrepared"
+			| "rotationStartPending"
+			| "rotationStartRejected"
+			| "rotationPreparationRequiresCrypto"
+			| "rotationAttemptConsumed"
+			| "rotationFinalizePending"
+			| "rotationRefreshRequired"
+			| "rotationCompleted"
+			| "rotationRejected";
+	}
+>;
+export type RuntimeRotationCompletion = Extract<
+	RuntimeRotationInspection,
+	{
+		type:
+			| "rotationFinalizePending"
+			| "rotationRefreshRequired"
+			| "rotationCompleted"
+			| "rotationRejected";
+	}
+>;
+export type RuntimeTeamLeaveAttempts = Extract<
+	RuntimeResponse,
+	{ type: "teamLeaveAttempts" }
 >;
 export type RuntimeItemShareLinks = Omit<
 	Extract<RuntimeResponse, { type: "itemShareLinks" }>,
@@ -260,6 +395,136 @@ export interface RuntimeCallOptions {
 }
 
 export interface RuntimeClient {
+	listAvailableVaultMembers(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "listAvailableVaultMembers" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAvailableVaultMembers>;
+	listVaultMembers(
+		input: Omit<Extract<RuntimeRequest, { type: "listVaultMembers" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeVaultMembers>;
+	addVaultMember(
+		input: Omit<Extract<RuntimeRequest, { type: "addVaultMember" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeVaultMemberAdd>;
+	prepareRotation(
+		input: Omit<Extract<RuntimeRequest, { type: "prepareRotation" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeRotationPreparation>;
+	completeRotation(
+		input: Omit<Extract<RuntimeRequest, { type: "completeRotation" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeRotationCompletion>;
+	inspectRotation(
+		input: Omit<Extract<RuntimeRequest, { type: "inspectRotation" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeRotationInspection>;
+	listTeamLeaveAttempts(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "listTeamLeaveAttempts" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeTeamLeaveAttempts["attempts"]>;
+	acknowledgeTeamLeaveAttempt(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "acknowledgeTeamLeaveAttempt" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<void>;
+	listMyTeamInvitations(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "listMyTeamInvitations" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeMyTeamInvitations>;
+	acceptMyTeamInvitation(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "acceptMyTeamInvitation" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeMyTeamInvitationAccept>;
+	declineMyTeamInvitation(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "declineMyTeamInvitation" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeMyTeamInvitationDecline>;
+	readInvitationComposer(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "readInvitationComposer" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeInvitationComposer>;
+	createTeamInvitation(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "createTeamInvitation" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeInvitationCreation>;
+	provisionTeamInvitation(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "provisionTeamInvitation" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeInvitationProvision>;
+	cancelTeamInvitation(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "cancelTeamInvitation" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeInvitationCancel>;
+	resendTeamInvitation(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "resendTeamInvitation" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeInvitationResend>;
+	releaseInvitationContinuation(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "releaseInvitationContinuation" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<void>;
+	readTeamPage(
+		input: Omit<Extract<RuntimeRequest, { type: "readTeamPage" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeTeamPage>;
+	recipientKeyScope(
+		input: Omit<Extract<RuntimeRequest, { type: "recipientKeyScope" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<Extract<RuntimeResponse, { type: "recipientKeyScope" }>>;
+	ownKeyFingerprint(
+		input: Omit<Extract<RuntimeRequest, { type: "ownKeyFingerprint" }>, "type">,
+		options?: RuntimeCallOptions,
+	): Promise<Extract<RuntimeResponse, { type: "ownKeyFingerprint" }>>;
+	verifyRecipientKey(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "verifyRecipientKey" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<Extract<RuntimeResponse, { type: "recipientKeyVerified" }>>;
+	verifiedRecipientKey(
+		input: Omit<
+			Extract<RuntimeRequest, { type: "verifiedRecipientKey" }>,
+			"type"
+		>,
+		options?: RuntimeCallOptions,
+	): Promise<Extract<RuntimeResponse, { type: "verifiedRecipientKey" }>>;
 	rebootstrapAccountRecovery(
 		input: Omit<
 			Extract<RuntimeRequest, { type: "rebootstrapAccountRecovery" }>,
@@ -341,6 +606,14 @@ export interface RuntimeClient {
 		input: UpdateItemInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeAccepted>;
+	removePasskey(
+		input: RemovePasskeyInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	duplicateItem(
+		input: DuplicateItemInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
 	setItemFavorite(
 		input: SetItemFavoriteInput,
 		options?: RuntimeCallOptions,
@@ -355,6 +628,14 @@ export interface RuntimeClient {
 	): Promise<RuntimeAccepted>;
 	moveItem(
 		input: MoveItemInput,
+		options?: RuntimeCallOptions,
+	): Promise<RuntimeAccepted>;
+	prepareCrossAccountMoveResume(
+		input: PrepareCrossAccountMoveResumeInput,
+		options?: RuntimeCallOptions,
+	): Promise<CrossAccountMoveResumeGuard>;
+	resumeCrossAccountMove(
+		guard: CrossAccountMoveResumeGuard,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeAccepted>;
 	permanentlyDeleteItem(
@@ -405,6 +686,11 @@ export interface RuntimeClient {
 		input: AcknowledgeShareResultInput,
 		options?: RuntimeCallOptions,
 	): Promise<RuntimeShareResultAcknowledged>;
+	observeVaultExport(
+		input: { accountId: string; vaultIds: string[] },
+		listener: (snapshot: VaultExportProjection) => void,
+		options: RuntimeVaultExportOptions,
+	): Promise<RuntimeVaultExportHandle>;
 	/** The Items observation for one Account. The same Account returns the same store. */
 	items(accountId: string): RuntimeStore<ItemsProjection>;
 	operations(accountId: string): RuntimeStore<OperationsProjection>;
@@ -460,7 +746,7 @@ export function createRuntimeClient(
 
 	async function call<Variant extends RuntimeResponse["type"]>(
 		request: RuntimeRequest,
-		expected: Variant,
+		expected: Variant | readonly Variant[],
 		callOptions: RuntimeCallOptions | undefined,
 	): Promise<Extract<RuntimeResponse, { type: Variant }>> {
 		requests += 1;
@@ -470,7 +756,11 @@ export function createRuntimeClient(
 			callOptions,
 		);
 		const response = decodeOutcome(responseJson);
-		if (response.type !== expected) {
+		if (
+			typeof expected === "string"
+				? response.type !== expected
+				: !expected.includes(response.type as Variant)
+		) {
 			throw new RuntimeRequestError(
 				"INVARIANT_VIOLATION",
 				`The Runtime answered ${request.type} with ${response.type}`,
@@ -480,6 +770,183 @@ export function createRuntimeClient(
 	}
 
 	return {
+		listAvailableVaultMembers: async (input, options) =>
+			(
+				await call(
+					{ type: "listAvailableVaultMembers", ...input },
+					"availableVaultMembers",
+					options,
+				)
+			).members,
+		listVaultMembers: async (input, options) =>
+			(
+				await call(
+					{ type: "listVaultMembers", ...input },
+					"vaultMembers",
+					options,
+				)
+			).members,
+		addVaultMember: (input, options) =>
+			call(
+				{ type: "addVaultMember", ...input },
+				["vaultMemberAdded", "vaultMemberAddUncertain"] as const,
+				options,
+			),
+		prepareRotation: (input, options) =>
+			call(
+				{ type: "prepareRotation", ...input },
+				[
+					"rotationPrepared",
+					"rotationStartPending",
+					"rotationStartRejected",
+					"rotationPreparationRequiresCrypto",
+				] as const,
+				options,
+			),
+		completeRotation: (input, options) =>
+			call(
+				{ type: "completeRotation", ...input },
+				[
+					"rotationFinalizePending",
+					"rotationRefreshRequired",
+					"rotationCompleted",
+					"rotationRejected",
+				] as const,
+				options,
+			),
+		inspectRotation: (input, options) =>
+			call(
+				{ type: "inspectRotation", ...input },
+				[
+					"rotationPrepared",
+					"rotationStartPending",
+					"rotationStartRejected",
+					"rotationPreparationRequiresCrypto",
+					"rotationAttemptConsumed",
+					"rotationFinalizePending",
+					"rotationRefreshRequired",
+					"rotationCompleted",
+					"rotationRejected",
+				] as const,
+				options,
+			),
+		listTeamLeaveAttempts: (input, options) =>
+			call(
+				{ type: "listTeamLeaveAttempts", ...input },
+				"teamLeaveAttempts",
+				options,
+			).then((answer) => answer.attempts),
+		acknowledgeTeamLeaveAttempt: async (input, options) => {
+			await call(
+				{ type: "acknowledgeTeamLeaveAttempt", ...input },
+				"teamLeaveAttemptAcknowledged",
+				options,
+			);
+		},
+		listMyTeamInvitations: async (input, options) =>
+			(
+				await call(
+					{ type: "listMyTeamInvitations", ...input },
+					"myTeamInvitations",
+					options,
+				)
+			).invitations,
+		acceptMyTeamInvitation: (input, options) =>
+			call(
+				{ type: "acceptMyTeamInvitation", ...input },
+				[
+					"myTeamInvitationAccepted",
+					"myTeamInvitationAcceptRefreshRequired",
+					"myTeamInvitationUncertain",
+				] as const,
+				options,
+			),
+		declineMyTeamInvitation: (input, options) =>
+			call(
+				{ type: "declineMyTeamInvitation", ...input },
+				["myTeamInvitationDeclined", "myTeamInvitationUncertain"] as const,
+				options,
+			),
+		readInvitationComposer: async (input, options) =>
+			(
+				await call(
+					{ type: "readInvitationComposer", ...input },
+					"invitationComposer",
+					options,
+				)
+			).composer,
+		createTeamInvitation: (input, options) =>
+			call(
+				{ type: "createTeamInvitation", ...input },
+				["teamInvitationCreated", "teamInvitationUncertain"] as const,
+				options,
+			),
+		provisionTeamInvitation: (input, options) =>
+			call(
+				{ type: "provisionTeamInvitation", ...input },
+				[
+					"teamInvitationProvisioned",
+					"teamInvitationProvisioningNotRequired",
+					"teamInvitationUncertain",
+				] as const,
+				options,
+			),
+		cancelTeamInvitation: (input, options) =>
+			call(
+				{ type: "cancelTeamInvitation", ...input },
+				["teamInvitationCancelled", "teamInvitationAdminUncertain"] as const,
+				options,
+			),
+		resendTeamInvitation: (input, options) =>
+			call(
+				{ type: "resendTeamInvitation", ...input },
+				["teamInvitationResent", "teamInvitationAdminUncertain"] as const,
+				options,
+			),
+		releaseInvitationContinuation: async (input, options) => {
+			await call(
+				{ type: "releaseInvitationContinuation", ...input },
+				"invitationContinuationReleased",
+				options,
+			);
+		},
+		readTeamPage: async (input, options) =>
+			(await call({ type: "readTeamPage", ...input }, "teamPage", options))
+				.page,
+		ownKeyFingerprint: (input, options) =>
+			call(
+				{ type: "ownKeyFingerprint", ...input },
+				"ownKeyFingerprint",
+				options,
+			),
+		recipientKeyScope: (input, options) =>
+			call(
+				{ type: "recipientKeyScope", ...input },
+				"recipientKeyScope",
+				options,
+			),
+		verifyRecipientKey: (input, options) =>
+			call(
+				{ type: "verifyRecipientKey", ...input },
+				"recipientKeyVerified",
+				options,
+			),
+		verifiedRecipientKey: (input, options) =>
+			call(
+				{ type: "verifiedRecipientKey", ...input },
+				"verifiedRecipientKey",
+				options,
+			),
+		observeVaultExport(input, listener, captureOptions) {
+			requests += 1;
+			return observeVaultExport(
+				transport,
+				`${prefix}-export-${requests}`,
+				input,
+				listener,
+				captureOptions,
+			);
+		},
 		async rebootstrapAccountRecovery(input, callOptions) {
 			const { type: _, ...result } = await call(
 				{ type: "rebootstrapAccountRecovery", ...input },
@@ -590,6 +1057,24 @@ export function createRuntimeClient(
 				await call({ type: "updateItem", ...input }, "accepted", callOptions),
 			);
 		},
+		async removePasskey(input, callOptions) {
+			return accepted(
+				await call(
+					{ type: "removePasskey", ...input },
+					"accepted",
+					callOptions,
+				),
+			);
+		},
+		async duplicateItem(input, callOptions) {
+			return accepted(
+				await call(
+					{ type: "duplicateItem", ...input },
+					"accepted",
+					callOptions,
+				),
+			);
+		},
 		async setItemFavorite(input, callOptions) {
 			return accepted(
 				await call(
@@ -612,6 +1097,23 @@ export function createRuntimeClient(
 		async moveItem(input, callOptions) {
 			return accepted(
 				await call({ type: "moveItem", ...input }, "accepted", callOptions),
+			);
+		},
+		async prepareCrossAccountMoveResume(input, callOptions) {
+			const { guard } = await call(
+				{ type: "prepareCrossAccountMoveResume", ...input },
+				"crossAccountMoveResumePrepared",
+				callOptions,
+			);
+			return guard;
+		},
+		async resumeCrossAccountMove(guard, callOptions) {
+			return accepted(
+				await call(
+					{ type: "resumeCrossAccountMove", guard },
+					"accepted",
+					callOptions,
+				),
 			);
 		},
 		async permanentlyDeleteItem(input, callOptions) {
@@ -778,6 +1280,7 @@ export function decodeOutcome(responseJson: string): RuntimeResponse {
 			outcome.value.code,
 			outcome.value.message,
 			outcome.value.recoveryBound ?? undefined,
+			outcome.value.teamPageProblem ?? undefined,
 		);
 	}
 	return outcome.value;

@@ -25,6 +25,11 @@ import type {
 	KeychainDeleteArgs,
 	KeychainGetArgs,
 	KeychainSetArgs,
+	RuntimeBridgeAttachment,
+	RuntimeBridgeCallArgs,
+	RuntimeBridgeCancelArgs,
+	RuntimeBridgeConnectionArgs,
+	RuntimeBridgeMessage,
 	SetUiThemeArgs,
 } from "@/generated/tauri-commands";
 
@@ -87,4 +92,57 @@ export async function broadcastActiveAccountChanged(
  */
 export async function setUiTheme(args: SetUiThemeArgs): Promise<void> {
 	await invoke<null>("set_ui_theme", args);
+}
+
+/** Inactive until the native Runtime plugin is registered by the Desktop cutover. */
+export async function runtimeAttach(): Promise<RuntimeBridgeAttachment> {
+	return invoke<RuntimeBridgeAttachment>(
+		"plugin:client-runtime|runtime_attach",
+		{},
+	);
+}
+
+/** Resolves once the native connection has synchronously admitted the request. */
+export async function runtimeRequest(
+	args: RuntimeBridgeCallArgs,
+): Promise<void> {
+	await invoke<null>("plugin:client-runtime|runtime_request", args);
+}
+
+export async function runtimeObserve(
+	args: RuntimeBridgeCallArgs,
+): Promise<void> {
+	await invoke<null>("plugin:client-runtime|runtime_observe", args);
+}
+
+export async function runtimeCancel(
+	args: RuntimeBridgeCancelArgs,
+): Promise<void> {
+	await invoke<null>("plugin:client-runtime|runtime_cancel", args);
+}
+
+export async function runtimeUnobserve(
+	args: RuntimeBridgeCancelArgs,
+): Promise<void> {
+	await invoke<null>("plugin:client-runtime|runtime_unobserve", args);
+}
+
+export async function runtimeDetach(
+	args: RuntimeBridgeConnectionArgs,
+): Promise<void> {
+	await invoke<null>("plugin:client-runtime|runtime_detach", args);
+}
+
+/** Native messages target only this Webview, never the application's global event target. */
+export async function listenRuntimeBridge(
+	eventName: string,
+	listener: (message: RuntimeBridgeMessage) => void,
+): Promise<() => void> {
+	const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+	return getCurrentWebview().listen<RuntimeBridgeMessage>(
+		eventName,
+		(event) => {
+			listener(event.payload);
+		},
+	);
 }

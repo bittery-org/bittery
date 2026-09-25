@@ -307,6 +307,7 @@ async fn runtime_with_accepted_preparation(account: &str) -> (Arc<Runtime>, Repl
         )
         .unwrap();
     let mut preparation = AttachmentMovePreparationRecord {
+        accepted_item_category: None,
         account_id: account_id.clone(),
         operation_id: "accepted-op".into(),
         item_id: "item-accepted".into(),
@@ -413,6 +414,7 @@ async fn add_accepted_preparation_account(
         )
         .unwrap();
     let mut preparation = AttachmentMovePreparationRecord {
+        accepted_item_category: None,
         account_id: account_id.clone(),
         operation_id: "accepted-op".into(),
         item_id: "item-accepted".into(),
@@ -477,10 +479,16 @@ async fn exclusive_account_lifecycle_sweeps_before_it_drives_preparation_and_rel
         lose_lease: None,
     });
     let (lifecycle, scheduler, _) = lifecycle_fixture(lease.clone(), store, Arc::clone(&events));
-    let (runtime, snapshot) = runtime_with_account("account-a").await;
+    let (runtime, snapshot) = runtime_with_accepted_preparation("account-a").await;
 
     let pass = lifecycle
-        .run_account(&runtime, &scheduler, &snapshot, Some("op-a".into()), 0)
+        .run_account(
+            &runtime,
+            &scheduler,
+            &snapshot,
+            Some("accepted-op".into()),
+            0,
+        )
         .await
         .unwrap();
 
@@ -803,8 +811,8 @@ async fn two_runtime_instances_sharing_the_host_port_never_own_one_account_toget
         first_driver.clone(),
     ));
     let second_scheduler = AttachmentMovePreparationScheduler::new_for_test(second_driver.clone());
-    let (first_runtime, first_snapshot) = runtime_with_account("shared").await;
-    let (second_runtime, second_snapshot) = runtime_with_account("shared").await;
+    let (first_runtime, first_snapshot) = runtime_with_accepted_preparation("shared").await;
+    let (second_runtime, second_snapshot) = runtime_with_accepted_preparation("shared").await;
     let first = tokio::spawn({
         let lifecycle = first_lifecycle;
         let scheduler = first_scheduler;
@@ -814,7 +822,7 @@ async fn two_runtime_instances_sharing_the_host_port_never_own_one_account_toget
                     &first_runtime,
                     &scheduler,
                     &first_snapshot,
-                    Some("op-first".into()),
+                    Some("accepted-op".into()),
                     0,
                 )
                 .await
@@ -828,7 +836,7 @@ async fn two_runtime_instances_sharing_the_host_port_never_own_one_account_toget
                 &second_runtime,
                 &second_scheduler,
                 &second_snapshot,
-                Some("op-second".into()),
+                Some("accepted-op".into()),
                 0,
             )
             .await
@@ -1118,6 +1126,7 @@ fn synthetic_preparation(
     let artifact =
         attachment_move_artifact_ref(account, operation, attachment, &digest, 1).unwrap();
     AttachmentMovePreparationRecord {
+        accepted_item_category: None,
         account_id: account.clone(),
         operation_id: operation.into(),
         item_id: format!("item-{operation}"),
@@ -1162,10 +1171,182 @@ fn synthetic_snapshot(
         lock_epoch: 0,
         items: vec![],
         operations,
+        cross_account_moves: Vec::new(),
         share_capabilities: vec![],
         attachment_move_preparations: preparations,
         receipts: vec![],
+        rotation_attempts: vec![],
         failure: None,
         bootstrap: BootstrapAuthority::default(),
     }
+}
+
+#[tokio::test]
+async fn selective_vault_retirement_cancels_either_move_endpoint_and_preserves_accepted_work() {
+    for endpoint in ["source", "destination"] {
+        let lease = Arc::new(ExclusiveLeasePort::default());
+        let store = Arc::new(RecordingStore {
+            events: Arc::new(Mutex::new(Vec::new())),
+            requests: Mutex::new(Vec::new()),
+            failures: AtomicUsize::new(0),
+            lose_lease: None,
+        });
+        let lifecycle = Arc::new(AttachmentMoveLifecycle::new(lease.clone(), store));
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let completed_write = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let scheduler = Arc::new(AttachmentMovePreparationScheduler::new_for_test(Arc::new(
+            BlockingDriver {
+                entered: entered.clone(),
+                release: release.clone(),
+                completed_write: completed_write.clone(),
+                cancelled: cancelled.clone(),
+            },
+        )));
+        let (runtime, snapshot) = runtime_with_accepted_preparation("selective-move").await;
+        let target = if endpoint == "source" {
+            snapshot.attachment_move_preparations[0]
+                .source_vault_id
+                .clone()
+        } else {
+            snapshot.attachment_move_preparations[0]
+                .target_vault_id
+                .clone()
+        };
+        let task = tokio::spawn({
+            let runtime = runtime.clone();
+            let snapshot = snapshot.clone();
+            async move {
+                lifecycle
+                    .run_account(
+                        &runtime,
+                        &scheduler,
+                        &snapshot,
+                        Some("accepted-op".into()),
+                        0,
+                    )
+                    .await
+            }
+        });
+        entered.notified().await;
+        let unrelated = runtime
+            .foreground_attachments
+            .begin_vault_retirement(
+                &snapshot.account_id,
+                &snapshot.incarnation,
+                &["unrelated-visible-vault".into()],
+                super::foreground_attachment_lifecycle::VaultRetirementProof::DurableJournal {
+                    revision: snapshot.revision,
+                },
+            )
+            .unwrap();
+        unrelated.drain().await;
+        assert!(
+            !task.is_finished(),
+            "another Vault retirement cannot cancel this accepted Move"
+        );
+        let retirement = runtime
+            .foreground_attachments
+            .begin_vault_retirement(
+                &snapshot.account_id,
+                &snapshot.incarnation,
+                &[target],
+                super::foreground_attachment_lifecycle::VaultRetirementProof::DurableJournal {
+                    revision: snapshot.revision,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            LifecyclePass::GenerationRetired
+        );
+        retirement.drain().await;
+        release.notify_waiters();
+        assert!(cancelled.load(Ordering::SeqCst));
+        assert!(!completed_write.load(Ordering::SeqCst));
+        assert_eq!(lease.releases.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            runtime.replica.snapshot(&snapshot.account_id).unwrap(),
+            snapshot,
+            "capability retirement does not delete accepted work or artifacts"
+        );
+    }
+}
+
+#[tokio::test]
+async fn selected_vault_sweep_carries_exact_pending_recovery_scope_and_refuses_missing_port() {
+    struct SelectedStore(Mutex<Vec<AttachmentArtifactStoreRequest>>);
+    #[async_trait]
+    impl AttachmentArtifactStore for SelectedStore {
+        async fn invoke(
+            &self,
+            request: AttachmentArtifactStoreRequest,
+        ) -> Result<AttachmentArtifactStoreResponse, RuntimeError> {
+            assert!(matches!(
+                &request,
+                AttachmentArtifactStoreRequest::SweepOperationOrphans { .. }
+            ));
+            self.0.lock().unwrap().push(request);
+            Ok(AttachmentArtifactStoreResponse::OrphansSwept { deleted: 0 })
+        }
+    }
+    let (runtime, snapshot) = runtime_with_accepted_preparation("selected-sweep").await;
+    let ids = vec!["source".into()];
+    *runtime.attachment_move_lifecycle.lock().unwrap() = None;
+    assert_eq!(
+        runtime
+            .sweep_retired_move_artifacts(&snapshot, &ids)
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::StorageUnavailable
+    );
+    let store = Arc::new(SelectedStore(Mutex::new(Vec::new())));
+    *runtime.attachment_move_lifecycle.lock().unwrap() = Some(Arc::new(
+        AttachmentMoveLifecycle::new(Arc::new(ExclusiveLeasePort::default()), store.clone()),
+    ));
+    runtime
+        .sweep_retired_move_artifacts(&snapshot, &ids)
+        .await
+        .unwrap();
+    runtime
+        .sweep_retired_move_artifacts(&snapshot, &["unrelated".into()])
+        .await
+        .unwrap();
+    let mut stale = snapshot.clone();
+    stale.revision += 1;
+    assert_eq!(
+        runtime
+            .sweep_retired_move_artifacts(&stale, &ids)
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::Cancelled
+    );
+    let requests = store.0.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let AttachmentArtifactStoreRequest::SweepOperationOrphans {
+        account_id,
+        operation_ids,
+        live,
+        pending,
+    } = &requests[0]
+    else {
+        panic!("selected sweep");
+    };
+    assert_eq!(account_id, &snapshot.account_id);
+    assert_eq!(operation_ids, &["accepted-op"]);
+    assert!(live.is_empty());
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].operation_id(), "accepted-op");
+    assert_eq!(pending[0].attachment_id(), "attachment-accepted");
+    assert_eq!(
+        runtime.replica.snapshot(&snapshot.account_id).unwrap(),
+        snapshot
+    );
 }

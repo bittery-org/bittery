@@ -9,11 +9,11 @@
 use super::bootstrap::authority_item_from_dto;
 use super::*;
 use crate::{
-    auth_http::AuthenticatedOutcome,
+    auth_http::{AuthenticatedOutcome, CurrentAuthority},
     platform_storage::CurrentSessionDocument,
     replica::{
         AuthorityAttachmentRecord, AuthorityItemRecord, CursorAdvance, ObservedOutcome,
-        OperationKind, OperationOutcomeResult, OperationRejectionCode,
+        OperationKind, OperationOutcomeResult, OperationRejectionCode, PlanResult,
     },
     server_contract::{
         CreateShareOperationRejectionCode as WireShareRejectionCode,
@@ -263,8 +263,8 @@ impl Runtime {
 
     /// Completes one Operation against its authoritative outcome.
     ///
-    /// For an applied create the authoritative Item is fetched first, outside any transaction,
-    /// and only then does one plan write authority, remove the Operation and its overlay, and
+    /// For an applied Item outcome current authority (or explicit absence) is fetched first,
+    /// outside any transaction. One plan then reconciles authority, removes its Operation/overlay, and
     /// insert the compact receipt. Bootstrap advances terminal page progress separately after
     /// every event succeeds. A fetch or commit failure leaves every semantic fact unchanged.
     #[allow(
@@ -280,15 +280,18 @@ impl Runtime {
         session: &mut CurrentSessionDocument,
         cursor: Option<CursorAdvance>,
     ) -> CompletionResult {
+        let Ok(execution_lock) = self.account_execution_lock(account_id) else {
+            return CompletionResult::Retry;
+        };
+        let _execution_guard = execution_lock.lock().await;
         let mut auth_budget = OutcomeResolutionAuthBudget::default();
-        self.complete_operation_with_fence(
+        self.complete_operation_fenced_with_auth_budget(
             account_id,
             operation,
             outcome,
             http,
             session,
             cursor,
-            false,
             &mut auth_budget,
         )
         .await
@@ -296,7 +299,7 @@ impl Runtime {
 
     #[allow(
         clippy::too_many_arguments,
-        reason = "the caller-held fence and attempt-wide authentication budget preserve one completion path"
+        reason = "one captured completion scope and authentication budget span dispatch and Sync"
     )]
     pub(super) async fn complete_operation_fenced_with_auth_budget(
         &self,
@@ -308,140 +311,163 @@ impl Runtime {
         cursor: Option<CursorAdvance>,
         auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
-        self.complete_operation_with_fence(
-            account_id,
-            operation,
-            outcome,
-            http,
-            session,
-            cursor,
-            true,
-            auth_budget,
-        )
-        .await
-    }
-
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fence mode preserves one reconciliation path for dispatch and Sync"
-    )]
-    async fn complete_operation_with_fence(
-        &self,
-        account_id: &AccountId,
-        operation: &OperationRecord,
-        outcome: ObservedOutcome,
-        http: &AuthHttpClient<'_>,
-        session: &mut CurrentSessionDocument,
-        cursor: Option<CursorAdvance>,
-        fence_already_held: bool,
-        auth_budget: &mut OutcomeResolutionAuthBudget,
-    ) -> CompletionResult {
-        let observed = outcome.clone();
-        if !outcome_matches_operation_shape(operation, &outcome.result) {
-            return if fence_already_held {
-                self.fail_account_module_fenced(account_id).await
+        let Some(captured) = self.replica.snapshot(account_id) else {
+            return CompletionResult::Retry;
+        };
+        if !self.completion_scope_is_current(&captured) {
+            return CompletionResult::Retry;
+        }
+        if let Some(receipt) = captured
+            .receipts
+            .iter()
+            .find(|receipt| receipt.operation_id == outcome.operation_id)
+        {
+            return if receipt.kind == operation.kind
+                && receipt.target == operation.target
+                && receipt.request_fingerprint == outcome.request_fingerprint
+                && outcome_matches_receipt(&receipt.result, &outcome.result)
+            {
+                CompletionResult::Completed
             } else {
-                self.fail_account_module(account_id).await
+                self.fail_account_module_at_snapshot(&captured).await
             };
         }
-        let expected_category = self.replica.snapshot(account_id).and_then(|snapshot| {
-            snapshot
-                .items
-                .iter()
-                .find(|item| item.operation_id == operation.operation_id)
-                .map(|item| item.category.clone())
-        });
+        if !outcome_matches_operation_shape(operation, &outcome.result) {
+            return self.fail_account_module_at_snapshot(&captured).await;
+        }
+        let expected_category = captured
+            .operations
+            .iter()
+            .find(|accepted| {
+                accepted.operation_id == operation.operation_id
+                    && accepted.kind == operation.kind
+                    && accepted.request_fingerprint == operation.request_fingerprint
+            })
+            .and_then(|accepted| accepted.accepted_item_category.clone())
+            .or_else(|| {
+                captured
+                    .items
+                    .iter()
+                    .find(|item| item.operation_id == operation.operation_id)
+                    .map(|item| item.category.clone())
+            });
         let mutation = match &outcome.result {
+            OperationOutcomeResult::RotationStartApplied { plans } => {
+                let intent = match &operation.target {
+                    crate::replica::ResourceRef::Team { team_id }
+                        if operation.kind == OperationKind::CreateTeamLeaveRotationPlans =>
+                    {
+                        crate::replica::RotationIntent::TeamLeave {
+                            team_id: team_id.clone(),
+                        }
+                    }
+                    _ => return self.fail_account_module_at_snapshot(&captured).await,
+                };
+                PlanMutation::ReconcileRotationStart {
+                    outcome: outcome.clone(),
+                    intent,
+                    validated_plans: plans.clone(),
+                }
+            }
+            OperationOutcomeResult::RotationStartRejected { .. } => {
+                let intent = match &operation.target {
+                    crate::replica::ResourceRef::Team { team_id }
+                        if operation.kind == OperationKind::CreateTeamLeaveRotationPlans =>
+                    {
+                        crate::replica::RotationIntent::TeamLeave {
+                            team_id: team_id.clone(),
+                        }
+                    }
+                    _ => return self.fail_account_module_at_snapshot(&captured).await,
+                };
+                PlanMutation::ReconcileRotationStart {
+                    outcome: outcome.clone(),
+                    intent,
+                    validated_plans: Vec::new(),
+                }
+            }
+            OperationOutcomeResult::RotationStartAppliedReceipt { .. } => {
+                return self.fail_account_module_at_snapshot(&captured).await;
+            }
+            OperationOutcomeResult::RotationFinalizeApplied { .. }
+            | OperationOutcomeResult::RotationFinalizeRejected { .. } => {
+                let Some(attempt) = captured.rotation_attempts.iter().find(|attempt| {
+                    matches!(&attempt.phase,
+                        crate::replica::RotationAttemptPhase::Finalizing { finalize_operation_id, .. }
+                            if finalize_operation_id == &operation.operation_id)
+                }) else {
+                    return self.fail_account_module_at_snapshot(&captured).await;
+                };
+                PlanMutation::ReconcileRotationFinalize {
+                    start_operation_id: attempt.start_operation_id.clone(),
+                    outcome,
+                }
+            }
             OperationOutcomeResult::Applied { entity_id, version } => {
-                if operation.kind != OperationKind::CreateItem {
-                    let mut item = match self
-                        .fetch_authoritative_item(account_id, entity_id, http, session, auth_budget)
-                        .await
-                    {
-                        Ok(item) => item,
-                        Err(result) => return result,
-                    };
-                    if operation.kind == OperationKind::MoveItem {
-                        let Some(authority) = item.as_mut() else {
-                            return self
-                                .fail_account_module_for_fence(account_id, fence_already_held)
-                                .await;
-                        };
-                        let attachments = match self
-                            .fetch_authoritative_attachments(
-                                account_id,
-                                entity_id,
-                                authority,
-                                http,
-                                session,
-                                auth_budget,
-                                fence_already_held,
-                            )
-                            .await
+                let item = match self
+                    .fetch_authoritative_item(account_id, entity_id, http, session, auth_budget)
+                    .await
+                {
+                    Ok(item) => item,
+                    Err(result) => return result,
+                };
+                match item {
+                    // Neither current absence nor access refusal changes the retained result or
+                    // installs authority. The existing refresh establishes current visibility.
+                    CurrentAuthority::Absent | CurrentAuthority::Unavailable => {
+                        PlanMutation::ReconcileRetainedResult { outcome }
+                    }
+                    CurrentAuthority::Present(mut item) => {
+                        if operation.kind == OperationKind::PermanentlyDeleteItem
+                            || item.id != operation.item_id()
+                            || item.version < *version
+                            || expected_category.as_ref() != Some(&item.category)
                         {
-                            Ok(attachments) => attachments,
-                            Err(result) => return result,
-                        };
-                        if attachments.iter().any(|attachment| {
-                            attachment.item_id != authority.id
-                                || attachment.vault_id != authority.vault_id
-                        }) {
-                            return self
-                                .fail_account_module_for_fence(account_id, fence_already_held)
-                                .await;
+                            return self.fail_account_module_at_snapshot(&captured).await;
                         }
-                        authority.attachments = attachments;
-                    }
-                    let valid = match (&item, operation.kind) {
-                        (None, OperationKind::PermanentlyDeleteItem) => true,
-                        (Some(item), kind) if kind != OperationKind::PermanentlyDeleteItem => {
-                            item.id == operation.item_id()
-                                && item.vault_id == operation.vault_id()
-                                && item.version == *version
-                                && expected_category.as_ref() == Some(&item.category)
-                                && self.validate_authoritative_item(account_id, item).is_ok()
+                        let current_visible =
+                            self.current_item_authority_is_visible(&captured, &item);
+                        if !current_visible {
+                            PlanMutation::ReconcileRetainedResult { outcome }
+                        } else {
+                            if operation.kind == OperationKind::MoveItem {
+                                let attachments = match self
+                                    .fetch_authoritative_attachments(
+                                        account_id,
+                                        entity_id,
+                                        &item,
+                                        http,
+                                        session,
+                                        auth_budget,
+                                        &captured,
+                                    )
+                                    .await
+                                {
+                                    Ok(attachments) => attachments,
+                                    Err(result) => return result,
+                                };
+                                item.attachments = attachments;
+                            }
+                            if let Err(result) = self
+                                .validate_outcome_authority(account_id, &item, &captured)
+                                .await
+                            {
+                                return result;
+                            }
+                            if operation.kind == OperationKind::CreateItem {
+                                PlanMutation::ReconcileAppliedCreate {
+                                    outcome,
+                                    item: Box::new(item),
+                                    cursor,
+                                }
+                            } else {
+                                PlanMutation::ReconcileItemMutation {
+                                    outcome,
+                                    item: Some(Box::new(item)),
+                                    cursor,
+                                }
+                            }
                         }
-                        _ => false,
-                    };
-                    if !valid {
-                        return if fence_already_held {
-                            self.fail_account_module_fenced(account_id).await
-                        } else {
-                            self.fail_account_module(account_id).await
-                        };
-                    }
-                    PlanMutation::ReconcileItemMutation {
-                        outcome,
-                        item: item.map(Box::new),
-                        cursor,
-                    }
-                } else {
-                    let item = match self
-                        .fetch_authoritative_item(account_id, entity_id, http, session, auth_budget)
-                        .await
-                    {
-                        Ok(Some(item)) => item,
-                        Ok(None) => return CompletionResult::Retry,
-                        Err(result) => return result,
-                    };
-                    if item.id != operation.item_id()
-                        || item.vault_id != operation.vault_id()
-                        || item.version != *version
-                        || expected_category.as_ref() != Some(&item.category)
-                        || self.validate_authoritative_item(account_id, &item).is_err()
-                    {
-                        // The Server's own outcome and its own Item disagree. Reading further would
-                        // be guessing, and this Runtime does not guess about authority.
-                        return if fence_already_held {
-                            self.fail_account_module_fenced(account_id).await
-                        } else {
-                            self.fail_account_module(account_id).await
-                        };
-                    }
-                    PlanMutation::ReconcileAppliedCreate {
-                        outcome,
-                        item: Box::new(item),
-                        cursor,
                     }
                 }
             }
@@ -449,18 +475,21 @@ impl Runtime {
                 PlanMutation::ReconcileShareOutcome { outcome, cursor }
             }
             OperationOutcomeResult::VaultApplied { .. }
-            | OperationOutcomeResult::VaultRejected { .. } => {
-                // The production create-Vault executor owns bounded Vault/key fetch and guarded
-                // reconciliation. Generic Sync defers here to preserve its staging and cleanup
-                // ordering.
-                return CompletionResult::Retry;
+            | OperationOutcomeResult::VaultMutationRejected { .. }
+                if matches!(
+                    operation.kind,
+                    OperationKind::UpdateVault | OperationKind::DeleteVault
+                ) =>
+            {
+                PlanMutation::ReconcileVaultMutation { outcome }
             }
-            OperationOutcomeResult::ImportApplied { .. }
+            OperationOutcomeResult::VaultApplied { .. }
+            | OperationOutcomeResult::VaultRejected { .. }
+            | OperationOutcomeResult::ImportApplied { .. }
             | OperationOutcomeResult::ImportRejected { .. } => {
-                // Ticket 56's bounded Import executor owns exact replay, complete batch fetch,
-                // and guarded reconciliation. Generic production dispatch remains closed.
-                return CompletionResult::Retry;
+                PlanMutation::ReconcileRetainedResult { outcome }
             }
+            OperationOutcomeResult::VaultMutationRejected { .. } => return CompletionResult::Retry,
             OperationOutcomeResult::Rejected { .. } => {
                 if operation.kind == OperationKind::CreateShare {
                     PlanMutation::ReconcileShareOutcome { outcome, cursor }
@@ -475,56 +504,63 @@ impl Runtime {
                         )
                         .await
                     {
-                        Ok(item) => item,
+                        Ok(CurrentAuthority::Present(item)) => Some(item),
+                        Ok(CurrentAuthority::Absent | CurrentAuthority::Unavailable) => None,
                         Err(result) => return result,
                     };
-                    if operation.kind == OperationKind::MoveItem {
-                        if let Some(authority) = item.as_mut() {
-                            let attachments = match self
-                                .fetch_authoritative_attachments(
-                                    account_id,
-                                    operation.item_id(),
-                                    authority,
-                                    http,
-                                    session,
-                                    auth_budget,
-                                    fence_already_held,
-                                )
+                    if item
+                        .as_ref()
+                        .is_some_and(|item| expected_category.as_ref() != Some(&item.category))
+                    {
+                        return self.fail_account_module_at_snapshot(&captured).await;
+                    }
+                    if item
+                        .as_ref()
+                        .is_none_or(|item| !self.current_item_authority_is_visible(&captured, item))
+                    {
+                        PlanMutation::ReconcileRetainedResult { outcome }
+                    } else {
+                        if operation.kind == OperationKind::MoveItem {
+                            if let Some(authority) = item.as_mut() {
+                                let attachments = match self
+                                    .fetch_authoritative_attachments(
+                                        account_id,
+                                        operation.item_id(),
+                                        authority,
+                                        http,
+                                        session,
+                                        auth_budget,
+                                        &captured,
+                                    )
+                                    .await
+                                {
+                                    Ok(attachments) => attachments,
+                                    Err(result) => return result,
+                                };
+                                authority.attachments = attachments;
+                            }
+                        }
+                        if let Some(item) = &item {
+                            if let Err(result) = self
+                                .validate_outcome_authority(account_id, item, &captured)
                                 .await
                             {
-                                Ok(attachments) => attachments,
-                                Err(result) => return result,
-                            };
-                            authority.attachments = attachments;
+                                return result;
+                            }
                         }
-                    }
-                    if item.as_ref().is_some_and(|item| {
-                        expected_category.as_ref() != Some(&item.category)
-                            || self.validate_authoritative_item(account_id, item).is_err()
-                    }) {
-                        return if fence_already_held {
-                            self.fail_account_module_fenced(account_id).await
-                        } else {
-                            self.fail_account_module(account_id).await
-                        };
-                    }
-                    PlanMutation::ReconcileItemMutation {
-                        outcome,
-                        item: item.map(Box::new),
-                        cursor,
+                        PlanMutation::ReconcileItemMutation {
+                            outcome,
+                            item: item.map(Box::new),
+                            cursor,
+                        }
                     }
                 } else {
                     PlanMutation::RetainRejection { outcome, cursor }
                 }
             }
         };
-        if fence_already_held {
-            self.commit_completion_fenced(account_id, &observed, mutation)
-                .await
-        } else {
-            self.commit_completion(account_id, &observed, mutation)
-                .await
-        }
+        self.commit_completion_fenced(account_id, &captured, mutation)
+            .await
     }
 
     /// Fetches the authoritative encrypted Item, renewing one expired Session on the way.
@@ -535,10 +571,10 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
         auth_budget: &mut OutcomeResolutionAuthBudget,
-    ) -> Result<Option<AuthorityItemRecord>, CompletionResult> {
+    ) -> Result<CurrentAuthority<AuthorityItemRecord>, CompletionResult> {
         let cancellation = RequestCancellation::new();
         let mut fetched = http
-            .fetch_item_or_absent(session.token.as_ref(), item_id, cancellation.clone())
+            .fetch_retained_item_authority(session.token.as_ref(), item_id, cancellation.clone())
             .await;
         if matches!(fetched, Ok(AuthenticatedOutcome::ReauthenticationRequired)) {
             if !auth_budget.consume_renewal() {
@@ -552,7 +588,11 @@ impl Runtime {
                 Ok(renewed) => {
                     *session = renewed;
                     fetched = http
-                        .fetch_item_or_absent(session.token.as_ref(), item_id, cancellation)
+                        .fetch_retained_item_authority(
+                            session.token.as_ref(),
+                            item_id,
+                            cancellation,
+                        )
                         .await;
                 }
                 Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
@@ -563,10 +603,15 @@ impl Runtime {
             }
         }
         match fetched {
-            Ok(AuthenticatedOutcome::Ok(Some(item))) => authority_item_from_dto(item)
-                .map(Some)
-                .map_err(|_| CompletionResult::Retry),
-            Ok(AuthenticatedOutcome::Ok(None)) => Ok(None),
+            Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Present(item))) => {
+                authority_item_from_dto(item)
+                    .map(CurrentAuthority::Present)
+                    .map_err(|_| CompletionResult::Retry)
+            }
+            Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Absent)) => Ok(CurrentAuthority::Absent),
+            Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Unavailable)) => {
+                Ok(CurrentAuthority::Unavailable)
+            }
             Ok(AuthenticatedOutcome::ReauthenticationRequired) => {
                 self.mark_reauthentication_required(account_id);
                 Err(CompletionResult::Reauthenticate)
@@ -587,11 +632,12 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
         auth_budget: &mut OutcomeResolutionAuthBudget,
-        fence_already_held: bool,
+        captured: &ReplicaSnapshot,
     ) -> Result<Vec<AuthorityAttachmentRecord>, CompletionResult> {
-        let Some(snapshot) = self.replica.snapshot(account_id) else {
+        if !self.completion_scope_is_current(captured) {
             return Err(CompletionResult::Retry);
-        };
+        }
+        let snapshot = captured;
         if item.id != expected_item_id
             || !snapshot
                 .bootstrap
@@ -600,9 +646,7 @@ impl Runtime {
                 .iter()
                 .any(|vault| vault.id == item.vault_id)
         {
-            return Err(self
-                .fail_account_module_for_fence(account_id, fence_already_held)
-                .await);
+            return Err(self.fail_account_module_at_snapshot(captured).await);
         }
         let item_id = &item.id;
         let cancellation = RequestCancellation::new();
@@ -626,9 +670,7 @@ impl Runtime {
                     if attachments.iter().any(|attachment| {
                         attachment.item_id != item.id || attachment.vault_id != item.vault_id
                     }) {
-                        return Err(self
-                            .fail_account_module_for_fence(account_id, fence_already_held)
-                            .await);
+                        return Err(self.fail_account_module_at_snapshot(captured).await);
                     }
                     return Ok(attachments);
                 }
@@ -659,123 +701,88 @@ impl Runtime {
         }
     }
 
-    async fn fail_account_module_for_fence(
+    /// Retained Sessions can finish sending accepted ciphertext while locked. Authority still
+    /// needs live keys before reconciliation; their absence defers completion, not Account health.
+    async fn validate_outcome_authority(
         &self,
         account_id: &AccountId,
-        fence_already_held: bool,
-    ) -> CompletionResult {
-        if fence_already_held {
-            self.fail_account_module_fenced(account_id).await
-        } else {
-            self.fail_account_module(account_id).await
+        item: &AuthorityItemRecord,
+        captured: &ReplicaSnapshot,
+    ) -> Result<(), CompletionResult> {
+        if !self.completion_scope_is_current(captured) {
+            return Err(CompletionResult::Retry);
+        }
+        match self.validate_authoritative_item(account_id, item) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
+                Err(CompletionResult::Retry)
+            }
+            Err(_) => Err(self.fail_account_module_at_snapshot(captured).await),
         }
     }
 
-    /// Commits the one plan that ends an Operation, and republishes what a reader can now see.
-    async fn commit_completion(
-        &self,
-        account_id: &AccountId,
-        observed: &ObservedOutcome,
-        mutation: PlanMutation,
-    ) -> CompletionResult {
-        // The completion reads and writes the Replica head, the Operation, its overlay, and the
-        // Bootstrap authority together, so it takes the same Account execution lock every other
-        // whole-Account transition takes.
-        let Ok(execution_lock) = self.account_execution_lock(account_id) else {
-            return CompletionResult::Retry;
-        };
-        let _execution_guard = execution_lock.lock().await;
-        if self.is_closed() {
-            return CompletionResult::Retry;
-        }
-        self.commit_completion_fenced(account_id, observed, mutation)
-            .await
+    pub(super) fn completion_scope_is_current(&self, captured: &ReplicaSnapshot) -> bool {
+        let account_id = &captured.account_id;
+        !self.is_closed()
+            && !self.account_teardown_is_pending(account_id)
+            && !self.account_access_retirement_is_pending(account_id)
+            && !self
+                .lock_epoch_pending
+                .lock()
+                .expect("pending lock epoch lock poisoned")
+                .contains_key(account_id)
+            && self
+                .account_lock_epochs
+                .lock()
+                .expect("Account lock epoch lock poisoned")
+                .get(account_id)
+                .is_none_or(|epoch| *epoch == captured.lock_epoch)
+            && self.replica.snapshot(account_id).is_some_and(|current| {
+                current.incarnation == captured.incarnation
+                    && current.lock_epoch == captured.lock_epoch
+                    && current.revision == captured.revision
+            })
     }
 
-    async fn commit_completion_fenced(
+    /// Commits the captured completion under the caller-held Account execution fence.
+    pub(super) async fn commit_completion_fenced(
         &self,
         account_id: &AccountId,
-        observed: &ObservedOutcome,
+        captured: &ReplicaSnapshot,
         mutation: PlanMutation,
     ) -> CompletionResult {
-        if self.is_closed() {
+        if !self.completion_scope_is_current(captured) {
             return CompletionResult::Retry;
         }
-        let Some(snapshot) = self.replica.snapshot(account_id) else {
-            return CompletionResult::Retry;
-        };
-        // Another sender may already have completed this Operation. A matching receipt is the
-        // proof, and it makes a duplicate completion a no-op rather than a second transaction.
-        if let Some(receipt) = snapshot
-            .receipts
-            .iter()
-            .find(|receipt| receipt.operation_id == observed.operation_id)
-        {
-            if receipt.request_fingerprint == observed.request_fingerprint
-                && receipt.result == observed.result
-            {
-                return CompletionResult::Completed;
-            }
-            // A matching semantic outcome is immutable, so a different one for the same
-            // identity is not an update; it is a contradiction.
-            return self.fail_account_module_fenced(account_id).await;
-        }
-        match snapshot
-            .operations
-            .iter()
-            .find(|operation| operation.operation_id == observed.operation_id)
-        {
-            // The durable fingerprint is the last word on which bytes this outcome answered.
-            Some(operation) if operation.request_fingerprint != observed.request_fingerprint => {
-                return self.fail_account_module_fenced(account_id).await;
-            }
-            Some(_) => {}
-            // The Operation is gone without a receipt, which only Account removal or a
-            // replacement incarnation can do. Nothing is owed here any more.
-            None => return CompletionResult::Retry,
-        }
+        let installs_authority = !matches!(&mutation, PlanMutation::ReconcileRetainedResult { .. });
         let result = self
             .replica
-            .execute_recomputing(GuardedCommitPlan::new(
+            .execute_exact(GuardedCommitPlan::new(
                 account_id.clone(),
-                snapshot.incarnation.clone(),
-                snapshot.revision,
-                snapshot.lock_epoch,
+                captured.incarnation.clone(),
+                captured.revision,
+                captured.lock_epoch,
                 vec![mutation],
             ))
             .await;
         match result {
-            Ok(RecomputedPlanResult::Applied { snapshot }) => {
+            Ok(PlanResult::Applied { .. }) => {
                 let publication = self.publication.lock().expect("publication lock poisoned");
-                self.replica.cache(snapshot);
                 self.device_revision.fetch_add(1, Ordering::SeqCst);
                 drop(publication);
-                let _ = self.decrypt_visible_items(account_id);
+                if installs_authority {
+                    let _ = self.decrypt_visible_items(account_id);
+                }
                 self.publish_all_unless_closed();
                 CompletionResult::Completed
             }
             // A fenced or removed Account keeps every durable row it still has. Nothing here may
             // reverse a Server effect, so the Operation simply stays owed until it can commit.
-            Ok(RecomputedPlanResult::Fenced { .. }) | Ok(RecomputedPlanResult::Missing) => {
-                CompletionResult::Retry
-            }
+            Ok(PlanResult::Stale { .. }) | Ok(PlanResult::Missing) => CompletionResult::Retry,
             // A persistence failure is a failure to write, never a semantic verdict. Everything
             // this plan would have moved is still exactly where it was.
             Err(_) => CompletionResult::Retry,
         }
-    }
-
-    /// Marks the Account module failed, durably, and stops working on it.
-    ///
-    /// Failing keeps every local record. It is the opposite of a discard: the Runtime refuses to
-    /// act rather than inventing an outcome, and a Server effect is neither cancelled nor
-    /// reversed by it.
-    pub(super) async fn fail_account_module(&self, account_id: &AccountId) -> CompletionResult {
-        let Ok(execution_lock) = self.account_execution_lock(account_id) else {
-            return CompletionResult::Failed;
-        };
-        let _execution_guard = execution_lock.lock().await;
-        self.fail_account_module_fenced(account_id).await
     }
 
     pub(super) async fn fail_account_module_fenced(
@@ -785,13 +792,23 @@ impl Runtime {
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return CompletionResult::Failed;
         };
+        self.fail_account_module_at_snapshot(&snapshot).await
+    }
+
+    pub(super) async fn fail_account_module_at_snapshot(
+        &self,
+        snapshot: &ReplicaSnapshot,
+    ) -> CompletionResult {
+        if !self.completion_scope_is_current(snapshot) {
+            return CompletionResult::Retry;
+        }
         if snapshot.failure.is_some() {
             return CompletionResult::Failed;
         }
-        if let Ok(RecomputedPlanResult::Applied { snapshot }) = self
+        match self
             .replica
-            .execute_recomputing(GuardedCommitPlan::new(
-                account_id.clone(),
+            .execute_exact(GuardedCommitPlan::new(
+                snapshot.account_id.clone(),
                 snapshot.incarnation.clone(),
                 snapshot.revision,
                 snapshot.lock_epoch,
@@ -801,13 +818,15 @@ impl Runtime {
             ))
             .await
         {
-            let publication = self.publication.lock().expect("publication lock poisoned");
-            self.replica.cache(snapshot);
-            self.device_revision.fetch_add(1, Ordering::SeqCst);
-            drop(publication);
-            self.publish_all_unless_closed();
+            Ok(PlanResult::Applied { .. }) => {
+                let publication = self.publication.lock().expect("publication lock poisoned");
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+                drop(publication);
+                self.publish_all_unless_closed();
+                CompletionResult::Failed
+            }
+            _ => CompletionResult::Retry,
         }
-        CompletionResult::Failed
     }
 
     /// Completes one Operation because the Sync feed says the Server resolved it.
@@ -832,8 +851,14 @@ impl Runtime {
         if self.is_closed() {
             return CompletionResult::Retry;
         }
-        self.reconcile_resolved_operation_fenced(account_id, operation_id, http, session)
-            .await
+        self.reconcile_resolved_operation_fenced(
+            account_id,
+            operation_id,
+            http,
+            session,
+            &mut OutcomeResolutionAuthBudget::default(),
+        )
+        .await
     }
 
     /// Bootstrap already owns the Account execution fence across Sync reconciliation.
@@ -843,8 +868,8 @@ impl Runtime {
         operation_id: &str,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
-        let mut auth_budget = OutcomeResolutionAuthBudget::default();
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return CompletionResult::Retry;
         };
@@ -858,42 +883,49 @@ impl Runtime {
             // the page watermark and advances it only after every event has been processed.
             return CompletionResult::Completed;
         };
+        if operation.is_legacy_held() {
+            let Ok(now_ms) = self.clock.now_ms() else {
+                return CompletionResult::Retry;
+            };
+            if operation.scheduling.not_before_ms > now_ms
+                || !self.completion_scope_is_current(&snapshot)
+            {
+                return CompletionResult::Retry;
+            }
+        }
         match self
-            .lookup_operation_outcome(account_id, &operation, http, session, &mut auth_budget)
+            .lookup_operation_outcome(account_id, &operation, http, session, auth_budget)
             .await
         {
-            SemanticAnswer::Outcome(outcome) => {
+            SemanticAnswer::Outcome(hint) => {
                 if operation.kind == OperationKind::CreateShare {
                     self.wake_dispatch();
                     return CompletionResult::Retry;
                 }
-                if operation.kind != OperationKind::CreateItem {
-                    // Lookup is only a hint because it carries no request fingerprint. Replay the
-                    // exact immutable request under this same Sync fence so identity remains
-                    // proven before Bootstrap advances the page watermark.
-                    return self
-                        .replay_lookup_hint_for_sync_fenced(
-                            &snapshot,
-                            &operation,
-                            http,
-                            session,
-                            &mut auth_budget,
-                        )
-                        .await;
-                }
-                self.complete_operation_fenced_with_auth_budget(
-                    account_id,
+                // Lookup is only a hint because it carries no request fingerprint. Replay the
+                // exact immutable request under this same Sync fence so identity remains proven
+                // before Bootstrap advances the page watermark, including Create with Item404.
+                self.replay_lookup_hint_for_sync_fenced(
+                    &snapshot,
                     &operation,
-                    outcome,
+                    &hint,
                     http,
                     session,
-                    None,
-                    &mut auth_budget,
+                    auth_budget,
                 )
                 .await
             }
+            SemanticAnswer::IdentityReused if operation.is_legacy_held() => {
+                self.fail_account_module_at_snapshot(&snapshot).await
+            }
             SemanticAnswer::IdentityReused => self.fail_account_module_fenced(account_id).await,
-            SemanticAnswer::Undecided | SemanticAnswer::Transient => CompletionResult::Retry,
+            SemanticAnswer::Transient => {
+                if operation.is_legacy_held() && self.completion_scope_is_current(&snapshot) {
+                    self.persist_backoff(&snapshot, &operation).await;
+                }
+                CompletionResult::Retry
+            }
+            SemanticAnswer::Undecided => CompletionResult::Retry,
             SemanticAnswer::ReauthenticationRequired => CompletionResult::Reauthenticate,
         }
     }
@@ -945,6 +977,17 @@ fn outcome_matches_operation_shape(
 ) -> bool {
     let item_target = operation.target.item_id().is_some();
     match result {
+        OperationOutcomeResult::RotationStartApplied { .. }
+        | OperationOutcomeResult::RotationStartRejected { .. } => {
+            matches!(operation.target, crate::replica::ResourceRef::Team { .. })
+                && operation.kind == OperationKind::CreateTeamLeaveRotationPlans
+        }
+        OperationOutcomeResult::RotationStartAppliedReceipt { .. } => false,
+        OperationOutcomeResult::RotationFinalizeApplied { .. }
+        | OperationOutcomeResult::RotationFinalizeRejected { .. } => {
+            matches!(operation.target, crate::replica::ResourceRef::Team { .. })
+                && operation.kind == OperationKind::FinalizeTeamLeaveRotationPlans
+        }
         OperationOutcomeResult::Applied { .. } => {
             item_target
                 && matches!(
@@ -959,22 +1002,75 @@ fn outcome_matches_operation_shape(
                 )
         }
         OperationOutcomeResult::Rejected { .. } => {
-            item_target && operation.kind != OperationKind::CreateVault
+            item_target
+                && !matches!(
+                    operation.kind,
+                    OperationKind::CreateVault
+                        | OperationKind::UpdateVault
+                        | OperationKind::DeleteVault
+                )
         }
         OperationOutcomeResult::ShareApplied { .. } => {
             item_target && operation.kind == OperationKind::CreateShare
         }
-        OperationOutcomeResult::VaultApplied { .. }
-        | OperationOutcomeResult::VaultRejected { .. } => {
+        OperationOutcomeResult::VaultApplied { vault_id } => {
+            matches!(operation.target, crate::replica::ResourceRef::Vault { .. })
+                && matches!(
+                    operation.kind,
+                    OperationKind::CreateVault
+                        | OperationKind::UpdateVault
+                        | OperationKind::DeleteVault
+                )
+                && vault_id == operation.vault_id()
+        }
+        OperationOutcomeResult::VaultRejected { .. } => {
             !item_target && operation.kind == OperationKind::CreateVault
         }
-        OperationOutcomeResult::ImportApplied { .. }
-        | OperationOutcomeResult::ImportRejected { .. } => {
+        OperationOutcomeResult::VaultMutationRejected { .. } => {
+            matches!(operation.target, crate::replica::ResourceRef::Vault { .. })
+                && matches!(
+                    operation.kind,
+                    OperationKind::UpdateVault | OperationKind::DeleteVault
+                )
+        }
+        OperationOutcomeResult::ImportApplied {
+            vault_id,
+            imported_count,
+        } => {
+            matches!(
+                operation.target,
+                crate::replica::ResourceRef::ImportBatch { .. }
+            ) && operation.kind == OperationKind::ImportItems
+                && vault_id == operation.vault_id()
+                && super::import::decode_import_request(operation)
+                    .is_ok_and(|body| body.items.len() == usize::from(*imported_count))
+        }
+        OperationOutcomeResult::ImportRejected { .. } => {
             matches!(
                 operation.target,
                 crate::replica::ResourceRef::ImportBatch { .. }
             ) && operation.kind == OperationKind::ImportItems
         }
+    }
+}
+
+fn outcome_matches_receipt(
+    receipt: &OperationOutcomeResult,
+    observed: &OperationOutcomeResult,
+) -> bool {
+    match (receipt, observed) {
+        (
+            OperationOutcomeResult::RotationStartAppliedReceipt {
+                plan_set_fingerprint,
+                plan_count,
+            },
+            OperationOutcomeResult::RotationStartApplied { plans },
+        ) => {
+            usize::from(*plan_count) == plans.len()
+                && crate::replica::rotation_plan_digest(plans)
+                    .is_ok_and(|digest| digest == *plan_set_fingerprint)
+        }
+        _ => receipt == observed,
     }
 }
 
@@ -994,15 +1090,117 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
         };
     }
     let (operation_id, expected_kind, result) = match outcome {
-        // Rotation is still a separate ceremony. Its retained Server outcomes are known wire
-        // kinds, but cannot resolve any Operation this Runtime has durably accepted.
+        // Unsupported Rotation kinds still cannot resolve a durable Operation.
         WireOperationOutcome::CreateVaultMemberRemovalRotationPlans { .. }
         | WireOperationOutcome::FinalizeVaultMemberRemovalRotationPlans { .. }
-        | WireOperationOutcome::CreateTeamLeaveRotationPlans { .. }
-        | WireOperationOutcome::FinalizeTeamLeaveRotationPlans { .. }
         | WireOperationOutcome::CreateTeamMemberRemovalRotationPlans { .. }
         | WireOperationOutcome::FinalizeTeamMemberRemovalRotationPlans { .. } => {
             return SemanticAnswer::IdentityReused;
+        }
+        WireOperationOutcome::CreateTeamLeaveRotationPlans {
+            operation_id,
+            result,
+        } => {
+            if operation.kind != OperationKind::CreateTeamLeaveRotationPlans
+                || !matches!(operation.target, crate::replica::ResourceRef::Team { .. })
+            {
+                return SemanticAnswer::IdentityReused;
+            }
+            let result = match result {
+                crate::server_contract::CreateTeamLeaveRotationPlansResult::Applied { plans } => {
+                    let Some(plans) = parse_rotation_start_plans(plans) else {
+                        return SemanticAnswer::IdentityReused;
+                    };
+                    OperationOutcomeResult::RotationStartApplied { plans }
+                }
+                crate::server_contract::CreateTeamLeaveRotationPlansResult::Rejected { code } => {
+                    use crate::replica::RotationStartRejectionCode as Local;
+                    let code = match code {
+                        crate::server_contract::CreateTeamLeaveRotationPlansRejectionCode::TeamMemberNotFound => Local::TeamMemberNotFound,
+                        crate::server_contract::CreateTeamLeaveRotationPlansRejectionCode::PersonalTeamDepartureForbidden => Local::PersonalTeamDepartureForbidden,
+                        crate::server_contract::CreateTeamLeaveRotationPlansRejectionCode::TeamOwnerLeaveForbidden => Local::TeamOwnerLeaveForbidden,
+                    };
+                    OperationOutcomeResult::RotationStartRejected { code }
+                }
+            };
+            (
+                operation_id,
+                OperationKind::CreateTeamLeaveRotationPlans,
+                result,
+            )
+        }
+        WireOperationOutcome::FinalizeTeamLeaveRotationPlans {
+            operation_id,
+            result,
+        } => {
+            if operation.kind != OperationKind::FinalizeTeamLeaveRotationPlans
+                || !matches!(operation.target, crate::replica::ResourceRef::Team { .. })
+            {
+                return SemanticAnswer::IdentityReused;
+            }
+            let result = match result {
+                crate::server_contract::FinalizeTeamLeaveRotationPlansResult::Applied {
+                    rotations,
+                    personal_team_id,
+                } => {
+                    if personal_team_id.is_empty() || personal_team_id.len() > 128 {
+                        return SemanticAnswer::IdentityReused;
+                    }
+                    OperationOutcomeResult::RotationFinalizeApplied {
+                        personal_team_id,
+                        rotations: rotations
+                            .into_iter()
+                            .map(|rotation| crate::replica::RotationResultRecord {
+                                plan_id: rotation.plan_id,
+                                vault_id: rotation.vault_id,
+                                key_version: rotation.key_version,
+                                rotation_id: rotation.rotation_id,
+                            })
+                            .collect(),
+                    }
+                }
+                crate::server_contract::FinalizeTeamLeaveRotationPlansResult::Rejected {
+                    code,
+                    details,
+                } => {
+                    use crate::replica::RotationFinalizeRejectionCode as Local;
+                    let code = match code {
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::TeamMembershipChanged => Local::TeamMembershipChanged,
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::PersonalTeamDepartureForbidden => Local::PersonalTeamDepartureForbidden,
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::TeamOwnerLeaveForbidden => Local::TeamOwnerLeaveForbidden,
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::RotationPlanUnavailable => Local::RotationPlanUnavailable,
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::RotationPlanMismatch => Local::RotationPlanMismatch,
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::RotationPlanIncomplete => Local::RotationPlanIncomplete,
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::RotationPlanStale => Local::RotationPlanStale,
+                        crate::server_contract::FinalizeTeamLeaveRotationPlansRejectionCode::RotationPlanSetMismatch => Local::RotationPlanSetMismatch,
+                    };
+                    let details = match details {
+                        Some(details) if code == Local::RotationPlanStale => {
+                            let reason = match details.reason {
+                                crate::server_contract::VaultKeyRotationStaleReason::VaultVersion => crate::replica::RotationStaleReason::VaultVersion,
+                                crate::server_contract::VaultKeyRotationStaleReason::MemberSet => crate::replica::RotationStaleReason::MemberSet,
+                                crate::server_contract::VaultKeyRotationStaleReason::ItemState => crate::replica::RotationStaleReason::ItemState,
+                                crate::server_contract::VaultKeyRotationStaleReason::AttachmentState => crate::replica::RotationStaleReason::AttachmentState,
+                            };
+                            Some(crate::replica::RotationStaleDetails {
+                                plan_id: details.plan_id,
+                                reason,
+                            })
+                        }
+                        None => None,
+                        Some(_) => return SemanticAnswer::IdentityReused,
+                    };
+                    if details.is_some() {
+                        return SemanticAnswer::IdentityReused;
+                    }
+                    OperationOutcomeResult::RotationFinalizeRejected { code, details }
+                }
+            };
+            (
+                operation_id,
+                OperationKind::FinalizeTeamLeaveRotationPlans,
+                result,
+            )
         }
 
         WireOperationOutcome::CreateItem {
@@ -1083,6 +1281,34 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
                 }
             };
             (operation_id, OperationKind::CreateShare, result)
+        }
+        WireOperationOutcome::UpdateVault {
+            operation_id,
+            result,
+        } => {
+            match vault_mutation_outcome(
+                operation,
+                operation_id,
+                OperationKind::UpdateVault,
+                result,
+            ) {
+                Some(outcome) => outcome,
+                None => return SemanticAnswer::IdentityReused,
+            }
+        }
+        WireOperationOutcome::DeleteVault {
+            operation_id,
+            result,
+        } => {
+            match vault_mutation_outcome(
+                operation,
+                operation_id,
+                OperationKind::DeleteVault,
+                result,
+            ) {
+                Some(outcome) => outcome,
+                None => return SemanticAnswer::IdentityReused,
+            }
         }
         WireOperationOutcome::CreateVault {
             operation_id,
@@ -1167,6 +1393,48 @@ fn observed_outcome(operation: &OperationRecord, outcome: WireOperationOutcome) 
         request_fingerprint: operation.request_fingerprint,
         result,
     })
+}
+
+fn parse_rotation_start_plans(
+    plans: Vec<crate::server_contract::RotationPlanSnapshot>,
+) -> Option<Vec<crate::replica::RotationPlanRecord>> {
+    if plans.len() > 21_000 {
+        return None;
+    }
+    let mut plan_ids = std::collections::HashSet::new();
+    let mut vault_ids = std::collections::HashSet::new();
+    plans
+        .into_iter()
+        .map(|plan| {
+            if !matches!(
+                plan.state,
+                crate::server_contract::InitialRotationPlanState::Preparing
+            ) || plan.id.is_empty()
+                || plan.id.len() > 128
+                || plan.vault_id.is_empty()
+                || plan.vault_id.len() > 128
+                || plan.initiator_user_id.is_empty()
+                || plan.initiator_user_id.len() > 128
+                || plan.expected_key_version < 1
+                || plan.idle_expires_at.is_empty()
+                || plan.idle_expires_at.len() > 64
+                || plan.absolute_expires_at.is_empty()
+                || plan.absolute_expires_at.len() > 64
+                || !plan_ids.insert(plan.id.clone())
+                || !vault_ids.insert(plan.vault_id.clone())
+            {
+                return None;
+            }
+            Some(crate::replica::RotationPlanRecord {
+                plan_id: plan.id,
+                vault_id: plan.vault_id,
+                initiator_user_id: plan.initiator_user_id,
+                expected_key_version: plan.expected_key_version,
+                idle_expires_at: plan.idle_expires_at,
+                absolute_expires_at: plan.absolute_expires_at,
+            })
+        })
+        .collect()
 }
 
 fn vault_rejection_code(
@@ -1267,10 +1535,48 @@ fn rejection_allowed(kind: OperationKind, code: OperationRejectionCode) -> bool 
                 | AttachmentStateConflict
         ),
         OperationKind::CreateVault
+        | OperationKind::UpdateVault
+        | OperationKind::DeleteVault
         | OperationKind::CreateItem
         | OperationKind::CreateShare
-        | OperationKind::ImportItems => false,
+        | OperationKind::ImportItems
+        | OperationKind::CreateVaultMemberRemovalRotationPlans
+        | OperationKind::FinalizeVaultMemberRemovalRotationPlans
+        | OperationKind::CreateTeamLeaveRotationPlans
+        | OperationKind::FinalizeTeamLeaveRotationPlans
+        | OperationKind::CreateTeamMemberRemovalRotationPlans
+        | OperationKind::FinalizeTeamMemberRemovalRotationPlans => false,
     }
+}
+
+fn vault_mutation_outcome(
+    operation: &OperationRecord,
+    operation_id: String,
+    kind: OperationKind,
+    result: crate::server_contract::VaultMutationOperationResult,
+) -> Option<(String, OperationKind, OperationOutcomeResult)> {
+    if operation.kind != kind
+        || !matches!(operation.target, crate::replica::ResourceRef::Vault { .. })
+    {
+        return None;
+    }
+    let result = match result {
+        crate::server_contract::VaultMutationOperationResult::Applied { vault_id } => {
+            if vault_id != operation.vault_id() {
+                return None;
+            }
+            OperationOutcomeResult::VaultApplied { vault_id }
+        }
+        crate::server_contract::VaultMutationOperationResult::Rejected { code } => {
+            let code = match code {
+                crate::server_contract::VaultMutationOperationRejectionCode::VaultAccessDenied => {
+                    crate::replica::VaultMutationOperationRejectionCode::VaultAccessDenied
+                }
+            };
+            OperationOutcomeResult::VaultMutationRejected { code }
+        }
+    };
+    Some((operation_id, kind, result))
 }
 
 fn import_rejection_code(
@@ -1342,4 +1648,31 @@ fn reused_operation_id(body: &[u8]) -> bool {
                 .map(str::to_owned)
         })
         .is_some_and(|code| code == "OPERATION_ID_REUSED")
+}
+
+impl Runtime {
+    fn current_item_authority_is_visible(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        item: &AuthorityItemRecord,
+    ) -> bool {
+        // Frozen ciphertext can finish while current policy is unknown. Its retained result
+        // does not authorize installing freshly fetched Item authority during that interval.
+        !self.travel_policy_verification_pending(snapshot)
+            && snapshot.bootstrap.state == crate::replica::ReplicaState::Ready
+            && !snapshot
+                .bootstrap
+                .pending_vault_retirements
+                .contains(&item.vault_id)
+            && snapshot
+                .bootstrap
+                .active_generation
+                .as_ref()
+                .is_some_and(|generation| {
+                    snapshot
+                        .bootstrap
+                        .vaults
+                        .contains_key(&(generation.clone(), item.vault_id.clone()))
+                })
+    }
 }

@@ -1,4 +1,5 @@
 import { useMoveItem, useMoveTargetVaults } from "@bittery/core/hooks";
+import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	AccountAvatar,
 	Button,
@@ -24,14 +25,19 @@ import {
 import { cn, getAccountLabel } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { privateMoveData } from "../../lib/legacy-item-move";
 import { useI18n } from "../../providers/i18n-provider";
+
+type DesktopMoveItemDialogProps = Omit<MoveItemDialogProps, "item"> & {
+	item: DecryptedItem;
+};
 
 export function MoveItemDialog({
 	open,
 	onOpenChange,
 	item,
 	currentVaultId,
-}: MoveItemDialogProps) {
+}: DesktopMoveItemDialogProps) {
 	const { m } = useI18n();
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
 	const [searchQuery, setSearchQuery] = useState("");
@@ -97,23 +103,12 @@ export function MoveItemDialog({
 		}
 
 		try {
-			// Extract decrypted data from the item (exclude metadata fields)
-			const {
-				id,
-				vaultId,
-				category,
-				favorite,
-				createdAt,
-				updatedAt,
-				...decryptedData
-			} = item;
-
 			const result = await moveItem.mutateAsync({
 				itemId: item.id,
 				sourceVaultId: currentVaultId,
 				targetVaultId: selectedVaultId,
 				category: item.category,
-				decryptedData,
+				decryptedData: privateMoveData(item),
 				accountId: sourceAccountId,
 				targetAccountId: selectedVault.accountId,
 			});

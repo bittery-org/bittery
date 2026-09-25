@@ -52,7 +52,7 @@ pub unsafe extern "C" fn ffi_bittery_client_bindings_sensitive_rustbuffer_free(
     uniffi::ffi::uniffi_rustbuffer_free(buffer, call_status);
 }
 
-#[derive(uniffi::Object)]
+#[derive(uniffi::Object, Zeroize, ZeroizeOnDrop)]
 pub struct SecretString {
     value: String,
 }
@@ -68,6 +68,12 @@ impl SecretString {
     #[uniffi::constructor]
     pub fn new(value: String) -> Arc<Self> {
         Arc::new(Self { value })
+    }
+
+    /// Opens this already-delivered secret container for its explicit presentation caller.
+    /// Account authorization occurs in Core's transient request and guarded response delivery.
+    pub fn reveal(&self) -> String {
+        self.value.clone()
     }
 }
 
@@ -349,6 +355,114 @@ pub enum ItemDraft {
     Authenticator { value: Arc<AuthenticatorItemData> },
 }
 
+/// Ordinary native observations expose credential metadata with no signing material.
+#[derive(Clone, uniffi::Record)]
+pub struct PublicPasskey {
+    pub credential_id: String,
+    pub rp_id: String,
+    pub rp_name: String,
+    pub user_handle: String,
+    pub user_name: String,
+    pub user_display_name: String,
+    pub public_key: String,
+    pub public_key_fingerprint: String,
+    pub algorithm: i32,
+    pub sign_count: u32,
+    pub transports: Vec<String>,
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+    pub status: Option<PasskeyStatus>,
+    pub status_reason: Option<PasskeyStatusReason>,
+    pub status_updated_at: Option<String>,
+}
+
+#[derive(Clone, uniffi::Object)]
+pub struct EditableLoginItemData {
+    title: String,
+    url: Option<String>,
+    urls: Vec<String>,
+    username: Option<String>,
+    password: Option<String>,
+    password_history: Vec<Arc<PasswordHistoryEntry>>,
+    notes: Option<String>,
+    note: Option<String>,
+    custom_fields: Vec<Arc<CustomField>>,
+    tags: Vec<String>,
+    totp_secret: Option<String>,
+    totp_issuer: Option<String>,
+    totp_account_name: Option<String>,
+    totp_algorithm: Option<TotpAlgorithm>,
+    totp_digits: Option<TotpDigits>,
+    totp_period: Option<u32>,
+}
+
+#[derive(uniffi::Object)]
+pub struct PublicLoginItemData {
+    editable: Arc<EditableLoginItemData>,
+    passkeys: Vec<PublicPasskey>,
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum PublicItemDraft {
+    Login { value: Arc<PublicLoginItemData> },
+    SecureNote { value: Arc<SecureNoteItemData> },
+    CreditCard { value: Arc<CreditCardItemData> },
+    Identity { value: Arc<IdentityItemData> },
+    Authenticator { value: Arc<AuthenticatorItemData> },
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum EditableItemDraft {
+    Login { value: Arc<EditableLoginItemData> },
+    SecureNote { value: Arc<SecureNoteItemData> },
+    CreditCard { value: Arc<CreditCardItemData> },
+    Identity { value: Arc<IdentityItemData> },
+    Authenticator { value: Arc<AuthenticatorItemData> },
+}
+
+impl fmt::Debug for EditableItemDraft {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let category = match self {
+            Self::Login { .. } => "login",
+            Self::SecureNote { .. } => "secure-note",
+            Self::CreditCard { .. } => "credit-card",
+            Self::Identity { .. } => "identity",
+            Self::Authenticator { .. } => "authenticator",
+        };
+        f.debug_struct("EditableItemDraft")
+            .field("category", &category)
+            .field("plaintext", &"[redacted]")
+            .finish()
+    }
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct ItemEditGuard {
+    pub account_id: String,
+    pub incarnation: String,
+    pub lock_epoch: u64,
+    pub item_id: String,
+    pub vault_id: String,
+    pub item_version: i32,
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum DuplicateSourceGuard {
+    Authoritative { item_version: i32 },
+    AcceptedOverlay { operation_id: String },
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct ItemDuplicateGuard {
+    pub account_id: String,
+    pub incarnation_id: String,
+    pub lock_epoch: u64,
+    pub source_item_id: String,
+    pub vault_id: String,
+    pub replica_revision: u64,
+    pub source: DuplicateSourceGuard,
+}
+
 #[uniffi::export]
 impl PasswordHistoryEntry {
     #[uniffi::constructor]
@@ -550,6 +664,108 @@ impl LoginItemData {
     }
     pub fn totp_period(&self) -> Option<u32> {
         self.totp_period
+    }
+}
+
+#[uniffi::export]
+impl EditableLoginItemData {
+    #[uniffi::constructor]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        title: String,
+        url: Option<String>,
+        urls: Vec<String>,
+        username: Option<String>,
+        password: Option<String>,
+        password_history: Vec<Arc<PasswordHistoryEntry>>,
+        notes: Option<String>,
+        note: Option<String>,
+        custom_fields: Vec<Arc<CustomField>>,
+        tags: Vec<String>,
+        totp_secret: Option<String>,
+        totp_issuer: Option<String>,
+        totp_account_name: Option<String>,
+        totp_algorithm: Option<TotpAlgorithm>,
+        totp_digits: Option<TotpDigits>,
+        totp_period: Option<u32>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            title,
+            url,
+            urls,
+            username,
+            password,
+            password_history,
+            notes,
+            note,
+            custom_fields,
+            tags,
+            totp_secret,
+            totp_issuer,
+            totp_account_name,
+            totp_algorithm,
+            totp_digits,
+            totp_period,
+        })
+    }
+
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
+    pub fn url(&self) -> Option<String> {
+        self.url.clone()
+    }
+    pub fn urls(&self) -> Vec<String> {
+        self.urls.clone()
+    }
+    pub fn username(&self) -> Option<String> {
+        self.username.clone()
+    }
+    pub fn password(&self) -> Option<String> {
+        self.password.clone()
+    }
+    pub fn password_history(&self) -> Vec<Arc<PasswordHistoryEntry>> {
+        self.password_history.clone()
+    }
+    pub fn notes(&self) -> Option<String> {
+        self.notes.clone()
+    }
+    pub fn note(&self) -> Option<String> {
+        self.note.clone()
+    }
+    pub fn custom_fields(&self) -> Vec<Arc<CustomField>> {
+        self.custom_fields.clone()
+    }
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.clone()
+    }
+    pub fn totp_secret(&self) -> Option<String> {
+        self.totp_secret.clone()
+    }
+    pub fn totp_issuer(&self) -> Option<String> {
+        self.totp_issuer.clone()
+    }
+    pub fn totp_account_name(&self) -> Option<String> {
+        self.totp_account_name.clone()
+    }
+    pub fn totp_algorithm(&self) -> Option<TotpAlgorithm> {
+        self.totp_algorithm
+    }
+    pub fn totp_digits(&self) -> Option<TotpDigits> {
+        self.totp_digits
+    }
+    pub fn totp_period(&self) -> Option<u32> {
+        self.totp_period
+    }
+}
+
+#[uniffi::export]
+impl PublicLoginItemData {
+    pub fn editable(&self) -> Arc<EditableLoginItemData> {
+        self.editable.clone()
+    }
+    pub fn passkeys(&self) -> Vec<PublicPasskey> {
+        self.passkeys.clone()
     }
 }
 
@@ -960,8 +1176,712 @@ pub struct ImportItemDraft {
     pub favorite: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BiometricKind {
+    TouchId,
+    FaceId,
+    WindowsHello,
+    Fingerprint,
+    Face,
+    Other,
+}
+impl From<core::BiometricKind> for BiometricKind {
+    fn from(value: core::BiometricKind) -> Self {
+        match value {
+            core::BiometricKind::TouchId => Self::TouchId,
+            core::BiometricKind::FaceId => Self::FaceId,
+            core::BiometricKind::WindowsHello => Self::WindowsHello,
+            core::BiometricKind::Fingerprint => Self::Fingerprint,
+            core::BiometricKind::Face => Self::Face,
+            core::BiometricKind::Other => Self::Other,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BiometricFailure {
+    Unavailable,
+    NotEnrolled,
+    NotEnabled,
+    PasswordRequired,
+    Cancelled,
+    Failed,
+    LockedOut,
+    AccountChanged,
+    TravelUnverified,
+    StorageUnavailable,
+}
+impl From<core::BiometricFailure> for BiometricFailure {
+    fn from(value: core::BiometricFailure) -> Self {
+        match value {
+            core::BiometricFailure::Unavailable => Self::Unavailable,
+            core::BiometricFailure::NotEnrolled => Self::NotEnrolled,
+            core::BiometricFailure::NotEnabled => Self::NotEnabled,
+            core::BiometricFailure::PasswordRequired => Self::PasswordRequired,
+            core::BiometricFailure::Cancelled => Self::Cancelled,
+            core::BiometricFailure::Failed => Self::Failed,
+            core::BiometricFailure::LockedOut => Self::LockedOut,
+            core::BiometricFailure::AccountChanged => Self::AccountChanged,
+            core::BiometricFailure::TravelUnverified => Self::TravelUnverified,
+            core::BiometricFailure::StorageUnavailable => Self::StorageUnavailable,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BiometricHardware {
+    pub has_hardware: bool,
+    pub is_enrolled: bool,
+    pub kind: Option<BiometricKind>,
+}
+impl From<core::BiometricHardware> for BiometricHardware {
+    fn from(value: core::BiometricHardware) -> Self {
+        Self {
+            has_hardware: value.has_hardware,
+            is_enrolled: value.is_enrolled,
+            kind: value.kind.map(Into::into),
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BiometricAccountAvailability {
+    pub account_id: String,
+    pub enabled: bool,
+    pub failure: Option<BiometricFailure>,
+}
+impl From<core::BiometricAccountAvailability> for BiometricAccountAvailability {
+    fn from(value: core::BiometricAccountAvailability) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            enabled: value.enabled,
+            failure: value.failure.map(Into::into),
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BiometricAccountUnlock {
+    pub account_id: String,
+    pub failure: Option<BiometricFailure>,
+}
+impl From<core::BiometricAccountUnlock> for BiometricAccountUnlock {
+    fn from(value: core::BiometricAccountUnlock) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            failure: value.failure.map(Into::into),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum TeamRole {
+    Owner,
+    Admin,
+    Member,
+}
+impl From<core::server_contract::TeamRole> for TeamRole {
+    fn from(value: core::server_contract::TeamRole) -> Self {
+        match value {
+            core::server_contract::TeamRole::Owner => Self::Owner,
+            core::server_contract::TeamRole::Admin => Self::Admin,
+            core::server_contract::TeamRole::Member => Self::Member,
+        }
+    }
+}
+
+impl From<TeamRole> for core::server_contract::TeamRole {
+    fn from(value: TeamRole) -> Self {
+        match value {
+            TeamRole::Owner => Self::Owner,
+            TeamRole::Admin => Self::Admin,
+            TeamRole::Member => Self::Member,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum VaultRole {
+    Owner,
+    Admin,
+    Member,
+    ReadOnly,
+}
+impl From<core::server_contract::VaultRole> for VaultRole {
+    fn from(value: core::server_contract::VaultRole) -> Self {
+        match value {
+            core::server_contract::VaultRole::Owner => Self::Owner,
+            core::server_contract::VaultRole::Admin => Self::Admin,
+            core::server_contract::VaultRole::Member => Self::Member,
+            core::server_contract::VaultRole::ReadOnly => Self::ReadOnly,
+        }
+    }
+}
+impl From<VaultRole> for core::server_contract::VaultRole {
+    fn from(value: VaultRole) -> Self {
+        match value {
+            VaultRole::Owner => Self::Owner,
+            VaultRole::Admin => Self::Admin,
+            VaultRole::Member => Self::Member,
+            VaultRole::ReadOnly => Self::ReadOnly,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct AvailableVaultMember {
+    pub user_id: String,
+    pub name: String,
+    pub email: String,
+    pub public_key: String,
+}
+impl From<core::AvailableVaultMember> for AvailableVaultMember {
+    fn from(value: core::AvailableVaultMember) -> Self {
+        Self {
+            user_id: value.user_id,
+            name: value.name,
+            email: value.email,
+            public_key: value.public_key,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CurrentVaultMember {
+    pub user_id: String,
+    pub name: String,
+    pub email: String,
+    pub role: VaultRole,
+}
+impl From<core::CurrentVaultMember> for CurrentVaultMember {
+    fn from(value: core::CurrentVaultMember) -> Self {
+        Self {
+            user_id: value.user_id,
+            name: value.name,
+            email: value.email,
+            role: value.role.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum MyInvitationAction {
+    Accept,
+    Decline,
+}
+impl From<core::MyInvitationAction> for MyInvitationAction {
+    fn from(value: core::MyInvitationAction) -> Self {
+        match value {
+            core::MyInvitationAction::Accept => Self::Accept,
+            core::MyInvitationAction::Decline => Self::Decline,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct MyTeamInvitation {
+    pub id: String,
+    pub team_id: String,
+    pub team_name: String,
+    pub role: TeamRole,
+    pub invited_by: String,
+    pub expires_at: String,
+}
+impl From<core::MyTeamInvitation> for MyTeamInvitation {
+    fn from(value: core::MyTeamInvitation) -> Self {
+        let core::MyTeamInvitation {
+            id,
+            team_id,
+            team_name,
+            role,
+            invited_by,
+            expires_at,
+        } = value;
+        Self {
+            id,
+            team_id,
+            team_name,
+            role: role.into(),
+            invited_by,
+            expires_at,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct InvitationComposerVault {
+    pub id: String,
+    pub name: String,
+}
+impl From<core::InvitationComposerVault> for InvitationComposerVault {
+    fn from(value: core::InvitationComposerVault) -> Self {
+        let core::InvitationComposerVault { id, name } = value;
+        Self { id, name }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct InvitationSeatPreviewLine {
+    pub id: String,
+    pub description: String,
+    pub amount_cents: String,
+    pub currency: String,
+    pub period_start: String,
+    pub period_end: String,
+    pub quantity: Option<String>,
+    pub unit_amount_cents: Option<String>,
+    pub is_proration: bool,
+}
+impl From<core::InvitationSeatPreviewLine> for InvitationSeatPreviewLine {
+    fn from(value: core::InvitationSeatPreviewLine) -> Self {
+        let core::InvitationSeatPreviewLine {
+            id,
+            description,
+            amount_cents,
+            currency,
+            period_start,
+            period_end,
+            quantity,
+            unit_amount_cents,
+            is_proration,
+        } = value;
+        Self {
+            id,
+            description,
+            amount_cents,
+            currency,
+            period_start,
+            period_end,
+            quantity,
+            unit_amount_cents,
+            is_proration,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct InvitationSeatPreview {
+    pub currency: String,
+    pub current_quantity: String,
+    pub next_quantity: String,
+    pub estimated_next_payment_cents: String,
+    pub total_line_items_cents: String,
+    pub lines: Vec<InvitationSeatPreviewLine>,
+}
+impl From<core::InvitationSeatPreview> for InvitationSeatPreview {
+    fn from(value: core::InvitationSeatPreview) -> Self {
+        let core::InvitationSeatPreview {
+            currency,
+            current_quantity,
+            next_quantity,
+            estimated_next_payment_cents,
+            total_line_items_cents,
+            lines,
+        } = value;
+        Self {
+            currency,
+            current_quantity,
+            next_quantity,
+            estimated_next_payment_cents,
+            total_line_items_cents,
+            lines: lines.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct InvitationComposerData {
+    pub team_id: String,
+    pub vaults: Vec<InvitationComposerVault>,
+    pub billing_enabled: bool,
+    pub team_plan_active: bool,
+    pub seat_preview: Option<InvitationSeatPreview>,
+}
+impl From<core::InvitationComposerData> for InvitationComposerData {
+    fn from(value: core::InvitationComposerData) -> Self {
+        let core::InvitationComposerData {
+            team_id,
+            vaults,
+            billing_enabled,
+            team_plan_active,
+            seat_preview,
+        } = value;
+        Self {
+            team_id,
+            vaults: vaults.into_iter().map(Into::into).collect(),
+            billing_enabled,
+            team_plan_active,
+            seat_preview: seat_preview.map(Into::into),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct InvitationCandidate {
+    pub recipient_user_id: String,
+    pub public_key: String,
+    pub fingerprint: String,
+}
+impl From<core::InvitationCandidate> for InvitationCandidate {
+    fn from(value: core::InvitationCandidate) -> Self {
+        let core::InvitationCandidate {
+            recipient_user_id,
+            public_key,
+            fingerprint,
+        } = value;
+        Self {
+            recipient_user_id,
+            public_key,
+            fingerprint,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum InvitationUncertainPhase {
+    FirstSend,
+    CancelOriginal,
+    ReplacementSend,
+}
+impl From<core::InvitationUncertainPhase> for InvitationUncertainPhase {
+    fn from(value: core::InvitationUncertainPhase) -> Self {
+        match value {
+            core::InvitationUncertainPhase::FirstSend => Self::FirstSend,
+            core::InvitationUncertainPhase::CancelOriginal => Self::CancelOriginal,
+            core::InvitationUncertainPhase::ReplacementSend => Self::ReplacementSend,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum InvitationAdminAction {
+    Cancel,
+    Resend,
+}
+impl From<core::InvitationAdminAction> for InvitationAdminAction {
+    fn from(value: core::InvitationAdminAction) -> Self {
+        match value {
+            core::InvitationAdminAction::Cancel => Self::Cancel,
+            core::InvitationAdminAction::Resend => Self::Resend,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum RotationIntent {
+    VaultMemberRemoval { vault_id: String, user_id: String },
+    TeamLeave { team_id: String },
+    TeamMemberRemoval { team_id: String, user_id: String },
+}
+impl From<RotationIntent> for core::RotationIntent {
+    fn from(value: RotationIntent) -> Self {
+        match value {
+            RotationIntent::VaultMemberRemoval { vault_id, user_id } => {
+                Self::VaultMemberRemoval { vault_id, user_id }
+            }
+            RotationIntent::TeamLeave { team_id } => Self::TeamLeave { team_id },
+            RotationIntent::TeamMemberRemoval { team_id, user_id } => {
+                Self::TeamMemberRemoval { team_id, user_id }
+            }
+        }
+    }
+}
+impl From<core::RotationIntent> for RotationIntent {
+    fn from(value: core::RotationIntent) -> Self {
+        match value {
+            core::RotationIntent::VaultMemberRemoval { vault_id, user_id } => {
+                Self::VaultMemberRemoval { vault_id, user_id }
+            }
+            core::RotationIntent::TeamLeave { team_id } => Self::TeamLeave { team_id },
+            core::RotationIntent::TeamMemberRemoval { team_id, user_id } => {
+                Self::TeamMemberRemoval { team_id, user_id }
+            }
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct RotationPlanSelection {
+    pub plan_id: String,
+    pub vault_id: String,
+    pub expected_key_version: i32,
+}
+impl From<core::RotationPlanSelection> for RotationPlanSelection {
+    fn from(value: core::RotationPlanSelection) -> Self {
+        Self {
+            plan_id: value.plan_id,
+            vault_id: value.vault_id,
+            expected_key_version: value.expected_key_version,
+        }
+    }
+}
+impl From<RotationPlanSelection> for core::RotationPlanSelection {
+    fn from(value: RotationPlanSelection) -> Self {
+        Self {
+            plan_id: value.plan_id,
+            vault_id: value.vault_id,
+            expected_key_version: value.expected_key_version,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct RotationCandidate {
+    pub user_id: String,
+    pub public_key: String,
+    pub fingerprint: String,
+}
+impl From<core::RotationCandidate> for RotationCandidate {
+    fn from(value: core::RotationCandidate) -> Self {
+        Self {
+            user_id: value.user_id,
+            public_key: value.public_key,
+            fingerprint: value.fingerprint,
+        }
+    }
+}
+impl From<RotationCandidate> for core::RotationCandidate {
+    fn from(value: RotationCandidate) -> Self {
+        Self {
+            user_id: value.user_id,
+            public_key: value.public_key,
+            fingerprint: value.fingerprint,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct RotationSelection {
+    pub account_id: String,
+    pub incarnation_id: String,
+    pub lock_epoch: String,
+    pub authority_generation_id: String,
+    pub intent: RotationIntent,
+    pub start_operation_id: String,
+    pub plans: Vec<RotationPlanSelection>,
+    pub candidates: Vec<RotationCandidate>,
+}
+impl From<core::RotationSelection> for RotationSelection {
+    fn from(value: core::RotationSelection) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            incarnation_id: value.incarnation_id.into(),
+            lock_epoch: value.lock_epoch,
+            authority_generation_id: value.authority_generation_id,
+            intent: value.intent.into(),
+            start_operation_id: value.start_operation_id,
+            plans: value.plans.into_iter().map(Into::into).collect(),
+            candidates: value.candidates.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<RotationSelection> for core::RotationSelection {
+    fn from(value: RotationSelection) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            incarnation_id: value.incarnation_id.into(),
+            lock_epoch: value.lock_epoch,
+            authority_generation_id: value.authority_generation_id,
+            intent: value.intent.into(),
+            start_operation_id: value.start_operation_id,
+            plans: value.plans.into_iter().map(Into::into).collect(),
+            candidates: value.candidates.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TeamLeaveAttempt {
+    pub team_id: String,
+    pub start_operation_id: String,
+}
+impl From<core::TeamLeaveAttempt> for TeamLeaveAttempt {
+    fn from(value: core::TeamLeaveAttempt) -> Self {
+        Self {
+            team_id: value.team_id,
+            start_operation_id: value.start_operation_id,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RotationStartRejectionCode {
+    TeamMemberNotFound,
+    PersonalTeamDepartureForbidden,
+    TeamOwnerLeaveForbidden,
+}
+impl From<core::RotationStartRejectionCode> for RotationStartRejectionCode {
+    fn from(value: core::RotationStartRejectionCode) -> Self {
+        match value {
+            core::RotationStartRejectionCode::TeamMemberNotFound => Self::TeamMemberNotFound,
+            core::RotationStartRejectionCode::PersonalTeamDepartureForbidden => {
+                Self::PersonalTeamDepartureForbidden
+            }
+            core::RotationStartRejectionCode::TeamOwnerLeaveForbidden => {
+                Self::TeamOwnerLeaveForbidden
+            }
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RotationFinalizeRejectionCode {
+    TeamMembershipChanged,
+    PersonalTeamDepartureForbidden,
+    TeamOwnerLeaveForbidden,
+    RotationPlanUnavailable,
+    RotationPlanMismatch,
+    RotationPlanIncomplete,
+    RotationPlanStale,
+    RotationPlanSetMismatch,
+}
+impl From<core::RotationFinalizeRejectionCode> for RotationFinalizeRejectionCode {
+    fn from(value: core::RotationFinalizeRejectionCode) -> Self {
+        match value {
+            core::RotationFinalizeRejectionCode::TeamMembershipChanged => {
+                Self::TeamMembershipChanged
+            }
+            core::RotationFinalizeRejectionCode::PersonalTeamDepartureForbidden => {
+                Self::PersonalTeamDepartureForbidden
+            }
+            core::RotationFinalizeRejectionCode::TeamOwnerLeaveForbidden => {
+                Self::TeamOwnerLeaveForbidden
+            }
+            core::RotationFinalizeRejectionCode::RotationPlanUnavailable => {
+                Self::RotationPlanUnavailable
+            }
+            core::RotationFinalizeRejectionCode::RotationPlanMismatch => Self::RotationPlanMismatch,
+            core::RotationFinalizeRejectionCode::RotationPlanIncomplete => {
+                Self::RotationPlanIncomplete
+            }
+            core::RotationFinalizeRejectionCode::RotationPlanStale => Self::RotationPlanStale,
+            core::RotationFinalizeRejectionCode::RotationPlanSetMismatch => {
+                Self::RotationPlanSetMismatch
+            }
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum RotationTerminalOutcome {
+    Applied { personal_team_id: String },
+    Rejected { code: RotationFinalizeRejectionCode },
+}
+impl From<core::RotationTerminalOutcome> for RotationTerminalOutcome {
+    fn from(value: core::RotationTerminalOutcome) -> Self {
+        match value {
+            core::RotationTerminalOutcome::Applied { personal_team_id } => {
+                Self::Applied { personal_team_id }
+            }
+            core::RotationTerminalOutcome::Rejected { code } => {
+                Self::Rejected { code: code.into() }
+            }
+        }
+    }
+}
+
 #[derive(Clone, uniffi::Enum)]
 pub enum RuntimeRequest {
+    ListAvailableVaultMembers {
+        account_id: String,
+        vault_id: String,
+    },
+    ListVaultMembers {
+        account_id: String,
+        vault_id: String,
+    },
+    AddVaultMember {
+        account_id: String,
+        vault_id: String,
+        user_id: String,
+        role: VaultRole,
+    },
+    PrepareRotation {
+        account_id: String,
+        intent: RotationIntent,
+        start_operation_id: Option<String>,
+    },
+    CompleteRotation {
+        account_id: String,
+        selection: RotationSelection,
+    },
+    InspectRotation {
+        account_id: String,
+        start_operation_id: String,
+    },
+    ListTeamLeaveAttempts {
+        account_id: String,
+    },
+    AcknowledgeTeamLeaveAttempt {
+        account_id: String,
+        start_operation_id: String,
+    },
+    ListMyTeamInvitations {
+        account_id: String,
+    },
+    AcceptMyTeamInvitation {
+        account_id: String,
+        invitation_id: String,
+    },
+    DeclineMyTeamInvitation {
+        account_id: String,
+        invitation_id: String,
+    },
+    ReadInvitationComposer {
+        account_id: String,
+        team_id: String,
+    },
+    CreateTeamInvitation {
+        account_id: String,
+        team_id: String,
+        email: String,
+        role: TeamRole,
+    },
+    ProvisionTeamInvitation {
+        account_id: String,
+        continuation_id: String,
+    },
+    ReleaseInvitationContinuation {
+        account_id: String,
+        continuation_id: String,
+    },
+    CancelTeamInvitation {
+        account_id: String,
+        team_id: String,
+        invitation_id: String,
+    },
+    ResendTeamInvitation {
+        account_id: String,
+        team_id: String,
+        invitation_id: String,
+    },
+    InspectProfileAdmission,
+    AbortProfileAdmission {
+        admission_id: String,
+    },
+    RecipientKeyScope {
+        account_id: String,
+    },
+    OwnKeyFingerprint {
+        account_id: String,
+    },
+    VerifyRecipientKey {
+        account_id: String,
+        recipient_user_id: String,
+        public_key: String,
+        expected_fingerprint: String,
+        scope: String,
+    },
+    VerifiedRecipientKey {
+        account_id: String,
+        recipient_user_id: String,
+        public_key: String,
+        scope: String,
+    },
+    RefreshTravelMode {
+        account_id: String,
+    },
+    SetTravelModeHiddenVaults {
+        account_id: String,
+        hidden_vault_ids: Vec<String>,
+    },
+    EnableTravelMode {
+        account_id: String,
+        hidden_vault_ids: Vec<String>,
+    },
+    DisableTravelMode {
+        account_id: String,
+        master_password: Arc<SecretString>,
+    },
     RebootstrapAccountRecovery {
         account_id: String,
     },
@@ -985,6 +1905,42 @@ pub enum RuntimeRequest {
         secret_key: Arc<SecretString>,
         insecure_transport_confirmed: bool,
     },
+    BiometricAvailability {
+        account_ids: Vec<String>,
+    },
+    SetBiometricEnabled {
+        account_id: String,
+        enabled: bool,
+    },
+    BiometricUnlock {
+        account_id: String,
+        prompt_message: String,
+    },
+    BiometricUnlockAccounts {
+        account_ids: Vec<String>,
+        prompt_message: String,
+    },
+    SetMasterPasswordReentryPeriod {
+        period_ms: i64,
+    },
+    LocalSecuritySettings {
+        account_id: String,
+    },
+    SetInactivityTimeout {
+        account_id: String,
+        timeout_ms: i64,
+    },
+    RecordActivity {
+        account_id: String,
+        kind: ActivityKind,
+    },
+    DeviceSetup {
+        account_id: String,
+    },
+    QuickUnlockAccounts {
+        account_ids: Vec<String>,
+        master_password: Arc<SecretString>,
+    },
     QuickUnlock {
         account_id: String,
         master_password: Arc<SecretString>,
@@ -1004,6 +1960,17 @@ pub enum RuntimeRequest {
         request_id: String,
     },
     Wipe,
+    UpdateVault {
+        account_id: String,
+        vault_id: String,
+        name: Option<String>,
+        icon: VaultIconPatch,
+        image: VaultImageChange,
+    },
+    DeleteVault {
+        account_id: String,
+        vault_id: String,
+    },
     CreateVault {
         account_id: String,
         name: String,
@@ -1014,7 +1981,7 @@ pub enum RuntimeRequest {
     CreateItem {
         account_id: String,
         vault_id: String,
-        draft: ItemDraft,
+        draft: EditableItemDraft,
     },
     ImportItems {
         account_id: String,
@@ -1024,7 +1991,22 @@ pub enum RuntimeRequest {
     UpdateItem {
         account_id: String,
         item_id: String,
-        draft: ItemDraft,
+        guard: ItemEditGuard,
+        draft: EditableItemDraft,
+    },
+    RemovePasskey {
+        account_id: String,
+        item_id: String,
+        guard: ItemEditGuard,
+        rp_id: String,
+        credential_id: String,
+        public_key_fingerprint: String,
+    },
+    DuplicateItem {
+        account_id: String,
+        source_item_id: String,
+        source_guard: ItemDuplicateGuard,
+        title: String,
     },
     SetItemFavorite {
         account_id: String,
@@ -1043,6 +2025,16 @@ pub enum RuntimeRequest {
         account_id: String,
         item_id: String,
         target_vault_id: String,
+        target_account_id: Option<String>,
+    },
+    PrepareCrossAccountMoveResume {
+        account_id: String,
+        operation_id: String,
+        target_account_id: String,
+        expected_binding_revision: u64,
+    },
+    ResumeCrossAccountMove {
+        guard: CrossAccountMoveResumeGuard,
     },
     PermanentlyDeleteItem {
         account_id: String,
@@ -1063,10 +2055,12 @@ pub enum RuntimeRequest {
     },
     ListShareAccessLogs {
         account_id: String,
+        item_id: String,
         link_id: String,
     },
     RevokeShareLink {
         account_id: String,
+        item_id: String,
         link_id: String,
     },
     RenameAttachment {
@@ -1185,9 +2179,81 @@ pub struct VaultImageSourceInput {
     pub content_type: String,
 }
 
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum VaultIconPatch {
+    Unchanged,
+    Clear,
+    Set { value: String },
+}
+#[derive(Clone, uniffi::Enum)]
+pub enum VaultImageChange {
+    Unchanged,
+    Remove,
+    Source { source: VaultImageSourceInput },
+}
+impl fmt::Debug for VaultImageChange {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unchanged => formatter.write_str("Unchanged"),
+            Self::Remove => formatter.write_str("Remove"),
+            Self::Source { .. } => formatter.write_str("Source([redacted])"),
+        }
+    }
+}
+impl From<VaultImageSourceInput> for core::VaultImageSourceInput {
+    fn from(source: VaultImageSourceInput) -> Self {
+        Self {
+            capability_id: source.capability_id,
+            byte_length: source.byte_length,
+            content_type: source.content_type,
+        }
+    }
+}
+
 impl fmt::Debug for RuntimeRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ListAvailableVaultMembers { .. }
+            | Self::ListVaultMembers { .. }
+            | Self::AddVaultMember { .. } => {
+                formatter.write_str("VaultMembership([redacted Account scope])")
+            }
+            Self::PrepareRotation { .. }
+            | Self::CompleteRotation { .. }
+            | Self::InspectRotation { .. }
+            | Self::ListTeamLeaveAttempts { .. }
+            | Self::AcknowledgeTeamLeaveAttempt { .. } => {
+                formatter.write_str("Rotation([redacted Account scope])")
+            }
+            Self::ListMyTeamInvitations { .. }
+            | Self::AcceptMyTeamInvitation { .. }
+            | Self::DeclineMyTeamInvitation { .. }
+            | Self::ReadInvitationComposer { .. }
+            | Self::CreateTeamInvitation { .. }
+            | Self::ProvisionTeamInvitation { .. }
+            | Self::ReleaseInvitationContinuation { .. }
+            | Self::CancelTeamInvitation { .. }
+            | Self::ResendTeamInvitation { .. } => {
+                formatter.write_str("TeamInvitation([redacted Account scope])")
+            }
+            Self::InspectProfileAdmission => formatter.write_str("InspectProfileAdmission"),
+            Self::AbortProfileAdmission { .. } => formatter.write_str("AbortProfileAdmission"),
+            Self::RecipientKeyScope { .. }
+            | Self::OwnKeyFingerprint { .. }
+            | Self::VerifyRecipientKey { .. }
+            | Self::VerifiedRecipientKey { .. } => {
+                formatter.write_str("RecipientKey([redacted scope])")
+            }
+            Self::RefreshTravelMode { .. } => {
+                formatter.write_str("RefreshTravelMode([redacted scope])")
+            }
+            Self::SetTravelModeHiddenVaults { .. } => {
+                formatter.write_str("SetTravelModeHiddenVaults([redacted scope])")
+            }
+            Self::EnableTravelMode { .. } => {
+                formatter.write_str("EnableTravelMode([redacted scope])")
+            }
+            Self::DisableTravelMode { .. } => formatter.write_str("DisableTravelMode([redacted])"),
             Self::RebootstrapAccountRecovery { .. } => {
                 formatter.write_str("RebootstrapAccountRecovery([redacted scope])")
             }
@@ -1208,6 +2274,24 @@ impl fmt::Debug for RuntimeRequest {
                 .field("email", email)
                 .field("credentials", &"[redacted]")
                 .finish(),
+            Self::BiometricAvailability { .. }
+            | Self::SetBiometricEnabled { .. }
+            | Self::BiometricUnlock { .. }
+            | Self::BiometricUnlockAccounts { .. }
+            | Self::SetMasterPasswordReentryPeriod { .. } => {
+                formatter.write_str("LocalAccess([redacted scope and prompt])")
+            }
+            Self::LocalSecuritySettings { .. } => {
+                formatter.write_str("LocalSecuritySettings([redacted])")
+            }
+            Self::SetInactivityTimeout { .. } => {
+                formatter.write_str("SetInactivityTimeout([redacted])")
+            }
+            Self::RecordActivity { .. } => formatter.write_str("RecordActivity([redacted])"),
+            Self::DeviceSetup { .. } => formatter.write_str("DeviceSetup([redacted])"),
+            Self::QuickUnlockAccounts { .. } => {
+                formatter.write_str("QuickUnlockAccounts([redacted])")
+            }
             Self::QuickUnlock { account_id, .. } => formatter
                 .debug_struct("QuickUnlock")
                 .field("account_id", account_id)
@@ -1226,6 +2310,23 @@ impl fmt::Debug for RuntimeRequest {
                 formatter.write_str("DeleteServerAccount([redacted scope and confirmation])")
             }
             Self::Wipe => formatter.write_str("Wipe"),
+            Self::UpdateVault {
+                account_id,
+                vault_id,
+                ..
+            } => formatter
+                .debug_struct("UpdateVault")
+                .field("account_id", account_id)
+                .field("vault_id", vault_id)
+                .finish(),
+            Self::DeleteVault {
+                account_id,
+                vault_id,
+            } => formatter
+                .debug_struct("DeleteVault")
+                .field("account_id", account_id)
+                .field("vault_id", vault_id)
+                .finish(),
             Self::CreateVault {
                 account_id,
                 name,
@@ -1265,11 +2366,31 @@ impl fmt::Debug for RuntimeRequest {
                 account_id,
                 item_id,
                 draft,
+                ..
             } => formatter
                 .debug_struct("UpdateItem")
                 .field("account_id", account_id)
                 .field("item_id", item_id)
                 .field("draft", draft)
+                .finish(),
+            Self::RemovePasskey {
+                account_id,
+                item_id,
+                ..
+            } => formatter
+                .debug_struct("RemovePasskey")
+                .field("account_id", account_id)
+                .field("item_id", item_id)
+                .finish(),
+            Self::DuplicateItem {
+                account_id,
+                source_item_id,
+                ..
+            } => formatter
+                .debug_struct("DuplicateItem")
+                .field("account_id", account_id)
+                .field("source_item_id", source_item_id)
+                .field("plaintext", &"[redacted]")
                 .finish(),
             Self::SetItemFavorite {
                 account_id,
@@ -1301,11 +2422,29 @@ impl fmt::Debug for RuntimeRequest {
                 account_id,
                 item_id,
                 target_vault_id,
+                target_account_id,
             } => formatter
                 .debug_struct("MoveItem")
                 .field("account_id", account_id)
                 .field("item_id", item_id)
                 .field("target_vault_id", target_vault_id)
+                .field("target_account_id", target_account_id)
+                .finish(),
+            Self::PrepareCrossAccountMoveResume {
+                account_id,
+                operation_id,
+                target_account_id,
+                expected_binding_revision,
+            } => formatter
+                .debug_struct("PrepareCrossAccountMoveResume")
+                .field("account_id", account_id)
+                .field("operation_id", operation_id)
+                .field("target_account_id", target_account_id)
+                .field("expected_binding_revision", expected_binding_revision)
+                .finish(),
+            Self::ResumeCrossAccountMove { guard } => formatter
+                .debug_struct("ResumeCrossAccountMove")
+                .field("guard", guard)
                 .finish(),
             Self::PermanentlyDeleteItem {
                 account_id,
@@ -1343,18 +2482,22 @@ impl fmt::Debug for RuntimeRequest {
                 .finish(),
             Self::ListShareAccessLogs {
                 account_id,
+                item_id,
                 link_id,
             } => formatter
                 .debug_struct("ListShareAccessLogs")
                 .field("account_id", account_id)
+                .field("item_id", item_id)
                 .field("link_id", link_id)
                 .finish(),
             Self::RevokeShareLink {
                 account_id,
+                item_id,
                 link_id,
             } => formatter
                 .debug_struct("RevokeShareLink")
                 .field("account_id", account_id)
+                .field("item_id", item_id)
                 .field("link_id", link_id)
                 .finish(),
             Self::RenameAttachment {
@@ -1401,8 +2544,299 @@ impl fmt::Debug for RuntimeRequest {
     }
 }
 
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TravelModePolicy {
+    pub enabled: bool,
+    pub hidden_vault_ids: Vec<String>,
+    pub server_enabled_at_ms: Option<String>,
+    pub server_updated_at_ms: Option<String>,
+    pub verified_at_ms: Option<String>,
+}
+impl From<core::TravelModePolicy> for TravelModePolicy {
+    fn from(value: core::TravelModePolicy) -> Self {
+        Self {
+            enabled: value.enabled,
+            hidden_vault_ids: value.hidden_vault_ids,
+            server_enabled_at_ms: value.server_enabled_at_ms,
+            server_updated_at_ms: value.server_updated_at_ms,
+            verified_at_ms: value.verified_at_ms,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum TravelModeEnforcement {
+    Unverified,
+    Retiring,
+    Ready,
+    Refreshing,
+}
+impl From<core::TravelModeEnforcement> for TravelModeEnforcement {
+    fn from(value: core::TravelModeEnforcement) -> Self {
+        match value {
+            core::TravelModeEnforcement::Unverified => Self::Unverified,
+            core::TravelModeEnforcement::Retiring => Self::Retiring,
+            core::TravelModeEnforcement::Ready => Self::Ready,
+            core::TravelModeEnforcement::Refreshing => Self::Refreshing,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum TravelModeCommandResult {
+    Confirmed {
+        policy: TravelModePolicy,
+        enforcement: TravelModeEnforcement,
+    },
+    RetryRequired {
+        policy: TravelModePolicy,
+    },
+    Uncertain {
+        last_verified_policy: Option<TravelModePolicy>,
+    },
+}
+impl From<core::TravelModeCommandResult> for TravelModeCommandResult {
+    fn from(value: core::TravelModeCommandResult) -> Self {
+        match value {
+            core::TravelModeCommandResult::Confirmed {
+                policy,
+                enforcement,
+            } => Self::Confirmed {
+                policy: policy.into(),
+                enforcement: enforcement.into(),
+            },
+            core::TravelModeCommandResult::RetryRequired { policy } => Self::RetryRequired {
+                policy: policy.into(),
+            },
+            core::TravelModeCommandResult::Uncertain {
+                last_verified_policy,
+            } => Self::Uncertain {
+                last_verified_policy: last_verified_policy.map(Into::into),
+            },
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TravelModeProjection {
+    pub account_id: String,
+    pub revision: u64,
+    pub last_verified_policy: Option<TravelModePolicy>,
+    pub enforcement: TravelModeEnforcement,
+}
+impl From<core::TravelModeProjection> for TravelModeProjection {
+    fn from(value: core::TravelModeProjection) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            revision: value.revision,
+            last_verified_policy: value.last_verified_policy.map(Into::into),
+            enforcement: value.enforcement.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ProfileAdmissionImportPhase {
+    Preparing,
+    Aborting,
+    Aborted,
+    Committed,
+    Complete,
+}
+
+impl From<core::ProfileAdmissionImportPhase> for ProfileAdmissionImportPhase {
+    fn from(value: core::ProfileAdmissionImportPhase) -> Self {
+        match value {
+            core::ProfileAdmissionImportPhase::Preparing => Self::Preparing,
+            core::ProfileAdmissionImportPhase::Aborting => Self::Aborting,
+            core::ProfileAdmissionImportPhase::Aborted => Self::Aborted,
+            core::ProfileAdmissionImportPhase::Committed => Self::Committed,
+            core::ProfileAdmissionImportPhase::Complete => Self::Complete,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ProfileAdmissionResetPhase {
+    Wiping,
+    Wiped,
+}
+
+impl From<core::ProfileAdmissionResetPhase> for ProfileAdmissionResetPhase {
+    fn from(value: core::ProfileAdmissionResetPhase) -> Self {
+        match value {
+            core::ProfileAdmissionResetPhase::Wiping => Self::Wiping,
+            core::ProfileAdmissionResetPhase::Wiped => Self::Wiped,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ProfileAdmissionInspectionState {
+    NotStarted,
+    Import {
+        admission_id: String,
+        phase: ProfileAdmissionImportPhase,
+    },
+    Reset {
+        wipe_id: String,
+        phase: ProfileAdmissionResetPhase,
+    },
+}
+
+impl From<core::ProfileAdmissionInspectionState> for ProfileAdmissionInspectionState {
+    fn from(value: core::ProfileAdmissionInspectionState) -> Self {
+        match value {
+            core::ProfileAdmissionInspectionState::NotStarted {} => Self::NotStarted,
+            core::ProfileAdmissionInspectionState::Import {
+                admission_id,
+                phase,
+            } => Self::Import {
+                admission_id,
+                phase: phase.into(),
+            },
+            core::ProfileAdmissionInspectionState::Reset { wipe_id, phase } => Self::Reset {
+                wipe_id,
+                phase: phase.into(),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum RuntimeResponse {
+    AvailableVaultMembers {
+        members: Vec<AvailableVaultMember>,
+    },
+    VaultMembers {
+        members: Vec<CurrentVaultMember>,
+    },
+    VaultMemberAdded {
+        vault_id: String,
+        user_id: String,
+    },
+    VaultMemberAddUncertain {
+        vault_id: String,
+        user_id: String,
+        current_role: Option<VaultRole>,
+    },
+    RotationPrepared {
+        selection: RotationSelection,
+    },
+    RotationStartPending {
+        start_operation_id: String,
+    },
+    RotationStartRejected {
+        code: RotationStartRejectionCode,
+    },
+    RotationPreparationRequiresCrypto {
+        start_operation_id: String,
+        plans: Vec<RotationPlanSelection>,
+    },
+    RotationAttemptConsumed {
+        start_operation_id: String,
+    },
+    RotationFinalizePending {
+        finalize_operation_id: String,
+    },
+    RotationRefreshRequired {
+        finalize_operation_id: String,
+        outcome: RotationTerminalOutcome,
+    },
+    RotationCompleted {
+        personal_team_id: String,
+    },
+    RotationRejected {
+        code: RotationFinalizeRejectionCode,
+    },
+    TeamLeaveAttempts {
+        attempts: Vec<TeamLeaveAttempt>,
+    },
+    TeamLeaveAttemptAcknowledged,
+    MyTeamInvitations {
+        invitations: Vec<MyTeamInvitation>,
+    },
+    MyTeamInvitationAccepted {
+        team_id: String,
+        team_name: String,
+    },
+    MyTeamInvitationAcceptRefreshRequired {
+        team_id: String,
+        team_name: String,
+    },
+    MyTeamInvitationDeclined,
+    MyTeamInvitationUncertain {
+        action: MyInvitationAction,
+        invitation_id: String,
+        pending: Option<bool>,
+        current_team_id: Option<String>,
+    },
+    InvitationComposer {
+        composer: InvitationComposerData,
+    },
+    TeamInvitationCreated {
+        invitation_id: String,
+        token: Arc<SecretString>,
+        candidate: Option<InvitationCandidate>,
+        continuation_id: Option<String>,
+    },
+    TeamInvitationProvisioned {
+        invitation_id: String,
+        token: Arc<SecretString>,
+    },
+    TeamInvitationProvisioningNotRequired {
+        invitation_id: String,
+    },
+    TeamInvitationUncertain {
+        phase: InvitationUncertainPhase,
+        original_invitation_id: Option<String>,
+    },
+    InvitationContinuationReleased,
+    TeamInvitationCancelled {
+        invitation_id: String,
+    },
+    TeamInvitationResent {
+        invitation_id: String,
+        token: Arc<SecretString>,
+    },
+    TeamInvitationAdminUncertain {
+        action: InvitationAdminAction,
+        invitation_id: String,
+        pending: Option<bool>,
+    },
+    ProfileAdmissionAborted {
+        admission_id: String,
+    },
+    ProfileAdmissionInspection {
+        state: ProfileAdmissionInspectionState,
+    },
+    CrossAccountMoveResumePrepared {
+        guard: CrossAccountMoveResumeGuard,
+    },
+    RecipientKeyScope {
+        scope: String,
+    },
+    OwnKeyFingerprint {
+        user_id: String,
+        fingerprint: String,
+    },
+    RecipientKeyVerified,
+    VerifiedRecipientKey {
+        public_key: String,
+    },
+    TravelMode {
+        account_id: String,
+        result: TravelModeCommandResult,
+    },
+    ActivityRecorded,
+    LocalSecuritySettings {
+        account_id: String,
+        inactivity_timeout_ms: i64,
+        master_password_reentry_period_ms: i64,
+    },
+    DeviceSetup {
+        disclosure: DeviceSetupDisclosure,
+    },
+    AccountsUnlocked {
+        accounts: Vec<AccountUnlockResult>,
+    },
     RecoveryDiagnosed {
         diagnostics: StorageRecoveryDiagnostics,
     },
@@ -1414,6 +2848,21 @@ pub enum RuntimeResponse {
     RecoveryRepaired {
         account_id: String,
         replica_revision: u64,
+    },
+    BiometricAvailability {
+        hardware: BiometricHardware,
+        accounts: Vec<BiometricAccountAvailability>,
+        master_password_reentry_period_ms: i64,
+    },
+    BiometricEnabled {
+        account_id: String,
+        enabled: bool,
+    },
+    BiometricUnlock {
+        accounts: Vec<BiometricAccountUnlock>,
+    },
+    MasterPasswordReentryPeriod {
+        period_ms: i64,
     },
     SignedIn {
         account_id: String,
@@ -1431,6 +2880,16 @@ pub enum RuntimeResponse {
     Accepted {
         operation_id: String,
         item_id: String,
+        replica_revision: u64,
+    },
+    VaultUpdateAccepted {
+        operation_id: String,
+        vault_id: String,
+        replica_revision: u64,
+    },
+    VaultDeletionAccepted {
+        operation_id: String,
+        vault_id: String,
         replica_revision: u64,
     },
     VaultCreationAccepted {
@@ -1515,11 +2974,26 @@ pub enum TeardownPhase {
 
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum ObservationRequest {
+    TravelMode {
+        account_id: String,
+    },
     WritableVaultCatalog,
-    Items { account_id: String },
-    PendingShareResults { account_id: String },
-    Operations { account_id: String },
-    RuntimeStatus { account_id: Option<String> },
+    Items {
+        account_id: String,
+    },
+    VaultExport {
+        account_id: String,
+        vault_ids: Vec<String>,
+    },
+    PendingShareResults {
+        account_id: String,
+    },
+    Operations {
+        account_id: String,
+    },
+    RuntimeStatus {
+        account_id: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
@@ -1534,13 +3008,15 @@ pub struct ItemProjection {
     account_id: String,
     item_id: String,
     vault_id: String,
-    data: ItemDraft,
+    data: PublicItemDraft,
     favorite: bool,
     deleted_at: Option<String>,
     attachments: Vec<Arc<AttachmentProjection>>,
     created_at: String,
     updated_at: String,
     status: ItemProjectionStatus,
+    edit_guard: Option<ItemEditGuard>,
+    duplicate_source_guard: Option<ItemDuplicateGuard>,
 }
 
 impl fmt::Debug for ItemProjection {
@@ -1566,8 +3042,14 @@ impl ItemProjection {
     pub fn vault_id(&self) -> String {
         self.vault_id.clone()
     }
-    pub fn data(&self) -> ItemDraft {
+    pub fn data(&self) -> PublicItemDraft {
         self.data.clone()
+    }
+    pub fn edit_guard(&self) -> Option<ItemEditGuard> {
+        self.edit_guard.clone()
+    }
+    pub fn duplicate_source_guard(&self) -> Option<ItemDuplicateGuard> {
+        self.duplicate_source_guard.clone()
     }
     pub fn favorite(&self) -> bool {
         self.favorite
@@ -1650,6 +3132,38 @@ pub struct ItemsProjection {
     pub replica_revision: u64,
     pub items: Vec<Arc<ItemProjection>>,
     pub vaults: Vec<VaultProjection>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct VaultExportItem {
+    pub account_id: String,
+    pub item_id: String,
+    pub vault_id: String,
+    pub data: ItemDraft,
+    pub favorite: bool,
+    pub deleted_at: Option<String>,
+    pub attachments: Vec<Arc<AttachmentProjection>>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub status: ItemProjectionStatus,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct VaultExportProjection {
+    pub account_id: String,
+    pub replica_revision: u64,
+    pub items: Vec<VaultExportItem>,
+    pub vaults: Vec<VaultProjection>,
+}
+
+impl fmt::Debug for VaultExportProjection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VaultExportProjection")
+            .field("account_id", &self.account_id)
+            .field("replica_revision", &self.replica_revision)
+            .field("item_count", &self.items.len())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -1772,6 +3286,9 @@ impl fmt::Debug for ItemsProjection {
 
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum RuntimeErrorCode {
+    RecipientKeyUnverified,
+    RecipientKeyChanged,
+    RecipientFingerprintMismatch,
     RuntimeClosed,
     Cancelled,
     AccountMissing,
@@ -1779,8 +3296,10 @@ pub enum RuntimeErrorCode {
     AccountFailed,
     AuthenticationRequired,
     AuthenticationUnavailable,
+    CredentialUnavailable,
     StorageUnavailable,
     RetryableTransport,
+    VersionEvidenceUnavailable,
     AuthorityMissing,
     AccessDenied,
     ReadOnly,
@@ -1817,8 +3336,34 @@ pub enum AccountWaitingReason {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct AccountUnlockResult {
+    pub account_id: String,
+    pub failure: Option<RuntimeErrorCode>,
+}
+impl From<core::AccountUnlockResult> for AccountUnlockResult {
+    fn from(value: core::AccountUnlockResult) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            failure: value.failure.map(Into::into),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct AccountDisplayIdentity {
     pub email: String,
+    pub name: String,
+    pub team_name: Option<String>,
+    pub team_avatar_url: Option<String>,
+    pub server_url: String,
+    pub secret_key_hint: String,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct AccountUnlockCapabilities {
+    pub password: bool,
+    pub desktop: bool,
+    pub sign_in: bool,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -1826,9 +3371,27 @@ pub struct AccountStatus {
     pub account_id: String,
     pub replica_revision: u64,
     pub access: AccountAccessState,
+    pub unlock_capabilities: AccountUnlockCapabilities,
     pub waiting_reason: Option<AccountWaitingReason>,
     pub failure: Option<RuntimeErrorCode>,
     pub display_identity: Option<AccountDisplayIdentity>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ProfileAdmissionCleanupStatus {
+    Pending { pending_obligations: u64 },
+}
+
+impl From<core::ProfileAdmissionCleanupStatus> for ProfileAdmissionCleanupStatus {
+    fn from(value: core::ProfileAdmissionCleanupStatus) -> Self {
+        match value {
+            core::ProfileAdmissionCleanupStatus::Pending {
+                pending_obligations,
+            } => Self::Pending {
+                pending_obligations,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -1837,15 +3400,22 @@ pub struct RuntimeStatusProjection {
     pub revision: u64,
     pub accounts: Vec<AccountStatus>,
     pub closed: bool,
+    pub profile_admission_cleanup: Option<ProfileAdmissionCleanupStatus>,
 }
 
 #[derive(Clone, uniffi::Enum)]
 pub enum RuntimeProjection {
+    TravelMode {
+        value: TravelModeProjection,
+    },
     WritableVaultCatalog {
         value: WritableVaultCatalogProjection,
     },
     Items {
         value: ItemsProjection,
+    },
+    VaultExport {
+        value: VaultExportProjection,
     },
     Operations {
         value: OperationsProjection,
@@ -1861,11 +3431,15 @@ pub enum RuntimeProjection {
 impl fmt::Debug for RuntimeProjection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::TravelMode { value } => formatter.debug_tuple("TravelMode").field(value).finish(),
             Self::WritableVaultCatalog { value } => formatter
                 .debug_tuple("WritableVaultCatalog")
                 .field(value)
                 .finish(),
             Self::Items { value } => formatter.debug_tuple("Items").field(value).finish(),
+            Self::VaultExport { value } => {
+                formatter.debug_tuple("VaultExport").field(value).finish()
+            }
             Self::Operations { value } => formatter.debug_tuple("Operations").field(value).finish(),
             Self::PendingShareResults { value } => formatter
                 .debug_tuple("PendingShareResults")
@@ -1874,6 +3448,38 @@ impl fmt::Debug for RuntimeProjection {
             Self::RuntimeStatus { value } => {
                 formatter.debug_tuple("RuntimeStatus").field(value).finish()
             }
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum VaultExportRetirementReason {
+    ScopeRetired,
+    RuntimeClosed,
+    ConnectionClosed,
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum ObservationControl {
+    VaultExportRetired { reason: VaultExportRetirementReason },
+}
+
+impl From<core::ObservationControl> for ObservationControl {
+    fn from(value: core::ObservationControl) -> Self {
+        match value {
+            core::ObservationControl::VaultExportRetired { reason } => Self::VaultExportRetired {
+                reason: match reason {
+                    core::VaultExportRetirementReason::ScopeRetired => {
+                        VaultExportRetirementReason::ScopeRetired
+                    }
+                    core::VaultExportRetirementReason::RuntimeClosed => {
+                        VaultExportRetirementReason::RuntimeClosed
+                    }
+                    core::VaultExportRetirementReason::ConnectionClosed => {
+                        VaultExportRetirementReason::ConnectionClosed
+                    }
+                },
+            },
         }
     }
 }
@@ -1892,6 +3498,7 @@ pub enum BindingError {
 #[uniffi::export(with_foreign)]
 pub trait ObservationSink: Send + Sync {
     fn publish(&self, projection: RuntimeProjection);
+    fn control(&self, control: ObservationControl);
 }
 
 /// A shallow native answer handle. Its sensitive payload is transferred as one canonical Base64
@@ -1980,6 +3587,10 @@ impl core::ObservationSink for NativeSink {
     fn publish(&self, projection: core::RuntimeProjection) {
         self.0.publish(projection.into());
     }
+
+    fn control(&self, control: core::ObservationControl) {
+        self.0.control(control.into());
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2017,10 +3628,12 @@ impl ClientRuntime {
     }
 
     pub async fn request(&self, request: RuntimeRequest) -> Result<RuntimeResponse, BindingError> {
-        self.inner
+        let response = self
+            .inner
             .request(request.into(), core::RequestCancellation::new())
-            .await
-            .map(Into::into)
+            .await?;
+        self.inner
+            .deliver_response(response, Into::into)
             .map_err(Into::into)
     }
 
@@ -2051,6 +3664,16 @@ pub struct ObservationHandle {
 #[cfg(not(target_arch = "wasm32"))]
 #[uniffi::export]
 impl ObservationHandle {
+    pub fn begin_vault_export_output(&self) -> Result<String, BindingError> {
+        self.inner.begin_vault_export_output().map_err(Into::into)
+    }
+
+    pub fn finish_vault_export_output(&self, lease_id: String) -> Result<(), BindingError> {
+        self.inner
+            .finish_vault_export_output(&lease_id)
+            .map_err(Into::into)
+    }
+
     pub fn close(&self) {
         self.inner.close();
     }
@@ -2059,6 +3682,189 @@ impl ObservationHandle {
 impl From<RuntimeRequest> for core::RuntimeRequest {
     fn from(value: RuntimeRequest) -> Self {
         match value {
+            RuntimeRequest::ListAvailableVaultMembers {
+                account_id,
+                vault_id,
+            } => Self::ListAvailableVaultMembers {
+                account_id: account_id.into(),
+                vault_id,
+            },
+            RuntimeRequest::ListVaultMembers {
+                account_id,
+                vault_id,
+            } => Self::ListVaultMembers {
+                account_id: account_id.into(),
+                vault_id,
+            },
+            RuntimeRequest::AddVaultMember {
+                account_id,
+                vault_id,
+                user_id,
+                role,
+            } => Self::AddVaultMember {
+                account_id: account_id.into(),
+                vault_id,
+                user_id,
+                role: role.into(),
+            },
+            RuntimeRequest::PrepareRotation {
+                account_id,
+                intent,
+                start_operation_id,
+            } => Self::PrepareRotation {
+                account_id: account_id.into(),
+                intent: intent.into(),
+                start_operation_id,
+            },
+            RuntimeRequest::CompleteRotation {
+                account_id,
+                selection,
+            } => Self::CompleteRotation {
+                account_id: account_id.into(),
+                selection: selection.into(),
+            },
+            RuntimeRequest::InspectRotation {
+                account_id,
+                start_operation_id,
+            } => Self::InspectRotation {
+                account_id: account_id.into(),
+                start_operation_id,
+            },
+            RuntimeRequest::ListTeamLeaveAttempts { account_id } => Self::ListTeamLeaveAttempts {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::AcknowledgeTeamLeaveAttempt {
+                account_id,
+                start_operation_id,
+            } => Self::AcknowledgeTeamLeaveAttempt {
+                account_id: account_id.into(),
+                start_operation_id,
+            },
+            RuntimeRequest::ListMyTeamInvitations { account_id } => Self::ListMyTeamInvitations {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::AcceptMyTeamInvitation {
+                account_id,
+                invitation_id,
+            } => Self::AcceptMyTeamInvitation {
+                account_id: account_id.into(),
+                invitation_id,
+            },
+            RuntimeRequest::DeclineMyTeamInvitation {
+                account_id,
+                invitation_id,
+            } => Self::DeclineMyTeamInvitation {
+                account_id: account_id.into(),
+                invitation_id,
+            },
+            RuntimeRequest::ReadInvitationComposer {
+                account_id,
+                team_id,
+            } => Self::ReadInvitationComposer {
+                account_id: account_id.into(),
+                team_id,
+            },
+            RuntimeRequest::CreateTeamInvitation {
+                account_id,
+                team_id,
+                email,
+                role,
+            } => Self::CreateTeamInvitation {
+                account_id: account_id.into(),
+                team_id,
+                email,
+                role: role.into(),
+            },
+            RuntimeRequest::ProvisionTeamInvitation {
+                account_id,
+                continuation_id,
+            } => Self::ProvisionTeamInvitation {
+                account_id: account_id.into(),
+                continuation_id,
+            },
+            RuntimeRequest::ReleaseInvitationContinuation {
+                account_id,
+                continuation_id,
+            } => Self::ReleaseInvitationContinuation {
+                account_id: account_id.into(),
+                continuation_id,
+            },
+            RuntimeRequest::CancelTeamInvitation {
+                account_id,
+                team_id,
+                invitation_id,
+            } => Self::CancelTeamInvitation {
+                account_id: account_id.into(),
+                team_id,
+                invitation_id,
+            },
+            RuntimeRequest::ResendTeamInvitation {
+                account_id,
+                team_id,
+                invitation_id,
+            } => Self::ResendTeamInvitation {
+                account_id: account_id.into(),
+                team_id,
+                invitation_id,
+            },
+            RuntimeRequest::InspectProfileAdmission => Self::InspectProfileAdmission {},
+            RuntimeRequest::AbortProfileAdmission { admission_id } => {
+                Self::AbortProfileAdmission { admission_id }
+            }
+            RuntimeRequest::OwnKeyFingerprint { account_id } => Self::OwnKeyFingerprint {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::RecipientKeyScope { account_id } => Self::RecipientKeyScope {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::VerifyRecipientKey {
+                account_id,
+                recipient_user_id,
+                public_key,
+                expected_fingerprint,
+                scope,
+            } => Self::VerifyRecipientKey {
+                account_id: account_id.into(),
+                recipient_user_id,
+                public_key,
+                expected_fingerprint,
+                scope,
+            },
+            RuntimeRequest::VerifiedRecipientKey {
+                account_id,
+                recipient_user_id,
+                public_key,
+                scope,
+            } => Self::VerifiedRecipientKey {
+                account_id: account_id.into(),
+                recipient_user_id,
+                public_key,
+                scope,
+            },
+            RuntimeRequest::RefreshTravelMode { account_id } => Self::RefreshTravelMode {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::SetTravelModeHiddenVaults {
+                account_id,
+                hidden_vault_ids,
+            } => Self::SetTravelModeHiddenVaults {
+                account_id: account_id.into(),
+                hidden_vault_ids,
+            },
+            RuntimeRequest::EnableTravelMode {
+                account_id,
+                hidden_vault_ids,
+            } => Self::EnableTravelMode {
+                account_id: account_id.into(),
+                hidden_vault_ids,
+            },
+            RuntimeRequest::DisableTravelMode {
+                account_id,
+                master_password,
+            } => Self::DisableTravelMode {
+                account_id: account_id.into(),
+                master_password: master_password.value.clone().into(),
+            },
             RuntimeRequest::RebootstrapAccountRecovery { account_id } => {
                 Self::RebootstrapAccountRecovery {
                     account_id: account_id.into(),
@@ -2098,6 +3904,57 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 secret_key: secret_key.value.clone(),
                 insecure_transport_confirmed,
             },
+            RuntimeRequest::BiometricAvailability { account_ids } => Self::BiometricAvailability {
+                account_ids: account_ids.into_iter().map(Into::into).collect(),
+            },
+            RuntimeRequest::SetBiometricEnabled {
+                account_id,
+                enabled,
+            } => Self::SetBiometricEnabled {
+                account_id: account_id.into(),
+                enabled,
+            },
+            RuntimeRequest::BiometricUnlock {
+                account_id,
+                prompt_message,
+            } => Self::BiometricUnlock {
+                account_id: account_id.into(),
+                prompt_message,
+            },
+            RuntimeRequest::BiometricUnlockAccounts {
+                account_ids,
+                prompt_message,
+            } => Self::BiometricUnlockAccounts {
+                account_ids: account_ids.into_iter().map(Into::into).collect(),
+                prompt_message,
+            },
+            RuntimeRequest::SetMasterPasswordReentryPeriod { period_ms } => {
+                Self::SetMasterPasswordReentryPeriod { period_ms }
+            }
+            RuntimeRequest::LocalSecuritySettings { account_id } => Self::LocalSecuritySettings {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::SetInactivityTimeout {
+                account_id,
+                timeout_ms,
+            } => Self::SetInactivityTimeout {
+                account_id: account_id.into(),
+                timeout_ms,
+            },
+            RuntimeRequest::RecordActivity { account_id, kind } => Self::RecordActivity {
+                account_id: account_id.into(),
+                kind: kind.into(),
+            },
+            RuntimeRequest::DeviceSetup { account_id } => Self::DeviceSetup {
+                account_id: account_id.into(),
+            },
+            RuntimeRequest::QuickUnlockAccounts {
+                account_ids,
+                master_password,
+            } => Self::QuickUnlockAccounts {
+                account_ids: account_ids.into_iter().map(Into::into).collect(),
+                master_password: master_password.value.clone(),
+            },
             RuntimeRequest::QuickUnlock {
                 account_id,
                 master_password,
@@ -2124,6 +3981,36 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 request_id,
             },
             RuntimeRequest::Wipe => Self::Wipe,
+            RuntimeRequest::DeleteVault {
+                account_id,
+                vault_id,
+            } => Self::DeleteVault {
+                account_id: account_id.into(),
+                vault_id,
+            },
+            RuntimeRequest::UpdateVault {
+                account_id,
+                vault_id,
+                name,
+                icon,
+                image,
+            } => Self::UpdateVault {
+                account_id: account_id.into(),
+                vault_id,
+                name,
+                icon: match icon {
+                    VaultIconPatch::Unchanged => core::VaultIconPatch::Unchanged,
+                    VaultIconPatch::Clear => core::VaultIconPatch::Clear,
+                    VaultIconPatch::Set { value } => core::VaultIconPatch::Set { value },
+                },
+                image: match image {
+                    VaultImageChange::Unchanged => core::VaultImageChange::Unchanged,
+                    VaultImageChange::Remove => core::VaultImageChange::Remove,
+                    VaultImageChange::Source { source } => core::VaultImageChange::Source {
+                        source: source.into(),
+                    },
+                },
+            },
             RuntimeRequest::CreateVault {
                 account_id,
                 name,
@@ -2138,11 +4025,7 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                     CreateVaultType::Shared => core::CreateVaultType::Shared,
                 },
                 icon,
-                image_source: image_source.map(|source| core::VaultImageSourceInput {
-                    capability_id: source.capability_id,
-                    byte_length: source.byte_length,
-                    content_type: source.content_type,
-                }),
+                image_source: image_source.map(Into::into),
             },
             RuntimeRequest::CreateItem {
                 account_id,
@@ -2151,7 +4034,7 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
             } => Self::CreateItem {
                 account_id: account_id.into(),
                 vault_id,
-                draft: draft.to_core(),
+                draft: editable_draft_to_core(draft),
             },
             RuntimeRequest::ImportItems {
                 account_id,
@@ -2171,11 +4054,39 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
             RuntimeRequest::UpdateItem {
                 account_id,
                 item_id,
+                guard,
                 draft,
             } => Self::UpdateItem {
                 account_id: account_id.into(),
                 item_id,
-                draft: draft.to_core(),
+                guard: guard.into(),
+                draft: editable_draft_to_core(draft),
+            },
+            RuntimeRequest::RemovePasskey {
+                account_id,
+                item_id,
+                guard,
+                rp_id,
+                credential_id,
+                public_key_fingerprint,
+            } => Self::RemovePasskey {
+                account_id: account_id.into(),
+                item_id,
+                guard: guard.into(),
+                rp_id,
+                credential_id,
+                public_key_fingerprint,
+            },
+            RuntimeRequest::DuplicateItem {
+                account_id,
+                source_item_id,
+                source_guard,
+                title,
+            } => Self::DuplicateItem {
+                account_id: account_id.into(),
+                source_item_id,
+                source_guard: source_guard.into(),
+                title,
             },
             RuntimeRequest::SetItemFavorite {
                 account_id,
@@ -2204,10 +4115,26 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
                 account_id,
                 item_id,
                 target_vault_id,
+                target_account_id,
             } => Self::MoveItem {
                 account_id: account_id.into(),
                 item_id,
                 target_vault_id,
+                target_account_id: target_account_id.map(Into::into),
+            },
+            RuntimeRequest::PrepareCrossAccountMoveResume {
+                account_id,
+                operation_id,
+                target_account_id,
+                expected_binding_revision,
+            } => Self::PrepareCrossAccountMoveResume {
+                account_id: account_id.into(),
+                operation_id,
+                target_account_id: target_account_id.into(),
+                expected_binding_revision,
+            },
+            RuntimeRequest::ResumeCrossAccountMove { guard } => Self::ResumeCrossAccountMove {
+                guard: guard.into(),
             },
             RuntimeRequest::PermanentlyDeleteItem {
                 account_id,
@@ -2246,16 +4173,20 @@ impl From<RuntimeRequest> for core::RuntimeRequest {
             },
             RuntimeRequest::ListShareAccessLogs {
                 account_id,
+                item_id,
                 link_id,
             } => Self::ListShareAccessLogs {
                 account_id: account_id.into(),
+                item_id,
                 link_id,
             },
             RuntimeRequest::RevokeShareLink {
                 account_id,
+                item_id,
                 link_id,
             } => Self::RevokeShareLink {
                 account_id: account_id.into(),
+                item_id,
                 link_id,
             },
             RuntimeRequest::RenameAttachment {
@@ -2336,9 +4267,19 @@ impl From<CustomFieldKind> for core::CustomFieldKind {
 impl From<ObservationRequest> for core::ObservationRequest {
     fn from(value: ObservationRequest) -> Self {
         match value {
+            ObservationRequest::TravelMode { account_id } => Self::TravelMode {
+                account_id: account_id.into(),
+            },
             ObservationRequest::WritableVaultCatalog => Self::WritableVaultCatalog,
             ObservationRequest::Items { account_id } => Self::Items {
                 account_id: account_id.into(),
+            },
+            ObservationRequest::VaultExport {
+                account_id,
+                vault_ids,
+            } => Self::VaultExport {
+                account_id: account_id.into(),
+                vault_ids,
             },
             ObservationRequest::Operations { account_id } => Self::Operations {
                 account_id: account_id.into(),
@@ -2353,9 +4294,184 @@ impl From<ObservationRequest> for core::ObservationRequest {
     }
 }
 
+fn delivered_invitation_token(token: core::InvitationToken) -> Arc<SecretString> {
+    SecretString::new(token.expose_for_delivery().to_owned())
+}
+
 impl From<core::RuntimeResponse> for RuntimeResponse {
     fn from(value: core::RuntimeResponse) -> Self {
         match value {
+            core::RuntimeResponse::AvailableVaultMembers { members } => {
+                Self::AvailableVaultMembers {
+                    members: members.into_iter().map(Into::into).collect(),
+                }
+            }
+            core::RuntimeResponse::VaultMembers { members } => Self::VaultMembers {
+                members: members.into_iter().map(Into::into).collect(),
+            },
+            core::RuntimeResponse::VaultMemberAdded { vault_id, user_id } => {
+                Self::VaultMemberAdded { vault_id, user_id }
+            }
+            core::RuntimeResponse::VaultMemberAddUncertain {
+                vault_id,
+                user_id,
+                current_role,
+            } => Self::VaultMemberAddUncertain {
+                vault_id,
+                user_id,
+                current_role: current_role.map(Into::into),
+            },
+            core::RuntimeResponse::RotationPrepared { selection } => Self::RotationPrepared {
+                selection: selection.into(),
+            },
+            core::RuntimeResponse::RotationStartPending { start_operation_id } => {
+                Self::RotationStartPending { start_operation_id }
+            }
+            core::RuntimeResponse::RotationStartRejected { code } => {
+                Self::RotationStartRejected { code: code.into() }
+            }
+            core::RuntimeResponse::RotationPreparationRequiresCrypto {
+                start_operation_id,
+                plans,
+            } => Self::RotationPreparationRequiresCrypto {
+                start_operation_id,
+                plans: plans.into_iter().map(Into::into).collect(),
+            },
+            core::RuntimeResponse::RotationAttemptConsumed { start_operation_id } => {
+                Self::RotationAttemptConsumed { start_operation_id }
+            }
+            core::RuntimeResponse::RotationFinalizePending {
+                finalize_operation_id,
+            } => Self::RotationFinalizePending {
+                finalize_operation_id,
+            },
+            core::RuntimeResponse::RotationRefreshRequired {
+                finalize_operation_id,
+                outcome,
+            } => Self::RotationRefreshRequired {
+                finalize_operation_id,
+                outcome: outcome.into(),
+            },
+            core::RuntimeResponse::RotationCompleted { personal_team_id } => {
+                Self::RotationCompleted { personal_team_id }
+            }
+            core::RuntimeResponse::RotationRejected { code } => {
+                Self::RotationRejected { code: code.into() }
+            }
+            core::RuntimeResponse::TeamLeaveAttempts { attempts } => Self::TeamLeaveAttempts {
+                attempts: attempts.into_iter().map(Into::into).collect(),
+            },
+            core::RuntimeResponse::TeamLeaveAttemptAcknowledged => {
+                Self::TeamLeaveAttemptAcknowledged
+            }
+            core::RuntimeResponse::MyTeamInvitations { invitations } => Self::MyTeamInvitations {
+                invitations: invitations.into_iter().map(Into::into).collect(),
+            },
+            core::RuntimeResponse::MyTeamInvitationAccepted { team_id, team_name } => {
+                Self::MyTeamInvitationAccepted { team_id, team_name }
+            }
+            core::RuntimeResponse::MyTeamInvitationAcceptRefreshRequired { team_id, team_name } => {
+                Self::MyTeamInvitationAcceptRefreshRequired { team_id, team_name }
+            }
+            core::RuntimeResponse::MyTeamInvitationDeclined => Self::MyTeamInvitationDeclined,
+            core::RuntimeResponse::MyTeamInvitationUncertain {
+                action,
+                invitation_id,
+                pending,
+                current_team_id,
+            } => Self::MyTeamInvitationUncertain {
+                action: action.into(),
+                invitation_id,
+                pending,
+                current_team_id,
+            },
+            core::RuntimeResponse::InvitationComposer { composer } => Self::InvitationComposer {
+                composer: (*composer).into(),
+            },
+            core::RuntimeResponse::TeamInvitationCreated {
+                invitation_id,
+                token,
+                candidate,
+                continuation_id,
+            } => Self::TeamInvitationCreated {
+                invitation_id,
+                token: delivered_invitation_token(token),
+                candidate: candidate.map(Into::into),
+                continuation_id,
+            },
+            core::RuntimeResponse::TeamInvitationProvisioned {
+                invitation_id,
+                token,
+            } => Self::TeamInvitationProvisioned {
+                invitation_id,
+                token: delivered_invitation_token(token),
+            },
+            core::RuntimeResponse::TeamInvitationProvisioningNotRequired { invitation_id } => {
+                Self::TeamInvitationProvisioningNotRequired { invitation_id }
+            }
+            core::RuntimeResponse::TeamInvitationUncertain {
+                phase,
+                original_invitation_id,
+            } => Self::TeamInvitationUncertain {
+                phase: phase.into(),
+                original_invitation_id,
+            },
+            core::RuntimeResponse::InvitationContinuationReleased => {
+                Self::InvitationContinuationReleased
+            }
+            core::RuntimeResponse::TeamInvitationCancelled { invitation_id } => {
+                Self::TeamInvitationCancelled { invitation_id }
+            }
+            core::RuntimeResponse::TeamInvitationResent {
+                invitation_id,
+                token,
+            } => Self::TeamInvitationResent {
+                invitation_id,
+                token: delivered_invitation_token(token),
+            },
+            core::RuntimeResponse::TeamInvitationAdminUncertain {
+                action,
+                invitation_id,
+                pending,
+            } => Self::TeamInvitationAdminUncertain {
+                action: action.into(),
+                invitation_id,
+                pending,
+            },
+            // This native request enum has no ReadTeamPage variant. Ticket 105 exposes the
+            // authenticated Team read through the Web JSON protocol only.
+            core::RuntimeResponse::TeamPage { .. } => {
+                unreachable!("native binding cannot issue ReadTeamPage")
+            }
+            core::RuntimeResponse::ProfileAdmissionAborted { admission_id } => {
+                Self::ProfileAdmissionAborted { admission_id }
+            }
+            core::RuntimeResponse::ProfileAdmissionInspection { state } => {
+                Self::ProfileAdmissionInspection {
+                    state: state.into(),
+                }
+            }
+            core::RuntimeResponse::CrossAccountMoveResumePrepared { guard } => {
+                Self::CrossAccountMoveResumePrepared {
+                    guard: guard.into(),
+                }
+            }
+            core::RuntimeResponse::OwnKeyFingerprint {
+                user_id,
+                fingerprint,
+            } => Self::OwnKeyFingerprint {
+                user_id,
+                fingerprint,
+            },
+            core::RuntimeResponse::RecipientKeyScope { scope } => Self::RecipientKeyScope { scope },
+            core::RuntimeResponse::RecipientKeyVerified => Self::RecipientKeyVerified,
+            core::RuntimeResponse::VerifiedRecipientKey { public_key } => {
+                Self::VerifiedRecipientKey { public_key }
+            }
+            core::RuntimeResponse::TravelMode { account_id, result } => Self::TravelMode {
+                account_id: account_id.into(),
+                result: result.into(),
+            },
             core::RuntimeResponse::RecoveryDiagnosed { diagnostics } => Self::RecoveryDiagnosed {
                 diagnostics: diagnostics.into(),
             },
@@ -2375,6 +4491,44 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
                 account_id: account_id.into(),
                 replica_revision,
             },
+            core::RuntimeResponse::ActivityRecorded => Self::ActivityRecorded,
+            core::RuntimeResponse::LocalSecuritySettings {
+                account_id,
+                inactivity_timeout_ms,
+                master_password_reentry_period_ms,
+            } => Self::LocalSecuritySettings {
+                account_id: account_id.into(),
+                inactivity_timeout_ms,
+                master_password_reentry_period_ms,
+            },
+            core::RuntimeResponse::DeviceSetup { disclosure } => Self::DeviceSetup {
+                disclosure: disclosure.into(),
+            },
+            core::RuntimeResponse::AccountsUnlocked { accounts } => Self::AccountsUnlocked {
+                accounts: accounts.into_iter().map(Into::into).collect(),
+            },
+            core::RuntimeResponse::BiometricAvailability {
+                hardware,
+                accounts,
+                master_password_reentry_period_ms,
+            } => Self::BiometricAvailability {
+                hardware: hardware.into(),
+                accounts: accounts.into_iter().map(Into::into).collect(),
+                master_password_reentry_period_ms,
+            },
+            core::RuntimeResponse::BiometricEnabled {
+                account_id,
+                enabled,
+            } => Self::BiometricEnabled {
+                account_id: account_id.into(),
+                enabled,
+            },
+            core::RuntimeResponse::BiometricUnlock { accounts } => Self::BiometricUnlock {
+                accounts: accounts.into_iter().map(Into::into).collect(),
+            },
+            core::RuntimeResponse::MasterPasswordReentryPeriod { period_ms } => {
+                Self::MasterPasswordReentryPeriod { period_ms }
+            }
             core::RuntimeResponse::SignedIn {
                 account_id,
                 user_id,
@@ -2402,6 +4556,24 @@ impl From<core::RuntimeResponse> for RuntimeResponse {
             } => Self::Accepted {
                 operation_id,
                 item_id,
+                replica_revision,
+            },
+            core::RuntimeResponse::VaultUpdateAccepted {
+                operation_id,
+                vault_id,
+                replica_revision,
+            } => Self::VaultUpdateAccepted {
+                operation_id,
+                vault_id,
+                replica_revision,
+            },
+            core::RuntimeResponse::VaultDeletionAccepted {
+                operation_id,
+                vault_id,
+                replica_revision,
+            } => Self::VaultDeletionAccepted {
+                operation_id,
+                vault_id,
                 replica_revision,
             },
             core::RuntimeResponse::VaultCreationAccepted {
@@ -2545,10 +4717,16 @@ impl From<core::TeardownPhase> for TeardownPhase {
 impl From<core::RuntimeProjection> for RuntimeProjection {
     fn from(value: core::RuntimeProjection) -> Self {
         match value {
+            core::RuntimeProjection::TravelMode(value) => Self::TravelMode {
+                value: value.into(),
+            },
             core::RuntimeProjection::WritableVaultCatalog(value) => Self::WritableVaultCatalog {
                 value: value.into(),
             },
             core::RuntimeProjection::Items(value) => Self::Items {
+                value: value.into(),
+            },
+            core::RuntimeProjection::VaultExport(value) => Self::VaultExport {
                 value: value.into(),
             },
             core::RuntimeProjection::Operations(value) => Self::Operations {
@@ -2607,6 +4785,38 @@ impl From<core::ItemsProjection> for ItemsProjection {
     }
 }
 
+impl From<core::VaultExportProjection> for VaultExportProjection {
+    fn from(value: core::VaultExportProjection) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            replica_revision: value.replica_revision,
+            items: value.items.into_iter().map(Into::into).collect(),
+            vaults: value.vaults.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<core::VaultExportItem> for VaultExportItem {
+    fn from(value: core::VaultExportItem) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            item_id: value.item_id,
+            vault_id: value.vault_id,
+            data: item_draft_from_core(value.data),
+            favorite: value.favorite,
+            deleted_at: value.deleted_at,
+            attachments: value
+                .attachments
+                .into_iter()
+                .map(|item| Arc::new(AttachmentProjection::from(item)))
+                .collect(),
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            status: value.status.into(),
+        }
+    }
+}
+
 impl From<core::PendingShareResultsProjection> for PendingShareResultsProjection {
     fn from(value: core::PendingShareResultsProjection) -> Self {
         Self {
@@ -2646,12 +4856,14 @@ impl From<core::ItemProjection> for ItemProjection {
             created_at,
             updated_at,
             status,
+            edit_guard,
+            duplicate_source_guard,
         } = value;
         Self {
             account_id: account_id.into(),
             item_id,
             vault_id,
-            data: item_draft_from_core(data),
+            data: public_item_draft_from_core(data),
             favorite,
             deleted_at,
             attachments: attachments
@@ -2661,8 +4873,112 @@ impl From<core::ItemProjection> for ItemProjection {
             created_at,
             updated_at,
             status: status.into(),
+            edit_guard: edit_guard.map(Into::into),
+            duplicate_source_guard: duplicate_source_guard.map(Into::into),
         }
     }
+}
+
+impl From<core::ItemEditGuard> for ItemEditGuard {
+    fn from(value: core::ItemEditGuard) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            incarnation: value.incarnation.into(),
+            lock_epoch: value.lock_epoch,
+            item_id: value.item_id,
+            vault_id: value.vault_id,
+            item_version: value.item_version,
+        }
+    }
+}
+
+impl From<ItemEditGuard> for core::ItemEditGuard {
+    fn from(value: ItemEditGuard) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            incarnation: value.incarnation.into(),
+            lock_epoch: value.lock_epoch,
+            item_id: value.item_id,
+            vault_id: value.vault_id,
+            item_version: value.item_version,
+        }
+    }
+}
+
+impl From<core::ItemDuplicateGuard> for ItemDuplicateGuard {
+    fn from(value: core::ItemDuplicateGuard) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            incarnation_id: value.incarnation_id.into(),
+            lock_epoch: value.lock_epoch,
+            source_item_id: value.source_item_id,
+            vault_id: value.vault_id,
+            replica_revision: value.replica_revision,
+            source: match value.source {
+                core::DuplicateSourceGuard::Authoritative { item_version } => {
+                    DuplicateSourceGuard::Authoritative { item_version }
+                }
+                core::DuplicateSourceGuard::AcceptedOverlay { operation_id } => {
+                    DuplicateSourceGuard::AcceptedOverlay { operation_id }
+                }
+            },
+        }
+    }
+}
+
+impl From<ItemDuplicateGuard> for core::ItemDuplicateGuard {
+    fn from(value: ItemDuplicateGuard) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            incarnation_id: value.incarnation_id.into(),
+            lock_epoch: value.lock_epoch,
+            source_item_id: value.source_item_id,
+            vault_id: value.vault_id,
+            replica_revision: value.replica_revision,
+            source: match value.source {
+                DuplicateSourceGuard::Authoritative { item_version } => {
+                    core::DuplicateSourceGuard::Authoritative { item_version }
+                }
+                DuplicateSourceGuard::AcceptedOverlay { operation_id } => {
+                    core::DuplicateSourceGuard::AcceptedOverlay { operation_id }
+                }
+            },
+        }
+    }
+}
+
+fn editable_draft_to_core(value: EditableItemDraft) -> core::ItemDraft {
+    let private_shape = match value {
+        EditableItemDraft::Login { value } => {
+            let value = Arc::unwrap_or_clone(value);
+            ItemDraft::Login {
+                value: Arc::new(LoginItemData {
+                    title: value.title,
+                    url: value.url,
+                    urls: value.urls,
+                    username: value.username,
+                    password: value.password,
+                    password_history: value.password_history,
+                    passkeys: Vec::new(),
+                    notes: value.notes,
+                    note: value.note,
+                    custom_fields: value.custom_fields,
+                    tags: value.tags,
+                    totp_secret: value.totp_secret,
+                    totp_issuer: value.totp_issuer,
+                    totp_account_name: value.totp_account_name,
+                    totp_algorithm: value.totp_algorithm,
+                    totp_digits: value.totp_digits,
+                    totp_period: value.totp_period,
+                }),
+            }
+        }
+        EditableItemDraft::SecureNote { value } => ItemDraft::SecureNote { value },
+        EditableItemDraft::CreditCard { value } => ItemDraft::CreditCard { value },
+        EditableItemDraft::Identity { value } => ItemDraft::Identity { value },
+        EditableItemDraft::Authenticator { value } => ItemDraft::Authenticator { value },
+    };
+    item_draft_to_core(&private_shape)
 }
 
 fn item_draft_to_core(value: &ItemDraft) -> core::ItemDraft {
@@ -2797,6 +5113,122 @@ fn item_draft_to_core(value: &ItemDraft) -> core::ItemDraft {
                 tags: value.tags.clone(),
             })
         }
+    }
+}
+
+fn public_item_draft_from_core(value: core::PublicItemDraft) -> PublicItemDraft {
+    match value {
+        core::PublicItemDraft::Login(value) => PublicItemDraft::Login {
+            value: Arc::new(PublicLoginItemData {
+                editable: Arc::new(EditableLoginItemData {
+                    title: value.editable.title,
+                    url: value.editable.url,
+                    urls: value.editable.urls,
+                    username: value.editable.username,
+                    password: value.editable.password,
+                    password_history: value
+                        .editable
+                        .password_history
+                        .into_iter()
+                        .map(|v| {
+                            Arc::new(PasswordHistoryEntry {
+                                password: v.password,
+                                changed_at: v.changed_at,
+                            })
+                        })
+                        .collect(),
+                    notes: value.editable.notes,
+                    note: value.editable.note,
+                    custom_fields: value
+                        .editable
+                        .custom_fields
+                        .into_iter()
+                        .map(|v| Arc::new(CustomField::from(v)))
+                        .collect(),
+                    tags: value.editable.tags,
+                    totp_secret: value.editable.totp_secret,
+                    totp_issuer: value.editable.totp_issuer,
+                    totp_account_name: value.editable.totp_account_name,
+                    totp_algorithm: value.editable.totp_algorithm.map(totp_from_core),
+                    totp_digits: value.editable.totp_digits.map(totp_digits_from_core),
+                    totp_period: value.editable.totp_period,
+                }),
+                passkeys: value
+                    .passkeys
+                    .into_iter()
+                    .map(public_passkey_from_core)
+                    .collect(),
+            }),
+        },
+        core::PublicItemDraft::SecureNote(value) => {
+            let ItemDraft::SecureNote { value } =
+                item_draft_from_core(core::ItemDraft::SecureNote(value))
+            else {
+                unreachable!()
+            };
+            PublicItemDraft::SecureNote { value }
+        }
+        core::PublicItemDraft::CreditCard(value) => {
+            let ItemDraft::CreditCard { value } =
+                item_draft_from_core(core::ItemDraft::CreditCard(value))
+            else {
+                unreachable!()
+            };
+            PublicItemDraft::CreditCard { value }
+        }
+        core::PublicItemDraft::Identity(value) => {
+            let ItemDraft::Identity { value } =
+                item_draft_from_core(core::ItemDraft::Identity(value))
+            else {
+                unreachable!()
+            };
+            PublicItemDraft::Identity { value }
+        }
+        core::PublicItemDraft::Authenticator(value) => {
+            let ItemDraft::Authenticator { value } =
+                item_draft_from_core(core::ItemDraft::Authenticator(value))
+            else {
+                unreachable!()
+            };
+            PublicItemDraft::Authenticator { value }
+        }
+    }
+}
+
+fn public_passkey_from_core(value: core::PublicPasskey) -> PublicPasskey {
+    PublicPasskey {
+        credential_id: value.credential_id,
+        rp_id: value.rp_id,
+        rp_name: value.rp_name,
+        user_handle: value.user_handle,
+        user_name: value.user_name,
+        user_display_name: value.user_display_name,
+        public_key: value.public_key,
+        public_key_fingerprint: value.public_key_fingerprint,
+        algorithm: value.algorithm,
+        sign_count: value.sign_count,
+        transports: value.transports,
+        created_at: value.created_at,
+        last_used_at: value.last_used_at,
+        status: value.status.map(passkey_status_from_core),
+        status_reason: value.status_reason.map(passkey_status_reason_from_core),
+        status_updated_at: value.status_updated_at,
+    }
+}
+
+fn passkey_status_from_core(value: core::PasskeyStatus) -> PasskeyStatus {
+    match value {
+        core::PasskeyStatus::Active => PasskeyStatus::Active,
+        core::PasskeyStatus::Suspect => PasskeyStatus::Suspect,
+    }
+}
+
+fn passkey_status_reason_from_core(value: core::PasskeyStatusReason) -> PasskeyStatusReason {
+    match value {
+        core::PasskeyStatusReason::Manual => PasskeyStatusReason::Manual,
+        core::PasskeyStatusReason::UnknownCredential => PasskeyStatusReason::UnknownCredential,
+        core::PasskeyStatusReason::SigningError => PasskeyStatusReason::SigningError,
+        core::PasskeyStatusReason::Other => PasskeyStatusReason::Other,
     }
 }
 
@@ -3147,12 +5579,14 @@ impl From<core::RuntimeStatusProjection> for RuntimeStatusProjection {
             revision,
             accounts,
             closed,
+            profile_admission_cleanup,
         } = value;
         Self {
             account_id: account_id.map(Into::into),
             revision,
             accounts: accounts.into_iter().map(Into::into).collect(),
             closed,
+            profile_admission_cleanup: profile_admission_cleanup.map(Into::into),
         }
     }
 }
@@ -3166,6 +5600,7 @@ impl From<core::AccountStatus> for AccountStatus {
             waiting_reason,
             failure,
             display_identity,
+            unlock_capabilities,
         } = value;
         Self {
             account_id: account_id.into(),
@@ -3174,13 +5609,25 @@ impl From<core::AccountStatus> for AccountStatus {
             waiting_reason: waiting_reason.map(Into::into),
             failure: failure.map(Into::into),
             display_identity: display_identity.map(Into::into),
+            unlock_capabilities: AccountUnlockCapabilities {
+                password: unlock_capabilities.password,
+                desktop: unlock_capabilities.desktop,
+                sign_in: unlock_capabilities.sign_in,
+            },
         }
     }
 }
 
 impl From<core::AccountDisplayIdentity> for AccountDisplayIdentity {
     fn from(value: core::AccountDisplayIdentity) -> Self {
-        Self { email: value.email }
+        Self {
+            email: value.email,
+            name: value.name,
+            team_name: value.team_name,
+            team_avatar_url: value.team_avatar_url,
+            server_url: value.server_url,
+            secret_key_hint: value.secret_key_hint,
+        }
     }
 }
 
@@ -3205,6 +5652,11 @@ impl From<core::AccountWaitingReason> for AccountWaitingReason {
 impl From<core::RuntimeErrorCode> for RuntimeErrorCode {
     fn from(value: core::RuntimeErrorCode) -> Self {
         match value {
+            core::RuntimeErrorCode::RecipientKeyUnverified => Self::RecipientKeyUnverified,
+            core::RuntimeErrorCode::RecipientKeyChanged => Self::RecipientKeyChanged,
+            core::RuntimeErrorCode::RecipientFingerprintMismatch => {
+                Self::RecipientFingerprintMismatch
+            }
             core::RuntimeErrorCode::RuntimeClosed => Self::RuntimeClosed,
             core::RuntimeErrorCode::Cancelled => Self::Cancelled,
             core::RuntimeErrorCode::AccountMissing => Self::AccountMissing,
@@ -3212,8 +5664,10 @@ impl From<core::RuntimeErrorCode> for RuntimeErrorCode {
             core::RuntimeErrorCode::AccountFailed => Self::AccountFailed,
             core::RuntimeErrorCode::AuthenticationRequired => Self::AuthenticationRequired,
             core::RuntimeErrorCode::AuthenticationUnavailable => Self::AuthenticationUnavailable,
+            core::RuntimeErrorCode::CredentialUnavailable => Self::CredentialUnavailable,
             core::RuntimeErrorCode::StorageUnavailable => Self::StorageUnavailable,
             core::RuntimeErrorCode::RetryableTransport => Self::RetryableTransport,
+            core::RuntimeErrorCode::VersionEvidenceUnavailable => Self::VersionEvidenceUnavailable,
             core::RuntimeErrorCode::AuthorityMissing => Self::AuthorityMissing,
             core::RuntimeErrorCode::AccessDenied => Self::AccessDenied,
             core::RuntimeErrorCode::ReadOnly => Self::ReadOnly,
@@ -3320,6 +5774,43 @@ pub use web_attachment_move_bridge::WebAttachmentMoveBridgeTestHarness;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn native_invitation_tokens_are_opaque_until_explicit_presentation() {
+        let cases = [
+            core::RuntimeResponse::TeamInvitationCreated {
+                invitation_id: "created".into(),
+                token: core::InvitationToken::from("UNIQUE_CREATED_TOKEN".to_owned()),
+                candidate: None,
+                continuation_id: None,
+            },
+            core::RuntimeResponse::TeamInvitationProvisioned {
+                invitation_id: "provisioned".into(),
+                token: core::InvitationToken::from("UNIQUE_PROVISIONED_TOKEN".to_owned()),
+            },
+            core::RuntimeResponse::TeamInvitationResent {
+                invitation_id: "resent".into(),
+                token: core::InvitationToken::from("UNIQUE_RESENT_TOKEN".to_owned()),
+            },
+        ];
+        for (response, marker) in cases.into_iter().zip([
+            "UNIQUE_CREATED_TOKEN",
+            "UNIQUE_PROVISIONED_TOKEN",
+            "UNIQUE_RESENT_TOKEN",
+        ]) {
+            let native = RuntimeResponse::from(response);
+            assert!(!format!("{native:?}").contains(marker));
+            let token = match native {
+                RuntimeResponse::TeamInvitationCreated { token, .. }
+                | RuntimeResponse::TeamInvitationProvisioned { token, .. }
+                | RuntimeResponse::TeamInvitationResent { token, .. } => token,
+                _ => unreachable!("only token-bearing results are in this test"),
+            };
+            assert_eq!(token.reveal(), marker);
+        }
+    }
+
     #[test]
     fn share_management_native_adapter_preserves_explicit_scopes_and_closed_results() {
         for request in [
@@ -3329,10 +5820,12 @@ mod tests {
             },
             RuntimeRequest::ListShareAccessLogs {
                 account_id: "account-2".into(),
+                item_id: "item-1".into(),
                 link_id: "link-1".into(),
             },
             RuntimeRequest::RevokeShareLink {
                 account_id: "account-2".into(),
+                item_id: "item-1".into(),
                 link_id: "link-1".into(),
             },
         ] {
@@ -3364,8 +5857,6 @@ mod tests {
         assert!(!log.success);
         assert_eq!(log.failure_reason.as_deref(), Some("expired"));
     }
-
-    use super::*;
 
     #[test]
     fn native_attachment_delete_keeps_the_closed_minimal_shape() {
@@ -3526,15 +6017,14 @@ mod tests {
         let create = RuntimeRequest::CreateItem {
             account_id: "account-1".into(),
             vault_id: "vault-1".into(),
-            draft: ItemDraft::Login {
-                value: Arc::new(LoginItemData {
+            draft: EditableItemDraft::Login {
+                value: Arc::new(EditableLoginItemData {
                     title: "UNIQUE_TITLE".into(),
                     url: Some("UNIQUE_URL".into()),
                     urls: vec!["UNIQUE_URLS".into()],
                     username: Some("UNIQUE_USERNAME".into()),
                     password: Some("UNIQUE_PASSWORD".into()),
                     password_history: vec![],
-                    passkeys: vec![],
                     notes: Some("UNIQUE_NOTES".into()),
                     note: Some("UNIQUE_NOTE".into()),
                     custom_fields: vec![CustomField::new(
@@ -3566,25 +6056,27 @@ mod tests {
                     account_id: "account-1".into(),
                     item_id: "item-1".into(),
                     vault_id: "vault-1".into(),
-                    data: ItemDraft::Login {
-                        value: Arc::new(LoginItemData {
-                            title: "UNIQUE_PROJECTION_TITLE".into(),
-                            url: Some("UNIQUE_PROJECTION_URL".into()),
-                            urls: vec!["UNIQUE_PROJECTION_URLS".into()],
-                            username: Some("UNIQUE_PROJECTION_USERNAME".into()),
-                            password: Some("UNIQUE_PROJECTION_PASSWORD".into()),
-                            password_history: vec![],
+                    data: PublicItemDraft::Login {
+                        value: Arc::new(PublicLoginItemData {
+                            editable: Arc::new(EditableLoginItemData {
+                                title: "UNIQUE_PROJECTION_TITLE".into(),
+                                url: Some("UNIQUE_PROJECTION_URL".into()),
+                                urls: vec!["UNIQUE_PROJECTION_URLS".into()],
+                                username: Some("UNIQUE_PROJECTION_USERNAME".into()),
+                                password: Some("UNIQUE_PROJECTION_PASSWORD".into()),
+                                password_history: vec![],
+                                notes: Some("UNIQUE_PROJECTION_NOTES".into()),
+                                note: Some("UNIQUE_PROJECTION_NOTE".into()),
+                                custom_fields: vec![],
+                                tags: vec![],
+                                totp_secret: None,
+                                totp_issuer: None,
+                                totp_account_name: None,
+                                totp_algorithm: None,
+                                totp_digits: None,
+                                totp_period: None,
+                            }),
                             passkeys: vec![],
-                            notes: Some("UNIQUE_PROJECTION_NOTES".into()),
-                            note: Some("UNIQUE_PROJECTION_NOTE".into()),
-                            custom_fields: vec![],
-                            tags: vec![],
-                            totp_secret: None,
-                            totp_issuer: None,
-                            totp_account_name: None,
-                            totp_algorithm: None,
-                            totp_digits: None,
-                            totp_period: None,
                         }),
                     },
                     favorite: true,
@@ -3593,6 +6085,8 @@ mod tests {
                     created_at: "2026-08-23T00:00:00Z".into(),
                     updated_at: "2026-08-23T00:00:00Z".into(),
                     status: ItemProjectionStatus::Pending,
+                    edit_guard: None,
+                    duplicate_source_guard: None,
                 })],
                 vaults: vec![VaultProjection {
                     vault_id: "vault-1".into(),
@@ -3666,16 +6160,196 @@ pub struct OperationProjection {
     pub resolution: OperationResolution,
     pub imported_count: Option<u16>,
     pub rejection_code: Option<String>,
+    pub cross_account_move: Option<CrossAccountMoveProjection>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CrossAccountMoveProjection {
+    pub phase: CrossAccountMovePhase,
+    pub destination_server_url: String,
+    pub destination_user_id: String,
+    pub destination_vault_id: String,
+    pub source_visible: bool,
+    pub disposition: CrossAccountMoveDisposition,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CrossAccountMoveResumeGuard {
+    pub account_id: String,
+    pub source_incarnation: String,
+    pub source_lock_epoch: u64,
+    pub target_account_id: String,
+    pub target_incarnation: String,
+    pub target_lock_epoch: u64,
+    pub operation_id: String,
+    pub binding_revision: u64,
+    pub source_replica_revision: u64,
+    pub owner_incarnation: String,
+}
+
+impl From<core::CrossAccountMoveResumeGuard> for CrossAccountMoveResumeGuard {
+    fn from(value: core::CrossAccountMoveResumeGuard) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            source_incarnation: value.source_incarnation.as_str().to_owned(),
+            source_lock_epoch: value.source_lock_epoch,
+            target_account_id: value.target_account_id.into(),
+            target_incarnation: value.target_incarnation.as_str().to_owned(),
+            target_lock_epoch: value.target_lock_epoch,
+            operation_id: value.operation_id,
+            binding_revision: value.binding_revision,
+            source_replica_revision: value.source_replica_revision,
+            owner_incarnation: value.owner_incarnation,
+        }
+    }
+}
+
+impl From<CrossAccountMoveResumeGuard> for core::CrossAccountMoveResumeGuard {
+    fn from(value: CrossAccountMoveResumeGuard) -> Self {
+        Self {
+            account_id: value.account_id.into(),
+            source_incarnation: value.source_incarnation.into(),
+            source_lock_epoch: value.source_lock_epoch,
+            target_account_id: value.target_account_id.into(),
+            target_incarnation: value.target_incarnation.into(),
+            target_lock_epoch: value.target_lock_epoch,
+            operation_id: value.operation_id,
+            binding_revision: value.binding_revision,
+            source_replica_revision: value.source_replica_revision,
+            owner_incarnation: value.owner_incarnation,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CrossAccountMovePhase {
+    TargetCreate,
+    Attachments { next_index: u32 },
+    SourceTrash,
+    SourceDelete,
+    Completed,
+    Rejected,
+}
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum CrossAccountMoveDisposition {
+    Ready,
+    LegacyHeld,
+    Waiting {
+        reason: CrossAccountMoveWaitingReason,
+    },
+    Blocked {
+        reason: CrossAccountMoveBlockedReason,
+    },
+    Rejected {
+        code: String,
+    },
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CrossAccountMoveWaitingReason {
+    AccountLocked,
+    Offline,
+    PolicyVerificationPending,
+    AccessUnavailable,
+    AttachmentAccessDenied,
+    AttachmentQuotaExceeded,
+    AttachmentSizeRejected,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CrossAccountMoveBlockedReason {
+    DestinationRetired,
+    SourceChanged,
+    TargetChanged,
+    MissingProof,
+    MissingArtifact,
+    MissingSourceEvidence,
+}
+impl From<core::CrossAccountMoveProjection> for CrossAccountMoveProjection {
+    fn from(value: core::CrossAccountMoveProjection) -> Self {
+        Self {
+            phase: value.phase.into(),
+            destination_server_url: value.destination_server_url,
+            destination_user_id: value.destination_user_id,
+            destination_vault_id: value.destination_vault_id,
+            source_visible: value.source_visible,
+            disposition: value.disposition.into(),
+        }
+    }
+}
+impl From<core::CrossAccountMovePhase> for CrossAccountMovePhase {
+    fn from(value: core::CrossAccountMovePhase) -> Self {
+        match value {
+            core::CrossAccountMovePhase::TargetCreate => Self::TargetCreate,
+            core::CrossAccountMovePhase::Attachments { next_index } => {
+                Self::Attachments { next_index }
+            }
+            core::CrossAccountMovePhase::SourceTrash => Self::SourceTrash,
+            core::CrossAccountMovePhase::SourceDelete => Self::SourceDelete,
+            core::CrossAccountMovePhase::Completed => Self::Completed,
+            core::CrossAccountMovePhase::Rejected => Self::Rejected,
+        }
+    }
+}
+impl From<core::CrossAccountMoveDisposition> for CrossAccountMoveDisposition {
+    fn from(value: core::CrossAccountMoveDisposition) -> Self {
+        match value {
+            core::CrossAccountMoveDisposition::Ready => Self::Ready,
+            core::CrossAccountMoveDisposition::LegacyHeld => Self::LegacyHeld,
+            core::CrossAccountMoveDisposition::Waiting { reason } => Self::Waiting {
+                reason: reason.into(),
+            },
+            core::CrossAccountMoveDisposition::Blocked { reason } => Self::Blocked {
+                reason: reason.into(),
+            },
+            core::CrossAccountMoveDisposition::Rejected { code } => Self::Rejected { code },
+        }
+    }
+}
+impl From<core::CrossAccountMoveWaitingReason> for CrossAccountMoveWaitingReason {
+    fn from(value: core::CrossAccountMoveWaitingReason) -> Self {
+        match value {
+            core::CrossAccountMoveWaitingReason::AccountLocked => Self::AccountLocked,
+            core::CrossAccountMoveWaitingReason::Offline => Self::Offline,
+            core::CrossAccountMoveWaitingReason::PolicyVerificationPending => {
+                Self::PolicyVerificationPending
+            }
+            core::CrossAccountMoveWaitingReason::AccessUnavailable => Self::AccessUnavailable,
+            core::CrossAccountMoveWaitingReason::AttachmentAccessDenied => {
+                Self::AttachmentAccessDenied
+            }
+            core::CrossAccountMoveWaitingReason::AttachmentQuotaExceeded => {
+                Self::AttachmentQuotaExceeded
+            }
+            core::CrossAccountMoveWaitingReason::AttachmentSizeRejected => {
+                Self::AttachmentSizeRejected
+            }
+        }
+    }
+}
+impl From<core::CrossAccountMoveBlockedReason> for CrossAccountMoveBlockedReason {
+    fn from(value: core::CrossAccountMoveBlockedReason) -> Self {
+        match value {
+            core::CrossAccountMoveBlockedReason::DestinationRetired => Self::DestinationRetired,
+            core::CrossAccountMoveBlockedReason::SourceChanged => Self::SourceChanged,
+            core::CrossAccountMoveBlockedReason::TargetChanged => Self::TargetChanged,
+            core::CrossAccountMoveBlockedReason::MissingProof => Self::MissingProof,
+            core::CrossAccountMoveBlockedReason::MissingArtifact => Self::MissingArtifact,
+            core::CrossAccountMoveBlockedReason::MissingSourceEvidence => {
+                Self::MissingSourceEvidence
+            }
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum OperationResolution {
     Pending,
     Applied,
     Rejected,
+    LegacyFailed,
+    LegacyConflicted,
 }
 #[derive(Clone, Copy, Debug, uniffi::Enum)]
 pub enum OperationProjectionKind {
     CreateVault,
+    UpdateVault,
+    DeleteVault,
     CreateItem,
     UpdateItem,
     SetItemFavorite,
@@ -3685,6 +6359,12 @@ pub enum OperationProjectionKind {
     PermanentlyDeleteItem,
     CreateShare,
     ImportItems,
+    CreateVaultMemberRemovalRotationPlans,
+    FinalizeVaultMemberRemovalRotationPlans,
+    CreateTeamLeaveRotationPlans,
+    FinalizeTeamLeaveRotationPlans,
+    CreateTeamMemberRemovalRotationPlans,
+    FinalizeTeamMemberRemovalRotationPlans,
 }
 impl From<core::OperationsProjection> for OperationsProjection {
     fn from(value: core::OperationsProjection) -> Self {
@@ -3703,9 +6383,16 @@ impl From<core::OperationsProjection> for OperationsProjection {
                         core::OperationResolution::Pending => OperationResolution::Pending,
                         core::OperationResolution::Applied => OperationResolution::Applied,
                         core::OperationResolution::Rejected => OperationResolution::Rejected,
+                        core::OperationResolution::LegacyFailed => {
+                            OperationResolution::LegacyFailed
+                        }
+                        core::OperationResolution::LegacyConflicted => {
+                            OperationResolution::LegacyConflicted
+                        }
                     },
                     imported_count: op.imported_count,
                     rejection_code: op.rejection_code,
+                    cross_account_move: op.cross_account_move.map(Into::into),
                 })
                 .collect(),
         }
@@ -3715,6 +6402,8 @@ impl From<core::OperationProjectionKind> for OperationProjectionKind {
     fn from(value: core::OperationProjectionKind) -> Self {
         match value {
             core::OperationProjectionKind::CreateVault => Self::CreateVault,
+            core::OperationProjectionKind::UpdateVault => Self::UpdateVault,
+            core::OperationProjectionKind::DeleteVault => Self::DeleteVault,
             core::OperationProjectionKind::CreateItem => Self::CreateItem,
             core::OperationProjectionKind::UpdateItem => Self::UpdateItem,
             core::OperationProjectionKind::SetItemFavorite => Self::SetItemFavorite,
@@ -3724,6 +6413,24 @@ impl From<core::OperationProjectionKind> for OperationProjectionKind {
             core::OperationProjectionKind::PermanentlyDeleteItem => Self::PermanentlyDeleteItem,
             core::OperationProjectionKind::CreateShare => Self::CreateShare,
             core::OperationProjectionKind::ImportItems => Self::ImportItems,
+            core::OperationProjectionKind::CreateVaultMemberRemovalRotationPlans => {
+                Self::CreateVaultMemberRemovalRotationPlans
+            }
+            core::OperationProjectionKind::FinalizeVaultMemberRemovalRotationPlans => {
+                Self::FinalizeVaultMemberRemovalRotationPlans
+            }
+            core::OperationProjectionKind::CreateTeamLeaveRotationPlans => {
+                Self::CreateTeamLeaveRotationPlans
+            }
+            core::OperationProjectionKind::FinalizeTeamLeaveRotationPlans => {
+                Self::FinalizeTeamLeaveRotationPlans
+            }
+            core::OperationProjectionKind::CreateTeamMemberRemovalRotationPlans => {
+                Self::CreateTeamMemberRemovalRotationPlans
+            }
+            core::OperationProjectionKind::FinalizeTeamMemberRemovalRotationPlans => {
+                Self::FinalizeTeamMemberRemovalRotationPlans
+            }
         }
     }
 }
@@ -3858,6 +6565,136 @@ impl From<core::StorageRecoveryAccount> for StorageRecoveryAccount {
             missing_artifacts: value.missing_artifacts,
             can_export: value.can_export,
             can_repair: value.can_repair,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct DeviceSetupDisclosure {
+    pub account_id: String,
+    pub incarnation: String,
+    pub lock_epoch: u64,
+    pub email: String,
+    pub server_url: String,
+    pub team_name: Option<String>,
+    pub secret_key: Arc<SecretString>,
+}
+impl From<core::DeviceSetupDisclosure> for DeviceSetupDisclosure {
+    fn from(value: core::DeviceSetupDisclosure) -> Self {
+        Self {
+            account_id: value.account_id.as_str().to_owned(),
+            incarnation: value.incarnation.as_str().to_owned(),
+            lock_epoch: value.lock_epoch,
+            email: value.email.clone(),
+            server_url: value.server_url.clone(),
+            team_name: value.team_name.clone(),
+            secret_key: SecretString::new(value.secret_key.to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum ActivityKind {
+    Interaction,
+    Focus,
+    Blur,
+}
+
+#[cfg(test)]
+mod profile_admission_binding_tests {
+    use super::*;
+
+    #[test]
+    fn inspection_and_abort_keep_the_exact_catalog_identity() {
+        assert!(matches!(
+            core::RuntimeRequest::from(RuntimeRequest::InspectProfileAdmission),
+            core::RuntimeRequest::InspectProfileAdmission {}
+        ));
+        let request = RuntimeRequest::AbortProfileAdmission {
+            admission_id: "admission-opaque".into(),
+        };
+        assert!(!format!("{request:?}").contains("admission-opaque"));
+        assert!(
+            matches!(core::RuntimeRequest::from(request), core::RuntimeRequest::AbortProfileAdmission { admission_id } if admission_id == "admission-opaque")
+        );
+        assert!(
+            matches!(RuntimeResponse::from(core::RuntimeResponse::ProfileAdmissionAborted { admission_id: "admission-opaque".into() }), RuntimeResponse::ProfileAdmissionAborted { admission_id } if admission_id == "admission-opaque")
+        );
+        for phase in [
+            core::ProfileAdmissionImportPhase::Preparing,
+            core::ProfileAdmissionImportPhase::Aborting,
+            core::ProfileAdmissionImportPhase::Aborted,
+            core::ProfileAdmissionImportPhase::Committed,
+            core::ProfileAdmissionImportPhase::Complete,
+        ] {
+            let response =
+                RuntimeResponse::from(core::RuntimeResponse::ProfileAdmissionInspection {
+                    state: core::ProfileAdmissionInspectionState::Import {
+                        admission_id: "admission".into(),
+                        phase,
+                    },
+                });
+            assert!(
+                matches!(response, RuntimeResponse::ProfileAdmissionInspection { state: ProfileAdmissionInspectionState::Import { admission_id, phase: actual } } if admission_id == "admission" && format!("{actual:?}") == format!("{phase:?}"))
+            );
+        }
+        for phase in [
+            core::ProfileAdmissionResetPhase::Wiping,
+            core::ProfileAdmissionResetPhase::Wiped,
+        ] {
+            let response =
+                RuntimeResponse::from(core::RuntimeResponse::ProfileAdmissionInspection {
+                    state: core::ProfileAdmissionInspectionState::Reset {
+                        wipe_id: "wipe".into(),
+                        phase,
+                    },
+                });
+            assert!(
+                matches!(response, RuntimeResponse::ProfileAdmissionInspection { state: ProfileAdmissionInspectionState::Reset { wipe_id, phase: actual } } if wipe_id == "wipe" && format!("{actual:?}") == format!("{phase:?}"))
+            );
+        }
+        assert!(matches!(
+            RuntimeResponse::from(core::RuntimeResponse::ProfileAdmissionInspection {
+                state: core::ProfileAdmissionInspectionState::NotStarted {}
+            }),
+            RuntimeResponse::ProfileAdmissionInspection {
+                state: ProfileAdmissionInspectionState::NotStarted
+            }
+        ));
+    }
+
+    #[test]
+    fn cleanup_projection_preserves_pending_even_with_zero_obligations() {
+        for count in [0, u64::MAX] {
+            let projection = RuntimeStatusProjection::from(core::RuntimeStatusProjection {
+                account_id: None,
+                revision: 7,
+                accounts: Vec::new(),
+                closed: false,
+                profile_admission_cleanup: Some(core::ProfileAdmissionCleanupStatus::Pending {
+                    pending_obligations: count,
+                }),
+            });
+            assert!(
+                matches!(projection.profile_admission_cleanup, Some(ProfileAdmissionCleanupStatus::Pending { pending_obligations }) if pending_obligations == count)
+            );
+        }
+        let projection = RuntimeStatusProjection::from(core::RuntimeStatusProjection {
+            account_id: None,
+            revision: 8,
+            accounts: Vec::new(),
+            closed: true,
+            profile_admission_cleanup: None,
+        });
+        assert!(projection.profile_admission_cleanup.is_none());
+    }
+}
+impl From<ActivityKind> for core::ActivityKind {
+    fn from(value: ActivityKind) -> Self {
+        match value {
+            ActivityKind::Interaction => Self::Interaction,
+            ActivityKind::Focus => Self::Focus,
+            ActivityKind::Blur => Self::Blur,
         }
     }
 }

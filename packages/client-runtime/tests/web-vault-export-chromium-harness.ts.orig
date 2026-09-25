@@ -1,0 +1,341 @@
+import type {
+	ItemsProjection,
+	ObservationControl,
+} from "../generated/runtime-protocol/contract";
+import {
+	validateObservationControl,
+	validateRuntimeProjection,
+} from "../generated/runtime-protocol/validator";
+import { createRuntimeClient, type RuntimeStore } from "../src/client";
+import { createWebClientRuntime } from "../src/web/composition";
+
+async function exerciseExportRetirement(
+	mode: "lock" | "close" | "loss" | "storeLoss" | "output",
+) {
+	let worker: Worker | undefined;
+	const forwardingWitnesses: string[] = [];
+	let snapshot: ItemsProjection | undefined;
+	let output: Blob | undefined;
+	let ordinaryStore: RuntimeStore<ItemsProjection> | undefined;
+	let releaseOrdinary: (() => void) | undefined;
+	let storeAtTermination:
+		| { state: string; hasData: boolean; code?: string }
+		| undefined;
+	let workerErrors = 0;
+	let retainedSnapshotAtTermination = false;
+	let ownerLossSettled = false;
+	let acknowledgeTermination: (() => void) | undefined;
+	const terminated = new Promise<void>((resolve) => {
+		acknowledgeTermination = resolve;
+	});
+	let terminations = 0;
+	let forcedTermination = false;
+	const composition = createWebClientRuntime({
+		createWorker: () => {
+			worker = new Worker(
+				mode === "loss" || mode === "storeLoss"
+					? "/create-vault-worker.js?exportLoss=1"
+					: mode === "output"
+						? "/create-vault-worker.js?exportOutput=1"
+						: "/create-vault-worker.js",
+				{ type: "module" },
+			);
+			if (mode === "output")
+				worker.addEventListener("message", ({ data }) => {
+					if (data?.type === "fixtureExportForwarding")
+						forwardingWitnesses.push(`${data.phase}:${data.result}`);
+				});
+			if (mode === "loss" || mode === "storeLoss")
+				worker.addEventListener("error", (event) => {
+					if (event.message.includes("joined Export owner loss")) {
+						workerErrors += 1;
+						event.preventDefault();
+					}
+				});
+			const terminate = worker.terminate.bind(worker);
+			worker.terminate = () => {
+				retainedSnapshotAtTermination = snapshot !== undefined;
+				if (ordinaryStore !== undefined) {
+					const current = ordinaryStore.getSnapshot();
+					storeAtTermination = {
+						state: current.state,
+						hasData: Object.hasOwn(current, "value"),
+						...(current.state === "failed" ? { code: current.code } : {}),
+					};
+				}
+				terminations += 1;
+				terminate();
+				acknowledgeTermination?.();
+			};
+			return worker;
+		},
+	});
+	const observationId = "fixed-export";
+
+	const controls: ObservationControl[] = [];
+	let acknowledgeRaw: (() => void) | undefined;
+	const rawControl = new Promise<void>((resolve) => {
+		acknowledgeRaw = resolve;
+	});
+	let rawControls = 0;
+	// This witnesses the real WASM control on the SAME channel. It never retains a private
+	// projection and cannot provide the facade's missing callback on the first RED run.
+	const detach = composition.workerOwner
+		.channel("runtime")
+		.subscribe((value) => {
+			if (typeof value !== "object" || value === null) return;
+			const event = value as Record<string, unknown>;
+			if (
+				event.type !== "observationControl" ||
+				event.observationId !== observationId
+			)
+				return;
+			if (typeof event.controlJson !== "string")
+				throw new Error("Missing control JSON");
+			const control: unknown = JSON.parse(event.controlJson);
+			if (!validateObservationControl(control))
+				throw new Error("Invalid actual Core control");
+			rawControls += 1;
+			acknowledgeRaw?.();
+		});
+	let retiring: Promise<string | undefined> | undefined;
+	let cleanupAcknowledged = false;
+	let lockFinished = false;
+	try {
+		if (mode === "storeLoss") {
+			const client = createRuntimeClient({
+				transport: composition.runtime,
+				releaseGraceMs: 0,
+			});
+			const store = client.items("account-1");
+			ordinaryStore = store;
+			await new Promise<void>((resolve, reject) => {
+				releaseOrdinary = store.subscribe(() => {
+					const current = store.getSnapshot();
+					if (current.state === "ready") resolve();
+					if (current.state === "failed")
+						reject(new Error(`Seeded Items failed: ${current.code}`));
+				});
+			});
+			// Keep only counts outside this synchronous read; the registry is the retained
+			// plaintext owner under test, not an additional captured projection in the harness.
+			const counts = (() => {
+				const current = store.getSnapshot();
+				if (current.state !== "ready")
+					throw new Error("Items store was not ready");
+				return {
+					itemCount: current.value.items.length,
+					attachmentCount: current.value.items.reduce(
+						(count, item) => count + (item.attachments?.length ?? 0),
+						0,
+					),
+				};
+			})();
+			worker?.postMessage({ type: "fixtureExportOwnerLoss" });
+			await terminated;
+			ownerLossSettled = true;
+			return { ...counts, workerErrors, terminations, storeAtTermination };
+		}
+		let vaultIds: string[] = [];
+		await composition.runtime.observe(
+			"inventory",
+			JSON.stringify({ type: "items", accountId: "account-1" }),
+			(json) => {
+				const projection: unknown = JSON.parse(json);
+				if (
+					!validateRuntimeProjection(projection) ||
+					projection.type !== "items"
+				)
+					throw new Error("Missing seeded Items");
+				vaultIds = projection.value.vaults.map((vault) => vault.vaultId);
+			},
+		);
+		await composition.runtime.unobserve("inventory");
+		if (vaultIds.length === 0) throw new Error("Missing seeded Vault");
+		await composition.runtime.observe(
+			observationId,
+			JSON.stringify({
+				type: "vaultExport",
+				accountId: "account-1",
+				vaultIds,
+			}),
+			(json) => {
+				const projection: unknown = JSON.parse(json);
+				if (
+					!validateRuntimeProjection(projection) ||
+					projection.type !== "vaultExport"
+				)
+					throw new Error("Missing fixed Export");
+				snapshot = projection.value;
+			},
+			{
+				onControl(json) {
+					const control: unknown = JSON.parse(json);
+					if (!validateObservationControl(control))
+						throw new Error("Invalid facade control");
+					controls.push(control);
+					if (mode === "loss" || mode === "storeLoss") snapshot = undefined;
+				},
+			},
+		);
+		if (snapshot === undefined)
+			throw new Error("Export callback was not delivered");
+		const itemCount = snapshot.items.length;
+		const attachmentCount = snapshot.items.reduce(
+			(count, item) => count + (item.attachments?.length ?? 0),
+			0,
+		);
+		if (mode === "loss" || mode === "storeLoss") {
+			worker?.postMessage({ type: "fixtureExportOwnerLoss" });
+			await terminated;
+			ownerLossSettled = true;
+			const held = {
+				itemCount,
+				attachmentCount,
+				workerErrors,
+				controls: [...controls],
+				retainedSnapshotAtTermination,
+				terminations,
+			};
+			// RED cleanup discards the host copy even when the missing terminal callback did not.
+			snapshot = undefined;
+			return held;
+		}
+		let outputLease: string | undefined;
+		if (mode === "output") {
+			// This is a private host output already prepared from the exact delivered frame.
+			// The same facade entry forwards admission only after its snapshot callback succeeded.
+			output = new Blob([JSON.stringify(snapshot)], {
+				type: "application/json",
+			});
+			try {
+				outputLease =
+					await composition.runtime.beginVaultExportOutput(observationId);
+			} catch (error) {
+				return {
+					itemCount,
+					attachmentCount,
+					outputBytes: output.size,
+					beginError: error instanceof Error ? error.message : String(error),
+				};
+			}
+		}
+		retiring = (
+			mode === "close"
+				? composition.close().then(() => undefined)
+				: composition.runtime.request(
+						"lock-export",
+						JSON.stringify({ type: "lock", accountId: "account-1" }),
+					)
+		).then((response) => {
+			lockFinished = true;
+			return response;
+		});
+		void retiring.catch(() => undefined);
+		await rawControl;
+		// The raw event is dispatched to all existing subscribers synchronously. The facade
+		// must have delivered its control before this continuation; no timer proves absence.
+		const held = {
+			itemCount,
+			attachmentCount,
+			rawControls,
+			controls: [...controls],
+			lockFinishedBeforeCleanup: lockFinished,
+			retainedSnapshot: snapshot !== undefined,
+		};
+		let wrongLeaseRejected = false;
+		let lockFinishedAfterWrongLease = false;
+		const outputBytes = output?.size;
+		if (mode === "output") {
+			try {
+				await composition.runtime.finishVaultExportOutput(
+					observationId,
+					`${outputLease}-wrong`,
+				);
+			} catch {
+				wrongLeaseRejected = true;
+			}
+			lockFinishedAfterWrongLease = lockFinished;
+		}
+		snapshot = undefined;
+		output = undefined;
+		let cleanupError: string | null = null;
+		try {
+			if (mode === "output") {
+				if (outputLease === undefined)
+					throw new Error("Missing admitted output lease");
+				await composition.runtime.finishVaultExportOutput(
+					observationId,
+					outputLease,
+				);
+			} else {
+				await composition.runtime.unobserve(observationId);
+			}
+			cleanupAcknowledged = true;
+		} catch (error) {
+			cleanupError = error instanceof Error ? error.message : String(error);
+		}
+		if (!cleanupAcknowledged) {
+			// RED cleanup only: the actual close cannot drain a handle whose ACK transport
+			// rejected it. Discard the host payload first, then retire the real Worker realm.
+			forcedTermination = true;
+			worker?.terminate();
+			return {
+				...held,
+				cleanupError,
+				lockFinished,
+				terminations,
+				forcedTermination,
+			};
+		}
+		const reply = await retiring;
+		return {
+			...held,
+			...(mode === "output"
+				? {
+						beginError: null,
+						forwardingWitnesses,
+						outputBytes,
+						wrongLeaseRejected,
+						lockFinishedAfterWrongLease,
+					}
+				: {}),
+			response: typeof reply === "string" ? JSON.parse(reply) : null,
+			cleanupError,
+			lockFinished,
+			terminations,
+			forcedTermination,
+		};
+	} finally {
+		snapshot = undefined;
+		output = undefined;
+		releaseOrdinary?.();
+		ordinaryStore = undefined;
+		if (mode === "storeLoss") {
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		}
+		detach();
+		if (mode === "loss" || mode === "storeLoss") {
+			// A setup error can precede the injected loss. Release through the live owner,
+			// rather than terminating its Worker and then waiting on an impossible close ACK.
+			if (!ownerLossSettled)
+				await composition.runtime
+					.unobserve(observationId)
+					.catch(() => undefined);
+			await composition.close().catch(() => undefined);
+		} else if (!forcedTermination) {
+			if (!cleanupAcknowledged)
+				await composition.runtime.unobserve(observationId);
+			await retiring;
+			await composition.close();
+		}
+	}
+}
+
+Object.assign(globalThis, {
+	exerciseExportOutput: () => exerciseExportRetirement("output"),
+	exerciseExportLock: () => exerciseExportRetirement("lock"),
+	exerciseExportClose: () => exerciseExportRetirement("close"),
+	exerciseExportOwnerLoss: () => exerciseExportRetirement("loss"),
+	exerciseItemsOwnerLoss: () => exerciseExportRetirement("storeLoss"),
+});

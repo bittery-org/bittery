@@ -27,7 +27,7 @@ export function VaultExportDialog({
 	onOpenChange,
 }: VaultExportDialogProps) {
 	const { m } = useI18n();
-	const { progress, archiveBlob, error, reset, startExport, downloadArchive } =
+	const { progress, archiveReady, error, reset, startExport, downloadArchive } =
 		useVaultExport();
 
 	const isIdle = progress.stage === "idle";
@@ -173,7 +173,7 @@ export function VaultExportDialog({
 								>
 									{m.vault_export_dialog_cancel()}
 								</Button>
-								<Button onClick={downloadArchive} disabled={!archiveBlob}>
+								<Button onClick={downloadArchive} disabled={!archiveReady}>
 									<Download className="mr-2 h-4 w-4" />
 									{m.vault_export_dialog_download()}
 								</Button>

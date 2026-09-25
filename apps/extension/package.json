@@ -7,7 +7,7 @@
 		"check-types": "tsc --noEmit",
 		"test": "node ./scripts/run-tests.mjs",
 		"dev": "node ./scripts/generate-manifest-locales.mjs && vite dev",
-		"build:release": "node ./scripts/generate-manifest-locales.mjs && vite build",
+		"build:release": "node ./scripts/generate-manifest-locales.mjs && vite build && node ./scripts/check-service-worker-bundle.mjs",
 		"preview": "vite preview",
 		"test:e2e": "playwright test",
 		"test:e2e:ui": "playwright test --ui",

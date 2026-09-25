@@ -48,6 +48,46 @@ beforeEach(() => {
 });
 
 describe("IndexedDB Attachment artifact execution", () => {
+	test("lists exact stored artifact ownership without changing another active writer", async () => {
+		const executor = new IndexedDbAttachmentArtifactExecutor({
+			databaseName: "artifact-selected-owner-list",
+		});
+		const unrelated = {
+			...owner,
+			artifactId: "artifact-unrelated",
+			operationId: "operation-unrelated",
+		};
+		const other = { ...owner, accountId: "account-2" };
+		const bytes = new Uint8Array([1, 2, 3]);
+		const digest =
+			"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81";
+		for (const scope of [owner, unrelated, other])
+			await executor.writeChunk(scope, 0, digest, bytes);
+		const before = await executor.listArtifactIds("account-1");
+		const listed = await invokeControl(executor, {
+			type: "listArtifactOwners",
+			accountId: "account-1",
+		});
+		expect(listed.response).toEqual({
+			type: "artifactOwners",
+			owners: [owner, unrelated],
+			provisional: [],
+		});
+		expect(validateArtifactControlResponse(listed.response)).toBe(true);
+		expect(await executor.listArtifactIds("account-1")).toEqual(before);
+		expect(await executor.writeChunk(unrelated, 0, digest, bytes)).toBe(
+			"alreadyStored",
+		);
+		expect(
+			(
+				await invokeControl(executor, {
+					type: "listArtifactOwners",
+					accountId: "account-2",
+				})
+			).response.owners,
+		).toEqual([other]);
+	});
+
 	test("begins one durable provisional writer through the closed control boundary", async () => {
 		const executor = new IndexedDbAttachmentArtifactExecutor({
 			databaseName: "artifact-provisional-begin",
@@ -180,7 +220,10 @@ describe("IndexedDB Attachment artifact execution", () => {
 					attachmentId: "attachment-1",
 				},
 			}),
-		).rejects.toThrow("authenticated provisional");
+		).resolves.toEqual({
+			response: { type: "provisionalRecoveryUnavailable" },
+			bytes: undefined,
+		});
 		await invokeControl(
 			state0,
 			{
@@ -423,7 +466,10 @@ describe("IndexedDB Attachment artifact execution", () => {
 					attachmentId: "attachment-1",
 				},
 			}),
-		).rejects.toThrow("authenticated provisional");
+		).resolves.toEqual({
+			response: { type: "provisionalRecoveryUnavailable" },
+			bytes: undefined,
+		});
 		await invokeControl(seed, {
 			type: "sealProvisional",
 			writer: provisionalWriter,

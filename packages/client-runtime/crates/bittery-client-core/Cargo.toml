@@ -9,9 +9,11 @@ description = "Shared Bittery client Runtime and Replica policy"
 default = []
 persistence-contract-schema = ["dep:schemars"]
 platform-storage-contract-schema = ["dep:schemars"]
+profile-admission-contract-schema = ["dep:schemars"]
 http-transport-contract-schema = ["dep:schemars"]
-runtime-protocol-contract-schema = ["dep:schemars"]
+runtime-protocol-contract-schema = ["dep:schemars", "bittery-crypto-core/contract-schema"]
 recovery-contract-schema = ["persistence-contract-schema"]
+vault-image-contract-schema = ["dep:schemars", "bittery-crypto-core/contract-schema"]
 replica-conformance = []
 binding-test-harness = []
 
@@ -49,6 +51,11 @@ path = "src/bin/generate_platform_storage_contract_schema.rs"
 required-features = ["platform-storage-contract-schema"]
 
 [[bin]]
+name = "generate-profile-admission-contract-schema"
+path = "src/bin/generate_profile_admission_contract_schema.rs"
+required-features = ["profile-admission-contract-schema"]
+
+[[bin]]
 name = "generate-http-transport-contract-schema"
 path = "src/bin/generate_http_transport_contract_schema.rs"
 required-features = ["http-transport-contract-schema"]
@@ -67,3 +74,8 @@ required-features = ["replica-conformance"]
 name = "generate-recovery-contract-schema"
 path = "src/bin/generate_recovery_contract_schema.rs"
 required-features = ["recovery-contract-schema"]
+
+[[bin]]
+name = "generate-native-authority-contract-schema"
+path = "src/bin/generate_native_authority_contract_schema.rs"
+required-features = ["runtime-protocol-contract-schema"]

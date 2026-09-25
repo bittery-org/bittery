@@ -146,6 +146,20 @@ pub(crate) async fn grant_vault_image_staging(
     )
     .await?;
 
+    let resolved = query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM operation_outcome WHERE user_id=$1 AND operation_id=$2)",
+    )
+    .bind(user_id)
+    .bind(&binding.operation_id)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|error| database_error(error, "Failed to inspect resolved Vault image Operation"))?;
+    if resolved {
+        return Err(AppError::conflict(
+            "Vault image Operation already has a retained outcome",
+        ));
+    }
+    super::vault_image_cleanup::lock_objects(&mut transaction, &[&key]).await?;
     let existing = query_as::<_, (String, i64, String)>(
         "SELECT binding_fingerprint, generation, COALESCE((SELECT state FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2), 'absent') FROM vault_image_staging_generation WHERE user_id = $1 AND operation_id = $2",
     )
@@ -403,6 +417,8 @@ pub(crate) async fn confirm_vault_image_staging(
             "Operation ID was reused with a different Vault image binding",
         ));
     }
+    super::vault_image_cleanup::lock_objects(&mut transaction, &[&object_key(user_id, binding)])
+        .await?;
     let status = query_as::<_, (String, String, i64, OffsetDateTime)>(
         "SELECT object_key, state, generation, lease_expires_at FROM vault_image_staging WHERE user_id = $1 AND operation_id = $2 FOR UPDATE",
     )
@@ -522,5 +538,47 @@ pub(crate) async fn request_vault_image_staging_cleanup(
         .commit()
         .await
         .map_err(|error| database_error(error, "Failed to commit Vault image staging cleanup"))?;
+    Ok(())
+}
+
+/// Caller holds the User-scoped Operation lock through the catalog effect and retained outcome.
+/// Creation and replacement both require this exact verified, live staging binding.
+pub(super) async fn require_confirmed_publication(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: &str,
+    operation_id: &str,
+    vault_id: &str,
+    image_key: &str,
+) -> Result<(), AppError> {
+    let confirmed = query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM vault_image_staging WHERE user_id=$1 AND operation_id=$2 AND vault_id=$3 AND object_key=$4 AND state='confirmed' AND lease_expires_at>NOW())",
+    ).bind(user_id).bind(operation_id).bind(vault_id).bind(image_key).fetch_one(&mut **transaction).await
+        .map_err(|error|database_error(error,"Failed to verify Vault image staging"))?;
+    if !confirmed {
+        return Err(AppError::conflict("Vault image staging is incomplete"));
+    }
+    Ok(())
+}
+
+/// Atomically transfer the verified object to the catalog, or retain its existing cleanup duty.
+pub(super) async fn resolve_publication(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: &str,
+    operation_id: &str,
+    published: bool,
+) -> Result<(), AppError> {
+    let statement = if published {
+        "DELETE FROM vault_image_staging WHERE user_id=$1 AND operation_id=$2 AND state='confirmed'"
+    } else {
+        "UPDATE vault_image_staging SET state='cleanup_pending',updated_at=NOW() WHERE user_id=$1 AND operation_id=$2"
+    };
+    query(statement)
+        .bind(user_id)
+        .bind(operation_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| {
+            database_error(error, "Failed to resolve Vault image staging publication")
+        })?;
     Ok(())
 }

@@ -1,0 +1,62 @@
+{
+  "frozenTree": "841ead9af08c2bcc51b1bd6e2f80f043d7e370c4",
+  "boundary": "AccountVaultReplica.hydrateFromServer awaited first Item page",
+  "trace": [
+    "initial:vaults",
+    "initial:items",
+    "initial:promoted",
+    "second:vault-page-returned",
+    "second:first-item-page-await-entered",
+    "capture:before-error-release-and-discard"
+  ],
+  "serverVaultWireRaw": "{\"id\":\"vault-duplicate\",\"name\":\"Unchanged Vault\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"{\\\"ciphertext\\\":\\\"9oIlN8azXnx8LSTA7cYAQbrpXHh4dgPM8dQBVb7heHt6QiL43egUYO2ACjQsH0CZn+YEUKDVGWBvGhre0v0dTOSgcEBWJnyqsIRpcN+8NVEFcH+vhYExcZD9LgkLYmaMhqVMKenBVGR6C3qS0fwJSf2WFTJ7R1mY2LxYHeiAHy3Wt+N8fUW29FIxqtOM5OA3eVHxtFs3oYbH\\\",\\\"iv\\\":\\\"jaFXFviUAjMiU0yM\\\",\\\"algorithm\\\":\\\"AES-GCM-AAD-V1\\\",\\\"context\\\":{\\\"vaultId\\\":\\\"vault-duplicate\\\",\\\"userId\\\":\\\"user-acc-duplicate-stage\\\",\\\"keyVersion\\\":1,\\\"purpose\\\":\\\"vault-key-wrap\\\"}}\",\"role\":\"owner\"}",
+  "serverVaultWireRawAtCapture": "{\"id\":\"vault-duplicate\",\"name\":\"Unchanged Vault\",\"vaultType\":\"personal\",\"icon\":null,\"imageUrl\":null,\"encryptedVaultKey\":\"{\\\"ciphertext\\\":\\\"9oIlN8azXnx8LSTA7cYAQbrpXHh4dgPM8dQBVb7heHt6QiL43egUYO2ACjQsH0CZn+YEUKDVGWBvGhre0v0dTOSgcEBWJnyqsIRpcN+8NVEFcH+vhYExcZD9LgkLYmaMhqVMKenBVGR6C3qS0fwJSf2WFTJ7R1mY2LxYHeiAHy3Wt+N8fUW29FIxqtOM5OA3eVHxtFs3oYbH\\\",\\\"iv\\\":\\\"jaFXFviUAjMiU0yM\\\",\\\"algorithm\\\":\\\"AES-GCM-AAD-V1\\\",\\\"context\\\":{\\\"vaultId\\\":\\\"vault-duplicate\\\",\\\"userId\\\":\\\"user-acc-duplicate-stage\\\",\\\"keyVersion\\\":1,\\\"purpose\\\":\\\"vault-key-wrap\\\"}}\",\"role\":\"owner\"}",
+  "initialStateRaw": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790128085861,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://bittery.test\",\"cursorId\":\"evt-original\"},\"itemCount\":1},\"activeGeneration\":\"mudg1j6r-1-t31b8rpacg9\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:acc-duplicate-stage:mudg1j6r-1-t31b8rpacg9:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:acc-duplicate-stage:mudg1j6r-1-t31b8rpacg9:vaults:\"}}",
+  "stateRaw": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790128085861,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://bittery.test\",\"cursorId\":\"evt-original\"},\"itemCount\":1},\"activeGeneration\":\"mudg1j6r-1-t31b8rpacg9\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:acc-duplicate-stage:mudg1j6r-1-t31b8rpacg9:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:acc-duplicate-stage:mudg1j6r-1-t31b8rpacg9:vaults:\"}}",
+  "initialActiveItems": [
+    {
+      "id": "item-duplicate",
+      "value": "{\"id\":\"item-duplicate\",\"vaultId\":\"vault-duplicate\",\"accountId\":\"acc-duplicate-stage\",\"accountEmail\":\"acc-duplicate-stage@test.com\",\"serverUrl\":\"https://bittery.test\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"Pqna4ieY/AwHR7KEIPDvryzwpRNYTq6IJaLRrXjc6C95D4+iU5e7jFe5iQtpO82/WdP7mVjs3BZlP6HsXoa3xzzEsWxUWuWVbrqI4T2EnnBLF7SJMa2f9BOVpz5FD6H4GcXvhUC5hU07MMjzS5KhwRGmnh4rd8S5Xt+o1hDnxw7P3XlPsC8Wbu0HaO+U\",\"encryptionIv\":\"If/Yr3Dc4CNIF6KP\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"lastModifiedBy\":\"user-acc-duplicate-stage\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-acc-duplicate-stage\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"updatedAt\":\"2026-09-01T00:00:00.000Z\",\"deletedAt\":null,\"attachments\":[]}"
+    }
+  ],
+  "initialActiveVaults": [
+    {
+      "id": "vault-duplicate",
+      "value": "{\"id\":\"vault-duplicate\",\"name\":\"Unchanged Vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acc-duplicate-stage\",\"accountEmail\":\"acc-duplicate-stage@test.com\",\"serverUrl\":\"https://bittery.test\"}"
+    }
+  ],
+  "activeItems": [
+    {
+      "id": "item-duplicate",
+      "value": "{\"id\":\"item-duplicate\",\"vaultId\":\"vault-duplicate\",\"accountId\":\"acc-duplicate-stage\",\"accountEmail\":\"acc-duplicate-stage@test.com\",\"serverUrl\":\"https://bittery.test\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"Pqna4ieY/AwHR7KEIPDvryzwpRNYTq6IJaLRrXjc6C95D4+iU5e7jFe5iQtpO82/WdP7mVjs3BZlP6HsXoa3xzzEsWxUWuWVbrqI4T2EnnBLF7SJMa2f9BOVpz5FD6H4GcXvhUC5hU07MMjzS5KhwRGmnh4rd8S5Xt+o1hDnxw7P3XlPsC8Wbu0HaO+U\",\"encryptionIv\":\"If/Yr3Dc4CNIF6KP\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"lastModifiedBy\":\"user-acc-duplicate-stage\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-acc-duplicate-stage\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"updatedAt\":\"2026-09-01T00:00:00.000Z\",\"deletedAt\":null,\"attachments\":[]}"
+    }
+  ],
+  "activeVaults": [
+    {
+      "id": "vault-duplicate",
+      "value": "{\"id\":\"vault-duplicate\",\"name\":\"Unchanged Vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acc-duplicate-stage\",\"accountEmail\":\"acc-duplicate-stage@test.com\",\"serverUrl\":\"https://bittery.test\"}"
+    }
+  ],
+  "stage": {
+    "item-cache-stage:acc-duplicate-stage:mudg1j72-2-3i5t1mvnnzg:item-baseline": [
+      {
+        "id": "item-duplicate",
+        "value": "{\"id\":\"item-duplicate\",\"vaultId\":\"vault-duplicate\",\"accountId\":\"acc-duplicate-stage\",\"accountEmail\":\"acc-duplicate-stage@test.com\",\"serverUrl\":\"https://bittery.test\",\"category\":\"login\",\"favorite\":false,\"encryptedData\":\"Pqna4ieY/AwHR7KEIPDvryzwpRNYTq6IJaLRrXjc6C95D4+iU5e7jFe5iQtpO82/WdP7mVjs3BZlP6HsXoa3xzzEsWxUWuWVbrqI4T2EnnBLF7SJMa2f9BOVpz5FD6H4GcXvhUC5hU07MMjzS5KhwRGmnh4rd8S5Xt+o1hDnxw7P3XlPsC8Wbu0HaO+U\",\"encryptionIv\":\"If/Yr3Dc4CNIF6KP\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"version\":1,\"lastModifiedBy\":\"user-acc-duplicate-stage\",\"encryptionVersion\":1,\"encryptedByUserId\":\"user-acc-duplicate-stage\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"updatedAt\":\"2026-09-01T00:00:00.000Z\",\"deletedAt\":null,\"attachments\":[]}"
+      }
+    ],
+    "item-cache-stage:acc-duplicate-stage:mudg1j72-2-3i5t1mvnnzg:vault-baseline": [
+      {
+        "id": "vault-duplicate",
+        "value": "{\"id\":\"vault-duplicate\",\"name\":\"Unchanged Vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acc-duplicate-stage\",\"accountEmail\":\"acc-duplicate-stage@test.com\",\"serverUrl\":\"https://bittery.test\"}"
+      }
+    ],
+    "item-cache-stage:acc-duplicate-stage:mudg1j72-2-3i5t1mvnnzg:vaults": [
+      {
+        "id": "vault-duplicate",
+        "value": "{\"id\":\"vault-duplicate\",\"name\":\"Unchanged Vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acc-duplicate-stage\",\"accountEmail\":\"acc-duplicate-stage@test.com\",\"serverUrl\":\"https://bittery.test\"}"
+      }
+    ]
+  },
+  "stagedItemsName": "item-cache-stage:acc-duplicate-stage:mudg1j72-2-3i5t1mvnnzg:items",
+  "stagedItems": []
+}

@@ -1,4 +1,5 @@
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
+import type { MaterialPublication } from "./material-publication";
 import type { LocalVaultAccount, VaultRepository } from "./vault-repository";
 
 export interface AccountVaultStateSource {
@@ -84,9 +85,11 @@ export class AccountVaultRuntime {
 
 	getSnapshot = (): AccountVaultRuntimeState => this.state;
 
-	retry = async (): Promise<void> => {
+	/** A caller-owned material publication also guards asynchronous local opening. */
+	retry = async (publication?: MaterialPublication): Promise<void> => {
+		publication?.check();
 		this.start();
-		await this.reconcile(true);
+		await this.reconcile(true, publication);
 	};
 
 	dispose(): void {
@@ -108,7 +111,11 @@ export class AccountVaultRuntime {
 		this.publish({ ...this.state, isLoading: false, error });
 	}
 
-	private async reconcile(force = false): Promise<void> {
+	private async reconcile(
+		force = false,
+		publication?: MaterialPublication,
+	): Promise<void> {
+		publication?.check();
 		const generation = ++this.generation;
 		const activeId = this.source.getActiveAccount();
 		const all = this.source.getAccounts();
@@ -141,6 +148,7 @@ export class AccountVaultRuntime {
 			return;
 		}
 		// Scope is changed synchronously before any durable read can yield.
+		publication?.check();
 		this.repository.setLocalActiveAccounts(activeAccounts);
 		this.publish({
 			accounts: activeAccounts,
@@ -151,6 +159,7 @@ export class AccountVaultRuntime {
 		try {
 			await this.repository.hydrateLocalAccounts(unlockedAccounts);
 			if (generation !== this.generation) return;
+			publication?.check();
 			this.publish({
 				accounts: activeAccounts,
 				unlockedAccounts,
@@ -158,6 +167,7 @@ export class AccountVaultRuntime {
 				error: null,
 			});
 		} catch (error) {
+			publication?.check();
 			this.fail(generation, error);
 		}
 	}

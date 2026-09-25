@@ -32,11 +32,15 @@ import {
 	IconTrash as Trash,
 	IconTriangleAlert as TriangleAlert,
 } from "@bittery/ui/icons";
+import type {
+	RuntimeListItem,
+	RuntimeVaultOption,
+} from "@bittery/ui/runtime-presentation";
+import { useAccountPresentationState } from "@bittery/ui/runtime-presentation";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
 import { MoveItemDialog } from "@/components/vault/move-item-dialog";
-import { useAccountPresentationState } from "@/hooks/use-account-presentation-state";
 import { useCreateShare } from "@/hooks/use-create-share";
 import {
 	getRuntimeAttachmentUploadErrorCode,
@@ -48,7 +52,6 @@ import {
 	useUpdateItem,
 } from "@/hooks/use-runtime-item-mutations";
 import { useRuntimeShareHistory } from "@/hooks/use-runtime-share-history";
-import type { RuntimeListItem, RuntimeVaultOption } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
@@ -386,6 +389,7 @@ export function ItemDetailPane({
 							}
 							onDecryptMeta={itemAttachments.decryptMeta}
 							onUpload={(file) => itemAttachments.upload.mutateAsync(file)}
+							onPrepareUpload={itemAttachments.prepareUpload}
 							onDownload={(attachment) =>
 								itemAttachments.download.mutateAsync(attachment)
 							}

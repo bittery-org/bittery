@@ -144,6 +144,43 @@ impl NativeArtifactPort {
 
 #[async_trait::async_trait]
 impl core::VaultImageArtifactPort for NativeArtifactPort {
+    async fn read_generation(
+        &self,
+        family: &core::VaultImageArtifactScope,
+        after: Option<&str>,
+    ) -> Result<Option<core::VaultImageArtifactGeneration>, core::RuntimeError> {
+        let request = VaultImageControlRequest::ReadGeneration {
+            scope: family.into(),
+            after_publication_id: after.map(str::to_owned),
+        };
+        let answer = self.invoke(request, None)?;
+        if answer.binary_chunk.is_some() {
+            return Err(invariant());
+        }
+        let response = parse_artifact(&answer)?;
+        match response {
+            VaultImageControlResponse::Generation { generation } => {
+                generation.into_core(family, after).map(Some)
+            }
+            VaultImageControlResponse::Missing => Ok(None),
+            _ => Err(invariant()),
+        }
+    }
+    async fn delete_generation(
+        &self,
+        scope: &core::VaultImageArtifactScope,
+    ) -> Result<(), core::RuntimeError> {
+        expect_artifact(
+            self.invoke(
+                VaultImageControlRequest::DeleteGeneration {
+                    scope: scope.into(),
+                },
+                None,
+            )?,
+            VaultImageControlResponse::Deleted,
+        )
+    }
+
     async fn begin(&self, scope: &core::VaultImageArtifactScope) -> Result<(), core::RuntimeError> {
         expect_artifact(
             self.invoke(
@@ -426,6 +463,48 @@ impl core::VaultImageSourcePort for NativeSourcePort {
         })?;
         expect_source_answer(answer, VaultImageSourceControlResponse::AcceptanceEnded)
     }
+    async fn retire_vaults(
+        &self,
+        _runtime_incarnation: &str,
+        account_id: &core::AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), core::VaultImageSourceError> {
+        expect_source_answer(
+            self.invoke(VaultImageSourceControlRequest::RetireVaults {
+                account_id: account_id.as_str().into(),
+                vault_ids: vault_ids.to_vec(),
+            })?,
+            VaultImageSourceControlResponse::Retired,
+        )
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _runtime_incarnation: &str,
+        account_id: &core::AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), core::VaultImageSourceError> {
+        expect_source_answer(
+            self.invoke(VaultImageSourceControlRequest::CompleteVaultRetirement {
+                account_id: account_id.as_str().into(),
+                vault_ids: vault_ids.to_vec(),
+            })?,
+            VaultImageSourceControlResponse::Retired,
+        )
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _runtime_incarnation: &str,
+        account_id: &core::AccountId,
+    ) -> Result<(), core::VaultImageSourceError> {
+        expect_source_answer(
+            self.invoke(
+                VaultImageSourceControlRequest::ForgetAccountVaultRetirements {
+                    account_id: account_id.as_str().into(),
+                },
+            )?,
+            VaultImageSourceControlResponse::Retired,
+        )
+    }
     async fn retire_runtime(
         &self,
         _runtime_incarnation: &str,
@@ -440,6 +519,7 @@ impl From<&core::VaultImageArtifactScope> for VaultImageScopeControl {
         Self {
             account_id: value.account_id().as_str().into(),
             operation_id: value.operation_id().into(),
+            publication_id: value.publication_id().map(str::to_owned),
         }
     }
 }
@@ -451,6 +531,7 @@ impl From<&core::VaultImageArtifactMetadata> for VaultImageMetadataControl {
             byte_length: value.byte_length().to_string(),
             content_type: value.content_type().into(),
             sha256: value.sha256().into(),
+            protection: value.protection().cloned(),
         }
     }
 }
@@ -494,6 +575,7 @@ fn expect_source_answer(
 fn invariant() -> core::RuntimeError {
     core::RuntimeError {
         recovery_bound: None,
+        team_page_problem: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Vault image native invocation failed".into(),
     }
@@ -574,6 +656,7 @@ mod tests {
                     scope: VaultImageScopeControl {
                         account_id: "account-a".into(),
                         operation_id: "operation-a".into(),
+                        publication_id: None,
                     },
                 },
                 Some(b"abc".to_vec()),

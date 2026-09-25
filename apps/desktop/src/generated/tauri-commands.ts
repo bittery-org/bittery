@@ -65,6 +65,21 @@ export type RecordStoreGetArgs = { key: string, };
 export type RecordStoreListArgs = { prefix: string, };
 
 /**
+ * A renderer attachment identifies callers, never a Runtime owner.
+ */
+export type RuntimeBridgeAttachment = { connectionId: string, eventName: string, };
+
+export type RuntimeBridgeCallArgs = { connectionId: string, callId: string, payloadJson: string, };
+
+export type RuntimeBridgeCancelArgs = { connectionId: string, callId: string, };
+
+export type RuntimeBridgeConnectionArgs = { connectionId: string, };
+
+export type RuntimeBridgeMessage = { connectionId: string, callId: string, payloadJson: string, kind: RuntimeBridgeMessageKind, };
+
+export type RuntimeBridgeMessageKind = "projection" | "response";
+
+/**
  * `set_ui_theme(theme)`
  */
 export type SetUiThemeArgs = { theme: DesktopTheme, };

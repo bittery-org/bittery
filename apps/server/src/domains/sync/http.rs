@@ -1,6 +1,6 @@
 use axum::{
     extract::{FromRequestParts, Path, State},
-    http::request::Parts,
+    http::{header::ACCEPT, request::Parts, HeaderMap},
     response::Response,
     Extension, Json,
 };
@@ -227,6 +227,11 @@ impl From<sync::BootstrapItemResponse> for BootstrapItemResponse {
 enum BootstrapItemsResponse {
     Vaults {
         vaults: Vec<BootstrapVaultSummary>,
+        #[serde(
+            rename = "vaultKeyVersionIncluded",
+            skip_serializing_if = "Option::is_none"
+        )]
+        vault_key_version_included: Option<bool>,
         #[serde(rename = "nextCursor")]
         next_cursor: Option<String>,
         #[serde(rename = "syncCursor")]
@@ -250,11 +255,13 @@ impl From<sync::BootstrapItemsResponse> for BootstrapItemsResponse {
         match value {
             sync::BootstrapItemsResponse::Vaults {
                 vaults,
+                vault_key_version_included,
                 next_cursor,
                 sync_cursor,
                 has_more,
             } => Self::Vaults {
                 vaults: vaults.into_iter().map(Into::into).collect(),
+                vault_key_version_included,
                 next_cursor,
                 sync_cursor: sync_cursor.map(Into::into),
                 has_more,
@@ -318,6 +325,7 @@ async fn bootstrap(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     BootstrapApiQuery(query): BootstrapApiQuery,
+    headers: HeaderMap,
 ) -> Result<Json<BootstrapItemsResponse>, ApiError> {
     let pool = &state.db_pool;
     let mut response: BootstrapItemsResponse = sync::bootstrap_items(
@@ -326,6 +334,7 @@ async fn bootstrap(
         state.config.server.mode,
         &auth.session.user_id,
         query.into(),
+        accepts_vault_key_version(&headers),
     )
     .await?
     .into();
@@ -354,6 +363,13 @@ async fn bootstrap(
         }
     }
     Ok(Json(response))
+}
+
+const VAULT_KEY_VERSION_ACCEPT: &str = "application/vnd.bittery.sync-vault-key-version+json";
+
+fn accepts_vault_key_version(headers: &HeaderMap) -> bool {
+    let mut values = headers.get_all(ACCEPT).iter();
+    matches!((values.next(), values.next()), (Some(value), None) if value.as_bytes() == VAULT_KEY_VERSION_ACCEPT.as_bytes())
 }
 
 #[utoipa::path(
@@ -541,12 +557,20 @@ mod tests {
                 image_url: None,
                 encrypted_vault_key: "wrapped-key".to_string(),
                 role: VaultRole::Owner,
+                key_version: None,
             }],
+            vault_key_version_included: None,
             next_cursor: None,
             sync_cursor: None,
             has_more: false,
         }
         .into();
+        let vault_bytes = serde_json::to_string(&vault_response)
+            .expect("ordinary bootstrap vault response should serialize");
+        assert_eq!(
+            vault_bytes,
+            r#"{"phase":"vaults","vaults":[{"id":"vault_test","name":"encrypted-vault-name","vaultType":"personal","icon":null,"imageUrl":null,"encryptedVaultKey":"wrapped-key","role":"owner"}],"nextCursor":null,"syncCursor":null,"hasMore":false}"#
+        );
         let vault_json =
             serde_json::to_value(vault_response).expect("vault response should serialize");
         assert_eq!(vault_json["phase"], json!("vaults"));

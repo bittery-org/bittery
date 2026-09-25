@@ -49,6 +49,7 @@ import { ChangePasswordDialog } from "@/components/settings/change-password-dial
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
 import { DeviceManagement } from "@/components/settings/device-management";
 import { WebDeviceSetupDialog } from "@/components/settings/device-setup-dialog";
+import { KeyFingerprint } from "@/components/settings/key-fingerprint";
 import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-recovery-key-dialog";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { SetupRecoveryKeyDialog } from "@/components/settings/setup-recovery-key-dialog";
@@ -235,6 +236,7 @@ function SettingsPage() {
 				{/* ── Security Tab ── */}
 				<TabsContent value="security" className="mt-4">
 					<div className="space-y-6">
+						<KeyFingerprint key={runtimeSession.accountId ?? "none"} />
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
 							<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 								{m.settings_security_heading()}

@@ -1,10 +1,12 @@
-import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
+import { RuntimeRequestError } from "@bittery/client-runtime/client";
+import {
+	useRuntimeClient,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
 import {
 	formatDate,
 	formatCurrency as formatLocalizedCurrency,
 } from "@bittery/i18n/format/browser";
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Badge,
 	Button,
@@ -35,13 +37,18 @@ import {
 	IconUsers as UserPlus,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
+import { useRecipientKeyVerification } from "@/providers/recipient-key-verification-provider";
 import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 
 interface InviteDialogProps {
 	teamId: string;
 }
+
+type InvitationGestureResult =
+	| { type: "created"; token: string }
+	| { type: "createdUnprovisioned"; invitationId: string };
 
 type TeamMessageCatalog = ReturnType<typeof useI18n>["m"];
 
@@ -87,127 +94,202 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	const [email, setEmail] = useState("");
 	const [role, setRole] = useState<"admin" | "member">("member");
 	const [inviteLink, setInviteLink] = useState<string | null>(null);
-	const api = useApiClient();
-	const crypto = usePlatformCrypto();
-	const { vaultCrypto } = useCoreContext();
+	const [unprovisionedInvitationId, setUnprovisionedInvitationId] = useState<
+		string | null
+	>(null);
+	const runtime = useRuntimeClient();
+	const session = useRuntimeSession();
+	const verification = useRecipientKeyVerification();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
-
-	// Query team vaults for key provisioning
-	const teamVaultsQuery = useQuery({
-		...apiQueries.teams.vaults(api, teamId),
-		enabled: open, // Only fetch when dialog is open
+	const active = useRef<{
+		controller: AbortController;
+		accountId?: string;
+		continuationId?: string;
+	} | null>(null);
+	const accountId = session.state === "unlocked" ? session.accountId : null;
+	const composerQuery = useQuery({
+		queryKey: ["runtime", "invitationComposer", accountId, teamId],
+		queryFn: ({ signal }) => {
+			if (!accountId) throw new Error("No unlocked Account");
+			return runtime.readInvitationComposer({ accountId, teamId }, { signal });
+		},
+		enabled: open && !!accountId,
 	});
-	const billingStatusQuery = useQuery({
-		...apiQueries.billing.status(api),
-		enabled: open,
-	});
-	const shouldFetchSeatPreview =
-		open &&
-		billingStatusQuery.data?.enabled &&
-		billingStatusQuery.data.plan === "team" &&
-		billingStatusQuery.data.isActive;
-
-	const seatPreviewQuery = useQuery({
-		queryKey: ["api", "v1", "billing", "team-seats", "addition-preview"],
-		queryFn: async () => (await api.billing.seatAdditionPreview()).data,
-		enabled: shouldFetchSeatPreview,
-	});
-	const seatPreview = seatPreviewQuery.data;
+	const seatPreview = composerQuery.data?.seatPreview;
 	const hasSeatPreview = !!(seatPreview && seatPreview.lines.length > 0);
+
+	useEffect(() => {
+		const flight = active.current;
+		if (flight?.accountId && flight.accountId !== accountId) {
+			flight.controller.abort();
+			if (flight.continuationId)
+				void runtime
+					.releaseInvitationContinuation({
+						accountId: flight.accountId,
+						continuationId: flight.continuationId,
+					})
+					.catch(() => undefined);
+		}
+	}, [accountId, runtime]);
+	useEffect(
+		() => () => {
+			const flight = active.current;
+			flight?.controller.abort();
+			if (flight?.accountId && flight.continuationId)
+				void runtime
+					.releaseInvitationContinuation({
+						accountId: flight.accountId,
+						continuationId: flight.continuationId,
+					})
+					.catch(() => undefined);
+		},
+		[runtime],
+	);
 
 	const inviteMutation = useMutation({
 		mutationFn: async (input: {
 			teamId: string;
 			email: string;
 			role: "admin" | "member";
-		}) => {
-			// First, send the invitation to get user's public key (if they exist)
-			const result = (
-				await api.teams.invitations.send(input.teamId, {
-					email: input.email,
-					role: input.role,
-					pendingVaultKeys: null,
-				})
-			).data;
-
-			// If the user already exists and has a public key, we need to provision vault keys
-			if (result.existingUserPublicKey && teamVaultsQuery.data) {
-				const pendingVaultKeys: Array<{
-					vaultId: string;
-					encryptedVaultKey: string;
-				}> = [];
-
-				// For each team vault, decrypt the key and re-encrypt with invitee's public key
-				for (const vault of teamVaultsQuery.data) {
-					if (vault.encryptedVaultKey) {
-						try {
-							const vaultKey = await vaultCrypto.unwrapStoredVaultKey({
-								encryptedVaultKey: vault.encryptedVaultKey,
-								vaultId: vault.id,
-							});
-
-							// Sealed to the invitee's public key without the key material
-							// leaving the backend; the ref is still ours to retire.
-							try {
-								pendingVaultKeys.push({
-									vaultId: vault.id,
-									encryptedVaultKey: await crypto.encryptVaultKeyForMember(
-										vaultKey,
-										result.existingUserPublicKey,
-									),
-								});
-							} finally {
-								await crypto.destroyKey(vaultKey);
-							}
-						} catch (err) {
-							console.error(
-								`Failed to provision vault key for vault ${vault.id}:`,
-								err,
-							);
-						}
-					}
-				}
-
-				// If we have vault keys to provision, update the invitation
-				if (pendingVaultKeys.length > 0) {
-					// Cancel the existing invitation and create a new one with vault keys
-					await api.teams.invitations.cancel(input.teamId, result.invitationId);
-					return (
-						await api.teams.invitations.send(input.teamId, {
+		}): Promise<InvitationGestureResult> => {
+			const flight = {
+				controller: new AbortController(),
+				accountId: "",
+				continuationId: "",
+			};
+			active.current = flight;
+			const progress: {
+				createdPending: { invitationId: string } | null;
+				provisioningStarted: boolean;
+			} = { createdPending: null, provisioningStarted: false };
+			try {
+				return await verification.run(async (gesture) => {
+					flight.accountId = gesture.accountId;
+					const created = await runtime.createTeamInvitation(
+						{
+							accountId: gesture.accountId,
+							teamId: input.teamId,
 							email: input.email,
 							role: input.role,
-							pendingVaultKeys,
-						})
-					).data;
+						},
+						{ signal: gesture.signal },
+					);
+					if (created.type === "teamInvitationUncertain")
+						throw new RuntimeRequestError(
+							"RETRYABLE_TRANSPORT",
+							m.recipient_key_invite_incomplete(),
+						);
+					progress.createdPending = { invitationId: created.invitationId };
+					if (!created.candidate)
+						return { type: "created", token: created.token };
+					if (!created.continuationId)
+						throw new RuntimeRequestError(
+							"INVARIANT_VIOLATION",
+							m.recipient_key_invite_incomplete(),
+						);
+					flight.continuationId = created.continuationId;
+					await gesture.checkActive();
+					await gesture.approvedKey({
+						recipientUserId: created.candidate.recipientUserId,
+						publicKey: created.candidate.publicKey,
+						label: input.email,
+					});
+					await gesture.checkActive();
+					progress.provisioningStarted = true;
+					const provisioned = await runtime.provisionTeamInvitation(
+						{
+							accountId: gesture.accountId,
+							continuationId: created.continuationId,
+						},
+						{ signal: gesture.signal },
+					);
+					if (provisioned.type === "teamInvitationProvisioningNotRequired")
+						return { type: "created", token: created.token };
+					if (provisioned.type === "teamInvitationUncertain")
+						throw new RuntimeRequestError(
+							"RETRYABLE_TRANSPORT",
+							m.recipient_key_invite_incomplete(),
+						);
+					return { type: "created", token: provisioned.token };
+				}, flight.controller.signal);
+			} catch (error) {
+				// The first Server send is confirmed, but the human verification
+				// ended before Core could attempt any replacement. Keep that exact
+				// pending Invitation distinct from a completed Vault provision.
+				const currentSession = runtime.session().getSnapshot();
+				if (
+					progress.createdPending &&
+					!progress.provisioningStarted &&
+					!flight.controller.signal.aborted &&
+					currentSession.state === "unlocked" &&
+					currentSession.accountId === flight.accountId
+				) {
+					return {
+						type: "createdUnprovisioned",
+						invitationId: progress.createdPending.invitationId,
+					};
 				}
+				throw error;
+			} finally {
+				if (flight.accountId && flight.continuationId)
+					await runtime
+						.releaseInvitationContinuation({
+							accountId: flight.accountId,
+							continuationId: flight.continuationId,
+						})
+						.catch(() => undefined);
+				if (active.current === flight) active.current = null;
 			}
-
-			return result;
 		},
 		onSuccess: async (data) => {
+			if (data.type === "createdUnprovisioned") {
+				setInviteLink(null);
+				setUnprovisionedInvitationId(data.invitationId);
+				toast.error(m.recipient_key_invite_incomplete());
+				await invalidator.invalidateTeamInvitations();
+				return;
+			}
+			setUnprovisionedInvitationId(null);
 			const url = `${window.location.origin}/invite/${data.token}`;
 			setInviteLink(url);
 			toast.success(m.team_invite_dialog_toast_created());
-			await invalidator.invalidateTeam();
+			await invalidator.invalidateTeamInvitations();
 		},
 		onError: (error: Error) => {
-			toast.error(error.message);
+			toast.error(
+				error instanceof RuntimeRequestError
+					? m.recipient_key_invite_incomplete()
+					: error.message,
+			);
+			// A lost first-send reply can still have created a pending Invitation.
+			void invalidator.invalidateTeamInvitations();
 		},
 	});
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!email.trim()) return;
+		setUnprovisionedInvitationId(null);
 		inviteMutation.mutate({ teamId, email: email.trim(), role });
 	};
 
 	const handleOpenChange = (nextOpen: boolean) => {
 		setOpen(nextOpen);
 		if (!nextOpen) {
+			const flight = active.current;
+			flight?.controller.abort();
+			if (flight?.accountId && flight.continuationId)
+				void runtime
+					.releaseInvitationContinuation({
+						accountId: flight.accountId,
+						continuationId: flight.continuationId,
+					})
+					.catch(() => undefined);
 			setEmail("");
 			setRole("member");
 			setInviteLink(null);
+			setUnprovisionedInvitationId(null);
 		}
 	};
 
@@ -464,12 +546,24 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 										</Button>
 									</div>
 								)}
+								{unprovisionedInvitationId && (
+									<div
+										className="rounded-md border bg-muted/40 p-3 text-sm"
+										data-testid="invite-unprovisioned"
+										role="status"
+									>
+										<p>{m.recipient_key_invite_incomplete()}</p>
+										<code className="mt-2 block text-xs">
+											{unprovisionedInvitationId}
+										</code>
+									</div>
+								)}
 							</div>
 							<DialogFooter>
 								<Button
 									type="button"
 									variant="outline"
-									onClick={() => setOpen(false)}
+									onClick={() => handleOpenChange(false)}
 								>
 									{m.team_common_action_cancel()}
 								</Button>

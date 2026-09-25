@@ -1,8 +1,10 @@
-/** biome-ignore-all lint/style/noNonNullAssertion: The queries are only enabled when a team id is there */
-
+import {
+	useRuntimeClient,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
+import { apiQueries, apiQueryKeys } from "@bittery/shared/api-query";
 import {
 	Avatar,
 	AvatarFallback,
@@ -24,6 +26,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { InviteDialog } from "@/components/teams/invite-dialog";
 import { MemberList } from "@/components/teams/member-list";
 import { PendingInvitationsList } from "@/components/teams/pending-invitations-list";
+import { TeamLeaveRecovery } from "@/components/teams/team-leave-recovery";
 import { TeamSettings } from "@/components/teams/team-settings";
 import { getTeamPageAccess } from "@/lib/team-access";
 import { useI18n } from "@/providers/i18n-provider";
@@ -37,41 +40,38 @@ export const Route = createFileRoute("/_app/team/")({
 
 function TeamPage() {
 	const api = useApiClient();
+	const runtime = useRuntimeClient();
+	const session = useRuntimeSession();
 	const { m } = useI18n();
 
-	const teamListQuery = useQuery(apiQueries.teams.current(api));
-	const teamId = teamListQuery.data?.id;
-	const billingEntitlementsQuery = useQuery(
-		apiQueries.billing.entitlements(api),
-	);
+	const accountId = session.state === "unlocked" ? session.accountId : null;
+	const teamPageQuery = useQuery({
+		queryKey: [...apiQueryKeys.teams.current, "runtime", accountId],
+		queryFn: ({ signal }) => {
+			if (!accountId) throw new Error("No unlocked Account");
+			return runtime.readTeamPage({ accountId }, { signal });
+		},
+		enabled: !!accountId,
+	});
+	const page = teamPageQuery.data;
+	const team = page?.team;
+	const teamId = team?.id;
 	const registrationStatusQuery = useQuery(
 		apiQueries.auth.registrationStatus(api),
 	);
-	const meQuery = useQuery(apiQueries.auth.me(api));
-	const teamQuery = useQuery({
-		...apiQueries.teams.details(api, teamId!),
-		enabled: !!teamId,
-	});
-	const team = teamQuery.data;
 	const { teamManagementEnabled, canManageTeam, canViewInvitations } =
 		getTeamPageAccess({
 			userRole: team?.userRole,
-			entitlements: billingEntitlementsQuery.data?.entitlements,
+			entitlements: page
+				? { teamManagement: page.teamManagementEnabled }
+				: null,
 		});
-	const membersQuery = useQuery({
-		...apiQueries.teams.members(api, teamId!),
-		enabled: !!teamId,
-	});
-	const invitationsQuery = useQuery({
-		...apiQueries.teams.invitations(api, teamId!),
-		enabled: !!teamId && canViewInvitations,
-	});
 
 	const isSelfHostedMode = registrationStatusQuery.data?.mode === "self-hosted";
 	const isCloudMode = registrationStatusQuery.data?.mode === "cloud";
-	const currentUserId = meQuery.data?.id;
+	const currentUserId = page?.user.id;
 
-	if (teamListQuery.isLoading || teamQuery.isLoading) {
+	if (teamPageQuery.isLoading || !accountId) {
 		return (
 			<div className="mx-auto w-full max-w-6xl space-y-4">
 				<Skeleton className="h-48 w-full rounded-lg" />
@@ -84,11 +84,24 @@ function TeamPage() {
 			</div>
 		);
 	}
+	if (teamPageQuery.isError) {
+		return (
+			<div className="mx-auto w-full max-w-6xl space-y-4 py-8">
+				<TeamLeaveRecovery key={accountId} accountId={accountId} />
+				<p className="text-center" role="alert">
+					{m.team_page_error_load_failed()}
+				</p>
+			</div>
+		);
+	}
 
 	if (!team) {
 		return (
-			<div className="py-8 text-center">
-				<p className="text-muted-foreground">{m.team_page_empty_no_team()}</p>
+			<div className="mx-auto w-full max-w-6xl space-y-4 py-8">
+				<TeamLeaveRecovery key={accountId} accountId={accountId} />
+				<p className="text-center text-muted-foreground">
+					{m.team_page_empty_no_team()}
+				</p>
 			</div>
 		);
 	}
@@ -173,6 +186,7 @@ function TeamPage() {
 			) : null}
 
 			{/* Tabs Area */}
+			<TeamLeaveRecovery key={accountId} accountId={accountId} />
 			<Tabs defaultValue="members">
 				<TabsList className="w-full sm:w-fit">
 					<TabsTrigger value="members" className="flex-1 sm:flex-none">
@@ -187,9 +201,9 @@ function TeamPage() {
 							<span className="hidden sm:inline">
 								{m.team_page_tab_invitations()}
 							</span>
-							{invitationsQuery.data?.length ? (
+							{page?.invitations.length ? (
 								<span className="ml-1.5 rounded-full border bg-foreground/3 px-1.5 text-[10px] text-muted-foreground tabular-nums">
-									{invitationsQuery.data.length}
+									{page.invitations.length}
 								</span>
 							) : null}
 						</TabsTrigger>
@@ -214,16 +228,10 @@ function TeamPage() {
 									: m.team_page_members_description_read_only()}
 							</p>
 						</div>
-						{membersQuery.isLoading ? (
-							<div className="grid gap-3 sm:grid-cols-2">
-								<Skeleton className="h-28" />
-								<Skeleton className="h-28" />
-								<Skeleton className="h-28" />
-							</div>
-						) : teamId ? (
+						{teamId ? (
 							<MemberList
 								teamId={teamId}
-								members={[...(membersQuery.data || [])]}
+								members={[...(page?.members || [])]}
 								currentUserId={currentUserId}
 								canManageMembers={canManageTeam}
 								isSelfHostedMode={isSelfHostedMode}
@@ -243,15 +251,11 @@ function TeamPage() {
 									{m.team_page_invitations_description()}
 								</p>
 							</div>
-							{invitationsQuery.isLoading ? (
-								<div className="grid gap-3 sm:grid-cols-2">
-									<Skeleton className="h-28" />
-									<Skeleton className="h-28" />
-								</div>
-							) : teamId ? (
+							{teamId ? (
 								<PendingInvitationsList
-									invitations={[...(invitationsQuery.data || [])]}
+									invitations={[...(page?.invitations || [])]}
 									canManage={canManageTeam}
+									accountId={accountId}
 									teamId={teamId}
 								/>
 							) : null}

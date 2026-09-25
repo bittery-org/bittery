@@ -5,10 +5,27 @@ use crate::{
 use async_trait::async_trait;
 use bittery_crypto_core::attachment_move::AttachmentPublicationProof;
 
+mod inventory;
+pub use inventory::{
+    AttachmentArtifactInventoryContinuation, AttachmentArtifactInventoryFamily,
+    AttachmentArtifactInventoryPage, AttachmentArtifactInventorySchema,
+    AttachmentArtifactPhysicalKey,
+};
+
 #[cfg(not(target_arch = "wasm32"))]
-mod sqlite;
+pub(crate) mod sqlite;
+#[cfg(any(test, feature = "binding-test-harness"))]
+mod test_fixture;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+#[cfg(any(test, feature = "binding-test-harness"))]
+pub(crate) use test_fixture::authenticated_target_for;
+#[cfg(feature = "binding-test-harness")]
+pub(crate) use test_fixture::authenticated_target_for_vaults;
+#[cfg(feature = "binding-test-harness")]
+pub use test_fixture::{
+    seed_attachment_artifact_recovery_test_history, sweep_attachment_artifact_recovery_test_history,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use sqlite::SqliteAttachmentArtifactStore;
@@ -175,6 +192,8 @@ fn is_canonical_generation(generation: &str) -> bool {
 pub enum ProvisionalAttachmentArtifactStoreResponse {
     Begun(ProvisionalAttachmentArtifactWriter),
     RecoveryAvailable(ProvisionalAttachmentArtifactRecovery),
+    /// The scope is proven absent or has only a valid, unsealed generation.
+    RecoveryUnavailable,
     ChunkWritten(ArtifactChunkWrite),
     Finalized(AttachmentArtifactOwner),
 }
@@ -342,6 +361,10 @@ impl ExclusiveStartupBoundary {
 }
 
 pub enum AttachmentArtifactStoreRequest {
+    /// Read physical presence without requiring a catalog, Account, or published artifact owner.
+    Inventory {
+        cursor: Option<String>,
+    },
     WriteChunk {
         owner: AttachmentArtifactOwner,
         chunk_index: u32,
@@ -358,15 +381,23 @@ pub enum AttachmentArtifactStoreRequest {
         account_id: AccountId,
     },
     WipeDevice,
+    SweepOperationOrphans {
+        account_id: AccountId,
+        operation_ids: Vec<String>,
+        live: Vec<AttachmentArtifactOwner>,
+        pending: Vec<ProvisionalAttachmentArtifactScope>,
+    },
     SweepOrphans {
         boundary: ExclusiveStartupBoundary,
         account_id: AccountId,
         live: Vec<AttachmentArtifactOwner>,
+        pending: Vec<ProvisionalAttachmentArtifactScope>,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AttachmentArtifactStoreResponse {
+    InventoryPage(AttachmentArtifactInventoryPage),
     ChunkWritten(ArtifactChunkWrite),
     Published(ArtifactPublication),
     ChunkRead(PublishedArtifactChunk),

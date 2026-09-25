@@ -37,27 +37,31 @@ function AppLayout() {
 	});
 
 	return (
-		<SidebarProvider className="h-svh overflow-hidden">
-			<AppSidebar />
-			<SidebarInset className="min-h-0 overflow-hidden">
-				<header className="absolute top-0 z-[50] flex h-11 shrink-0 items-center gap-2 xl:h-12">
-					<div className="flex items-center gap-2 px-4">
-						<SidebarTrigger className="-ml-1" />
+		<RecipientKeyVerificationProvider>
+			<SidebarProvider className="h-svh overflow-hidden">
+				<AppSidebar />
+				<SidebarInset className="min-h-0 overflow-hidden">
+					<header className="absolute top-0 z-[50] flex h-11 shrink-0 items-center gap-2 xl:h-12">
+						<div className="flex items-center gap-2 px-4">
+							<SidebarTrigger className="-ml-1" />
+						</div>
+					</header>
+					<div
+						id="app-scroll-area"
+						className={cn(
+							"flex min-h-0 flex-1 flex-col",
+							isVaultsRoute
+								? "overflow-hidden"
+								: "gap-4 overflow-y-auto px-5 pt-11 pb-4 lg:pl-13 xl:pt-12",
+						)}
+					>
+						<Outlet />
 					</div>
-				</header>
-				<div
-					id="app-scroll-area"
-					className={cn(
-						"flex min-h-0 flex-1 flex-col",
-						isVaultsRoute
-							? "overflow-hidden"
-							: "gap-4 overflow-y-auto px-5 pt-11 pb-4 lg:pl-13 xl:pt-12",
-					)}
-				>
-					<Outlet />
-				</div>
-			</SidebarInset>
-			<RevealLoader isLoading={isLoading} />
-		</SidebarProvider>
+				</SidebarInset>
+				<RevealLoader isLoading={isLoading} />
+			</SidebarProvider>
+		</RecipientKeyVerificationProvider>
 	);
 }
+
+import { RecipientKeyVerificationProvider } from "@/providers/recipient-key-verification-provider";

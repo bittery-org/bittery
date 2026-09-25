@@ -75,6 +75,7 @@ fn validate_context_field(value: &str, field_name: &str) -> Result<(), CryptoErr
 
 /// Encrypted data structure matching the TypeScript interface
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct EncryptedData {
     /// Base64-encoded ciphertext
     pub ciphertext: String,

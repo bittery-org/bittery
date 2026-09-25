@@ -16,6 +16,13 @@ chunkIndex: number
 metadata: VaultImageMetadataControl
 type: "readChunk"
 } | {
+afterPublicationId?: (string | null)
+scope: VaultImageScopeControl
+type: "readGeneration"
+} | {
+scope: VaultImageScopeControl
+type: "deleteGeneration"
+} | {
 scope: VaultImageScopeControl
 type: "delete"
 } | {
@@ -38,6 +45,9 @@ result: VaultImagePublicationControl
 type: "published"
 } | {
 type: "chunk"
+} | {
+generation: VaultImageGenerationControl
+type: "generation"
 } | {
 type: "missing"
 } | {
@@ -72,6 +82,17 @@ type: "retireAccount"
 } | {
 accountId: string
 type: "completeAccountRetirement"
+} | {
+accountId: string
+type: "retireVaults"
+vaultIds: string[]
+} | {
+accountId: string
+type: "completeVaultRetirement"
+vaultIds: string[]
+} | {
+accountId: string
+type: "forgetAccountVaultRetirements"
 } | {
 accountId: string
 operationId: string
@@ -114,12 +135,60 @@ sourceResponse: VaultImageSourceControlResponse
 export interface VaultImageScopeControl {
 accountId: string
 operationId: string
+publicationId?: (string | null)
 }
 export interface VaultImageMetadataControl {
 accountId: string
 byteLength: string
 contentType: string
 operationId: string
+protection?: (ProtectedImageMetadata | null)
+publicationId?: (string | null)
 sha256: string
 vaultId: string
+}
+export interface ProtectedImageMetadata {
+binding: ImageBinding
+witness: ProtectedImageWitness
+wrappedKey: EncryptedData
+}
+export interface ImageBinding {
+byteLength: number
+contentType: string
+identity: ImageIdentity
+sha256: string
+}
+export interface ImageIdentity {
+accountId: string
+operationId: string
+userId: string
+vaultId: string
+}
+export interface ProtectedImageWitness {
+chunkCount: number
+ciphertextByteLength: number
+ciphertextSha256: string
+formatVersion: number
+publicationId: string
+}
+/**
+ * Encrypted data structure matching the TypeScript interface
+ */
+export interface EncryptedData {
+/**
+ * Algorithm identifier
+ */
+algorithm: string
+/**
+ * Base64-encoded ciphertext
+ */
+ciphertext: string
+/**
+ * Base64-encoded initialization vector
+ */
+iv: string
+}
+export interface VaultImageGenerationControl {
+metadata?: (VaultImageMetadataControl | null)
+scope: VaultImageScopeControl
 }

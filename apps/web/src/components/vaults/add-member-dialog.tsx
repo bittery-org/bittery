@@ -1,6 +1,7 @@
-import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
+import {
+	useRuntimeClient,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -28,9 +29,10 @@ import {
 	IconSearch as Search,
 	IconUsers as UserPlus,
 } from "@bittery/ui/icons";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
+import { useRecipientKeyVerification } from "@/providers/recipient-key-verification-provider";
 import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 
 interface AddMemberDialogProps {
@@ -47,17 +49,30 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 		Record<string, "admin" | "member" | "read-only">
 	>({});
 
-	const api = useApiClient();
-	const crypto = usePlatformCrypto();
-	const { vaultCrypto } = useCoreContext();
+	const runtime = useRuntimeClient();
+	const queryClient = useQueryClient();
+	const session = useRuntimeSession();
+	const accountId = session.state === "unlocked" ? session.accountId : null;
+	const active = useRef<AbortController | null>(null);
+	const verification = useRecipientKeyVerification();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 
-	// Fetch available team members (not already in vault)
 	const availableQuery = useQuery({
-		...apiQueries.vaults.availableMembers(api, vaultId),
-		enabled: open,
+		queryKey: ["runtime", "availableVaultMembers", accountId, vaultId],
+		queryFn: ({ signal }) => {
+			if (!accountId) throw new Error("No unlocked Account");
+			return runtime.listAvailableVaultMembers(
+				{ accountId, vaultId },
+				{ signal },
+			);
+		},
+		enabled: open && accountId !== null,
 	});
+	useEffect(() => {
+		if (!accountId) active.current?.abort();
+		return () => active.current?.abort();
+	}, [accountId]);
 
 	const filteredMembers = useMemo(() => {
 		const members = availableQuery.data ?? [];
@@ -69,66 +84,55 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 		);
 	}, [availableQuery.data, search]);
 
-	const addMemberMutation = useMutation({
-		mutationFn: async (input: {
-			vaultId: string;
-			userId: string;
-			role: "admin" | "member" | "read-only";
-			encryptedVaultKey: string;
-		}) =>
-			api.vaults.members.add(input.vaultId, input.userId, {
-				encryptedVaultKey: input.encryptedVaultKey,
-				role: input.role,
-			}),
-		onSuccess: async (_data, variables) => {
-			setAddedUserIds((prev) => new Set([...prev, variables.userId]));
-			setAddingUserId(null);
-			toast.success(m.vaults_add_member_dialog_toast_member_added());
-			await invalidator.invalidateVaultMembers(vaultId);
-			availableQuery.refetch();
-		},
-		onError: () => {
-			setAddingUserId(null);
-			toast.error(m.vaults_add_member_dialog_toast_add_failed());
-		},
-	});
-
 	const handleAddMember = async (member: {
 		userId: string;
 		publicKey: string;
+		email: string;
 	}) => {
+		const controller = new AbortController();
+		active.current = controller;
 		setAddingUserId(member.userId);
 
 		try {
-			const vaultKey = await vaultCrypto.getVaultKey({ vaultId });
-			if (!vaultKey) {
-				toast.error(m.vaults_add_member_dialog_toast_decrypt_key_failed());
-				setAddingUserId(null);
-				return;
-			}
-
-			// Sealing to the member's public key never exposes the key here — the ref goes
-			// in and a ciphertext comes back — but the ref itself is ours to retire.
-			let encryptedVaultKey: string;
-			try {
-				encryptedVaultKey = await crypto.encryptVaultKeyForMember(
-					vaultKey,
-					member.publicKey,
+			await verification.run(async (gesture) => {
+				await gesture.approvedKey({
+					recipientUserId: member.userId,
+					publicKey: member.publicKey,
+					label: member.email,
+				});
+				const role = selectedRoles[member.userId] ?? "member";
+				await gesture.checkActive();
+				const result = await runtime.addVaultMember(
+					{
+						accountId: gesture.accountId,
+						vaultId,
+						userId: member.userId,
+						role,
+					},
+					{ signal: gesture.signal },
 				);
-			} finally {
-				await crypto.destroyKey(vaultKey);
-			}
-
-			const role = selectedRoles[member.userId] ?? "member";
-			addMemberMutation.mutate({
-				vaultId,
-				userId: member.userId,
-				role,
-				encryptedVaultKey,
-			});
-		} catch (error) {
-			toast.error(m.vaults_add_member_dialog_toast_encrypt_key_failed());
-			console.error(error);
+				if (result.type === "vaultMemberAddUncertain") {
+					toast.error(m.vaults_add_member_dialog_toast_add_uncertain());
+					await queryClient.invalidateQueries({
+						queryKey: ["runtime", "vaultMembers", gesture.accountId, vaultId],
+					});
+					await invalidator.invalidateVaultMembers(vaultId);
+					await availableQuery.refetch();
+					return;
+				}
+				setAddedUserIds((prev) => new Set([...prev, member.userId]));
+				toast.success(m.vaults_add_member_dialog_toast_member_added());
+				await queryClient.invalidateQueries({
+					queryKey: ["runtime", "vaultMembers", gesture.accountId, vaultId],
+				});
+				await invalidator.invalidateVaultMembers(vaultId);
+				await availableQuery.refetch();
+			}, controller.signal);
+		} catch {
+			if (!controller.signal.aborted)
+				toast.error(m.vaults_add_member_dialog_toast_add_failed());
+		} finally {
+			if (active.current === controller) active.current = null;
 			setAddingUserId(null);
 		}
 	};
@@ -136,6 +140,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 	const handleOpenChange = (newOpen: boolean) => {
 		setOpen(newOpen);
 		if (!newOpen) {
+			active.current?.abort();
 			setSearch("");
 			setAddingUserId(null);
 			setAddedUserIds(new Set());

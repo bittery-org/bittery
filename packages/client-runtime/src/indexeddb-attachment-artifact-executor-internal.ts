@@ -127,12 +127,14 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 				await this.finishProvisional(request.token, request.owner);
 				response = { type: "provisionalFinished" };
 				break;
-			case "recoverProvisional":
-				response = {
-					type: "provisionalRecoveryAvailable",
-					recovery: await this.recoverProvisional(request.scope),
-				};
+			case "recoverProvisional": {
+				const recovery = await this.recoverProvisional(request.scope);
+				response =
+					recovery === undefined
+						? { type: "provisionalRecoveryUnavailable" }
+						: { type: "provisionalRecoveryAvailable", recovery };
 				break;
+			}
 			case "resumeRecoveredProvisional":
 				response = {
 					type: "provisionalBinding",
@@ -195,6 +197,15 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 			case "wipeDevice":
 				await this.wipeDevice();
 				response = { type: "deviceWiped" };
+				break;
+			case "listArtifactOwners":
+				response = {
+					type: "artifactOwners",
+					owners: [...(await this.listArtifactOwners(request.accountId))],
+					provisional: [
+						...(await this.listProvisionalTokens(request.accountId)),
+					],
+				};
 				break;
 			case "listArtifactIds":
 				{
@@ -507,28 +518,64 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 
 	async recoverProvisional(
 		scope: ProvisionalArtifactScopeControl,
-	): Promise<ProvisionalToken> {
+	): Promise<ProvisionalToken | undefined> {
 		const database = await openAttachmentArtifactDatabase(this.#databaseName);
+		const transaction = database.transaction(
+			[METADATA_STORE, PROVISIONAL_METADATA_STORE],
+			"readonly",
+		);
+		const completed = transactionDone(transaction);
 		try {
-			const transaction = database.transaction(
-				PROVISIONAL_METADATA_STORE,
-				"readonly",
-			);
 			const records = await requestResult<StoredProvisionalArtifact[]>(
 				transaction
 					.objectStore(PROVISIONAL_METADATA_STORE)
 					.index(SCOPE_INDEX)
 					.getAll(IDBKeyRange.only(scopeKey(scope))),
 			);
-			await transactionDone(transaction);
-			const authenticated = records.find(
-				({ publicationState, current }) => current && publicationState !== 0,
-			);
-			if (authenticated === undefined)
+			for (const record of records) {
+				assertCanonicalToken(record);
+				if (
+					typeof record.current !== "boolean" ||
+					![0, 1, 2].includes(record.publicationState)
+				)
+					throw new Error("Provisional Attachment artifact state is invalid");
+			}
+			const current = records.filter((record) => record.current);
+			if (current.length > 1)
 				throw new Error(
-					"No authenticated provisional generation is available to recover",
+					"Provisional Attachment artifact has multiple current generations",
 				);
-			return tokenOf(authenticated);
+			const stored = current[0];
+			if (stored === undefined || stored.publicationState === 0) {
+				if (
+					stored !== undefined &&
+					[
+						stored.artifactId,
+						stored.ciphertextSha256,
+						stored.byteLength,
+						stored.chunkCount,
+					].some((value) => value !== undefined)
+				)
+					throw new Error(
+						"Incomplete provisional Attachment artifact has a contradictory seal",
+					);
+				const mapped = await findProvisionalPublication(
+					transaction.objectStore(METADATA_STORE),
+					scope,
+					stored?.generation,
+				);
+				if (mapped !== undefined)
+					throw new Error(
+						"Provisional Attachment publication has no matching authenticated current generation",
+					);
+				await completed;
+				return undefined;
+			}
+			await completed;
+			return tokenOf(stored);
+		} catch (error) {
+			await completed.catch(() => undefined);
+			throw error;
 		} finally {
 			database.close();
 		}
@@ -542,7 +589,7 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 		const database = await openAttachmentArtifactDatabase(this.#databaseName);
 		try {
 			const transaction = database.transaction(
-				[METADATA_STORE, PROVISIONAL_METADATA_STORE],
+				[METADATA_STORE, PROVISIONAL_METADATA_STORE, PROVISIONAL_CHUNK_STORE],
 				"readonly",
 			);
 			const stored = await requestResult<StoredProvisionalArtifact | undefined>(
@@ -552,12 +599,36 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 			);
 			if (stored !== undefined && stored.publicationState !== 0) {
 				const owner = ownerFromProvisional(stored);
-				if (stored.publicationState === 2) {
-					const mapped = await requiredArtifact(
-						transaction.objectStore(METADATA_STORE),
-						owner,
+				const count = await requestResult(
+					transaction
+						.objectStore(PROVISIONAL_CHUNK_STORE)
+						.index("by_generation")
+						.count(IDBKeyRange.only(tokenKey(token))),
+				);
+				if (
+					count !== owner.chunkCount ||
+					stored.durableChunkCount !== owner.chunkCount ||
+					stored.durableByteLength !== decimalLength(owner.byteLength) ||
+					stored.minimumChunkIndex !== 0 ||
+					stored.maximumChunkIndex !== owner.chunkCount - 1
+				)
+					throw new Error(
+						"Provisional Attachment artifact chunk inventory is contradictory",
 					);
-					if (mapped.physicalGeneration !== token.generation)
+				const mapped = await requestResult<StoredArtifact | undefined>(
+					transaction
+						.objectStore(METADATA_STORE)
+						.get([owner.accountId, owner.artifactId]),
+				);
+				if (stored.publicationState === 2 && mapped === undefined)
+					throw new Error("Published Attachment artifact mapping is missing");
+				if (mapped !== undefined) {
+					assertSameOwner(mapped, owner);
+					if (
+						mapped.physicalGeneration !== token.generation ||
+						mapped.publicationState !== "published" ||
+						mapped.durableChunkCount !== owner.chunkCount
+					)
 						throw new Error(
 							"Completed Attachment artifact publication conflicts with its writer generation",
 						);
@@ -568,25 +639,11 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 					state: stored.publicationState === 2 ? "published" : "sealed",
 				};
 			}
-			const mapped = await requestResult<IDBCursorWithValue | null>(
-				transaction
-					.objectStore(METADATA_STORE)
-					.index(ACCOUNT_INDEX)
-					.openCursor(IDBKeyRange.only(token.accountId)),
-			).then(async (cursor) => {
-				let current = cursor;
-				while (current !== null) {
-					const value = current.value as StoredArtifact;
-					if (
-						value.physicalGeneration === token.generation &&
-						value.operationId === token.operationId &&
-						value.attachmentId === token.attachmentId
-					)
-						return value;
-					current = await continueCursor(current);
-				}
-				return undefined;
-			});
+			const mapped = await findProvisionalPublication(
+				transaction.objectStore(METADATA_STORE),
+				token,
+				token.generation,
+			);
 			await transactionDone(transaction);
 			if (mapped === undefined)
 				throw new Error(
@@ -815,6 +872,45 @@ export class ConfigurableIndexedDbAttachmentArtifactExecutor {
 			abort(transaction);
 			await completed.catch(() => undefined);
 			throw error;
+		} finally {
+			database.close();
+		}
+	}
+
+	async listArtifactOwners(
+		accountId: string,
+	): Promise<readonly IndexedDbAttachmentArtifactOwner[]> {
+		const database = await openAttachmentArtifactDatabase(this.#databaseName);
+		try {
+			const transaction = database.transaction(METADATA_STORE, "readonly");
+			const records = await requestResult<StoredArtifact[]>(
+				transaction
+					.objectStore(METADATA_STORE)
+					.index(ACCOUNT_INDEX)
+					.getAll(IDBKeyRange.only(accountId)),
+			);
+			await transactionDone(transaction);
+			return records
+				.sort((left, right) => left.artifactId.localeCompare(right.artifactId))
+				.map(
+					({
+						accountId,
+						artifactId,
+						operationId,
+						attachmentId,
+						ciphertextSha256,
+						byteLength,
+						chunkCount,
+					}) => ({
+						accountId,
+						artifactId,
+						operationId,
+						attachmentId,
+						ciphertextSha256,
+						byteLength,
+						chunkCount,
+					}),
+				);
 		} finally {
 			database.close();
 		}
@@ -1311,11 +1407,33 @@ async function requiredCurrentProvisional(
 	return stored;
 }
 
+async function findProvisionalPublication(
+	store: IDBObjectStore,
+	scope: ProvisionalArtifactScopeControl,
+	generation?: string,
+): Promise<StoredArtifact | undefined> {
+	let cursor = await requestResult<IDBCursorWithValue | null>(
+		store.index(ACCOUNT_INDEX).openCursor(IDBKeyRange.only(scope.accountId)),
+	);
+	while (cursor !== null) {
+		const value = cursor.value as StoredArtifact;
+		if (
+			value.operationId === scope.operationId &&
+			value.attachmentId === scope.attachmentId &&
+			value.physicalGeneration !== undefined &&
+			(generation === undefined || value.physicalGeneration === generation)
+		)
+			return value;
+		cursor = await continueCursor(cursor);
+	}
+	return undefined;
+}
+
 function ownerFromProvisional(
 	stored: StoredProvisionalArtifact,
 ): IndexedDbAttachmentArtifactOwner {
 	if (
-		stored.publicationState === 0 ||
+		(stored.publicationState !== 1 && stored.publicationState !== 2) ||
 		stored.ciphertextSha256 === undefined ||
 		stored.byteLength === undefined ||
 		stored.chunkCount === undefined

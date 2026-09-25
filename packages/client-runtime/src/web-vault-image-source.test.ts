@@ -30,6 +30,7 @@ describe("Web Vault-image source registry", () => {
 		});
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a"),
 			accountId: "account-a",
 			contentType: "image/png",
 			byteLength: 1n,
@@ -70,6 +71,7 @@ describe("Web Vault-image source registry", () => {
 		});
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a"),
 			accountId: "account-a",
 			contentType: "image/png",
 			byteLength: 1n,
@@ -105,6 +107,7 @@ describe("Web Vault-image source registry", () => {
 		});
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-a",
 			vaultId: "vault-a",
@@ -141,6 +144,7 @@ describe("Web Vault-image source registry", () => {
 		});
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-a",
 			vaultId: "vault-a",
@@ -193,10 +197,11 @@ describe("Web Vault-image source registry", () => {
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		for (
 			let index = 0;
-			index < MAX_VAULT_IMAGE_SOURCE_IDENTITIES - 2;
+			index < MAX_VAULT_IMAGE_SOURCE_IDENTITIES - 3;
 			index += 1
 		)
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: `operation-${index}`,
 				vaultId: "vault-a",
@@ -206,6 +211,7 @@ describe("Web Vault-image source registry", () => {
 			});
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: "overflow",
 				vaultId: "vault-a",
@@ -226,6 +232,7 @@ describe("Web Vault-image source registry", () => {
 		});
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-a",
 			vaultId: "vault-a",
@@ -264,6 +271,7 @@ describe("Web Vault-image source registry", () => {
 		});
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-a",
 			vaultId: "vault-a",
@@ -305,6 +313,7 @@ describe("Web Vault-image source registry", () => {
 			});
 			await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 			const capabilityId = registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: "operation-a",
 				vaultId: "vault-a",
@@ -353,6 +362,7 @@ describe("Web Vault-image source registry", () => {
 		});
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-a",
 			vaultId: "vault-a",
@@ -409,6 +419,7 @@ describe("Web Vault-image source registry", () => {
 			});
 			await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 			const capabilityId = registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: "operation-a",
 				vaultId: "vault-a",
@@ -473,6 +484,7 @@ describe("Web Vault-image source registry", () => {
 		const old = new WebVaultImageSourceRegistry({ identity: () => "cap-old" });
 		await activateWebVaultImageSourceRegistry(old, "runtime-old");
 		old.grant({
+			scope: old.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-a",
 			vaultId: "vault-a",
@@ -498,6 +510,7 @@ describe("Web Vault-image source registry", () => {
 		await activateWebVaultImageSourceRegistry(fresh, "runtime-new");
 		expect(
 			fresh.grant({
+				scope: fresh.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: "operation-new",
 				vaultId: "vault-a",
@@ -529,6 +542,7 @@ describe("Web Vault-image source registry", () => {
 			});
 			await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 			const capabilityId = registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: "operation-a",
 				vaultId: "vault-a",
@@ -570,6 +584,7 @@ describe("Web Vault-image source registry", () => {
 		await activateWebVaultImageSourceRegistry(registry, "runtime-a");
 		for (const authority of ["lock", "signOut"] as const) {
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: `operation-${authority}`,
 				vaultId: "vault-a",
@@ -582,6 +597,7 @@ describe("Web Vault-image source registry", () => {
 		}
 		expect(
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
 				operationId: "operation-reactivated",
 				vaultId: "vault-a",

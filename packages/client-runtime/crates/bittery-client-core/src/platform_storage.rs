@@ -1,11 +1,26 @@
-use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
+use crate::{
+    protocol::Incarnation, wire::map_only_serde, AccountId, RuntimeError, RuntimeErrorCode,
+};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
+mod admission_cleanup;
+mod legacy_session_evidence;
+pub(crate) mod profile_admission;
+mod profile_reset;
+
+pub(crate) use legacy_session_evidence::{
+    LegacySessionEvidenceDocument, LegacySessionEvidenceMaterial,
+};
+
 const KEY_PREFIX: &str = "bittery:runtime:platform-storage";
 const DOCUMENT_VERSION: u32 = 1;
+const INVENTORY_KEY_BYTES: usize = 4096;
+const INVENTORY_PAGE_KEYS: usize = 128;
+const INVENTORY_CONTROL_BYTES: usize = 262_144;
+const INVENTORY_CURSOR_BYTES: usize = 96 * 1024;
 
 mod required_option {
     use serde::{Deserialize, Deserializer};
@@ -19,9 +34,54 @@ mod required_option {
     }
 }
 
+/// Some external wire structs are also used as fields in persisted documents. Their generated
+/// Serde implementations accept positional sequences, so require the actual JSON object boundary
+/// here while retaining their one typed field definition and duplicate-field checks.
+struct Object<T>(T);
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Object<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ObjectVisitor<T>(std::marker::PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for ObjectVisitor<T> {
+            type Value = Object<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a typed JSON object")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<Self::Value, A::Error> {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Object)
+            }
+        }
+
+        deserializer.deserialize_map(ObjectVisitor(std::marker::PhantomData))
+    }
+}
+
+fn deserialize_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Object::<T>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_object_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Vec::<Object<T>>::deserialize(deserializer)
+        .map(|values| values.into_iter().map(|value| value.0).collect())
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize)]
 #[serde(transparent)]
-pub(crate) struct SecretString(Zeroizing<String>);
+pub struct SecretString(Zeroizing<String>);
 
 impl SecretString {
     fn new(value: String) -> Self {
@@ -164,42 +224,272 @@ impl<'de> Deserialize<'de> for SecretBytes32 {
     derive(schemars::JsonSchema)
 )]
 #[serde(rename_all = "camelCase")]
-enum PlatformStorageArea {
+pub enum PlatformStorageArea {
     DevicePlain,
     DeviceSecret,
     SessionSecret,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "platform-storage-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum PlatformStorageInventoryFamily {
+    PlatformStorage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "platform-storage-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[cfg_attr(
+    feature = "platform-storage-contract-schema",
+    schemars(rename = "PlatformStorageInventoryContinuation")
+)]
+#[serde(remote = "Self")]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum PlatformStorageInventoryContinuation {
+    More {
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(length(min = 1, max = 98304))
+        )]
+        cursor: String,
+    },
+    // An empty struct makes Serde reject extra fields; an internally tagged unit ignores them.
+    End {},
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "platform-storage-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[cfg_attr(
+    feature = "platform-storage-contract-schema",
+    schemars(rename = "PlatformStorageKeysPage")
+)]
+#[serde(remote = "Self")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlatformStorageKeysPage {
+    #[cfg_attr(
+        feature = "platform-storage-contract-schema",
+        schemars(schema_with = "inventory_version_schema")
+    )]
+    pub version: u32,
+    pub family: PlatformStorageInventoryFamily,
+    #[cfg_attr(
+        feature = "platform-storage-contract-schema",
+        schemars(length(min = 1, max = 3))
+    )]
+    pub backing_areas: Vec<PlatformStorageArea>,
+    #[cfg_attr(
+        feature = "platform-storage-contract-schema",
+        schemars(schema_with = "inventory_keys_schema")
+    )]
+    pub keys: Vec<String>,
+    pub continuation: PlatformStorageInventoryContinuation,
+}
+
+map_only_serde!(
+    PlatformStorageInventoryContinuation,
+    PlatformStorageKeysPage
+);
+
+#[cfg(feature = "platform-storage-contract-schema")]
+fn inventory_version_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "integer", "const": 1 })
+}
+
+#[cfg(feature = "platform-storage-contract-schema")]
+fn inventory_keys_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "array", "maxItems": 128,
+        "items": { "type": "string", "minLength": 1, "maxLength": 4096 }
+    })
+}
+
+#[cfg(feature = "platform-storage-contract-schema")]
+fn inventory_cursor_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "anyOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1, "maxLength": 98304 }
+        ]
+    })
+}
+
+impl PlatformStorageKeysPage {
+    #[doc(hidden)]
+    pub const MAX_KEY_BYTES: usize = INVENTORY_KEY_BYTES;
+    #[doc(hidden)]
+    pub const MAX_PAGE_KEYS: usize = INVENTORY_PAGE_KEYS;
+    #[doc(hidden)]
+    pub const MAX_CONTROL_BYTES: usize = INVENTORY_CONTROL_BYTES;
+    #[doc(hidden)]
+    pub const MAX_CURSOR_BYTES: usize = INVENTORY_CURSOR_BYTES;
+
+    fn validate(&self) -> Result<(), RuntimeError> {
+        fn area_order(area: PlatformStorageArea) -> u8 {
+            match area {
+                PlatformStorageArea::DevicePlain => 0,
+                PlatformStorageArea::DeviceSecret => 1,
+                PlatformStorageArea::SessionSecret => 2,
+            }
+        }
+        if self.version != 1
+            || self.backing_areas.is_empty()
+            || self.backing_areas.len() > 3
+            || self
+                .backing_areas
+                .windows(2)
+                .any(|areas| area_order(areas[0]) >= area_order(areas[1]))
+        {
+            return Err(platform_storage_invariant(
+                "platform storage inventory page is invalid",
+            ));
+        }
+        if self.keys.len() > INVENTORY_PAGE_KEYS
+            || self.keys.iter().any(|key| key.len() > INVENTORY_KEY_BYTES)
+        {
+            return Err(inventory_bound());
+        }
+        if self.keys.iter().any(String::is_empty)
+            || self
+                .keys
+                .windows(2)
+                .any(|keys| keys[0].as_bytes() >= keys[1].as_bytes())
+        {
+            return Err(platform_storage_invariant(
+                "platform storage inventory keys do not advance",
+            ));
+        }
+        if let PlatformStorageInventoryContinuation::More { cursor } = &self.continuation {
+            validate_inventory_cursor(Some(cursor))?;
+            if self.keys.is_empty() {
+                return Err(platform_storage_invariant(
+                    "platform storage inventory continuation has no keys",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Trusted adapters validate key topology here; the transport also bounds serialized bytes.
+    #[doc(hidden)]
+    pub fn validate_for(
+        &self,
+        area: PlatformStorageArea,
+        prefix: &str,
+    ) -> Result<(), RuntimeError> {
+        self.validate()?;
+        if !self.backing_areas.contains(&area)
+            || self.keys.iter().any(|key| !key.starts_with(prefix))
+        {
+            return Err(platform_storage_invariant(
+                "platform storage inventory escaped its requested scope",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn validate_inventory_cursor(cursor: Option<&str>) -> Result<(), RuntimeError> {
+    if cursor.is_some_and(str::is_empty) {
+        return Err(platform_storage_invariant(
+            "platform storage inventory cursor is empty",
+        ));
+    }
+    if cursor.is_some_and(|cursor| cursor.len() > INVENTORY_CURSOR_BYTES) {
+        return Err(inventory_bound());
+    }
+    Ok(())
+}
+
+fn validate_inventory_request(prefix: &str, cursor: Option<&str>) -> Result<(), RuntimeError> {
+    if prefix.is_empty() {
+        return Err(platform_storage_invariant(
+            "platform storage inventory prefix is empty",
+        ));
+    }
+    if prefix.len() > INVENTORY_KEY_BYTES {
+        return Err(inventory_bound());
+    }
+    validate_inventory_cursor(cursor)
+}
+
+fn validate_inventory_control_bytes(bytes: usize) -> Result<(), RuntimeError> {
+    if bytes > INVENTORY_CONTROL_BYTES {
+        return Err(inventory_bound());
+    }
+    Ok(())
+}
+
+fn inventory_bound() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::SizeRejected,
+        "platform storage inventory exceeds its control bound",
+    )
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum PlatformStorageValue {
+pub(crate) enum PlatformStorageValue {
     DeviceCatalog,
+    LocalSecurity,
+    AccountLocalSecurity(AccountId),
     AccountMetadata(AccountId, Incarnation),
+    VerifiedRecipientKeys(AccountId, Incarnation),
     DeviceKey,
     AccountQuickUnlock(AccountId, Incarnation),
     CurrentSessionCredentials(AccountId, Incarnation),
+    LegacySessionEvidence(AccountId, Incarnation),
 }
 
 impl PlatformStorageValue {
-    fn area(&self) -> PlatformStorageArea {
+    fn area(&self, session_survives_restart: bool) -> PlatformStorageArea {
         match self {
-            Self::DeviceCatalog | Self::AccountMetadata(..) => PlatformStorageArea::DevicePlain,
+            Self::DeviceCatalog
+            | Self::LocalSecurity
+            | Self::AccountLocalSecurity(..)
+            | Self::VerifiedRecipientKeys(..)
+            | Self::AccountMetadata(..) => PlatformStorageArea::DevicePlain,
             Self::DeviceKey | Self::AccountQuickUnlock(..) => PlatformStorageArea::DeviceSecret,
-            Self::CurrentSessionCredentials(..) => PlatformStorageArea::SessionSecret,
+            Self::CurrentSessionCredentials(..) | Self::LegacySessionEvidence(..)
+                if session_survives_restart =>
+            {
+                PlatformStorageArea::DeviceSecret
+            }
+            Self::CurrentSessionCredentials(..) | Self::LegacySessionEvidence(..) => {
+                PlatformStorageArea::SessionSecret
+            }
         }
     }
 
     fn key(&self) -> Result<String, RuntimeError> {
         match self {
             Self::DeviceCatalog => Ok(format!("{KEY_PREFIX}:device-catalog")),
+            Self::LocalSecurity => Ok(format!("{KEY_PREFIX}:local-security")),
             Self::DeviceKey => Ok(format!("{KEY_PREFIX}:device-key")),
+            Self::AccountLocalSecurity(account_id) => {
+                Ok(format!("{}local-security", account_prefix(account_id)?))
+            }
             Self::AccountMetadata(account_id, incarnation) => {
                 account_key(account_id, incarnation, "metadata")
+            }
+            Self::VerifiedRecipientKeys(account_id, incarnation) => {
+                account_key(account_id, incarnation, "verified-recipient-keys")
             }
             Self::AccountQuickUnlock(account_id, incarnation) => {
                 account_key(account_id, incarnation, "quick-unlock")
             }
             Self::CurrentSessionCredentials(account_id, incarnation) => {
                 account_key(account_id, incarnation, "current-session")
+            }
+            Self::LegacySessionEvidence(account_id, incarnation) => {
+                account_key(account_id, incarnation, "legacy-session-evidence")
             }
         }
     }
@@ -253,42 +543,141 @@ fn require_incarnation(incarnation: &Incarnation) -> Result<(), RuntimeError> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PendingAccountInstallIntent {
     pub(crate) incarnation: Incarnation,
     #[serde(deserialize_with = "required_option::deserialize")]
     pub(crate) expected_active_incarnation: Option<Incarnation>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AccountRetirementPurpose {
+    Remove,
+    Replace,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PendingAccountRetirementIntent {
+    pub(crate) incarnation: Incarnation,
+    pub(crate) purpose: AccountRetirementPurpose,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeviceCatalogAccount {
     pub(crate) account_id: AccountId,
     #[serde(deserialize_with = "required_option::deserialize")]
     pub(crate) active_incarnation: Option<Incarnation>,
     #[serde(deserialize_with = "required_option::deserialize")]
     pub(crate) pending_install: Option<PendingAccountInstallIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pending_retirement: Option<PendingAccountRetirementIntent>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeviceCatalogDocument {
     version: u32,
     pub(crate) accounts: Vec<DeviceCatalogAccount>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "profile_admission::deserialize_present"
+    )]
+    profile_admission: Option<profile_admission::ProfileAdmissionRecord>,
 }
+
+map_only_serde!(
+    PendingAccountInstallIntent,
+    PendingAccountRetirementIntent,
+    DeviceCatalogAccount,
+    DeviceCatalogDocument,
+);
 
 impl DeviceCatalogDocument {
     pub(crate) fn new(accounts: Vec<DeviceCatalogAccount>) -> Result<Self, RuntimeError> {
         let document = Self {
             version: DOCUMENT_VERSION,
             accounts,
+            profile_admission: None,
         };
         document.validate()?;
         Ok(document)
     }
 
+    pub(crate) fn with_accounts(
+        &self,
+        accounts: Vec<DeviceCatalogAccount>,
+    ) -> Result<Self, RuntimeError> {
+        let document = Self {
+            version: self.version,
+            accounts,
+            profile_admission: self.profile_admission.clone(),
+        };
+        document.validate()?;
+        Ok(document)
+    }
+
+    pub(crate) fn admission_record(&self) -> Option<&profile_admission::ProfileAdmissionRecord> {
+        self.profile_admission.as_ref()
+    }
+
+    pub(crate) fn with_admission(
+        &self,
+        record: profile_admission::ProfileAdmissionRecord,
+        accounts: Vec<DeviceCatalogAccount>,
+    ) -> Result<Self, RuntimeError> {
+        let document = Self {
+            version: self.version,
+            accounts,
+            profile_admission: Some(record),
+        };
+        document.validate()?;
+        Ok(document)
+    }
+
+    pub(crate) fn profile_reset_wiping(&self) -> bool {
+        self.admission_record().is_some_and(|record| {
+            record.reset_phase() == Some(profile_admission::ResetPhase::Wiping)
+        })
+    }
+    pub(crate) fn profile_reset_wiped(&self) -> bool {
+        self.admission_record().is_some_and(|record| {
+            record.reset_phase() == Some(profile_admission::ResetPhase::Wiped)
+        })
+    }
+    pub(crate) fn profile_admission_pending(&self) -> bool {
+        self.profile_admission.as_ref().is_some_and(|record| {
+            matches!(
+                record.phase(),
+                Some(
+                    profile_admission::ImportPhase::Preparing
+                        | profile_admission::ImportPhase::Aborting
+                        | profile_admission::ImportPhase::Aborted
+                )
+            )
+        })
+    }
+
+    pub(crate) fn profile_admission_committed(&self) -> bool {
+        self.profile_admission
+            .as_ref()
+            .is_some_and(|record| record.phase() == Some(profile_admission::ImportPhase::Committed))
+    }
+
+    pub(crate) fn profile_admission_complete(&self) -> bool {
+        self.profile_admission
+            .as_ref()
+            .is_some_and(|record| record.is_complete())
+    }
+
     fn validate(&self) -> Result<(), RuntimeError> {
         require_version(self.version, "Device catalog")?;
+        if let Some(record) = &self.profile_admission {
+            record.validate(&self.accounts)?;
+        }
         let mut identities = HashSet::new();
         for account in &self.accounts {
             require_account_id(&account.account_id)?;
@@ -299,6 +688,16 @@ impl DeviceCatalogDocument {
             }
             if let Some(active) = &account.active_incarnation {
                 require_incarnation(active)?;
+            }
+            if let Some(retirement) = &account.pending_retirement {
+                require_incarnation(&retirement.incarnation)?;
+                if account.active_incarnation.as_ref() != Some(&retirement.incarnation)
+                    || account.pending_install.is_some()
+                {
+                    return Err(platform_storage_invariant(
+                        "pending Account retirement must bind only its active incarnation",
+                    ));
+                }
             }
             if let Some(pending) = &account.pending_install {
                 require_incarnation(&pending.incarnation)?;
@@ -323,33 +722,98 @@ impl DeviceCatalogDocument {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct VerifiedTravelModePolicy {
     pub(crate) enabled: bool,
     pub(crate) hidden_vault_ids: Vec<String>,
     pub(crate) server_enabled_at_ms: Option<u64>,
     pub(crate) server_updated_at_ms: Option<u64>,
-    pub(crate) verified_at_ms: u64,
+    #[serde(deserialize_with = "crate::wire::required_nullable")]
+    pub(crate) verified_at_ms: Option<u64>,
 }
 
 impl VerifiedTravelModePolicy {
-    fn validate(&self) -> Result<(), RuntimeError> {
-        let mut vault_ids = HashSet::new();
-        for vault_id in &self.hidden_vault_ids {
-            require_non_empty(vault_id, "verified Travel Mode hidden Vault identity")?;
-            if !vault_ids.insert(vault_id.as_str()) {
-                return Err(platform_storage_invariant(
-                    "verified Travel Mode policy contains a duplicate hidden Vault identity",
-                ));
-            }
+    pub(crate) fn validate(&self) -> Result<(), RuntimeError> {
+        validate_travel_hidden_vault_ids(&self.hidden_vault_ids)?;
+        if self.enabled != self.server_enabled_at_ms.is_some() {
+            return Err(platform_storage_invariant(
+                "verified Travel Mode activation timestamp is inconsistent",
+            ));
         }
         Ok(())
     }
 }
 
+/// The Server response, durable document and transient retirement proof share one selection bound.
+pub(crate) fn validate_travel_hidden_vault_ids(ids: &[String]) -> Result<(), RuntimeError> {
+    if ids.len() > 100 {
+        return Err(platform_storage_invariant(
+            "verified Travel Mode selection exceeds the Vault bound",
+        ));
+    }
+    let mut vault_ids = HashSet::new();
+    for vault_id in ids {
+        require_non_empty(vault_id, "verified Travel Mode hidden Vault identity")?;
+        if !vault_ids.insert(vault_id.as_str()) {
+            return Err(platform_storage_invariant(
+                "verified Travel Mode policy contains a duplicate hidden Vault identity",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Account-scoped local preference; it survives credential generation replacement.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AccountLocalSecurityDocument {
+    version: u32,
+    pub(crate) inactivity_timeout_ms: i64,
+}
+
+impl AccountLocalSecurityDocument {
+    pub(crate) fn new(inactivity_timeout_ms: i64) -> Self {
+        Self {
+            version: DOCUMENT_VERSION,
+            inactivity_timeout_ms,
+        }
+    }
+}
+
+/// Device-wide local access policy. This document contains no authentication material.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LocalSecurityDocument {
+    version: u32,
+    pub(crate) master_password_reentry_period_ms: i64,
+}
+impl LocalSecurityDocument {
+    pub(crate) fn new(period_ms: i64) -> Self {
+        Self {
+            version: DOCUMENT_VERSION,
+            master_password_reentry_period_ms: period_ms,
+        }
+    }
+}
+
+/// Retained source observations are never prompt grace or current enrollment authority.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LegacyDesktopAccountEvidence {
+    pub(crate) account_biometric_enabled: bool,
+    #[serde(deserialize_with = "required_option::deserialize")]
+    pub(crate) session_biometric_enabled: Option<bool>,
+    #[serde(deserialize_with = "required_option::deserialize")]
+    pub(crate) last_biometric_auth: Option<i64>,
+    #[serde(deserialize_with = "required_option::deserialize")]
+    pub(crate) background_timestamp: Option<i64>,
+}
+
+map_only_serde!(LegacyDesktopAccountEvidence);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AccountMetadataDocument {
     version: u32,
     pub(crate) account_id: AccountId,
@@ -363,10 +827,19 @@ pub(crate) struct AccountMetadataDocument {
     pub(crate) secret_key_hint: String,
     pub(crate) added_at_ms: u64,
     pub(crate) last_active_at_ms: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) native_only: bool,
     pub(crate) biometric_enabled: bool,
     pub(crate) insecure_transport_confirmed: bool,
+    #[serde(deserialize_with = "deserialize_object")]
     pub(crate) pinned_kdf_profile: bittery_crypto_core::KdfProfile,
     pub(crate) verified_travel_mode: Option<VerifiedTravelModePolicy>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "profile_admission::deserialize_present"
+    )]
+    pub(crate) legacy_desktop_evidence: Option<LegacyDesktopAccountEvidence>,
 }
 
 impl AccountMetadataDocument {
@@ -401,10 +874,12 @@ impl AccountMetadataDocument {
             secret_key_hint,
             added_at_ms,
             last_active_at_ms,
+            native_only: false,
             biometric_enabled,
             insecure_transport_confirmed,
             pinned_kdf_profile,
             verified_travel_mode,
+            legacy_desktop_evidence: None,
         };
         document.validate()?;
         Ok(document)
@@ -427,7 +902,7 @@ impl AccountMetadataDocument {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeviceKeyDocument {
     #[zeroize(skip)]
     version: u32,
@@ -448,7 +923,7 @@ impl DeviceKeyDocument {
 }
 
 #[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct QuickUnlockDocument {
     #[zeroize(skip)]
     version: u32,
@@ -457,6 +932,7 @@ pub(crate) struct QuickUnlockDocument {
     #[zeroize(skip)]
     pub(crate) incarnation: Incarnation,
     #[zeroize(skip)]
+    #[serde(deserialize_with = "deserialize_object")]
     pub(crate) encrypted_master_unlock_key: bittery_crypto_core::EncryptedData,
     pub(crate) secret_key: SecretString,
     #[zeroize(skip)]
@@ -527,9 +1003,40 @@ impl QuickUnlockDocument {
     }
 }
 
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(crate) enum SessionProvenance {
+    #[default]
+    Independent,
+    Borrowed {
+        grant_id: String,
+    },
+}
+
+/// Test-only lifetime evidence carries no credentials and never changes document equality.
+#[cfg(test)]
+#[derive(Clone, Default)]
+struct SessionLifetimeWitness {
+    _lease: Option<Arc<()>>,
+}
+#[cfg(test)]
+impl PartialEq for SessionLifetimeWitness {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(remote = "Self", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CurrentSessionDocument {
+    #[cfg(test)]
+    #[serde(skip)]
+    #[zeroize(skip)]
+    lifetime_witness: SessionLifetimeWitness,
+    /// Runtime-only authority. Deserialization never grants borrowed authority, and persistence
+    /// rejects it before serialization can erase this marker.
+    #[serde(skip)]
+    #[zeroize(skip)]
+    pub(crate) provenance: SessionProvenance,
     #[zeroize(skip)]
     version: u32,
     #[zeroize(skip)]
@@ -544,10 +1051,21 @@ pub(crate) struct CurrentSessionDocument {
     #[zeroize(skip)]
     pub(crate) server_expires_at_ms: Option<u64>,
     #[zeroize(skip)]
+    #[serde(deserialize_with = "deserialize_object_vec")]
     pub(crate) vault_keys: Vec<crate::server_contract::AuthVaultKeyResponse>,
     #[zeroize(skip)]
     pub(crate) encrypted_private_key: String,
 }
+
+map_only_serde!(
+    VerifiedTravelModePolicy,
+    AccountLocalSecurityDocument,
+    LocalSecurityDocument,
+    AccountMetadataDocument,
+    DeviceKeyDocument,
+    QuickUnlockDocument,
+    CurrentSessionDocument,
+);
 
 impl CurrentSessionDocument {
     #[allow(clippy::too_many_arguments)]
@@ -562,10 +1080,13 @@ impl CurrentSessionDocument {
         encrypted_private_key: String,
     ) -> Result<Self, RuntimeError> {
         let document = Self {
+            #[cfg(test)]
+            lifetime_witness: SessionLifetimeWitness::default(),
             version: DOCUMENT_VERSION,
             account_id,
             incarnation,
             token: SecretString::new(token),
+            provenance: SessionProvenance::Independent,
             session_id,
             expires_at_ms,
             server_expires_at_ms,
@@ -646,7 +1167,24 @@ where
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-enum PlatformStorageRequest {
+pub enum PlatformStorageRequest {
+    ListKeys {
+        #[zeroize(skip)]
+        area: PlatformStorageArea,
+        #[zeroize(skip)]
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(length(min = 1, max = 4096))
+        )]
+        prefix: String,
+        #[zeroize(skip)]
+        #[serde(deserialize_with = "required_option::deserialize")]
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(schema_with = "inventory_cursor_schema")
+        )]
+        cursor: Option<String>,
+    },
     Get {
         #[zeroize(skip)]
         area: PlatformStorageArea,
@@ -670,6 +1208,17 @@ enum PlatformStorageRequest {
         #[zeroize(skip)]
         key: String,
     },
+    DeleteIfUnchanged {
+        #[zeroize(skip)]
+        area: PlatformStorageArea,
+        #[zeroize(skip)]
+        key: String,
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(with = "String")
+        )]
+        expected_value: SecretString,
+    },
     DeletePrefix {
         #[zeroize(skip)]
         area: PlatformStorageArea,
@@ -679,6 +1228,13 @@ enum PlatformStorageRequest {
             schemars(length(min = 1))
         )]
         prefix: String,
+        #[zeroize(skip)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(
+            feature = "platform-storage-contract-schema",
+            schemars(with = "String", length(min = 1))
+        )]
+        preserve_key: Option<String>,
     },
 }
 
@@ -704,8 +1260,11 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
                 let mut area = None;
                 let mut key = None;
                 let mut prefix = None;
+                let mut preserve_key: Option<String> = None;
+                let mut cursor: Option<Option<String>> = None;
                 let mut value = None;
                 let mut value_present = false;
+                let mut expected_value = None;
                 let mut unknown_field = None;
 
                 while let Some(field) = map.next_key::<String>()? {
@@ -714,12 +1273,19 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
                         "area" => read_buffered_field(&mut map, &mut area, "area")?,
                         "key" => read_buffered_field(&mut map, &mut key, "key")?,
                         "prefix" => read_buffered_field(&mut map, &mut prefix, "prefix")?,
+                        "preserveKey" => {
+                            read_typed_field(&mut map, &mut preserve_key, "preserveKey")?
+                        }
+                        "cursor" => read_typed_field(&mut map, &mut cursor, "cursor")?,
                         "value" => {
                             if value_present {
                                 return Err(serde::de::Error::duplicate_field("value"));
                             }
                             value_present = true;
                             value = Some(map.next_value::<SecretString>()?);
+                        }
+                        "expectedValue" => {
+                            read_typed_field(&mut map, &mut expected_value, "expectedValue")?
                         }
                         _ => {
                             map.next_value::<serde::de::IgnoredAny>()?;
@@ -736,45 +1302,103 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
 
                 let request_type: String = decode_buffered_field(request_type, "type")?;
                 let area = decode_buffered_field(area, "area")?;
+                if expected_value.is_some() && request_type != "deleteIfUnchanged" {
+                    return Err(serde::de::Error::custom(
+                        "unexpected guarded deletion value in platform-storage request",
+                    ));
+                }
                 match request_type.as_str() {
-                    "get" if !value_present && prefix.is_none() => {
+                    "listKeys" if !value_present && key.is_none() && preserve_key.is_none() => {
+                        let prefix: String = decode_buffered_field(prefix, "prefix")?;
+                        let cursor =
+                            cursor.ok_or_else(|| serde::de::Error::missing_field("cursor"))?;
+                        validate_inventory_request(&prefix, cursor.as_deref()).map_err(|_| {
+                            serde::de::Error::custom("invalid platform-storage inventory control")
+                        })?;
+                        Ok(PlatformStorageRequest::ListKeys {
+                            area,
+                            prefix,
+                            cursor,
+                        })
+                    }
+                    "get"
+                        if !value_present
+                            && prefix.is_none()
+                            && cursor.is_none()
+                            && preserve_key.is_none() =>
+                    {
                         Ok(PlatformStorageRequest::Get {
                             area,
                             key: decode_buffered_field(key, "key")?,
                         })
                     }
-                    "set" if prefix.is_none() => Ok(PlatformStorageRequest::Set {
-                        area,
-                        key: decode_buffered_field(key, "key")?,
-                        value: value.ok_or_else(|| serde::de::Error::missing_field("value"))?,
-                    }),
-                    "delete" if !value_present && prefix.is_none() => {
+                    "set" if prefix.is_none() && cursor.is_none() && preserve_key.is_none() => {
+                        Ok(PlatformStorageRequest::Set {
+                            area,
+                            key: decode_buffered_field(key, "key")?,
+                            value: value.ok_or_else(|| serde::de::Error::missing_field("value"))?,
+                        })
+                    }
+                    "delete"
+                        if !value_present
+                            && prefix.is_none()
+                            && cursor.is_none()
+                            && preserve_key.is_none() =>
+                    {
                         Ok(PlatformStorageRequest::Delete {
                             area,
                             key: decode_buffered_field(key, "key")?,
                         })
                     }
-                    "deletePrefix" if !value_present && key.is_none() => {
+                    "deleteIfUnchanged"
+                        if !value_present
+                            && prefix.is_none()
+                            && cursor.is_none()
+                            && preserve_key.is_none() =>
+                    {
+                        Ok(PlatformStorageRequest::DeleteIfUnchanged {
+                            area,
+                            key: decode_buffered_field(key, "key")?,
+                            expected_value: expected_value
+                                .ok_or_else(|| serde::de::Error::missing_field("expectedValue"))?,
+                        })
+                    }
+                    "deletePrefix" if !value_present && key.is_none() && cursor.is_none() => {
                         let prefix: String = decode_buffered_field(prefix, "prefix")?;
-                        if prefix.is_empty() {
+                        if prefix.is_empty() || preserve_key.as_ref().is_some_and(String::is_empty)
+                        {
                             return Err(serde::de::Error::custom(
-                                "platform-storage deletion prefix is empty",
+                                "platform-storage deletion prefix or preservation key is empty",
                             ));
                         }
-                        Ok(PlatformStorageRequest::DeletePrefix { area, prefix })
+                        Ok(PlatformStorageRequest::DeletePrefix {
+                            area,
+                            prefix,
+                            preserve_key,
+                        })
                     }
-                    "get" | "delete" => Err(serde::de::Error::custom(format!(
-                        "invalid fields in platform-storage {request_type} request"
-                    ))),
+                    "get" | "delete" | "deleteIfUnchanged" => Err(serde::de::Error::custom(
+                        format!("invalid fields in platform-storage {request_type} request"),
+                    )),
                     "deletePrefix" => Err(serde::de::Error::custom(
                         "invalid fields in platform-storage deletePrefix request",
                     )),
                     "set" => Err(serde::de::Error::custom(
                         "invalid fields in platform-storage set request",
                     )),
+                    "listKeys" => Err(serde::de::Error::custom(
+                        "invalid fields in platform-storage listKeys request",
+                    )),
                     _ => Err(serde::de::Error::unknown_variant(
                         &request_type,
-                        &["get", "set", "delete", "deletePrefix"],
+                        &[
+                            "get",
+                            "set",
+                            "delete",
+                            "deleteIfUnchanged",
+                            "deletePrefix",
+                            "listKeys",
+                        ],
                     )),
                 }
             }
@@ -782,6 +1406,18 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
 
         deserializer.deserialize_map(RequestVisitor)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "platform-storage-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(rename_all = "camelCase")]
+pub enum PlatformStorageDeleteResult {
+    Deleted,
+    AlreadyAbsent,
+    Conflict,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Zeroize, ZeroizeOnDrop)]
@@ -795,7 +1431,9 @@ impl<'de> Deserialize<'de> for PlatformStorageRequest {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-enum PlatformStorageResponse {
+pub enum PlatformStorageResponse {
+    #[zeroize(skip)]
+    KeysPage(PlatformStorageKeysPage),
     Value {
         #[serde(deserialize_with = "required_option::deserialize")]
         #[cfg_attr(
@@ -803,6 +1441,10 @@ enum PlatformStorageResponse {
             schemars(with = "Option<String>")
         )]
         value: Option<SecretString>,
+    },
+    DeleteResult {
+        #[zeroize(skip)]
+        result: PlatformStorageDeleteResult,
     },
     #[zeroize(skip)]
     Done,
@@ -829,11 +1471,27 @@ impl<'de> Deserialize<'de> for PlatformStorageResponse {
                 let mut response_type = None;
                 let mut value = None;
                 let mut value_present = false;
+                let mut version = None;
+                let mut family = None;
+                let mut backing_areas = None;
+                let mut keys = None;
+                let mut continuation = None;
+                let mut result = None;
                 let mut unknown_field = None;
 
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_str() {
                         "type" => read_buffered_field(&mut map, &mut response_type, "type")?,
+                        "version" => read_typed_field(&mut map, &mut version, "version")?,
+                        "family" => read_typed_field(&mut map, &mut family, "family")?,
+                        "backingAreas" => {
+                            read_typed_field(&mut map, &mut backing_areas, "backingAreas")?
+                        }
+                        "keys" => read_typed_field(&mut map, &mut keys, "keys")?,
+                        "continuation" => {
+                            read_typed_field(&mut map, &mut continuation, "continuation")?
+                        }
+                        "result" => read_typed_field(&mut map, &mut result, "result")?,
                         "value" => {
                             if value_present {
                                 return Err(serde::de::Error::duplicate_field("value"));
@@ -855,17 +1513,64 @@ impl<'de> Deserialize<'de> for PlatformStorageResponse {
                 }
 
                 let response_type: String = decode_buffered_field(response_type, "type")?;
+                if result.is_some() && response_type != "deleteResult" {
+                    return Err(serde::de::Error::custom(
+                        "unexpected deletion result in platform-storage response",
+                    ));
+                }
+                let inventory_fields_present = version.is_some()
+                    || family.is_some()
+                    || backing_areas.is_some()
+                    || keys.is_some()
+                    || continuation.is_some();
                 match response_type.as_str() {
-                    "value" => Ok(PlatformStorageResponse::Value {
+                    "keysPage" if !value_present => {
+                        let page = PlatformStorageKeysPage {
+                            version: version
+                                .ok_or_else(|| serde::de::Error::missing_field("version"))?,
+                            family: family
+                                .ok_or_else(|| serde::de::Error::missing_field("family"))?,
+                            backing_areas: backing_areas
+                                .ok_or_else(|| serde::de::Error::missing_field("backingAreas"))?,
+                            keys: keys.ok_or_else(|| serde::de::Error::missing_field("keys"))?,
+                            continuation: continuation
+                                .ok_or_else(|| serde::de::Error::missing_field("continuation"))?,
+                        };
+                        page.validate().map_err(|_| {
+                            serde::de::Error::custom("invalid platform-storage inventory page")
+                        })?;
+                        Ok(PlatformStorageResponse::KeysPage(page))
+                    }
+                    "value" if !inventory_fields_present => Ok(PlatformStorageResponse::Value {
                         value: value.ok_or_else(|| serde::de::Error::missing_field("value"))?,
                     }),
-                    "done" if !value_present => Ok(PlatformStorageResponse::Done),
-                    "done" => Err(serde::de::Error::custom(
+                    "done" if !value_present && !inventory_fields_present => {
+                        Ok(PlatformStorageResponse::Done)
+                    }
+                    "deleteResult" if !value_present && !inventory_fields_present => {
+                        Ok(PlatformStorageResponse::DeleteResult {
+                            result: result
+                                .ok_or_else(|| serde::de::Error::missing_field("result"))?,
+                        })
+                    }
+                    "done" if value_present => Err(serde::de::Error::custom(
                         "unknown field `value` in platform-storage done response",
+                    )),
+                    "done" => Err(serde::de::Error::custom(
+                        "invalid fields in platform-storage done response",
+                    )),
+                    "value" => Err(serde::de::Error::custom(
+                        "invalid fields in platform-storage value response",
+                    )),
+                    "keysPage" => Err(serde::de::Error::custom(
+                        "invalid fields in platform-storage keysPage response",
+                    )),
+                    "deleteResult" => Err(serde::de::Error::custom(
+                        "invalid fields in platform-storage deleteResult response",
                     )),
                     _ => Err(serde::de::Error::unknown_variant(
                         &response_type,
-                        &["value", "done"],
+                        &["value", "done", "keysPage", "deleteResult"],
                     )),
                 }
             }
@@ -873,6 +1578,23 @@ impl<'de> Deserialize<'de> for PlatformStorageResponse {
 
         deserializer.deserialize_map(ResponseVisitor)
     }
+}
+
+// Read nested controls directly so duplicate fields reach their typed serde visitors intact.
+fn read_typed_field<'de, A, T>(
+    map: &mut A,
+    slot: &mut Option<T>,
+    field: &'static str,
+) -> Result<(), A::Error>
+where
+    A: serde::de::MapAccess<'de>,
+    T: Deserialize<'de>,
+{
+    if slot.is_some() {
+        return Err(serde::de::Error::duplicate_field(field));
+    }
+    *slot = Some(map.next_value()?);
+    Ok(())
 }
 
 fn read_buffered_field<'de, A>(
@@ -940,8 +1662,20 @@ pub trait SerializedPlatformStorageExecutor {
 }
 
 /// Rust-owned document policy over one serialized primitive host seam.
+#[derive(Clone)]
 pub(crate) struct PlatformStorage {
     executor: Arc<dyn SerializedPlatformStorageExecutor>,
+    session_survives_restart: bool,
+    #[cfg(test)]
+    session_lifetime_witness: Arc<std::sync::Mutex<Option<SessionLifetimeRegistration>>>,
+}
+
+#[cfg(test)]
+struct SessionLifetimeRegistration {
+    account_id: AccountId,
+    incarnation: Incarnation,
+    vault_id: String,
+    lifetime: std::sync::Weak<()>,
 }
 
 struct UnavailablePlatformStorageExecutor;
@@ -960,12 +1694,117 @@ impl SerializedPlatformStorageExecutor for UnavailablePlatformStorageExecutor {
 }
 
 impl PlatformStorage {
+    pub(crate) fn physical_location(
+        &self,
+        value: &PlatformStorageValue,
+    ) -> Result<(PlatformStorageArea, String), RuntimeError> {
+        Ok((value.area(self.session_survives_restart), value.key()?))
+    }
+
     pub(crate) fn new(executor: Arc<dyn SerializedPlatformStorageExecutor>) -> Self {
-        Self { executor }
+        Self {
+            executor,
+            #[cfg(test)]
+            session_lifetime_witness: Arc::default(),
+            session_survives_restart: false,
+        }
+    }
+
+    pub(crate) fn for_platform(
+        executor: Arc<dyn SerializedPlatformStorageExecutor>,
+        platform: crate::ClientPlatform,
+    ) -> Self {
+        // This is the existing storage tier lifetime rule. The primitive host never
+        // reinterprets SessionSecret, and native restart retains no new login credential.
+        Self {
+            executor,
+            #[cfg(test)]
+            session_lifetime_witness: Arc::default(),
+            session_survives_restart: matches!(
+                platform,
+                crate::ClientPlatform::Desktop | crate::ClientPlatform::Mobile
+            ),
+        }
     }
 
     pub(crate) fn unavailable() -> Self {
         Self::new(Arc::new(UnavailablePlatformStorageExecutor))
+    }
+
+    /// Keys-only evidence for one admission pass. The caller owns cross-page and area-partition
+    /// checks; ordinary document selectors and their prescribed storage areas stay unchanged.
+    pub(crate) async fn list_keys(
+        &self,
+        area: PlatformStorageArea,
+        cursor: Option<String>,
+    ) -> Result<PlatformStorageKeysPage, RuntimeError> {
+        let prefix = runtime_namespace_prefix();
+        let response = self
+            .invoke(PlatformStorageRequest::ListKeys {
+                area,
+                prefix: prefix.clone(),
+                cursor,
+            })
+            .await?;
+        let PlatformStorageResponse::KeysPage(page) = &response else {
+            return Err(platform_storage_invariant(
+                "platform storage returned a non-inventory response for ListKeys",
+            ));
+        };
+        page.validate_for(area, &prefix)?;
+        Ok(page.clone())
+    }
+
+    pub(crate) async fn load_inactivity_timeout(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<i64, RuntimeError> {
+        self.load_account_local_security(account_id)
+            .await
+            .map(|document| document.map_or(600_000, |value| value.inactivity_timeout_ms))
+    }
+
+    pub(crate) async fn load_account_local_security(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<AccountLocalSecurityDocument>, RuntimeError> {
+        self.load_document(
+            PlatformStorageValue::AccountLocalSecurity(account_id.clone()),
+            |value: &AccountLocalSecurityDocument| {
+                require_version(value.version, "Account local security")
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn store_inactivity_timeout(
+        &self,
+        account_id: &AccountId,
+        timeout_ms: i64,
+    ) -> Result<(), RuntimeError> {
+        self.store_document(
+            PlatformStorageValue::AccountLocalSecurity(account_id.clone()),
+            &AccountLocalSecurityDocument::new(timeout_ms),
+        )
+        .await
+    }
+
+    pub(crate) async fn load_local_security(
+        &self,
+    ) -> Result<Option<LocalSecurityDocument>, RuntimeError> {
+        self.load_document(
+            PlatformStorageValue::LocalSecurity,
+            |value: &LocalSecurityDocument| require_version(value.version, "Local security"),
+        )
+        .await
+    }
+
+    pub(crate) async fn store_local_security(&self, period_ms: i64) -> Result<(), RuntimeError> {
+        self.store_document(
+            PlatformStorageValue::LocalSecurity,
+            &LocalSecurityDocument::new(period_ms),
+        )
+        .await
     }
 
     pub(crate) async fn load_device_catalog(
@@ -1005,6 +1844,7 @@ impl PlatformStorage {
             self.expect_done(PlatformStorageRequest::DeletePrefix {
                 area,
                 prefix: prefix.clone(),
+                preserve_key: None,
             })
             .await?;
         }
@@ -1022,6 +1862,7 @@ impl PlatformStorage {
             self.expect_done(PlatformStorageRequest::DeletePrefix {
                 area,
                 prefix: prefix.clone(),
+                preserve_key: None,
             })
             .await?;
         }
@@ -1048,6 +1889,60 @@ impl PlatformStorage {
                     "Account metadata",
                 )
             },
+        )
+        .await
+    }
+
+    pub(crate) async fn load_verified_recipient_keys(
+        &self,
+        metadata: &AccountMetadataDocument,
+    ) -> Result<crate::recipient_keys::VerifiedRecipientKeys, RuntimeError> {
+        let document = self
+            .load_document(
+                PlatformStorageValue::VerifiedRecipientKeys(
+                    metadata.account_id.clone(),
+                    metadata.incarnation.clone(),
+                ),
+                |value: &crate::recipient_keys::VerifiedRecipientKeys| {
+                    value.validate(
+                        &metadata.account_id,
+                        &metadata.incarnation,
+                        &metadata.normalized_server_url,
+                        &metadata.user_id,
+                    )
+                },
+            )
+            .await
+            .map_err(|error| {
+                if error.code == RuntimeErrorCode::InvariantViolation {
+                    RuntimeError::new(
+                        RuntimeErrorCode::StorageUnavailable,
+                        "Recipient verification storage is invalid",
+                    )
+                } else {
+                    error
+                }
+            })?;
+        Ok(document.unwrap_or_else(|| {
+            crate::recipient_keys::VerifiedRecipientKeys::new(
+                metadata.account_id.clone(),
+                metadata.incarnation.clone(),
+                metadata.normalized_server_url.clone(),
+                metadata.user_id.clone(),
+            )
+        }))
+    }
+
+    pub(crate) async fn store_verified_recipient_keys(
+        &self,
+        document: &crate::recipient_keys::VerifiedRecipientKeys,
+    ) -> Result<(), RuntimeError> {
+        self.store_document(
+            PlatformStorageValue::VerifiedRecipientKeys(
+                document.account_id.clone(),
+                document.incarnation.clone(),
+            ),
+            document,
         )
         .await
     }
@@ -1218,28 +2113,69 @@ impl PlatformStorage {
         require_incarnation(incarnation)?;
         let expected = account_id.clone();
         let expected_incarnation = incarnation.clone();
-        self.load_document(
-            PlatformStorageValue::CurrentSessionCredentials(
-                account_id.clone(),
-                incarnation.clone(),
-            ),
-            move |value: &CurrentSessionDocument| {
-                value.validate()?;
-                require_matching_account(&expected, &value.account_id, "Current Session")?;
-                require_matching_incarnation(
-                    &expected_incarnation,
-                    &value.incarnation,
-                    "Current Session",
-                )
-            },
-        )
-        .await
+        let document = self
+            .load_document(
+                PlatformStorageValue::CurrentSessionCredentials(
+                    account_id.clone(),
+                    incarnation.clone(),
+                ),
+                move |value: &CurrentSessionDocument| {
+                    value.validate()?;
+                    require_matching_account(&expected, &value.account_id, "Current Session")?;
+                    require_matching_incarnation(
+                        &expected_incarnation,
+                        &value.incarnation,
+                        "Current Session",
+                    )
+                },
+            )
+            .await?;
+        #[cfg(test)]
+        let document = {
+            let mut document = document;
+            let registration = self.session_lifetime_witness.lock().unwrap();
+            if let (Some(document), Some(registration)) = (&mut document, registration.as_ref()) {
+                if document.account_id == registration.account_id
+                    && document.incarnation == registration.incarnation
+                    && document
+                        .vault_keys
+                        .iter()
+                        .any(|key| key.vault_id == registration.vault_id)
+                {
+                    document.lifetime_witness._lease = registration.lifetime.upgrade();
+                }
+            }
+            document
+        };
+        Ok(document)
+    }
+
+    /// Observe decoded Session snapshots for one fixture cohort, without a global registry.
+    #[cfg(test)]
+    pub(crate) fn observe_session_lifetime_for_test(
+        &self,
+        account_id: AccountId,
+        incarnation: Incarnation,
+        vault_id: String,
+        lifetime: &Arc<()>,
+    ) {
+        *self.session_lifetime_witness.lock().unwrap() = Some(SessionLifetimeRegistration {
+            account_id,
+            incarnation,
+            vault_id,
+            lifetime: Arc::downgrade(lifetime),
+        });
     }
 
     pub(crate) async fn store_current_session(
         &self,
         document: &CurrentSessionDocument,
     ) -> Result<(), RuntimeError> {
+        if document.provenance != SessionProvenance::Independent {
+            return Err(platform_storage_invariant(
+                "Borrowed Session authority cannot enter platform storage",
+            ));
+        }
         document.validate()?;
         self.store_document(
             PlatformStorageValue::CurrentSessionCredentials(
@@ -1263,6 +2199,59 @@ impl PlatformStorage {
         .await
     }
 
+    pub(crate) async fn load_legacy_session_evidence(
+        &self,
+        account_id: &AccountId,
+        incarnation: &Incarnation,
+    ) -> Result<Option<LegacySessionEvidenceDocument>, RuntimeError> {
+        require_account_id(account_id)?;
+        require_incarnation(incarnation)?;
+        let expected = account_id.clone();
+        let expected_incarnation = incarnation.clone();
+        self.load_document(
+            PlatformStorageValue::LegacySessionEvidence(account_id.clone(), incarnation.clone()),
+            move |value: &LegacySessionEvidenceDocument| {
+                value.validate()?;
+                require_matching_account(&expected, &value.account_id, "Legacy Session evidence")?;
+                require_matching_incarnation(
+                    &expected_incarnation,
+                    &value.incarnation,
+                    "Legacy Session evidence",
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn store_legacy_session_evidence(
+        &self,
+        document: &LegacySessionEvidenceDocument,
+    ) -> Result<(), RuntimeError> {
+        document.validate()?;
+        self.store_document(
+            PlatformStorageValue::LegacySessionEvidence(
+                document.account_id.clone(),
+                document.incarnation.clone(),
+            ),
+            document,
+        )
+        .await
+    }
+
+    pub(crate) async fn remove_legacy_session_evidence(
+        &self,
+        account_id: &AccountId,
+        incarnation: &Incarnation,
+    ) -> Result<(), RuntimeError> {
+        require_account_id(account_id)?;
+        require_incarnation(incarnation)?;
+        self.delete(PlatformStorageValue::LegacySessionEvidence(
+            account_id.clone(),
+            incarnation.clone(),
+        ))
+        .await
+    }
+
     async fn load_document<T>(
         &self,
         target: PlatformStorageValue,
@@ -1274,7 +2263,7 @@ impl PlatformStorage {
         let Some(serialized) = self.get(target).await? else {
             return Ok(None);
         };
-        let document: T = serde_json::from_str(&serialized)
+        let Object(document): Object<T> = serde_json::from_str(&serialized)
             .map_err(|_| platform_storage_invariant("platform storage document is invalid"))?;
         validate(&document)?;
         Ok(Some(document))
@@ -1293,7 +2282,7 @@ impl PlatformStorage {
         let Some(serialized) = self.get(target).await? else {
             return Ok(None);
         };
-        let document: T =
+        let Object(document): Object<T> =
             serde_json::from_str(&serialized).map_err(|_| unavailable_quick_unlock_material())?;
         validate(&document).map_err(|_| unavailable_quick_unlock_material())?;
         Ok(Some(document))
@@ -1307,7 +2296,7 @@ impl PlatformStorage {
     where
         T: Serialize,
     {
-        let area = target.area();
+        let area = target.area(self.session_survives_restart);
         let key = target.key()?;
         let serialized = serialize_sensitive_json(
             document,
@@ -1327,7 +2316,7 @@ impl PlatformStorage {
     ) -> Result<Option<Zeroizing<String>>, RuntimeError> {
         let mut response = self
             .invoke(PlatformStorageRequest::Get {
-                area: target.area(),
+                area: target.area(self.session_survives_restart),
                 key: target.key()?,
             })
             .await?;
@@ -1338,12 +2327,18 @@ impl PlatformStorage {
             PlatformStorageResponse::Done => Err(platform_storage_invariant(
                 "platform storage returned Done for Get",
             )),
+            PlatformStorageResponse::KeysPage(_) => Err(platform_storage_invariant(
+                "platform storage returned KeysPage for Get",
+            )),
+            PlatformStorageResponse::DeleteResult { .. } => Err(platform_storage_invariant(
+                "platform storage returned DeleteResult for Get",
+            )),
         }
     }
 
     async fn delete(&self, target: PlatformStorageValue) -> Result<(), RuntimeError> {
         self.expect_done(PlatformStorageRequest::Delete {
-            area: target.area(),
+            area: target.area(self.session_survives_restart),
             key: target.key()?,
         })
         .await
@@ -1355,6 +2350,12 @@ impl PlatformStorage {
             PlatformStorageResponse::Value { .. } => Err(platform_storage_invariant(
                 "platform storage returned Value for a write",
             )),
+            PlatformStorageResponse::KeysPage(_) => Err(platform_storage_invariant(
+                "platform storage returned KeysPage for a write",
+            )),
+            PlatformStorageResponse::DeleteResult { .. } => Err(platform_storage_invariant(
+                "platform storage returned DeleteResult for an unconditional write",
+            )),
         }
     }
 
@@ -1362,11 +2363,24 @@ impl PlatformStorage {
         &self,
         request: PlatformStorageRequest,
     ) -> Result<PlatformStorageResponse, RuntimeError> {
+        let inventory_request =
+            if let PlatformStorageRequest::ListKeys { prefix, cursor, .. } = &request {
+                validate_inventory_request(prefix, cursor.as_deref())?;
+                true
+            } else {
+                false
+            };
         let request_json = Zeroizing::new(serialize_sensitive_json(
             &request,
             "platform storage request could not be serialized",
         )?);
+        if inventory_request {
+            validate_inventory_control_bytes(request_json.len())?;
+        }
         let response_json = self.executor.invoke(request_json).await?;
+        if inventory_request {
+            validate_inventory_control_bytes(response_json.len())?;
+        }
         serde_json::from_str(&response_json).map_err(|_| {
             platform_storage_invariant("platform storage returned an invalid response")
         })
@@ -1517,9 +2531,34 @@ mod tests {
         ) -> Result<Zeroizing<String>, RuntimeError> {
             let request: PlatformStorageRequest = serde_json::from_str(&request_json)
                 .map_err(|_| platform_storage_invariant("test request was invalid"))?;
-            let PlatformStorageRequest::DeletePrefix { area, prefix } = &request else {
+            if let PlatformStorageRequest::Get { area, key } = &request {
+                let value = self
+                    .values
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|(stored_area, stored_key, _)| stored_area == area && stored_key == key)
+                    .map(|(_, _, value)| SecretString::from(value.clone()));
+                return Ok(Zeroizing::new(
+                    serde_json::to_string(&PlatformStorageResponse::Value { value }).unwrap(),
+                ));
+            }
+            if let PlatformStorageRequest::Set { area, key, value } = &request {
+                let mut values = self.values.lock().unwrap();
+                values.retain(|(stored_area, stored_key, _)| {
+                    stored_area != area || stored_key != key
+                });
+                values.push((*area, key.clone(), value.to_string()));
+                return Ok(Zeroizing::new(r#"{"type":"done"}"#.into()));
+            }
+            let PlatformStorageRequest::DeletePrefix {
+                area,
+                prefix,
+                preserve_key,
+            } = &request
+            else {
                 return Err(platform_storage_invariant(
-                    "test executor accepts only prefix deletion",
+                    "test executor accepts get, set and prefix deletion",
                 ));
             };
             let mut fail_once = self.fail_once_in.lock().expect("failure lock poisoned");
@@ -1534,7 +2573,9 @@ mod tests {
                 .lock()
                 .expect("values lock poisoned")
                 .retain(|(candidate_area, key, _)| {
-                    *candidate_area != *area || !key.starts_with(prefix)
+                    *candidate_area != *area
+                        || !key.starts_with(prefix)
+                        || Some(key.as_str()) == preserve_key.as_deref()
                 });
             Ok(Zeroizing::new(r#"{"type":"done"}"#.into()))
         }
@@ -1542,6 +2583,105 @@ mod tests {
 
     fn account(value: &str) -> AccountId {
         AccountId::from(value)
+    }
+
+    #[tokio::test]
+    async fn verified_recipient_keys_survive_reopen_but_not_removal_or_wipe() {
+        let executor = Arc::new(PrefixStorageExecutor::new(vec![]));
+        let storage = PlatformStorage::new(executor.clone());
+        let identity = metadata("recipient-test", "first");
+        let (real, _) = crate::recipient_keys::tests::identities();
+        let mut trust = storage
+            .load_verified_recipient_keys(&identity)
+            .await
+            .unwrap();
+        trust
+            .verify(
+                "recipient",
+                &real.public_key,
+                &bittery_crypto_core::rsa::rsa_public_key_fingerprint(&real.public_key).unwrap(),
+            )
+            .unwrap();
+        storage.store_verified_recipient_keys(&trust).await.unwrap();
+        drop(storage);
+        let reopened = PlatformStorage::new(executor.clone());
+        assert_eq!(
+            reopened
+                .load_verified_recipient_keys(&identity)
+                .await
+                .unwrap()
+                .approved_key("recipient", real.public_key.clone())
+                .unwrap(),
+            real.public_key
+        );
+        for isolated in [
+            metadata("other", "first"),
+            metadata("recipient-test", "second"),
+        ] {
+            assert_eq!(
+                reopened
+                    .load_verified_recipient_keys(&isolated)
+                    .await
+                    .unwrap()
+                    .approved_key("recipient", real.public_key.clone())
+                    .unwrap_err()
+                    .code,
+                RuntimeErrorCode::RecipientKeyUnverified
+            );
+        }
+        let mut other_user = identity.clone();
+        other_user.user_id = "other-user".into();
+        assert_eq!(
+            reopened
+                .load_verified_recipient_keys(&other_user)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            RuntimeErrorCode::StorageUnavailable
+        );
+        let mut other_server = identity.clone();
+        other_server.normalized_server_url = "https://other.example.com".into();
+        assert_eq!(
+            reopened
+                .load_verified_recipient_keys(&other_server)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            RuntimeErrorCode::StorageUnavailable
+        );
+        reopened
+            .delete_account_namespace(&identity.account_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened
+                .load_verified_recipient_keys(&identity)
+                .await
+                .unwrap()
+                .approved_key("recipient", real.public_key.clone())
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::RecipientKeyUnverified
+        );
+        assert!(executor.keys().is_empty());
+        reopened
+            .store_verified_recipient_keys(&trust)
+            .await
+            .unwrap();
+        reopened.wipe_runtime_namespace().await.unwrap();
+        assert!(executor.keys().is_empty());
+        assert_eq!(
+            reopened
+                .load_verified_recipient_keys(&identity)
+                .await
+                .unwrap()
+                .approved_key("recipient", real.public_key.clone())
+                .unwrap_err()
+                .code,
+            RuntimeErrorCode::RecipientKeyUnverified
+        );
     }
 
     fn incarnation(value: &str) -> Incarnation {
@@ -1616,6 +2756,285 @@ mod tests {
         .expect("canonical Current Session must be valid")
     }
 
+    fn legacy_session_evidence_document() -> LegacySessionEvidenceDocument {
+        LegacySessionEvidenceDocument::new(
+            account("account"),
+            incarnation("generation"),
+            "a".repeat(64),
+            LegacySessionEvidenceMaterial {
+                source_session_instance: None,
+                created_at_ms: 1_700_000_000_000,
+                expires_at: Some(1_209_600_000),
+                server_expires_at: None,
+                session_id: Some(String::new()),
+                token: Some("retained-token".into()),
+                vault_keys: None,
+                encrypted_private_key: None,
+            },
+        )
+        .expect("canonical legacy Session evidence must be valid")
+    }
+
+    fn positional(value: &serde_json::Value, fields: &[&str]) -> serde_json::Value {
+        let object = value.as_object().expect("test value must be an object");
+        serde_json::Value::Array(
+            fields
+                .iter()
+                .map(|field| object.get(*field).expect("test field must exist").clone())
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn persisted_documents_require_objects_at_every_struct_boundary() {
+        let device_key = serde_json::to_value(DeviceKeyDocument::new([7; 32])).unwrap();
+        let positional_device_key = positional(&device_key, &["version", "keyBytes"]);
+        assert!(serde_json::from_value::<DeviceKeyDocument>(positional_device_key).is_err());
+
+        let catalog = serde_json::to_value(
+            DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
+                account_id: account("account"),
+                active_incarnation: None,
+                pending_install: Some(PendingAccountInstallIntent {
+                    incarnation: incarnation("generation"),
+                    expected_active_incarnation: None,
+                }),
+                pending_retirement: None,
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+        let mut positional_catalog_account = catalog.clone();
+        positional_catalog_account["accounts"][0] = positional(
+            &catalog["accounts"][0],
+            &["accountId", "activeIncarnation", "pendingInstall"],
+        );
+        assert!(
+            serde_json::from_value::<DeviceCatalogDocument>(positional_catalog_account).is_err()
+        );
+        let mut positional_pending_install = catalog;
+        positional_pending_install["accounts"][0]["pendingInstall"] =
+            serde_json::json!(["generation", null]);
+        assert!(
+            serde_json::from_value::<DeviceCatalogDocument>(positional_pending_install).is_err()
+        );
+
+        let quick_unlock = serde_json::to_value(quick_unlock_document()).unwrap();
+        let mut positional_envelope = quick_unlock.clone();
+        positional_envelope["encryptedMasterUnlockKey"] = positional(
+            &quick_unlock["encryptedMasterUnlockKey"],
+            &["ciphertext", "iv", "algorithm"],
+        );
+        assert!(serde_json::from_value::<QuickUnlockDocument>(positional_envelope).is_err());
+
+        let metadata = serde_json::to_value(metadata("account", "generation")).unwrap();
+        let mut positional_kdf = metadata.clone();
+        positional_kdf["pinnedKdfProfile"] = positional(
+            &metadata["pinnedKdfProfile"],
+            &["schemaVersion", "algorithm", "iterations"],
+        );
+        assert!(serde_json::from_value::<AccountMetadataDocument>(positional_kdf).is_err());
+
+        let mut positional_travel = metadata;
+        positional_travel["verifiedTravelMode"] = serde_json::json!([false, [], null, null, 10]);
+        assert!(serde_json::from_value::<AccountMetadataDocument>(positional_travel).is_err());
+
+        let session = serde_json::to_value(current_session_document()).unwrap();
+        let mut positional_vault_key = session.clone();
+        positional_vault_key["vaultKeys"][0] = positional(
+            &session["vaultKeys"][0],
+            &[
+                "encryptedVaultKey",
+                "role",
+                "vaultIcon",
+                "vaultId",
+                "vaultImageUrl",
+                "vaultName",
+                "vaultType",
+            ],
+        );
+        assert!(serde_json::from_value::<CurrentSessionDocument>(positional_vault_key).is_err());
+
+        // The array itself remains the intended representation for fixed key bytes and Vault-key
+        // collections when their elements retain their object shape.
+        assert!(serde_json::from_value::<DeviceKeyDocument>(device_key).is_ok());
+        assert!(serde_json::from_value::<CurrentSessionDocument>(session).is_ok());
+    }
+
+    #[test]
+    fn persisted_nested_objects_still_reject_duplicate_fields() {
+        assert!(serde_json::from_str::<QuickUnlockDocument>(
+            r#"{"version":1,"accountId":"account","incarnation":"generation","encryptedMasterUnlockKey":{"ciphertext":"first","ciphertext":"second","iv":"iv","algorithm":"AES-GCM-AAD-V1"},"secretKey":"A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2","createdAtMs":10,"lastMasterPasswordEntryMs":null,"biometricEnabled":false}"#,
+        )
+        .is_err());
+        assert!(serde_json::from_str::<AccountMetadataDocument>(
+            r#"{"version":1,"accountId":"account","incarnation":"generation","userId":"user","email":"user@example.com","name":"User","normalizedServerUrl":"https://example.test","teamName":null,"teamAvatarUrl":null,"secretKeyHint":"A3-TEST","addedAtMs":10,"lastActiveAtMs":20,"biometricEnabled":false,"insecureTransportConfirmed":false,"pinnedKdfProfile":{"schemaVersion":1,"algorithm":"pbkdf2-sha256","algorithm":"pbkdf2-sha512","iterations":600000},"verifiedTravelMode":null}"#,
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn borrowed_session_cannot_enter_any_platform_storage_tier() {
+        let executor = Arc::new(RecordingExecutor {
+            responses: Mutex::new(vec![PlatformStorageResponse::Done]),
+            ..RecordingExecutor::default()
+        });
+        let storage = PlatformStorage::new(executor.clone());
+        let mut borrowed = current_session_document();
+        borrowed.provenance = SessionProvenance::Borrowed {
+            grant_id: "grant".into(),
+        };
+        let cloned = borrowed.clone();
+        assert!(matches!(
+            cloned.provenance,
+            SessionProvenance::Borrowed { .. }
+        ));
+        let error = storage
+            .store_current_session(&cloned)
+            .await
+            .expect_err("borrowed Session must be refused before host storage");
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(executor.requests.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn session_provenance_is_not_a_new_persisted_format_or_serialized_authority() {
+        let original = current_session_document();
+        let mut borrowed = original.clone();
+        borrowed.provenance = SessionProvenance::Borrowed {
+            grant_id: "grant".into(),
+        };
+        let encoded = serde_json::to_string(&borrowed).unwrap();
+        assert_eq!(encoded, serde_json::to_string(&original).unwrap());
+        let decoded: CurrentSessionDocument = serde_json::from_str(&encoded).unwrap();
+        assert!(matches!(decoded.provenance, SessionProvenance::Independent));
+        assert!(!encoded.contains("grant"));
+    }
+
+    #[tokio::test]
+    async fn current_session_lifetime_is_routed_by_core_for_each_platform() {
+        for (platform, expected_area) in [
+            (
+                crate::ClientPlatform::Web,
+                PlatformStorageArea::SessionSecret,
+            ),
+            (
+                crate::ClientPlatform::Extension,
+                PlatformStorageArea::SessionSecret,
+            ),
+            (
+                crate::ClientPlatform::Desktop,
+                PlatformStorageArea::DeviceSecret,
+            ),
+            (
+                crate::ClientPlatform::Mobile,
+                PlatformStorageArea::DeviceSecret,
+            ),
+        ] {
+            let document = current_session_document();
+            let executor = Arc::new(RecordingExecutor {
+                requests: Mutex::new(Vec::new()),
+                responses: Mutex::new(vec![
+                    PlatformStorageResponse::Done,
+                    PlatformStorageResponse::Value {
+                        value: Some(serde_json::to_string(&document).unwrap().into()),
+                    },
+                    PlatformStorageResponse::Done,
+                ]),
+            });
+            let storage = PlatformStorage::for_platform(executor.clone(), platform);
+            storage.store_current_session(&document).await.unwrap();
+            let restored = storage
+                .load_current_session(&account("account"), &incarnation("generation"))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(restored.token.as_ref(), "session-token");
+            storage
+                .remove_current_session(&account("account"), &incarnation("generation"))
+                .await
+                .unwrap();
+            for request in executor.requests.lock().unwrap().iter() {
+                let area = match request {
+                    PlatformStorageRequest::Get { area, .. }
+                    | PlatformStorageRequest::Set { area, .. }
+                    | PlatformStorageRequest::Delete { area, .. } => *area,
+                    _ => panic!("unexpected capability request"),
+                };
+                assert_eq!(area, expected_area, "{platform:?}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_session_evidence_uses_session_lifetime_without_authentication_fallback() {
+        for (platform, expected_area) in [
+            (
+                crate::ClientPlatform::Extension,
+                PlatformStorageArea::SessionSecret,
+            ),
+            (
+                crate::ClientPlatform::Desktop,
+                PlatformStorageArea::DeviceSecret,
+            ),
+        ] {
+            let document = legacy_session_evidence_document();
+            let executor = Arc::new(RecordingExecutor {
+                requests: Mutex::new(Vec::new()),
+                responses: Mutex::new(vec![
+                    PlatformStorageResponse::Done,
+                    PlatformStorageResponse::Value {
+                        value: Some(serde_json::to_string(&document).unwrap().into()),
+                    },
+                    PlatformStorageResponse::Done,
+                ]),
+            });
+            let storage = PlatformStorage::for_platform(executor.clone(), platform);
+            storage
+                .store_legacy_session_evidence(&document)
+                .await
+                .unwrap();
+            let restored = storage
+                .load_legacy_session_evidence(&account("account"), &incarnation("generation"))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(restored == document);
+            storage
+                .remove_legacy_session_evidence(&account("account"), &incarnation("generation"))
+                .await
+                .unwrap();
+            for request in executor.requests.lock().unwrap().iter() {
+                let (area, key) = match request {
+                    PlatformStorageRequest::Get { area, key }
+                    | PlatformStorageRequest::Set { area, key, .. }
+                    | PlatformStorageRequest::Delete { area, key } => (*area, key),
+                    _ => panic!("unexpected capability request"),
+                };
+                assert_eq!(area, expected_area, "{platform:?}");
+                assert!(key.ends_with(":legacy-session-evidence"));
+            }
+        }
+
+        let document = legacy_session_evidence_document();
+        let target = PlatformStorageValue::LegacySessionEvidence(
+            account("account"),
+            incarnation("generation"),
+        );
+        let executor = Arc::new(PrefixStorageExecutor::new(vec![(
+            PlatformStorageArea::SessionSecret,
+            target.key().unwrap(),
+            serde_json::to_string(&document).unwrap(),
+        )]));
+        let storage = PlatformStorage::new(executor.clone());
+        assert!(storage
+            .load_current_session(&account("account"), &incarnation("generation"))
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(executor.keys().len(), 1);
+    }
+
     #[test]
     fn sensitive_documents_zeroize_only_their_plaintext_secrets() {
         fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
@@ -1625,6 +3044,7 @@ mod tests {
         assert_zeroize_on_drop::<DeviceKeyDocument>();
         assert_zeroize_on_drop::<QuickUnlockDocument>();
         assert_zeroize_on_drop::<CurrentSessionDocument>();
+        assert_zeroize_on_drop::<LegacySessionEvidenceDocument>();
         assert_zeroize_on_drop::<PlatformStorageRequest>();
         assert_zeroize_on_drop::<PlatformStorageResponse>();
 
@@ -1734,6 +3154,49 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<PlatformStorageResponse>(response).is_err());
             assert_eq!(take_secret_drop_observations(), (1, 0));
+        }
+    }
+
+    #[test]
+    fn guarded_deletion_wire_is_closed_and_expected_bytes_are_zeroizing() {
+        let encoded = r#"{"type":"deleteIfUnchanged","area":"deviceSecret","key":"owned","expectedValue":"{\"token\":\"original\"}"}"#;
+        let request: PlatformStorageRequest = serde_json::from_str(encoded).unwrap();
+        assert_eq!(serde_json::to_string(&request).unwrap(), encoded);
+        drop(request);
+        let _ = take_secret_drop_observations();
+        for malformed in [
+            encoded.replace("\"deviceSecret\"", "7"),
+            encoded.replace("\"key\":\"owned\"", "\"unexpected\":true"),
+            encoded.replace("\"type\":\"deleteIfUnchanged\"", "\"type\":\"delete\""),
+            encoded.replace(
+                "\"key\":\"owned\"",
+                "\"key\":\"owned\",\"value\":\"another\"",
+            ),
+        ] {
+            assert!(serde_json::from_str::<PlatformStorageRequest>(&malformed).is_err());
+            assert!(take_secret_drop_observations().0 >= 1);
+        }
+        for malformed in [
+            r#"{"type":"deleteIfUnchanged","area":"deviceSecret","key":"owned"}"#,
+            r#"{"type":"deleteIfUnchanged","area":"deviceSecret","key":"owned","expectedValue":null}"#,
+            r#"{"type":"deleteIfUnchanged","area":"deviceSecret","key":"owned","expectedValue":"a","expectedValue":"b"}"#,
+        ] {
+            assert!(serde_json::from_str::<PlatformStorageRequest>(malformed).is_err());
+        }
+        for result in ["deleted", "alreadyAbsent", "conflict"] {
+            let encoded = format!(r#"{{"type":"deleteResult","result":"{result}"}}"#);
+            let decoded: PlatformStorageResponse = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded);
+        }
+        for malformed in [
+            r#"{"type":"deleteResult"}"#,
+            r#"{"type":"deleteResult","result":null}"#,
+            r#"{"type":"deleteResult","result":"unknown"}"#,
+            r#"{"type":"deleteResult","result":"deleted","result":"conflict"}"#,
+            r#"{"type":"deleteResult","result":"deleted","value":null}"#,
+            r#"{"type":"done","result":"deleted"}"#,
+        ] {
+            assert!(serde_json::from_str::<PlatformStorageResponse>(malformed).is_err());
         }
     }
 
@@ -1880,11 +3343,18 @@ mod tests {
                 ),
                 PlatformStorageArea::SessionSecret,
             ),
+            (
+                PlatformStorageValue::LegacySessionEvidence(
+                    account("account"),
+                    incarnation("generation"),
+                ),
+                PlatformStorageArea::SessionSecret,
+            ),
         ];
 
-        assert_eq!(values.len(), 5);
+        assert_eq!(values.len(), 6);
         for (value, expected_area) in values {
-            assert_eq!(value.area(), expected_area);
+            assert_eq!(value.area(false), expected_area);
         }
 
         let quick_unlock = quick_unlock_document();
@@ -1970,13 +3440,29 @@ mod tests {
     }
 
     #[test]
+    fn retained_travel_receipt_is_required_nullable_without_changing_existing_values() {
+        for receipt in [serde_json::Value::Null, serde_json::json!(300)] {
+            let encoded = serde_json::json!({
+                "enabled":false,"hiddenVaultIds":[],"serverEnabledAtMs":null,
+                "serverUpdatedAtMs":null,"verifiedAtMs":receipt
+            });
+            let policy: VerifiedTravelModePolicy = serde_json::from_value(encoded.clone()).unwrap();
+            policy.validate().unwrap();
+            assert_eq!(serde_json::to_value(policy).unwrap(), encoded);
+            let mut missing = encoded;
+            missing.as_object_mut().unwrap().remove("verifiedAtMs");
+            assert!(serde_json::from_value::<VerifiedTravelModePolicy>(missing).is_err());
+        }
+    }
+
+    #[test]
     fn verified_travel_mode_policy_is_generation_bound_and_fail_closed() {
         let policy = VerifiedTravelModePolicy {
             enabled: true,
             hidden_vault_ids: vec!["vault-a".into(), "vault-b".into()],
             server_enabled_at_ms: Some(100),
             server_updated_at_ms: Some(200),
-            verified_at_ms: 300,
+            verified_at_ms: Some(300),
         };
         let mut document = metadata("account", "generation");
         document.verified_travel_mode = Some(policy);
@@ -1993,11 +3479,61 @@ mod tests {
             invalid.verified_travel_mode = Some(VerifiedTravelModePolicy {
                 enabled: true,
                 hidden_vault_ids,
-                server_enabled_at_ms: None,
+                server_enabled_at_ms: Some(100),
                 server_updated_at_ms: None,
-                verified_at_ms: 300,
+                verified_at_ms: Some(300),
             });
             assert!(invalid.validate().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn retained_travel_policy_requires_consistent_activation_but_accepts_legacy_update_time()
+    {
+        for (enabled, enabled_at, accepted) in [
+            (true, Some(100), true),
+            (false, None, true),
+            (true, None, false),
+            (false, Some(100), false),
+        ] {
+            let mut document = metadata("account", "generation");
+            document.verified_travel_mode = Some(VerifiedTravelModePolicy {
+                enabled,
+                hidden_vault_ids: vec!["vault-a".into()],
+                server_enabled_at_ms: enabled_at,
+                // Older valid documents need no fabricated Server update timestamp.
+                server_updated_at_ms: None,
+                verified_at_ms: Some(300),
+            });
+            let mut encoded = serde_json::to_value(&document).unwrap();
+            if accepted {
+                encoded["verifiedTravelMode"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("serverUpdatedAtMs");
+            }
+            let executor = Arc::new(RecordingExecutor::default());
+            executor
+                .responses
+                .lock()
+                .unwrap()
+                .push(PlatformStorageResponse::Value {
+                    value: Some(encoded.to_string().into()),
+                });
+            let storage = PlatformStorage::new(executor);
+            let loaded = storage
+                .load_account_metadata(&account("account"), &incarnation("generation"))
+                .await;
+            if accepted {
+                assert_eq!(loaded.unwrap(), Some(document));
+            } else {
+                assert_eq!(
+                    loaded
+                        .expect_err("inconsistent retained Travel policy must fail closed")
+                        .code,
+                    RuntimeErrorCode::InvariantViolation,
+                );
+            }
         }
     }
 
@@ -2032,6 +3568,7 @@ mod tests {
         let catalog = DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
             account_id: account("account"),
             active_incarnation: Some(incarnation("old-generation")),
+            pending_retirement: None,
             pending_install: Some(PendingAccountInstallIntent {
                 incarnation: incarnation("new-generation"),
                 expected_active_incarnation: Some(incarnation("old-generation")),
@@ -2040,6 +3577,10 @@ mod tests {
         .expect("catalog staging state must be valid");
 
         let encoded = serde_json::to_value(catalog).expect("catalog must serialize");
+        assert!(
+            encoded["accounts"][0].get("pendingRetirement").is_none(),
+            "old catalog documents retain their exact field set"
+        );
         assert_eq!(
             encoded["accounts"][0]["activeIncarnation"],
             "old-generation"
@@ -2056,6 +3597,7 @@ mod tests {
         assert!(DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
             account_id: account("account"),
             active_incarnation: Some(incarnation("old-generation")),
+            pending_retirement: None,
             pending_install: Some(PendingAccountInstallIntent {
                 incarnation: incarnation("new-generation"),
                 expected_active_incarnation: Some(incarnation("another-generation")),
@@ -2065,12 +3607,51 @@ mod tests {
         assert!(DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
             account_id: account("account"),
             active_incarnation: Some(incarnation("same-generation")),
+            pending_retirement: None,
             pending_install: Some(PendingAccountInstallIntent {
                 incarnation: incarnation("same-generation"),
                 expected_active_incarnation: Some(incarnation("same-generation")),
             }),
         }])
         .is_err());
+    }
+
+    #[test]
+    fn catalog_retirement_requires_its_exact_active_incarnation_and_closed_purpose() {
+        let mut entry = DeviceCatalogAccount {
+            account_id: account("account"),
+            active_incarnation: Some(incarnation("active")),
+            pending_install: None,
+            pending_retirement: Some(PendingAccountRetirementIntent {
+                incarnation: incarnation("active"),
+                purpose: AccountRetirementPurpose::Remove,
+            }),
+        };
+        for purpose in [
+            AccountRetirementPurpose::Remove,
+            AccountRetirementPurpose::Replace,
+        ] {
+            entry.pending_retirement.as_mut().unwrap().purpose = purpose;
+            let catalog = DeviceCatalogDocument::new(vec![entry.clone()]).unwrap();
+            let encoded = serde_json::to_value(&catalog).unwrap();
+            assert_eq!(
+                serde_json::from_value::<DeviceCatalogDocument>(encoded.clone()).unwrap(),
+                catalog
+            );
+            let mut unknown = encoded;
+            unknown["accounts"][0]["pendingRetirement"]["purpose"] = serde_json::json!("clearKeys");
+            assert!(serde_json::from_value::<DeviceCatalogDocument>(unknown).is_err());
+        }
+        entry.pending_install = Some(PendingAccountInstallIntent {
+            incarnation: incarnation("next"),
+            expected_active_incarnation: entry.active_incarnation.clone(),
+        });
+        assert!(DeviceCatalogDocument::new(vec![entry.clone()]).is_err());
+        entry.pending_install = None;
+        for retired in ["", "different"] {
+            entry.pending_retirement.as_mut().unwrap().incarnation = incarnation(retired);
+            assert!(DeviceCatalogDocument::new(vec![entry.clone()]).is_err());
+        }
     }
 
     #[tokio::test]
@@ -2102,6 +3683,7 @@ mod tests {
         assert!(DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
             account_id: account(""),
             active_incarnation: Some(incarnation("generation")),
+            pending_retirement: None,
             pending_install: None,
         }])
         .is_err());
@@ -2176,17 +3758,29 @@ mod tests {
             PlatformStorageArea::SessionSecret,
         ];
         for (request, expected_area) in requests[..3].iter().zip(areas) {
-            let PlatformStorageRequest::DeletePrefix { area, prefix } = request else {
+            let PlatformStorageRequest::DeletePrefix {
+                area,
+                prefix,
+                preserve_key,
+            } = request
+            else {
                 panic!("expected Account prefix deletion");
             };
             assert_eq!(*area, expected_area);
+            assert!(preserve_key.is_none());
             assert_eq!(prefix, "bittery:runtime:platform-storage:account:3:a:b:");
         }
         for (request, expected_area) in requests[3..].iter().zip(areas) {
-            let PlatformStorageRequest::DeletePrefix { area, prefix } = request else {
+            let PlatformStorageRequest::DeletePrefix {
+                area,
+                prefix,
+                preserve_key,
+            } = request
+            else {
                 panic!("expected Device prefix deletion");
             };
             assert_eq!(*area, expected_area);
+            assert!(preserve_key.is_none());
             assert_eq!(prefix, "bittery:runtime:platform-storage:");
         }
     }

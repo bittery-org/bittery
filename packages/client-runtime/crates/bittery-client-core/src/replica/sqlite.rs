@@ -1,20 +1,24 @@
 use super::{
+    inventory,
     persistence_contract::{
         apply_prepared_writes_to_rows, reconstruct_snapshot, ExpectedReplicaInstall,
         LockEpochAdvanceResult, PreparedReplicaWrite, ReplicaHead, ReplicaInstallResult,
         ReplicaPersistenceResponse, ReplicaRowKey, ReplicaStore, StoredReplicaRow,
     },
-    ReplicaPersistence, ReplicaPersistenceRequest, SerializedReplicaExecutor,
+    ReplicaInventoryPage, ReplicaPersistence, ReplicaPersistenceRequest, ReplicaPhysicalKey,
+    SerializedReplicaExecutor,
 };
 use crate::{AccountId, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
-use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{
+    params, types::ValueRef, Connection, OptionalExtension, Row, Transaction, TransactionBehavior,
+};
 use std::{path::Path, sync::Mutex};
 
 // Physical engine versions are independent of Rust's logical Replica/contract versions.
-const APPLICATION_ID: i32 = 0x4254_5259; // BTRY
-const PHYSICAL_VERSION: i32 = 1;
-const MIGRATION_1: &[&str] = &[
+pub(crate) const APPLICATION_ID: i32 = 0x4254_5259; // BTRY
+pub(crate) const PHYSICAL_VERSION: i32 = 1;
+pub(crate) const MIGRATION_1: &[&str] = &[
     r#"
 CREATE TABLE IF NOT EXISTS replica_heads (
     account_id TEXT PRIMARY KEY NOT NULL,
@@ -56,20 +60,10 @@ fn migrate(connection: &mut Connection, fail_after: Option<usize>) -> Result<(),
         ));
     }
     if version == 0 {
-        let tables: Vec<String> = transaction
-            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-            .map_err(sqlite_error)?
-            .query_map([], |row| row.get(0))
-            .map_err(sqlite_error)?
-            .collect::<Result<_, _>>()
-            .map_err(sqlite_error)?;
-        // Only an empty file or the known unversioned Replica schema can be adopted.
-        if !tables.is_empty() {
-            if tables != ["replica_heads", "replica_rows"] {
-                return Err(storage_error("This database is not a supported Replica"));
-            }
-            validate_schema(&transaction)?;
-        }
+        // A view-only file is not empty. Validate all objects before creating tables or stamps,
+        // while preserving this owner's supported application-id/version-zero combinations.
+        crate::sqlite_schema::admit_empty_or_known(&transaction, &MIGRATION_1.join("\n"), &[])
+            .map_err(|_| storage_error("This database is not a supported Replica"))?;
     }
     let mut boundary = 0;
     for next_version in (version + 1)..=PHYSICAL_VERSION {
@@ -169,6 +163,7 @@ fn validate_schema(transaction: &Transaction<'_>) -> Result<(), RuntimeError> {
 /// Hosts choose the database location. Schema and table identity remain private to the adapter.
 pub struct SqliteReplica {
     connection: Mutex<Connection>,
+    inventory_nonce: String,
     #[cfg(test)]
     fail_after_write: Option<usize>,
 }
@@ -191,6 +186,7 @@ impl SqliteReplica {
         let _ = fail_after_write;
         Ok(Self {
             connection: Mutex::new(connection),
+            inventory_nonce: bittery_crypto_core::generate_uuid(),
             #[cfg(test)]
             fail_after_write,
         })
@@ -225,6 +221,13 @@ impl SqliteReplica {
             .map_err(|_| replica_error("SQLite Replica connection lock poisoned"))?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         let response = match request {
+            ReplicaPersistenceRequest::Inventory { cursor } => {
+                ReplicaPersistenceResponse::InventoryPage(inventory_page(
+                    &transaction,
+                    &self.inventory_nonce,
+                    cursor.as_deref(),
+                )?)
+            }
             ReplicaPersistenceRequest::Load { account_id } => {
                 let (head, rows) = load_account(&transaction, &account_id)?;
                 ReplicaPersistenceResponse::Loaded { head, rows }
@@ -358,6 +361,56 @@ impl SqliteReplica {
                     },
                 }
             }
+            ReplicaPersistenceRequest::DeleteAccountIfUnchanged {
+                account_id,
+                expected_head,
+                expected_rows,
+            } => {
+                use super::persistence_contract::{
+                    admission_deletion_matches, ReplicaAccountDeletionResult,
+                };
+                // Validate expected evidence even if the current physical scope is empty.
+                admission_deletion_matches(
+                    &account_id,
+                    &expected_head,
+                    &expected_rows,
+                    &expected_head,
+                    &expected_rows,
+                )?;
+                let result = match load_account(&transaction, &account_id) {
+                    Ok((None, rows)) if rows.is_empty() => {
+                        ReplicaAccountDeletionResult::AlreadyAbsent {}
+                    }
+                    Ok((Some(head), rows))
+                        if admission_deletion_matches(
+                            &account_id,
+                            &expected_head,
+                            &expected_rows,
+                            &head,
+                            &rows,
+                        )? =>
+                    {
+                        let mut boundary = 0;
+                        transaction
+                            .execute(
+                                "DELETE FROM replica_rows WHERE account_id = ?1",
+                                params![account_id.as_str()],
+                            )
+                            .map_err(sqlite_error)?;
+                        self.after_write(&mut boundary)?;
+                        transaction
+                            .execute(
+                                "DELETE FROM replica_heads WHERE account_id = ?1",
+                                params![account_id.as_str()],
+                            )
+                            .map_err(sqlite_error)?;
+                        self.after_write(&mut boundary)?;
+                        ReplicaAccountDeletionResult::Deleted {}
+                    }
+                    _ => ReplicaAccountDeletionResult::Conflict {},
+                };
+                ReplicaPersistenceResponse::AccountDeletion { result }
+            }
             ReplicaPersistenceRequest::DeleteAccount { account_id } => {
                 if account_id.as_str().is_empty() {
                     return Err(replica_error("Replica Account identity is empty"));
@@ -473,7 +526,10 @@ fn load_account(
     Ok((head, rows))
 }
 
-fn put_head(transaction: &Transaction<'_>, head: &ReplicaHead) -> Result<(), RuntimeError> {
+pub(crate) fn put_head(
+    transaction: &Transaction<'_>,
+    head: &ReplicaHead,
+) -> Result<(), RuntimeError> {
     let failure_json = head
         .failure
         .map(|failure| serde_json::to_string(&failure).map_err(sqlite_error))
@@ -531,6 +587,99 @@ fn apply_write(
     Ok(())
 }
 
+/// Enumerate raw physical keys, independently of heads and logical payload reconstruction.
+fn inventory_page(
+    transaction: &Transaction<'_>,
+    owner: &str,
+    cursor: Option<&str>,
+) -> Result<ReplicaInventoryPage, RuntimeError> {
+    let after = inventory::decode_cursor(owner, cursor)?;
+    let identity: i32 = transaction
+        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .map_err(sqlite_error)?;
+    let version: i32 = transaction
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if identity != APPLICATION_ID || version != PHYSICAL_VERSION {
+        return Err(storage_error("Replica inventory schema is not supported"));
+    }
+    crate::sqlite_schema::validate(transaction, &MIGRATION_1.join("\n"))
+        .map_err(|_| storage_error("Replica inventory schema is not supported"))?;
+
+    let mut page = inventory::PageBuilder::new(owner, after.as_ref());
+    let limit = (inventory::PAGE_ENTRIES + 1) as i64;
+    if !matches!(&after, Some(ReplicaPhysicalKey::Row { .. })) {
+        let mut statement = transaction
+            .prepare(match &after {
+                None => "SELECT account_id FROM replica_heads ORDER BY account_id LIMIT ?1",
+                _ => "SELECT account_id FROM replica_heads WHERE account_id > ?2 ORDER BY account_id LIMIT ?1",
+            })
+            .map_err(sqlite_error)?;
+        let mut heads = match &after {
+            Some(ReplicaPhysicalKey::Head { account_id }) => {
+                statement.query(params![limit, account_id.as_str()])
+            }
+            _ => statement.query(params![limit]),
+        }
+        .map_err(sqlite_error)?;
+        while let Some(row) = heads.next().map_err(sqlite_error)? {
+            let account_id = physical_text(row, 0)?.into();
+            if !page.push(ReplicaPhysicalKey::Head { account_id })? {
+                return page.finish(true);
+            }
+        }
+    }
+
+    let mut statement = transaction
+        .prepare(match &after {
+            Some(ReplicaPhysicalKey::Row { .. }) => "SELECT account_id, store, record_id FROM replica_rows WHERE (account_id, store, record_id) > (?2, ?3, ?4) ORDER BY account_id, store, record_id LIMIT ?1",
+            _ => "SELECT account_id, store, record_id FROM replica_rows ORDER BY account_id, store, record_id LIMIT ?1",
+        })
+        .map_err(sqlite_error)?;
+    let mut rows = match &after {
+        Some(ReplicaPhysicalKey::Row {
+            account_id,
+            store,
+            record_id,
+        }) => statement.query(params![
+            limit,
+            account_id.as_str(),
+            store.physical_id(),
+            record_id
+        ]),
+        _ => statement.query(params![limit]),
+    }
+    .map_err(sqlite_error)?;
+    while let Some(row) = rows.next().map_err(sqlite_error)? {
+        let account_id = physical_text(row, 0)?.into();
+        let store = match row.get_ref(1).map_err(sqlite_error)? {
+            ValueRef::Integer(value) => decode_store(value)
+                .map_err(|_| storage_error("Replica inventory row store is not supported"))?,
+            _ => {
+                return Err(storage_error(
+                    "Replica inventory row store has an invalid type",
+                ));
+            }
+        };
+        let record_id = physical_text(row, 2)?;
+        if !page.push(ReplicaPhysicalKey::Row {
+            account_id,
+            store,
+            record_id,
+        })? {
+            return page.finish(true);
+        }
+    }
+    page.finish(false)
+}
+
+fn physical_text(row: &Row<'_>, index: usize) -> Result<String, RuntimeError> {
+    match row.get_ref(index).map_err(sqlite_error)? {
+        ValueRef::Text(bytes) => Ok(inventory::validate_text(bytes)?.to_owned()),
+        _ => Err(storage_error("Replica inventory key has an invalid type")),
+    }
+}
+
 fn validate_commit_transition(
     current: &ReplicaHead,
     next: &ReplicaHead,
@@ -569,22 +718,11 @@ fn validate_write_scope(
     Ok(())
 }
 
-fn encode_store(store: ReplicaStore) -> i64 {
-    match store {
-        ReplicaStore::OptimisticItems => 0,
-        ReplicaStore::Operations => 1,
-        ReplicaStore::OperationReceipts => 2,
-        ReplicaStore::ReplicaMetadata => 3,
-        ReplicaStore::BootstrapGenerations => 4,
-        ReplicaStore::BootstrapPages => 5,
-        ReplicaStore::AuthorityVaults => 6,
-        ReplicaStore::AuthorityItems => 7,
-        ReplicaStore::AttachmentMovePreparations => 8,
-        ReplicaStore::ShareCapabilities => 9,
-    }
+pub(crate) fn encode_store(store: ReplicaStore) -> i64 {
+    store.physical_id()
 }
 
-fn decode_store(store: i64) -> Result<ReplicaStore, RuntimeError> {
+pub(crate) fn decode_store(store: i64) -> Result<ReplicaStore, RuntimeError> {
     match store {
         0 => Ok(ReplicaStore::OptimisticItems),
         1 => Ok(ReplicaStore::Operations),
@@ -596,6 +734,8 @@ fn decode_store(store: i64) -> Result<ReplicaStore, RuntimeError> {
         7 => Ok(ReplicaStore::AuthorityItems),
         8 => Ok(ReplicaStore::AttachmentMovePreparations),
         9 => Ok(ReplicaStore::ShareCapabilities),
+        10 => Ok(ReplicaStore::CrossAccountMoves),
+        11 => Ok(ReplicaStore::RotationAttempts),
         _ => Err(replica_error("SQLite Replica row has an unknown store")),
     }
 }

@@ -27,6 +27,7 @@ function account(
 		access,
 		failure: null,
 		replicaRevision: "1",
+		unlockCapabilities: { password: false, desktop: false, signIn: false },
 		...extra,
 	};
 }
@@ -175,7 +176,14 @@ describe("Device session states", () => {
 		transport.publish(
 			status([
 				account("account-1", "unlocked", {
-					displayIdentity: { email: "person@example.test" },
+					displayIdentity: {
+						email: "person@example.test",
+						name: "Test Account",
+						teamName: null,
+						teamAvatarUrl: null,
+						serverUrl: "https://vault.example.test",
+						secretKeyHint: "A3-A••••",
+					},
 				}),
 			]),
 		);
@@ -185,7 +193,14 @@ describe("Device session states", () => {
 			accounts: [
 				{
 					accountId: "account-1",
-					displayIdentity: { email: "person@example.test" },
+					displayIdentity: {
+						email: "person@example.test",
+						name: "Test Account",
+						teamName: null,
+						teamAvatarUrl: null,
+						serverUrl: "https://vault.example.test",
+						secretKeyHint: "A3-A••••",
+					},
 				},
 			],
 		});

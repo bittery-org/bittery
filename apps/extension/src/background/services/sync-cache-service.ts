@@ -23,6 +23,8 @@ import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
 import { vaultRepository } from "../../lib/vault-runtime";
 import { desktopClient } from "../desktop-client";
+import { nativeMessagingClient } from "../native-messaging-client";
+import { reconcileOutboundOperationOutcome } from "../outbound-drain";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
 
@@ -109,9 +111,6 @@ const defaultDeps: SyncCacheServiceDeps = {
 		}),
 	deltaSync: performDeltaSync,
 	reconcileOperationOutcome: async (accountId, outcome) => {
-		const { reconcileOutboundOperationOutcome } = await import(
-			"../outbound-drain"
-		);
 		await reconcileOutboundOperationOutcome(accountId, outcome);
 	},
 	handleTravelModeSync: async (event, accountId, accountClient) => {
@@ -239,11 +238,21 @@ export function createSyncCacheService(
 		}
 
 		try {
+			const generation =
+				await nativeMessagingClient.captureDeliveryGeneration();
 			const desktopToken = await deps.desktopClient.getAuthToken(accountId);
 			if (!desktopToken) {
 				return null;
 			}
-			await deps.storage.storeAuthToken(desktopToken, accountId);
+			await nativeMessagingClient.withMaterialMutation(
+				generation,
+				accountId,
+				async (check, markMaterialWrite) => {
+					markMaterialWrite();
+					await deps.storage.storeAuthToken(desktopToken, accountId);
+					check();
+				},
+			);
 			return desktopToken;
 		} catch {
 			// Desktop bridge failures should not block fallback to other accounts.

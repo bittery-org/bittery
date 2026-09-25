@@ -148,3 +148,53 @@ test("hosts without projected names retain metadata decryption and rename presen
 	expect(screen.queryByTitle("legacy-renamed.txt")).not.toBeNull();
 	queryClient.clear();
 });
+
+test("Attachment selection captures before the picker and retains that upload through confirmation and rerender", async () => {
+	const events: string[] = [];
+	const queryClient = new QueryClient();
+	const view = (generation: string) => (
+		<QueryClientProvider client={queryClient}>
+			<ItemAttachments
+				{...props}
+				attachments={[]}
+				onPrepareUpload={() => {
+					events.push(`capture-${generation}`);
+					return async (file) => {
+						events.push(`upload-${generation}-${file.name}`);
+					};
+				}}
+				onUpload={async () => {
+					events.push("unscoped-upload");
+				}}
+			/>
+		</QueryClientProvider>
+	);
+	const mounted = render(view("old"));
+	const picker =
+		mounted.container.querySelector<HTMLInputElement>('input[type="file"]');
+	if (!picker) throw new Error("Attachment picker missing");
+	picker.click = () => {
+		events.push("picker");
+	};
+	fireEvent.click(
+		screen.getByText("vaults_detail_items_attachments_action_attach_file"),
+	);
+	expect(events).toEqual(["capture-old", "picker"]);
+	mounted.rerender(view("replacement"));
+	const file = new File(["private"], "selected.txt", { type: "text/plain" });
+	fireEvent.change(picker, { target: { files: [file] } });
+	fireEvent.change(screen.getByRole("textbox"), {
+		target: { value: "display.txt" },
+	});
+	await act(async () => {
+		fireEvent.click(
+			screen.getByText("vaults_detail_items_attachments_action_upload"),
+		);
+	});
+	expect(events).toEqual(["capture-old", "picker", "upload-old-selected.txt"]);
+	fireEvent.click(
+		screen.getByText("vaults_detail_items_attachments_action_attach_file"),
+	);
+	expect(events.slice(-2)).toEqual(["capture-replacement", "picker"]);
+	queryClient.clear();
+});

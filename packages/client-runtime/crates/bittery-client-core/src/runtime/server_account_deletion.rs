@@ -47,8 +47,7 @@ impl Runtime {
                 )
             })?;
         let mut session = self
-            .platform_storage
-            .load_current_session(&account_id, &snapshot.incarnation)
+            .effective_session(&account_id, &snapshot.incarnation)
             .await?
             .ok_or_else(|| {
                 RuntimeError::new(

@@ -1,0 +1,1608 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProfileAdmissionContract",
+  "type": "object",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/ProfileAdmissionRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/ProfileAdmissionResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response"
+  ],
+  "$defs": {
+    "LegacyProfileFormat": {
+      "type": "string",
+      "enum": [
+        "desktopLegacyV1",
+        "extensionLegacyV1"
+      ]
+    },
+    "ProfileAccountCredentialField": {
+      "type": "string",
+      "enum": [
+        "secretKey",
+        "sessionData",
+        "jwtToken",
+        "vaultKeys",
+        "encryptedPrivateKey"
+      ]
+    },
+    "ProfileAdmissionRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "expectedScope": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ProfileLegacyResetScope"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "format": {
+              "$ref": "#/$defs/LegacyProfileFormat"
+            },
+            "type": {
+              "type": "string",
+              "const": "prepareLegacyProfileReset"
+            },
+            "wipeId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "wipeId",
+            "format",
+            "expectedScope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "family": {
+              "$ref": "#/$defs/ProfileSourceFamily"
+            },
+            "resetHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "resetLegacySourceFamily"
+            },
+            "wipeId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "resetHandle",
+            "wipeId",
+            "family"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "$ref": "#/$defs/LegacyProfileFormat"
+            },
+            "type": {
+              "type": "string",
+              "const": "beginSourceSnapshot"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "format"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 98304,
+              "minLength": 1
+            },
+            "family": {
+              "$ref": "#/$defs/ProfileSourceFamily"
+            },
+            "selector": {
+              "$ref": "#/$defs/ProfileSourceSelector"
+            },
+            "snapshotHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "readSourcePage"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshotHandle",
+            "family",
+            "selector",
+            "cursor"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "selector": {
+              "$ref": "#/$defs/ProfileSnapshotCloseSelector"
+            },
+            "type": {
+              "type": "string",
+              "const": "closeSourceSnapshot"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "selector"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "$ref": "#/$defs/ProfileSourceReopenStep"
+            },
+            "type": {
+              "type": "string",
+              "const": "reopenSourceSnapshot"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "step"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "$ref": "#/$defs/ProfileSourceVerifyStep"
+            },
+            "type": {
+              "type": "string",
+              "const": "verifySourceSnapshot"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "step"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "$ref": "#/$defs/ProfileSourceCleanupReopenStep"
+            },
+            "type": {
+              "type": "string",
+              "const": "reopenSourceForCleanup"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "step"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "admissionId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "expectedEntry": {
+              "$ref": "#/$defs/ProfileSourceManifestEntry"
+            },
+            "index": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "snapshotHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteCapturedSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshotHandle",
+            "admissionId",
+            "index",
+            "expectedEntry"
+          ]
+        }
+      ]
+    },
+    "ProfileAdmissionResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ProfileResetPreparedResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "profileResetPrepared"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "family": {
+              "$ref": "#/$defs/ProfileSourceFamily"
+            },
+            "resetHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "result": {
+              "$ref": "#/$defs/ProfileResetResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "profileResetFamilyResult"
+            },
+            "wipeId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "resetHandle",
+            "wipeId",
+            "family",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/ProfileSourceSnapshot"
+            },
+            "type": {
+              "type": "string",
+              "const": "sourceSnapshot"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshot"
+          ]
+        },
+        {
+          "description": "Raw content stays in the separately owned binary result, never in control JSON.",
+          "type": "object",
+          "properties": {
+            "byteLength": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "continuation": {
+              "$ref": "#/$defs/ProfileSourceContinuation"
+            },
+            "family": {
+              "$ref": "#/$defs/ProfileSourceFamily"
+            },
+            "observation": {
+              "$ref": "#/$defs/ProfileSourceObservation"
+            },
+            "offset": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "selector": {
+              "$ref": "#/$defs/ProfileSourceSelector"
+            },
+            "snapshotHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "sourcePage"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshotHandle",
+            "family",
+            "selector",
+            "observation",
+            "offset",
+            "byteLength",
+            "continuation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ProfileSourceVerificationResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "sourceSnapshotVerification"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ProfileSourceCleanupReopenResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "sourceCleanupReopen"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "admissionId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "index": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "result": {
+              "$ref": "#/$defs/ProfileSourceDeleteResult"
+            },
+            "snapshotHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "sourceCleanupResult"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshotHandle",
+            "admissionId",
+            "index",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sourceSnapshotClosed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileGlobalCredentialField": {
+      "type": "string",
+      "enum": [
+        "deviceKey"
+      ]
+    },
+    "ProfileLegacyResetScope": {
+      "type": "object",
+      "properties": {
+        "families": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProfileResetFamilyScope"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "format": {
+          "$ref": "#/$defs/LegacyProfileFormat"
+        },
+        "profileIdentity": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "const": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "format",
+        "profileIdentity",
+        "families"
+      ]
+    },
+    "ProfileResetFamilyScope": {
+      "type": "object",
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/ProfileSourceFamily"
+        },
+        "file": {
+          "$ref": "#/$defs/ProfileResetFileBinding"
+        },
+        "namespaceIdentity": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "selectorPlanVersion": {
+          "type": "integer",
+          "const": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "namespaceIdentity",
+        "selectorPlanVersion",
+        "file"
+      ]
+    },
+    "ProfileResetFileBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "absent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fileIdentity": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "present"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "fileIdentity"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "notFile"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileResetPreparedResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/ProfileResetSnapshot"
+            },
+            "type": {
+              "type": "string",
+              "const": "prepared"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshot"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "changed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileResetResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "reset"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "alreadyAbsent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "changed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileResetSnapshot": {
+      "type": "object",
+      "properties": {
+        "resetHandle": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/ProfileLegacyResetScope"
+        },
+        "wipeId": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "resetHandle",
+        "wipeId",
+        "scope"
+      ]
+    },
+    "ProfileSnapshotCloseSelector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "exact"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "handle"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "currentCapability"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceCleanupReopenResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "nextIndex": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "started"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor",
+            "nextIndex"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "nextIndex": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "accepted"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor",
+            "nextIndex"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/ProfileSourceCleanupSnapshot"
+            },
+            "type": {
+              "type": "string",
+              "const": "reopened"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshot"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceCleanupReopenStep": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "admissionId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "header": {
+              "$ref": "#/$defs/ProfileSourceManifestHeader"
+            },
+            "type": {
+              "type": "string",
+              "const": "start"
+            },
+            "verificationAttemptId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationAttemptId",
+            "admissionId",
+            "header"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "expectedEntry": {
+              "$ref": "#/$defs/ProfileSourceManifestEntry"
+            },
+            "index": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "entry"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor",
+            "index",
+            "expectedEntry"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "finish"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceCleanupSnapshot": {
+      "type": "object",
+      "properties": {
+        "admissionId": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "captureId": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "format": {
+          "$ref": "#/$defs/LegacyProfileFormat"
+        },
+        "profileIdentity": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "snapshotHandle": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "snapshotHandle",
+        "profileIdentity",
+        "captureId",
+        "admissionId"
+      ]
+    },
+    "ProfileSourceContinuation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "more"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "cursor"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "end"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceDeleteResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "deleted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "alreadyAbsent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "changed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceFamily": {
+      "type": "string",
+      "enum": [
+        "desktopStore",
+        "desktopSyncStore",
+        "desktopCredentials",
+        "extensionLocal",
+        "extensionSession",
+        "extensionRecords"
+      ]
+    },
+    "ProfileSourceFamilyInventory": {
+      "type": "object",
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/ProfileSourceFamily"
+        },
+        "fileIdentity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "presence": {
+          "$ref": "#/$defs/ProfileSourcePresence"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "presence"
+      ]
+    },
+    "ProfileSourceManifestEntry": {
+      "type": "object",
+      "properties": {
+        "evidenceSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "family": {
+          "$ref": "#/$defs/ProfileSourceFamily"
+        },
+        "fileIdentity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "observation": {
+          "$ref": "#/$defs/ProfileSourceObservation"
+        },
+        "selector": {
+          "$ref": "#/$defs/ProfileSourceSelector"
+        },
+        "version": {
+          "type": "integer",
+          "const": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "family",
+        "selector",
+        "observation",
+        "fileIdentity",
+        "evidenceSha256"
+      ]
+    },
+    "ProfileSourceManifestHeader": {
+      "type": "object",
+      "properties": {
+        "entriesSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "entryCount": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "format": {
+          "$ref": "#/$defs/LegacyProfileFormat"
+        },
+        "profileIdentity": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "recordedCaptureId": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "const": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "format",
+        "profileIdentity",
+        "recordedCaptureId",
+        "entryCount",
+        "entriesSha256"
+      ]
+    },
+    "ProfileSourceObservation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "missing"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "length": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "fileBytes"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "length"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "encoding": {
+              "$ref": "#/$defs/ProfileSourceStringEncoding"
+            },
+            "length": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "storedString"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "encoding",
+            "length"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "presentUnsupported"
+            },
+            "valueKind": {
+              "$ref": "#/$defs/ProfileSourceValueKind"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "valueKind"
+          ]
+        }
+      ]
+    },
+    "ProfileSourcePresence": {
+      "type": "string",
+      "enum": [
+        "missing",
+        "present"
+      ]
+    },
+    "ProfileSourceReopenStep": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "header": {
+              "$ref": "#/$defs/ProfileSourceManifestHeader"
+            },
+            "type": {
+              "type": "string",
+              "const": "start"
+            },
+            "verificationAttemptId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationAttemptId",
+            "header"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "expectedEntry": {
+              "$ref": "#/$defs/ProfileSourceManifestEntry"
+            },
+            "index": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "entry"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor",
+            "index",
+            "expectedEntry"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "finish"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceSelector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "wholeFile"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "field": {
+              "$ref": "#/$defs/ProfileGlobalCredentialField"
+            },
+            "type": {
+              "type": "string",
+              "const": "globalCredential"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "field"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "field": {
+              "$ref": "#/$defs/ProfileAccountCredentialField"
+            },
+            "type": {
+              "type": "string",
+              "const": "accountCredential"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "field"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceSnapshot": {
+      "type": "object",
+      "properties": {
+        "captureId": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "families": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProfileSourceFamilyInventory"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "format": {
+          "$ref": "#/$defs/LegacyProfileFormat"
+        },
+        "profileIdentity": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "sessionInstance": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096,
+          "minLength": 1
+        },
+        "snapshotHandle": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "snapshotHandle",
+        "profileIdentity",
+        "captureId",
+        "families"
+      ]
+    },
+    "ProfileSourceStringEncoding": {
+      "type": "string",
+      "enum": [
+        "utf8",
+        "utf16Le"
+      ]
+    },
+    "ProfileSourceValueKind": {
+      "type": "string",
+      "enum": [
+        "null",
+        "boolean",
+        "number",
+        "array",
+        "object",
+        "otherUnsupported"
+      ]
+    },
+    "ProfileSourceVerificationResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "nextIndex": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "started"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor",
+            "nextIndex"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "nextIndex": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "matched"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor",
+            "nextIndex"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "changed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/ProfileSourceSnapshot"
+            },
+            "type": {
+              "type": "string",
+              "const": "reopened"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshot"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "snapshotHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "unchanged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "snapshotHandle"
+          ]
+        }
+      ]
+    },
+    "ProfileSourceVerifyStep": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "header": {
+              "$ref": "#/$defs/ProfileSourceManifestHeader"
+            },
+            "snapshotHandle": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "start"
+            },
+            "verificationAttemptId": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationAttemptId",
+            "snapshotHandle",
+            "header"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "expectedEntry": {
+              "$ref": "#/$defs/ProfileSourceManifestEntry"
+            },
+            "index": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "entry"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor",
+            "index",
+            "expectedEntry"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "finish"
+            },
+            "verificationCursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "verificationCursor"
+          ]
+        }
+      ]
+    }
+  },
+  "$id": "urn:bittery:client-runtime:profile-admission"
+}

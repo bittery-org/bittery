@@ -22,6 +22,7 @@ static POLICY: LazyLock<KdfPolicy> = LazyLock::new(|| {
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct KdfProfile {
     pub schema_version: u32,

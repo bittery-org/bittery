@@ -1,4 +1,18 @@
 use super::*;
+#[path = "biometric_tests.rs"]
+mod biometric;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "cross_account_move_tests.rs"]
+mod cross_account_move;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "native_authority_tests.rs"]
+mod native_authority;
+#[path = "profile_admission_catalog_tests.rs"]
+mod profile_admission_catalog;
+#[path = "shared_vault_tests.rs"]
+mod shared_vault;
+#[path = "travel_disable_tests.rs"]
+mod travel_disable;
 use crate::{
     auth_http::{AuthClientConfig, ClientPlatform},
     authentication_installation::{
@@ -32,6 +46,8 @@ const NOW_MS: u64 = 1_700_000_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PersistenceStep {
+    RecipientKeys,
+    LocalSecurity,
     DeviceKey,
     PendingCatalog,
     Metadata,
@@ -132,8 +148,10 @@ struct InstallationPlatform {
     values: Mutex<HashMap<(String, String), String>>,
     events: Arc<Mutex<Vec<PersistenceStep>>>,
     invocations: AtomicU64,
+    allow_teardown_prefixes: AtomicBool,
     fault: Mutex<Option<PersistenceStep>>,
     read_fault: Mutex<Option<RuntimeError>>,
+    device_key_read_pause: Mutex<Option<Arc<Pause>>>,
     pause: Mutex<Option<Arc<Pause>>>,
     cancel_on_next_write: Mutex<Option<RequestCancellation>>,
 }
@@ -197,7 +215,11 @@ impl InstallationPlatform {
 }
 
 fn classify_set(key: &str, serialized: &str) -> PersistenceStep {
-    if key.ends_with("device-key") {
+    if key.ends_with("verified-recipient-keys") {
+        PersistenceStep::RecipientKeys
+    } else if key.ends_with("local-security") {
+        PersistenceStep::LocalSecurity
+    } else if key.ends_with("device-key") {
         PersistenceStep::DeviceKey
     } else if key.ends_with("device-catalog") {
         let value: Value = serde_json::from_str(serialized).unwrap();
@@ -229,8 +251,31 @@ impl SerializedPlatformStorageExecutor for InstallationPlatform {
     ) -> Result<Zeroizing<String>, RuntimeError> {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         let request: Value = serde_json::from_str(&request_json).unwrap();
+        if request["type"] == "deletePrefix" {
+            if self.allow_teardown_prefixes.load(Ordering::SeqCst) {
+                let area = request["area"].as_str().unwrap();
+                let prefix = request["prefix"].as_str().unwrap();
+                self.values.lock().unwrap().retain(|(stored_area, key), _| {
+                    stored_area != area || !key.starts_with(prefix)
+                });
+                return Ok(Zeroizing::new(json!({"type": "done"}).to_string()));
+            }
+            return Err(startup_invariant(
+                "installation reached a platform namespace delete",
+            ));
+        }
         let area = request["area"].as_str().unwrap().to_owned();
         let key = request["key"].as_str().unwrap().to_owned();
+        if request["type"] == "get" && key.ends_with("device-key") {
+            let pause = self.device_key_read_pause.lock().unwrap().clone();
+            if let Some(pause) = pause {
+                pause.reached.store(true, Ordering::SeqCst);
+                pause.reached_notify.notify_waiters();
+                while !pause.released.load(Ordering::SeqCst) {
+                    pause.release_notify.notified().await;
+                }
+            }
+        }
         match request["type"].as_str().unwrap() {
             "get" => Ok(Zeroizing::new(
                 if let Some(error) = self.read_fault.lock().unwrap().take() {
@@ -277,10 +322,6 @@ impl SerializedPlatformStorageExecutor for InstallationPlatform {
                 self.values.lock().unwrap().remove(&(area, key));
                 Ok(Zeroizing::new(json!({"type": "done"}).to_string()))
             }
-            // A namespace delete must fail an assertion, not abort the test harness.
-            "deletePrefix" => Err(startup_invariant(
-                "installation reached a platform namespace delete",
-            )),
             other => panic!("unexpected platform request {other}"),
         }
     }
@@ -394,7 +435,10 @@ impl ObservationSink for Sink {
 
 #[async_trait]
 impl SerializedHttpExecutor for UnusedHttp {
-    async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        _request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         panic!("installation coordinator tests do not use HTTP")
     }
 
@@ -410,8 +454,33 @@ enum RoutingAuthBehavior {
     UserMismatch,
 }
 
+#[derive(Clone, Copy)]
+struct RoutingAuthIdentity {
+    normalized_email: &'static str,
+    user_id: &'static str,
+    attempt_id: &'static str,
+    session_id: &'static str,
+    token: &'static str,
+    refreshed_token: &'static str,
+}
+
+impl Default for RoutingAuthIdentity {
+    fn default() -> Self {
+        Self {
+            normalized_email: NORMALIZED_EMAIL,
+            user_id: "user-1",
+            attempt_id: "attempt-1",
+            session_id: "session-1",
+            token: "fresh-token",
+            refreshed_token: "refreshed-token",
+        }
+    }
+}
+
 struct RoutingAuthHttp {
     state: Mutex<RoutingAuthState>,
+    identity: RoutingAuthIdentity,
+    accepted_client_platforms: &'static [ClientPlatform],
     kdf_profile: bittery_crypto_core::KdfProfile,
     behavior: RoutingAuthBehavior,
     cancellation: Option<RequestCancellation>,
@@ -442,10 +511,29 @@ impl RoutingAuthHttp {
         behavior: RoutingAuthBehavior,
         cancellation: Option<RequestCancellation>,
     ) -> Self {
+        Self::with_identity(
+            kdf_profile,
+            behavior,
+            cancellation,
+            RoutingAuthIdentity::default(),
+        )
+    }
+
+    fn with_identity(
+        kdf_profile: bittery_crypto_core::KdfProfile,
+        behavior: RoutingAuthBehavior,
+        cancellation: Option<RequestCancellation>,
+        identity: RoutingAuthIdentity,
+    ) -> Self {
         let srp = SrpClient::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
         let server = SrpServer::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
-        let derived =
-            derive_keys(MASTER_PASSWORD, SECRET_KEY, NORMALIZED_EMAIL, &kdf_profile).unwrap();
+        let derived = derive_keys(
+            MASTER_PASSWORD,
+            SECRET_KEY,
+            identity.normalized_email,
+            &kdf_profile,
+        )
+        .unwrap();
         let password = Zeroizing::new(String::from_utf8_lossy(&derived.auth_key).into_owned());
         let private_key = Zeroizing::new(
             srp.derive_safe_private_key(SRP_SALT, &password, None)
@@ -462,7 +550,9 @@ impl RoutingAuthHttp {
                 bootstrap_index: 0,
                 changes_index: 0,
             }),
+            accepted_client_platforms: &[ClientPlatform::Desktop],
             kdf_profile,
+            identity,
             behavior,
             cancellation,
             bootstrap_pages: Mutex::new(Vec::new()),
@@ -496,14 +586,14 @@ impl RoutingAuthHttp {
 
     fn start_login(&self, state: &mut RoutingAuthState) -> String {
         let body = routing_request_body(state.requests.last().unwrap());
-        assert_eq!(body["email"], NORMALIZED_EMAIL);
+        assert_eq!(body["email"], self.identity.normalized_email);
         if matches!(self.behavior, RoutingAuthBehavior::CancelAfterStart) {
             self.cancellation.as_ref().unwrap().cancel();
         }
         routing_completed(
             201,
             json!({
-                "attemptId": "attempt-1",
+                "attemptId": self.identity.attempt_id,
                 "kdfParams": {
                     "algorithm": self.kdf_profile.algorithm,
                     "iterations": self.kdf_profile.iterations,
@@ -536,17 +626,17 @@ impl RoutingAuthHttp {
         let user_id = if matches!(self.behavior, RoutingAuthBehavior::UserMismatch) {
             "user-2"
         } else {
-            "user-1"
+            self.identity.user_id
         };
         routing_completed(
             200,
             json!({
                 "expiresAt": "2099-01-01T00:00:00Z",
                 "serverProof": proof,
-                "sessionId": "session-1",
-                "token": "fresh-token",
+                "sessionId": self.identity.session_id,
+                "token": self.identity.token,
                 "user": {
-                    "email": NORMALIZED_EMAIL,
+                    "email": self.identity.normalized_email,
                     "encryptedPrivateKey": "encrypted-private-key",
                     "id": user_id,
                     "name": "User One",
@@ -683,8 +773,8 @@ impl RoutingAuthHttp {
             200,
             json!({
                 "expiresAt": "2099-01-01T00:00:00Z",
-                "sessionId": "session-1",
-                "token": "refreshed-token"
+                "sessionId": self.identity.session_id,
+                "token": self.identity.refreshed_token
             }),
         )
     }
@@ -703,12 +793,14 @@ enum V1Route<'a> {
     Item(&'a str),
 }
 
-fn v1_route(url: &str) -> Option<V1Route<'_>> {
+fn v1_route<'a>(url: &'a str, attempt_id: &str) -> Option<V1Route<'a>> {
     let rest = url.split_once("/api/v1/")?.1;
     let path = rest.split(['?', '#']).next().unwrap_or(rest);
     match path {
         "auth/login-attempts" => Some(V1Route::StartLogin),
-        "auth/login-attempts/attempt-1/finish" => Some(V1Route::FinishLogin),
+        path if path == format!("auth/login-attempts/{attempt_id}/finish") => {
+            Some(V1Route::FinishLogin)
+        }
         "travel-mode" => Some(V1Route::TravelMode),
         "sessions/current/refresh" => Some(V1Route::RefreshSession),
         "users/me" => Some(V1Route::DeleteAccount),
@@ -739,19 +831,22 @@ fn is_sync_route(route: V1Route<'_>) -> bool {
 
 #[async_trait]
 impl SerializedHttpExecutor for RoutingAuthHttp {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         if self.disconnected.load(Ordering::SeqCst) {
             return Ok(json!({ "type": "networkFailure" }).to_string());
         }
         let request: Value = serde_json::from_str(&request_json).unwrap();
-        assert_auth_headers(&request);
+        assert_auth_headers_for_platforms(&request, self.accepted_client_platforms);
         let url = request["url"].as_str().unwrap().to_owned();
         {
             let mut state = self.state.lock().unwrap();
             state.requests.push(request);
         }
 
-        let Some(route) = v1_route(&url) else {
+        let Some(route) = v1_route(&url, self.identity.attempt_id) else {
             return Err(startup_invariant("unexpected authentication test request"));
         };
         if *self.refresh_status.lock().unwrap() == Some(401) && is_renewable_session_route(route) {
@@ -771,7 +866,7 @@ impl SerializedHttpExecutor for RoutingAuthHttp {
             }
         }
         let mut state = self.state.lock().unwrap();
-        Ok(match v1_route(&url).expect("route was already parsed") {
+        Ok(match route {
             V1Route::StartLogin => self.start_login(&mut state),
             V1Route::FinishLogin => self.finish_login(&mut state),
             V1Route::TravelMode => self.travel_mode(),
@@ -807,16 +902,31 @@ impl SerializedHttpExecutor for RoutingAuthHttp {
 }
 
 fn assert_auth_headers(request: &Value) {
+    assert_auth_headers_for_platforms(request, &[ClientPlatform::Desktop]);
+}
+
+fn assert_auth_headers_for_platforms(request: &Value, platforms: &[ClientPlatform]) {
     let headers = request["headers"].as_array().unwrap();
     for (name, value) in [
         ("Bittery-Client-Id", "client-routing"),
-        ("Bittery-Client-Platform", "desktop"),
         ("Bittery-Client-Version", "0.5.2-test"),
     ] {
         assert!(headers
             .iter()
             .any(|header| header["name"] == name && header["value"] == value));
     }
+    assert!(headers.iter().any(|header| {
+        header["name"] == "Bittery-Client-Platform"
+            && platforms.iter().any(|platform| {
+                header["value"]
+                    == match platform {
+                        ClientPlatform::Web => "web",
+                        ClientPlatform::Desktop => "desktop",
+                        ClientPlatform::Mobile => "mobile",
+                        ClientPlatform::Extension => "extension",
+                    }
+            })
+    }));
 }
 
 fn routing_request_body(request: &Value) -> Value {
@@ -1697,7 +1807,40 @@ async fn quick_unlock_reauthenticates_and_updates_only_the_existing_generation_s
         None,
     ));
     let (runtime, _replica, platform) = routing_harness(http.clone()).await;
-    install_quick_unlock_account(&runtime, &platform).await;
+    // This test starts with settled authority. The generic installation fixture's enabled
+    // policy differs from this Server's disabled policy; Bootstrap must abandon
+    // pages captured under that old selection, leaving legitimate catch-up for a later unlock.
+    let mut authentication = verified_with_derived_muk();
+    authentication.travel_mode = TravelModeResponse {
+        enabled: false,
+        enabled_at: None,
+        hidden_vault_ids: Vec::new(),
+        updated_at: "2029-01-02T00:00:00Z".into(),
+    };
+    runtime
+        .install_verified_authentication_with(
+            authentication,
+            evidence(),
+            &FixedClock(NOW_MS),
+            &FixedEntropy::new(&["account-1", "generation-1"]),
+        )
+        .await
+        .unwrap();
+    let installed = runtime
+        .replica
+        .snapshot(&AccountId::from("account-1"))
+        .unwrap();
+    assert_eq!(
+        installed.bootstrap.state,
+        crate::replica::ReplicaState::Ready
+    );
+    assert!(!installed.bootstrap.policy_verification_pending);
+    assert!(installed.bootstrap.staging_generation.is_none());
+    runtime
+        .mark_account_locked(&AccountId::from("account-1"))
+        .await
+        .unwrap();
+    platform.clear_events();
     {
         let key = (
                 "deviceSecret".into(),
@@ -2149,6 +2292,8 @@ async fn quick_unlock_cancellation_has_one_final_pre_write_acceptance_boundary()
             PersistenceStep::Metadata,
             PersistenceStep::QuickUnlock,
             PersistenceStep::CurrentSession,
+            // The existing Bootstrap owner persists its freshly verified Travel policy.
+            PersistenceStep::Metadata,
         ]
     );
 }
@@ -2180,10 +2325,12 @@ async fn confirmed_remote_http_is_used_and_persisted_as_account_local_evidence()
     else {
         panic!("Sign-in returned another response");
     };
-    assert!(http.requests().iter().all(|request| request["url"]
-        .as_str()
-        .unwrap()
-        .starts_with("http://vault.example.com/")));
+    assert!(http.requests().iter().all(|request| {
+        request["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://vault.example.com/")
+    }));
     let incarnation = runtime.replica.snapshot(&account_id).unwrap().incarnation;
     let metadata = runtime
         .platform_storage
@@ -2525,6 +2672,7 @@ async fn replacement_keeps_the_account_id_and_duplicate_identity_rejects_before_
     catalog.accounts.push(DeviceCatalogAccount {
         account_id: AccountId::from("duplicate"),
         active_incarnation: Some(Incarnation::from("duplicate-generation")),
+        pending_retirement: None,
         pending_install: None,
     });
     platform.put_document(
@@ -2639,6 +2787,7 @@ async fn unreadable_replica_outcomes_remain_visible_signed_out_without_a_usable_
             account_id: AccountId::from("account-1"),
             replica_revision: 0,
             access: AccountAccessState::SignedOut,
+            unlock_capabilities: AccountUnlockCapabilities::default(),
             display_identity: None,
             waiting_reason: None,
             failure: None,
@@ -4052,10 +4201,10 @@ async fn failed_authority_commit_leaves_prior_generation_and_cursor() {
 
 fn generation_storage_key(account: &str, incarnation: &str, document: &str) -> String {
     format!(
-            "bittery:runtime:platform-storage:account:{}:{account}:incarnation:{}:{incarnation}:{document}",
-            account.len(),
-            incarnation.len()
-        )
+        "bittery:runtime:platform-storage:account:{}:{account}:incarnation:{}:{incarnation}:{document}",
+        account.len(),
+        incarnation.len()
+    )
 }
 
 fn signed_in_account(runtime: &Runtime) -> (AccountId, Incarnation) {
@@ -4072,6 +4221,8 @@ fn last_status_access(sink: &Sink, account_id: &AccountId) -> Option<AccountAcce
         .find_map(|projection| match projection {
             RuntimeProjection::RuntimeStatus(status) => Some(status.clone()),
             RuntimeProjection::Items(_)
+            | RuntimeProjection::VaultExport(_)
+            | RuntimeProjection::TravelMode(_)
             | RuntimeProjection::PendingShareResults(_)
             | RuntimeProjection::WritableVaultCatalog(_)
             | RuntimeProjection::Operations(_) => None,
@@ -4343,7 +4494,7 @@ struct HeldSyncAuthHttp {
 
 #[async_trait]
 impl crate::http_transport::SerializedHttpExecutor for HeldSyncAuthHttp {
-    async fn invoke(&self, request: String) -> Result<String, RuntimeError> {
+    async fn invoke(&self, request: zeroize::Zeroizing<String>) -> Result<String, RuntimeError> {
         let value: Value = serde_json::from_str(&request).unwrap();
         if value["type"] == "openStream" {
             self.streams.lock().unwrap().insert(

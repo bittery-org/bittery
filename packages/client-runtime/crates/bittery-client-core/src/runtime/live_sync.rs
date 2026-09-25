@@ -246,18 +246,27 @@ impl Runtime {
                 .ok_or_else(sync_auth_required)?,
         )?;
         let mut renewed = false;
-        let mut session = self.sync_session(identity).await?;
+        // Neither a held opening request nor a quiet stream needs Vault wrappers. Release each
+        // loaded Session immediately; renewal reloads current authority under Account execution.
+        let mut stream_token = self.sync_session(identity).await?.token.clone();
         let mut stream = loop {
             match http
-                .open_sync_events(session.token.as_ref(), cancellation.clone())
+                .open_sync_events(stream_token.as_ref(), cancellation.clone())
                 .await?
             {
                 AuthenticatedOutcome::Ok(stream) => break stream,
                 AuthenticatedOutcome::Transient => return Err(sync_retry()),
                 AuthenticatedOutcome::ReauthenticationRequired if !renewed => {
-                    session = self
-                        .renew_sync_session(identity, &http, session, cancellation.clone())
-                        .await?;
+                    stream_token = self
+                        .renew_sync_session(
+                            identity,
+                            &http,
+                            stream_token.as_ref(),
+                            cancellation.clone(),
+                        )
+                        .await?
+                        .token
+                        .clone();
                     renewed = true;
                 }
                 AuthenticatedOutcome::ReauthenticationRequired => return Err(sync_auth_required()),
@@ -268,15 +277,49 @@ impl Runtime {
         let mut connected = false;
         let mut decoder = HintDecoder::default();
         loop {
-            let Some(bytes) = stream.next_chunk(cancellation.clone()).await? else {
+            // A retained local outcome can require authority without producing a new Server
+            // hint. Keep one read alive across local publications: dropping and reissuing it
+            // would cancel the host stream or lose a frame already being read.
+            let next_chunk = stream.next_chunk(cancellation.clone());
+            tokio::pin!(next_chunk);
+            let bytes = loop {
+                let mut wake = std::pin::pin!(self.live_sync_wake.notified());
+                wake.as_mut().enable();
+                if self
+                    .replica
+                    .snapshot(&identity.account_id)
+                    .is_some_and(|snapshot| {
+                        self.travel_policy_sync_work_due(&snapshot)
+                            || (snapshot.bootstrap.state
+                                == crate::replica::ReplicaState::RefreshRequired
+                                && !self.travel_policy_verification_pending(&snapshot))
+                    })
+                {
+                    self.sync_authority(identity, &http, cancellation.clone())
+                        .await?;
+                    if self.sync_session(identity).await?.token.as_ref() != stream_token.as_ref() {
+                        return Err(sync_retry());
+                    }
+                }
+                tokio::select! {
+                    () = wake => {},
+                    result = &mut next_chunk => break result?,
+                }
+            };
+            let Some(bytes) = bytes else {
                 return Err(sync_retry());
             };
             let hints = decoder.push(&bytes).map_err(|_| sync_retry())?;
             if hints.revoked {
                 // The Server's control frame is an auth hint. Renewal still uses the private,
                 // currently installed Session, and serializes with all other renewal owners.
-                self.renew_sync_session(identity, &http, session, cancellation.clone())
-                    .await?;
+                self.renew_sync_session(
+                    identity,
+                    &http,
+                    stream_token.as_ref(),
+                    cancellation.clone(),
+                )
+                .await?;
                 return Err(sync_retry());
             }
             if hints.changed || (hints.connected && !connected) {
@@ -286,7 +329,7 @@ impl Runtime {
                     connected = true;
                 }
                 let current = self.sync_session(identity).await?;
-                if current.token.as_ref() != session.token.as_ref() {
+                if current.token.as_ref() != stream_token.as_ref() {
                     return Err(sync_retry());
                 }
             }
@@ -300,8 +343,7 @@ impl Runtime {
         if !self.sync_eligible(identity) {
             return Err(sync_cancelled());
         }
-        self.platform_storage
-            .load_current_session(&identity.account_id, &identity.incarnation)
+        self.effective_session(&identity.account_id, &identity.incarnation)
             .await?
             .ok_or_else(sync_auth_required)
     }
@@ -310,7 +352,7 @@ impl Runtime {
         &self,
         identity: &SyncIdentity,
         http: &AuthHttpClient<'_>,
-        previous: CurrentSessionDocument,
+        previous_token: &str,
         cancellation: RequestCancellation,
     ) -> Result<CurrentSessionDocument, RuntimeError> {
         let execution = self.account_execution_lock(&identity.account_id)?;
@@ -320,7 +362,7 @@ impl Runtime {
             guard = execution.lock() => guard,
         };
         let current = self.sync_session(identity).await?;
-        if current.token.as_ref() != previous.token.as_ref() {
+        if current.token.as_ref() != previous_token {
             return Ok(current);
         }
         self.renew_session(&identity.account_id, &current, http, cancellation)

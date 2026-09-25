@@ -1,0 +1,57 @@
+{
+  "accounts": [
+    {
+      "email": "source@legacy.invalid",
+      "userId": "source:user",
+      "name": "acct_legacy_α:7",
+      "serverUrl": "https://source.legacy.invalid",
+      "secretKeyHint": "ABCD••••",
+      "addedAt": 1,
+      "lastActiveAt": 1,
+      "biometricEnabled": false,
+      "accountId": "acct_legacy_α:7",
+      "insecureTransportConfirmed": false
+    },
+    {
+      "email": "target@legacy.invalid",
+      "userId": "target:user",
+      "name": "zz_second_account",
+      "serverUrl": "https://target.legacy.invalid",
+      "secretKeyHint": "ABCD••••",
+      "addedAt": 1,
+      "lastActiveAt": 1,
+      "biometricEnabled": false,
+      "accountId": "zz_second_account",
+      "insecureTransportConfirmed": false
+    }
+  ],
+  "records": [
+    {
+      "collection": "acct_legacy_α:7:meta",
+      "id": "meta",
+      "value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790019303565,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://source.legacy.invalid\",\"cursorId\":\"source-independent-deletion\"},\"itemCount\":0},\"activeGeneration\":\"mubn9y8d-3-jq3fescryrh\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:mubn9y8d-3-jq3fescryrh:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:mubn9y8d-3-jq3fescryrh:vaults:\"}}"
+    },
+    {
+      "collection": "item-cache-stage:acct_legacy_α:7:mubn9y8d-3-jq3fescryrh:vaults",
+      "id": "source:vault/雪",
+      "value": "{\"id\":\"source:vault/雪\",\"name\":\"acct_legacy_α:7 vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"serverUrl\":\"https://source.legacy.invalid\"}"
+    },
+    {
+      "collection": "item-cache-stage:zz_second_account:mubn9y76-2-e7f8cz3ig7r:vaults",
+      "id": "target:vault/目标",
+      "value": "{\"id\":\"target:vault/目标\",\"name\":\"zz_second_account vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"zz_second_account\",\"accountEmail\":\"target@legacy.invalid\",\"serverUrl\":\"https://target.legacy.invalid\"}"
+    },
+    {
+      "collection": "zz_second_account:meta",
+      "id": "meta",
+      "value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790019303523,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://target.legacy.invalid\",\"cursorId\":\"target-bootstrap\"},\"itemCount\":0},\"activeGeneration\":\"mubn9y76-2-e7f8cz3ig7r\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:zz_second_account:mubn9y76-2-e7f8cz3ig7r:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:zz_second_account:mubn9y76-2-e7f8cz3ig7r:vaults:\"}}"
+    }
+  ],
+  "sync": {
+    "sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:lastSyncCursor": "{\"id\":\"source-independent-deletion\"}",
+    "sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"source-independent-deletion\"}}",
+    "sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:lastSyncCursor": "{\"id\":\"target-bootstrap\"}",
+    "sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"target-bootstrap\"}}",
+    "bittery_pending_mutation_queues_v3": "{\"acct_legacy_α:7\":[{\"type\":\"cross_account_move\",\"entityId\":\"source:item/雪\",\"vaultId\":\"source:vault/雪\",\"targetVaultId\":\"target:vault/目标\",\"targetAccountId\":\"zz_second_account\",\"targetItemId\":\"target:item/雪\",\"category\":\"login\",\"encryptedPayload\":{\"encryptedData\":\"AUVhzLtuCm/9CpOLr1W//jrNS4rMAR0eGOIMO1u1LOQI9t+bOcUmiA==\",\"encryptionIv\":\"2MVmqKs3Aq1I9HfK\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"target:user\"},\"id\":\"original-semantic-move\",\"operationId\":\"original-semantic-move\",\"timestamp\":1789000000123,\"retryCount\":0,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"baseVersion\":6,\"status\":\"conflicted\",\"attemptId\":\"original-semantic-move\",\"lastError\":\"The Item changed on another device\",\"conflictCopyId\":\"c10e849a-4808-4a30-b2e1-3719c2ad1983\"},{\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"id\":\"conflict-copy:original-semantic-move\",\"operationId\":\"conflict-copy:original-semantic-move\",\"type\":\"create\",\"entityId\":\"c10e849a-4808-4a30-b2e1-3719c2ad1983\",\"vaultId\":\"source:vault/雪\",\"category\":\"login\",\"encryptedPayload\":{\"encryptedData\":\"BGvqVh52x6LRIWNVJD8r855OvEIk9nb6o/th0SrUagMpCuiirmzPEnEg/A==\",\"encryptionIv\":\"4SZ0Zc0bUCP492lc\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"source:user\"},\"baseVersion\":0,\"timestamp\":1790019303553,\"retryCount\":1,\"status\":\"retrying\",\"attemptId\":\"conflict-copy:original-semantic-move\",\"lastError\":\"The server could not be reached.\",\"nextAttemptAt\":1001}]}"
+  }
+}

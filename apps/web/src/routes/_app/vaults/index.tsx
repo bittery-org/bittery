@@ -1,9 +1,9 @@
 import { useAvailableTags } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import type {
-	DecryptedItem,
 	DecryptedItemData,
 	ItemCategory,
+	PublicDecryptedItem,
 } from "@bittery/shared/types";
 import {
 	Badge,
@@ -20,6 +20,10 @@ import {
 	toast,
 } from "@bittery/ui";
 import { IconLayoutGrid as Grid, IconPlus as Plus } from "@bittery/ui/icons";
+import {
+	canWriteVault,
+	creatableVaults,
+} from "@bittery/ui/runtime-presentation";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
@@ -32,7 +36,6 @@ import {
 	useUpdateItem,
 } from "@/hooks/use-runtime-item-mutations";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
-import { canWriteVault, creatableVaults } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/")({
@@ -74,7 +77,7 @@ function AllItemsPage() {
 		? canWriteVault(vaults, selectedItem.vaultId)
 		: true;
 
-	const handleItemSelect = (item: DecryptedItem) => {
+	const handleItemSelect = (item: PublicDecryptedItem) => {
 		navigate({ to: "/vaults", search: { itemId: item.id } });
 	};
 

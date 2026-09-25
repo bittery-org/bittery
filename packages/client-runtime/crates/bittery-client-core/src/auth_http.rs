@@ -8,14 +8,21 @@ use crate::{
         AuthVaultKeyResponse, CursorPageAuthVaultKeyResponse, DeleteAccountRequest,
         DeleteAccountResponse, ErrorCode, FinishLoginRequest, FinishLoginResponse,
         LoginAttemptResponse, ProblemDetails, StartLoginRequest, TravelModeResponse,
-        VaultDetailsResponseDto, VaultImageStagingBody, VaultImageStagingGrantResponse,
-        VaultImageStagingStatusResponse,
+        VaultImageStagingBody, VaultImageStagingGrantResponse, VaultImageStagingStatusResponse,
     },
     RequestCancellation, RuntimeError, RuntimeErrorCode,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashSet;
 use url::{Host, Url};
+mod invitations;
+mod my_invitations;
+mod rotation;
+mod team_page;
+mod vault_members;
+pub(crate) use invitations::InvitationMutationAnswer;
+pub(crate) use my_invitations::MyInvitationMutationAnswer;
+pub(crate) use team_page::{TeamPageHttpAnswer, TeamPageHttpPage, TeamPageHttpRoute};
 
 const SMALL_AUTH_RESPONSE_BYTES: u32 = 64 * 1024;
 // The Server accepts a roughly 1.1 MiB manifest request and returns one storage identity plus an
@@ -34,6 +41,7 @@ const MAX_ATTACHMENT_AUTHORITY_BYTES: usize = MAX_AUTH_VAULT_KEY_BYTES;
 /// One Operation outcome is a small closed document, never an entity page.
 const OPERATION_OUTCOME_RESPONSE_BYTES: u32 = 64 * 1024;
 const VAULT_KEY_RESPONSE_BYTES: u32 = 4 * 1024 * 1024;
+const VAULT_KEY_VERSION_ACCEPT: &str = "application/vnd.bittery.sync-vault-key-version+json";
 const VAULT_IMAGE_STAGING_RESPONSE_BYTES: u32 = 256 * 1024;
 
 pub(crate) fn decode_sha256_hex(value: &str) -> Option<[u8; 32]> {
@@ -58,6 +66,14 @@ pub(crate) enum AuthenticatedOutcome<T> {
     Ok(T),
     ReauthenticationRequired,
     Transient,
+}
+
+/// Current visibility is independent of an already-proved retained Operation result.
+/// In particular, access refusal supplies no evidence that the entity was deleted.
+pub(crate) enum CurrentAuthority<T> {
+    Present(T),
+    Absent,
+    Unavailable,
 }
 
 pub(crate) enum ServerAccountDeletionAnswer {
@@ -173,12 +189,15 @@ pub(crate) enum AttachmentUploadGrantAnswer {
     AccessDenied,
     QuotaRejected,
     SizeRejected,
+    Conflict { retryable: bool },
 }
 
 pub(crate) enum AttachmentMetadataCreateAnswer {
     Created(crate::server_contract::CreateAttachmentResponse),
     Ambiguous,
     AccessDenied,
+    QuotaRejected,
+    Conflict { retryable: bool },
     Missing,
     Rejected,
 }
@@ -354,6 +373,114 @@ impl<'transport> AuthHttpClient<'transport> {
         Ok(vault_keys.into_items())
     }
 
+    pub(crate) fn disable_travel_mode(
+        &self,
+        token: &str,
+        mut request: crate::server_contract::DisableTravelModeRequest,
+        cancellation: RequestCancellation,
+    ) -> impl std::future::Future<Output = Result<TravelModeResponse, RuntimeError>> + '_ {
+        // Preparation is synchronous: even dropping the returned future before its first poll
+        // leaves no raw one-use proof. The pending future owns only a zeroizing serialized body.
+        let body = serde_json::to_vec(&request);
+        zeroize::Zeroize::zeroize(&mut request.client_proof);
+        self.travel_settings_request(token, HttpMethod::Post, "disable", body, cancellation)
+    }
+
+    pub(crate) fn set_travel_mode_hidden_vaults(
+        &self,
+        token: &str,
+        request: &crate::server_contract::HiddenVaultsRequest,
+        cancellation: RequestCancellation,
+    ) -> impl std::future::Future<Output = Result<TravelModeResponse, RuntimeError>> + '_ {
+        self.travel_settings_request(
+            token,
+            HttpMethod::Put,
+            "hidden-vaults",
+            serde_json::to_vec(request),
+            cancellation,
+        )
+    }
+
+    pub(crate) fn enable_travel_mode(
+        &self,
+        token: &str,
+        request: &crate::server_contract::HiddenVaultsRequest,
+        cancellation: RequestCancellation,
+    ) -> impl std::future::Future<Output = Result<TravelModeResponse, RuntimeError>> + '_ {
+        self.travel_settings_request(
+            token,
+            HttpMethod::Post,
+            "enable",
+            serde_json::to_vec(request),
+            cancellation,
+        )
+    }
+
+    fn travel_settings_request(
+        &self,
+        token: &str,
+        method: HttpMethod,
+        endpoint: &str,
+        body: Result<Vec<u8>, serde_json::Error>,
+        cancellation: RequestCancellation,
+    ) -> impl std::future::Future<Output = Result<TravelModeResponse, RuntimeError>> + '_ {
+        let prepared = (|| {
+            let body = zeroize::Zeroizing::new(
+                body.map_err(|_| invariant("Travel settings request could not be serialized"))?,
+            );
+            let mut headers = self.headers(Some(token))?;
+            headers.insert(
+                0,
+                HttpHeader {
+                    name: "Content-Type".into(),
+                    value: "application/json".into(),
+                },
+            );
+            let url = self.endpoint(&["api", "v1", "travel-mode", endpoint])?;
+            Ok::<_, RuntimeError>((url, headers, body))
+        })();
+        async move {
+            let (url, headers, mut body) = prepared?;
+            let uncertain = || {
+                RuntimeError::new(
+                    RuntimeErrorCode::RetryableTransport,
+                    "Travel settings outcome requires current-policy reconciliation",
+                )
+            };
+            // The first poll moves bytes directly into the existing zeroizing HttpDispatch.
+            let response = self
+                .execute_raw(
+                    method,
+                    url,
+                    headers,
+                    std::mem::take(&mut *body),
+                    SMALL_AUTH_RESPONSE_BYTES,
+                    cancellation,
+                )
+                .await
+                .map_err(|error| {
+                    if error.code == RuntimeErrorCode::Cancelled {
+                        error
+                    } else {
+                        uncertain()
+                    }
+                })?;
+            match response.status {
+                200 => {
+                    require_json_content_type(&response.headers).map_err(|_| uncertain())?;
+                    serde_json::from_slice(&response.body).map_err(|_| uncertain())
+                }
+                400 | 403 | 404 => Err(RuntimeError::new(
+                    RuntimeErrorCode::AccessDenied,
+                    "Travel settings request was refused",
+                )),
+                // In particular, a 401 does not prove that this one-use proof is reusable.
+                // The foreground owner may reconcile with GET; this method never renews/reposts.
+                _ => Err(uncertain()),
+            }
+        }
+    }
+
     pub(crate) async fn get_travel_mode(
         &self,
         token: &str,
@@ -361,14 +488,63 @@ impl<'transport> AuthHttpClient<'transport> {
     ) -> Result<TravelModeResponse, RuntimeError> {
         validate_bearer(token)?;
         let url = self.endpoint(&["api", "v1", "travel-mode"])?;
-        self.get_json(
-            url,
-            200,
+        let response = self
+            .transport
+            .execute(
+                HttpDispatch::new(
+                    HttpMethod::Get,
+                    url.into(),
+                    self.headers(Some(token))?,
+                    Vec::new(),
+                    SMALL_AUTH_RESPONSE_BYTES,
+                ),
+                cancellation,
+            )
+            .await?;
+        match response {
+            HttpResponse::Completed {
+                status: 200,
+                headers,
+                body,
+            } => {
+                require_json_content_type(&headers)?;
+                serde_json::from_slice(&body)
+                    .map_err(|_| authentication_failure("Travel Mode response is invalid"))
+            }
+            HttpResponse::Completed {
+                status: 401 | 403, ..
+            } => Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Travel Mode requires a usable Session",
+            )),
+            HttpResponse::NetworkFailure
+            | HttpResponse::Completed {
+                status: 500..=599, ..
+            } => Err(RuntimeError::new(
+                RuntimeErrorCode::RetryableTransport,
+                "Travel Mode verification is temporarily unavailable",
+            )),
+            HttpResponse::Cancelled => Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Travel Mode verification cancelled",
+            )),
+            _ => Err(authentication_failure("Travel Mode verification failed")),
+        }
+    }
+
+    pub(crate) async fn account_identity(
+        &self,
+        token: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<AuthenticatedOutcome<crate::server_contract::MeResponse>, RuntimeError> {
+        self.get_authenticated_json(
+            self.endpoint(&["api", "v1", "auth", "me"])?,
             SMALL_AUTH_RESPONSE_BYTES,
-            Some(token),
+            token,
             cancellation,
         )
         .await
+        .map(|answer| answer.map(|page| page.value))
     }
 
     pub(crate) async fn refresh_session(
@@ -534,8 +710,17 @@ impl<'transport> AuthHttpClient<'transport> {
                 }
             }
         }
-        self.get_authenticated_json(url, VAULT_KEY_RESPONSE_BYTES, token, cancellation)
-            .await
+        // Every new Core Bootstrap generation requests this additive authority fact. An old
+        // Server ignores Accept and returns the ordinary response, which still decodes here.
+        self.get_authenticated_json_with_transport_policy(
+            url,
+            VAULT_KEY_RESPONSE_BYTES,
+            token,
+            cancellation,
+            false,
+            (phase == "vaults").then_some(VAULT_KEY_VERSION_ACCEPT),
+        )
+        .await
     }
 
     pub(crate) async fn sync_changes(
@@ -575,36 +760,11 @@ impl<'transport> AuthHttpClient<'transport> {
             .map(|page| page.value))
     }
 
-    /// Reads current Item authority for semantic reconciliation, where `404` is authoritative
-    /// absence rather than a transport failure.
-    pub(crate) async fn fetch_item_or_absent(
-        &self,
-        token: &str,
-        item_id: &str,
-        cancellation: RequestCancellation,
-    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
-    {
-        self.fetch_item_or_absent_with_transport_policy(token, item_id, cancellation, false)
-            .await
-    }
-
     pub(crate) async fn fetch_item_or_absent_for_attachment(
         &self,
         token: &str,
         item_id: &str,
         cancellation: RequestCancellation,
-    ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
-    {
-        self.fetch_item_or_absent_with_transport_policy(token, item_id, cancellation, true)
-            .await
-    }
-
-    async fn fetch_item_or_absent_with_transport_policy(
-        &self,
-        token: &str,
-        item_id: &str,
-        cancellation: RequestCancellation,
-        transport_is_transient: bool,
     ) -> Result<AuthenticatedOutcome<Option<crate::server_contract::ItemResponseDto>>, RuntimeError>
     {
         validate_bearer(token)?;
@@ -615,7 +775,29 @@ impl<'transport> AuthHttpClient<'transport> {
             VAULT_KEY_RESPONSE_BYTES,
             token,
             cancellation,
-            transport_is_transient,
+            true,
+        )
+        .await
+    }
+
+    pub(crate) async fn fetch_retained_item_authority(
+        &self,
+        token: &str,
+        item_id: &str,
+        cancellation: RequestCancellation,
+    ) -> Result<
+        AuthenticatedOutcome<CurrentAuthority<crate::server_contract::ItemResponseDto>>,
+        RuntimeError,
+    > {
+        validate_bearer(token)?;
+        validate_identifier(item_id, "Item")?;
+        let url = self.endpoint(&["api", "v1", "items", item_id])?;
+        self.get_current_authenticated_json(
+            url,
+            VAULT_KEY_RESPONSE_BYTES,
+            token,
+            cancellation,
+            false,
         )
         .await
     }
@@ -652,6 +834,42 @@ impl<'transport> AuthHttpClient<'transport> {
         cancellation: RequestCancellation,
         transport_is_transient: bool,
     ) -> Result<AuthenticatedOutcome<Option<T>>, RuntimeError> {
+        // Ordinary authority readers retain their existing access-refusal behavior. Only exact
+        // retained-result completion can use Unavailable to finish a receipt without authority.
+        Ok(
+            match self
+                .get_current_authenticated_json(
+                    url,
+                    max_bytes,
+                    token,
+                    cancellation,
+                    transport_is_transient,
+                )
+                .await?
+            {
+                AuthenticatedOutcome::Ok(CurrentAuthority::Present(value)) => {
+                    AuthenticatedOutcome::Ok(Some(value))
+                }
+                AuthenticatedOutcome::Ok(CurrentAuthority::Absent) => {
+                    AuthenticatedOutcome::Ok(None)
+                }
+                AuthenticatedOutcome::Ok(CurrentAuthority::Unavailable)
+                | AuthenticatedOutcome::Transient => AuthenticatedOutcome::Transient,
+                AuthenticatedOutcome::ReauthenticationRequired => {
+                    AuthenticatedOutcome::ReauthenticationRequired
+                }
+            },
+        )
+    }
+
+    async fn get_current_authenticated_json<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        max_bytes: u32,
+        token: &str,
+        cancellation: RequestCancellation,
+        transport_is_transient: bool,
+    ) -> Result<AuthenticatedOutcome<CurrentAuthority<T>>, RuntimeError> {
         let raw = match self
             .execute_raw(
                 HttpMethod::Get,
@@ -674,9 +892,10 @@ impl<'transport> AuthHttpClient<'transport> {
                 require_json_content_type(&raw.headers)?;
                 let item = serde_json::from_slice(&raw.body)
                     .map_err(|_| authentication_failure("Sync Server returned invalid JSON"))?;
-                Ok(AuthenticatedOutcome::Ok(Some(item)))
+                Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Present(item)))
             }
-            404 => Ok(AuthenticatedOutcome::Ok(None)),
+            404 => Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Absent)),
+            403 => Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Unavailable)),
             401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
             _ => Ok(AuthenticatedOutcome::Transient),
         }
@@ -995,6 +1214,21 @@ impl<'transport> AuthHttpClient<'transport> {
                 })
             }
             HttpResponse::Completed {
+                status: 409,
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure(
+                        "Attachment Upload conflict returned invalid Problem Details",
+                    )
+                })?;
+                AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::Conflict {
+                    retryable: problem.retryable,
+                })
+            }
+            HttpResponse::Completed {
                 status: 400 | 413, ..
             } => AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::SizeRejected),
             HttpResponse::Completed {
@@ -1007,12 +1241,12 @@ impl<'transport> AuthHttpClient<'transport> {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::Cancelled,
                     "Attachment Upload grant was cancelled",
-                ))
+                ));
             }
             HttpResponse::Completed { .. } => {
                 return Err(invariant(
                     "Attachment Upload grant returned an unexpected status",
-                ))
+                ));
             }
         })
     }
@@ -1065,8 +1299,37 @@ impl<'transport> AuthHttpClient<'transport> {
             HttpResponse::Completed { status: 401, .. } => {
                 AuthenticatedOutcome::ReauthenticationRequired
             }
-            HttpResponse::Completed { status: 403, .. } => {
-                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::AccessDenied)
+            HttpResponse::Completed {
+                status: 403,
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure(
+                        "Attachment metadata refusal returned invalid Problem Details",
+                    )
+                })?;
+                AuthenticatedOutcome::Ok(if problem.code == ErrorCode::AttachmentQuotaExceeded {
+                    AttachmentMetadataCreateAnswer::QuotaRejected
+                } else {
+                    AttachmentMetadataCreateAnswer::AccessDenied
+                })
+            }
+            HttpResponse::Completed {
+                status: 409,
+                headers,
+                body,
+            } => {
+                require_problem_json_content_type(&headers)?;
+                let problem: ProblemDetails = serde_json::from_slice(&body).map_err(|_| {
+                    authentication_failure(
+                        "Attachment metadata conflict returned invalid Problem Details",
+                    )
+                })?;
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Conflict {
+                    retryable: problem.retryable,
+                })
             }
             HttpResponse::Completed { status: 404, .. } => {
                 AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Missing)
@@ -1075,7 +1338,7 @@ impl<'transport> AuthHttpClient<'transport> {
                 status: 400 | 413, ..
             } => AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Rejected),
             HttpResponse::Completed {
-                status: 408 | 409 | 425 | 429 | 500..=599,
+                status: 408 | 425 | 429 | 500..=599,
                 ..
             }
             | HttpResponse::NetworkFailure
@@ -1086,12 +1349,12 @@ impl<'transport> AuthHttpClient<'transport> {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::Cancelled,
                     "Attachment metadata creation was cancelled",
-                ))
+                ));
             }
             HttpResponse::Completed { .. } => {
                 return Err(invariant(
                     "Attachment metadata returned an unexpected status",
-                ))
+                ));
             }
         })
     }
@@ -1290,6 +1553,7 @@ impl<'transport> AuthHttpClient<'transport> {
                 token,
                 cancellation,
                 true,
+                None,
             )
             .await?
         {
@@ -1545,104 +1809,6 @@ impl<'transport> AuthHttpClient<'transport> {
         ))
     }
 
-    pub(crate) async fn fetch_vault_authority(
-        &self,
-        token: &str,
-        vault_id: &str,
-        cancellation: RequestCancellation,
-    ) -> Result<AuthenticatedOutcome<VaultDetailsResponseDto>, RuntimeError> {
-        validate_bearer(token)?;
-        validate_identifier(vault_id, "Vault")?;
-        let url = self.endpoint(&["api", "v1", "vaults", vault_id])?;
-        self.authenticated_json_response(token, url, cancellation)
-            .await
-    }
-
-    pub(crate) async fn fetch_import_authority_page(
-        &self,
-        token: &str,
-        vault_id: &str,
-        item_ids: &[String],
-        cursor: Option<&str>,
-        cancellation: RequestCancellation,
-    ) -> Result<AuthenticatedOutcome<(Vec<u8>, Option<String>)>, RuntimeError> {
-        validate_bearer(token)?;
-        validate_identifier(vault_id, "Vault")?;
-        let url = self.endpoint(&["api", "v1", "vaults", vault_id, "item-authority-pages"])?;
-        let body = serde_json::to_vec(
-            &serde_json::json!({"itemIds": item_ids, "cursor": cursor, "limit": 200}),
-        )
-        .map_err(|_| invariant("Import authority request is invalid"))?;
-        let mut headers = self.headers(Some(token))?;
-        headers.extend([
-            HttpHeader {
-                name: "Content-Type".into(),
-                value: "application/json".into(),
-            },
-            HttpHeader {
-                name: "Accept".into(),
-                value: "application/json".into(),
-            },
-        ]);
-        let raw = self
-            .execute_raw(
-                HttpMethod::Post,
-                url,
-                headers,
-                body,
-                16 * 1024 * 1024,
-                cancellation,
-            )
-            .await?;
-        match raw.status {
-            200 => {
-                require_json_content_type(&raw.headers)?;
-                let mut cursors = raw
-                    .headers
-                    .iter()
-                    .filter(|header| header.name.eq_ignore_ascii_case("Bittery-Next-Cursor"));
-                let cursor = cursors.next().map(|header| header.value.clone());
-                if cursors.next().is_some() {
-                    return Err(invariant("Import authority repeated its cursor header"));
-                }
-                Ok(AuthenticatedOutcome::Ok((raw.body, cursor)))
-            }
-            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
-            _ => Ok(AuthenticatedOutcome::Transient),
-        }
-    }
-
-    pub(crate) async fn fetch_vault_key_page_raw(
-        &self,
-        token: &str,
-        cursor: Option<&str>,
-        cancellation: RequestCancellation,
-    ) -> Result<AuthenticatedOutcome<Vec<u8>>, RuntimeError> {
-        validate_bearer(token)?;
-        let mut url = self.endpoint(&["api", "v1", "users", "me", "vault-keys"])?;
-        if let Some(cursor) = cursor {
-            url.query_pairs_mut().append_pair("cursor", cursor);
-        }
-        let raw = self
-            .execute_raw(
-                HttpMethod::Get,
-                url,
-                self.headers(Some(token))?,
-                Vec::new(),
-                VAULT_KEY_RESPONSE_BYTES,
-                cancellation,
-            )
-            .await?;
-        match raw.status {
-            200 => {
-                require_json_content_type(&raw.headers)?;
-                Ok(AuthenticatedOutcome::Ok(raw.body))
-            }
-            401 => Ok(AuthenticatedOutcome::ReauthenticationRequired),
-            _ => Ok(AuthenticatedOutcome::Transient),
-        }
-    }
-
     pub(crate) async fn list_item_share_links(
         &self,
         token: &str,
@@ -1858,6 +2024,7 @@ impl<'transport> AuthHttpClient<'transport> {
             token,
             cancellation,
             false,
+            None,
         )
         .await
     }
@@ -1869,12 +2036,20 @@ impl<'transport> AuthHttpClient<'transport> {
         token: &str,
         cancellation: RequestCancellation,
         transport_is_transient: bool,
+        accept: Option<&'static str>,
     ) -> Result<AuthenticatedOutcome<RawJsonPage<T>>, RuntimeError> {
+        let mut headers = self.headers(Some(token))?;
+        if let Some(value) = accept {
+            headers.push(HttpHeader {
+                name: "Accept".to_owned(),
+                value: value.to_owned(),
+            });
+        }
         let raw = match self
             .execute_raw(
                 HttpMethod::Get,
                 url,
-                self.headers(Some(token))?,
+                headers,
                 Vec::new(),
                 max_response_bytes,
                 cancellation,
@@ -2527,6 +2702,7 @@ fn is_raw_transport_failure(error: &RuntimeError) -> bool {
 mod tests {
     use super::*;
     use crate::http_transport::SerializedHttpExecutor;
+    use crate::server_contract;
     use crate::server_contract::{VaultRole, VaultType};
     use async_trait::async_trait;
     use serde_json::{json, Value};
@@ -2557,8 +2733,11 @@ mod tests {
 
     #[async_trait]
     impl SerializedHttpExecutor for ScriptedExecutor {
-        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
-            self.requests.lock().unwrap().push(request_json);
+        async fn invoke(
+            &self,
+            request_json: zeroize::Zeroizing<String>,
+        ) -> Result<String, RuntimeError> {
+            self.requests.lock().unwrap().push(request_json.to_string());
             self.responses.lock().unwrap().pop().ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::InvariantViolation,
@@ -2582,6 +2761,204 @@ mod tests {
 
     fn metadata() -> AuthClientConfig {
         AuthClientConfig::new("client-7".into(), ClientPlatform::Web, "0.5.2".into()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn rotation_stage_accepts_only_empty_success_responses_from_the_server() {
+        let stage = server_contract::StageRequest {
+            outputs: vec![server_contract::StagedOutputRequest {
+                id: "member-7".into(),
+                payload: "nonsecret-staged-output".into(),
+            }],
+        };
+        for (status, body, accepted) in [
+            (200, Vec::new(), true),
+            (204, Vec::new(), true),
+            (200, b"unexpected".to_vec(), false),
+            (204, b"unexpected".to_vec(), false),
+            (202, Vec::new(), false),
+        ] {
+            let response = serde_json::to_string(&json!({
+                "type": "completed",
+                "status": status,
+                "headers": [],
+                "body": body,
+            }))
+            .unwrap();
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor.clone());
+            let client =
+                AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+            let actual = client
+                .stage_rotation_outputs(
+                    "session-7",
+                    "plan-7",
+                    "member",
+                    &stage,
+                    RequestCancellation::new(),
+                )
+                .await;
+            assert_eq!(actual.is_ok(), accepted, "stage response status {status}");
+            let requests = executor.requests();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0]["method"], "PUT");
+            assert!(requests[0]["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("/api/v1/vault-key-rotation-plans/plan-7/staged/member"));
+        }
+    }
+
+    #[tokio::test]
+    async fn bootstrap_vault_pages_request_exact_version_capability_even_from_an_old_server() {
+        let old_vault_page = json!({
+            "phase": "vaults",
+            "hasMore": false,
+            "nextCursor": null,
+            "syncCursor": null,
+            "vaults": []
+        });
+        let old_item_page = json!({
+            "phase": "items",
+            "hasMore": false,
+            "nextCursor": null,
+            "syncCursor": null,
+            "items": []
+        });
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            completed(200, "application/json", old_vault_page.clone()),
+            completed(200, "application/json", old_vault_page),
+            completed(200, "application/json", old_item_page),
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+        for (phase, cursor) in [("vaults", None), ("vaults", Some("next")), ("items", None)] {
+            assert!(matches!(
+                client
+                    .bootstrap_page(
+                        "session-7",
+                        phase,
+                        cursor,
+                        None,
+                        false,
+                        RequestCancellation::new(),
+                    )
+                    .await
+                    .unwrap(),
+                AuthenticatedOutcome::Ok(_)
+            ));
+        }
+        let requests = executor.requests();
+        assert_eq!(requests.len(), 3);
+        for request in requests.iter().take(2) {
+            let headers = request["headers"].as_array().unwrap();
+            let accept: Vec<_> = headers
+                .iter()
+                .filter(|header| header["name"] == "Accept")
+                .collect();
+            assert_eq!(
+                accept,
+                vec![&json!({
+                    "name": "Accept",
+                    "value": "application/vnd.bittery.sync-vault-key-version+json"
+                })]
+            );
+        }
+        assert!(requests[2]["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|header| header["name"] != "Accept"));
+    }
+
+    #[tokio::test]
+    async fn retained_item_read_distinguishes_access_refusal_without_changing_other_readers() {
+        for (response, expected) in [
+            (
+                completed(403, "application/problem+json", json!({})),
+                "unavailable",
+            ),
+            (
+                completed(404, "application/problem+json", json!({})),
+                "absent",
+            ),
+            (
+                completed(401, "application/problem+json", json!({})),
+                "renew",
+            ),
+            (
+                completed(503, "application/problem+json", json!({})),
+                "transient",
+            ),
+            (completed(200, "application/json", json!({})), "error"),
+            (json!({"type":"networkFailure"}).to_string(), "error"),
+            (json!({"type":"cancelled"}).to_string(), "cancelled"),
+        ] {
+            let executor = Arc::new(ScriptedExecutor::new(vec![response]));
+            let transport = HttpTransport::new(executor.clone());
+            let client =
+                AuthHttpClient::new(&transport, "https://server.test/prefix", false, metadata())
+                    .unwrap();
+            let actual = match client
+                .fetch_retained_item_authority("session-7", "item-7", RequestCancellation::new())
+                .await
+            {
+                Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Unavailable)) => "unavailable",
+                Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Absent)) => "absent",
+                Ok(AuthenticatedOutcome::Ok(CurrentAuthority::Present(_))) => "present",
+                Ok(AuthenticatedOutcome::ReauthenticationRequired) => "renew",
+                Ok(AuthenticatedOutcome::Transient) => "transient",
+                Err(error) if error.code == RuntimeErrorCode::Cancelled => "cancelled",
+                Err(_) => "error",
+            };
+            assert_eq!(actual, expected);
+            let requests = executor.requests();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0]["method"], "GET");
+            assert_eq!(
+                requests[0]["url"],
+                "https://server.test/prefix/api/v1/items/item-7"
+            );
+            assert_eq!(requests[0]["maxResponseBytes"], VAULT_KEY_RESPONSE_BYTES);
+        }
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            completed(
+                403,
+                "application/problem+json",
+                json!({})
+            );
+            3
+        ]));
+        let transport = HttpTransport::new(executor.clone());
+        let client =
+            AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+        assert!(matches!(
+            client
+                .fetch_item("session-7", "item-7", RequestCancellation::new())
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::Transient
+        ));
+        assert!(matches!(
+            client
+                .fetch_item_or_absent_for_attachment(
+                    "session-7",
+                    "item-7",
+                    RequestCancellation::new()
+                )
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::Transient
+        ));
+        assert!(matches!(
+            client
+                .fetch_sync_item_authority("session-7", "item-7", RequestCancellation::new())
+                .await
+                .unwrap(),
+            AuthenticatedOutcome::Transient
+        ));
+        assert_eq!(executor.requests().len(), 3);
     }
 
     #[tokio::test]
@@ -2727,76 +3104,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn import_authority_posts_the_identity_set_and_preserves_raw_pages_and_continuation() {
-        let raw_body = b"[  ]\n".to_vec();
-        let response = json!({ "type": "completed", "status": 200,
-            "headers": [{"name": "Content-Type", "value": "application/json"}, {"name": "bittery-next-cursor", "value": "next-page"}],
-            "body": raw_body }).to_string();
-        let executor = Arc::new(ScriptedExecutor::new(vec![
-            response,
-            completed(401, "application/json", json!({})),
-        ]));
-        let transport = HttpTransport::new(executor.clone());
-        let client =
-            AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
-                .unwrap();
-        let ids = vec!["item-2".to_owned(), "item-1".to_owned()];
-        let answer = client
-            .fetch_import_authority_page(
-                "token",
-                "vault-1",
-                &ids,
-                Some("previous"),
-                RequestCancellation::new(),
-            )
-            .await
-            .unwrap();
-        let AuthenticatedOutcome::Ok((body, cursor)) = answer else {
-            panic!("raw authority")
-        };
-        assert_eq!(body, raw_body);
-        assert_eq!(cursor.as_deref(), Some("next-page"));
-        let requests = executor.requests();
-        assert_eq!(requests[0]["method"], "POST");
-        let headers: Vec<HttpHeader> =
-            serde_json::from_value(requests[0]["headers"].clone()).unwrap();
-        let content_types: Vec<_> = headers
-            .iter()
-            .filter(|header| header.name.eq_ignore_ascii_case("Content-Type"))
-            .map(|header| header.value.as_str())
-            .collect();
-        assert_eq!(content_types, ["application/json"]);
-        let accepted_types: Vec<_> = headers
-            .iter()
-            .filter(|header| header.name.eq_ignore_ascii_case("Accept"))
-            .map(|header| header.value.as_str())
-            .collect();
-        assert_eq!(accepted_types, ["application/json"]);
-        assert_eq!(
-            requests[0]["url"],
-            "https://vault.example.test/api/v1/vaults/vault-1/item-authority-pages"
-        );
-        let bytes: Vec<u8> = serde_json::from_value(requests[0]["body"].clone()).unwrap();
-        assert_eq!(
-            serde_json::from_slice::<Value>(&bytes).unwrap(),
-            json!({"itemIds": ids, "cursor": "previous", "limit": 200})
-        );
-        assert!(matches!(
-            client
-                .fetch_import_authority_page(
-                    "token",
-                    "vault-1",
-                    &ids,
-                    None,
-                    RequestCancellation::new()
-                )
-                .await
-                .unwrap(),
-            AuthenticatedOutcome::ReauthenticationRequired
-        ));
-    }
-
-    #[tokio::test]
     async fn owns_exact_authenticated_attachment_upload_grant_and_metadata_exchanges() {
         let executor = Arc::new(ScriptedExecutor::new(vec![
             completed(
@@ -2817,6 +3124,7 @@ mod tests {
             file_name: "opaque.enc".into(),
             content_type: "application/octet-stream".into(),
             file_size: 7,
+            durable_upload: None,
         };
         let grant = client
             .create_attachment_upload_grant(
@@ -2874,6 +3182,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attachment_registration_retains_quota_and_conflict_retryability() {
+        let problem = |status, code, retryable| {
+            completed(
+                status,
+                "application/problem+json",
+                json!({
+                    "type":"https://bittery.com/problems/attachment", "title":"Attachment unavailable",
+                    "status":status, "code":code, "detail":"opaque current policy",
+                    "instance":"urn:bittery:request:test", "requestId":"test", "retryable":retryable, "errors":null
+                }),
+            )
+        };
+        let executor = Arc::new(ScriptedExecutor::new(vec![
+            problem(403, "FORBIDDEN", false),
+            problem(403, "ATTACHMENT_QUOTA_EXCEEDED", false),
+            problem(409, "CONFLICT", true),
+            problem(409, "CONFLICT", false),
+            problem(409, "CONFLICT", true),
+            problem(409, "CONFLICT", false),
+        ]));
+        let transport = HttpTransport::new(executor);
+        let client =
+            AuthHttpClient::new(&transport, "https://server.test", false, metadata()).unwrap();
+        let body: crate::server_contract::CreateAttachmentBody = serde_json::from_value(json!({
+            "attachmentId":"attachment-7", "storageKey":"attachments/key", "encryptedAttachmentKey":"key",
+            "attachmentKeyIv":"iv", "attachmentKeyAlgorithm":"AES-GCM-AAD-V1", "envelopeVersion":1,
+            "encryptedName":"name", "encryptedContentType":"type", "encryptionIv":"iv", "encryptedContentTypeIv":"iv",
+            "encryptionAlgorithm":"AES-GCM-AAD-V1", "fileSize":7
+        })).unwrap();
+        for index in 0..4 {
+            let answer = client
+                .create_attachment_metadata("token", "item-7", &body, RequestCancellation::new())
+                .await
+                .unwrap();
+            assert!(matches!(
+                (index, answer),
+                (
+                    0,
+                    AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::AccessDenied)
+                ) | (
+                    1,
+                    AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::QuotaRejected)
+                ) | (
+                    2,
+                    AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Conflict {
+                        retryable: true,
+                    }),
+                ) | (
+                    3,
+                    AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Conflict {
+                        retryable: false,
+                    }),
+                )
+            ));
+        }
+        let body = crate::server_contract::AttachmentUploadBody {
+            file_name: "opaque.enc".into(),
+            content_type: "application/octet-stream".into(),
+            file_size: 7,
+            durable_upload: None,
+        };
+        for expected in [true, false] {
+            let answer = client
+                .create_attachment_upload_grant(
+                    "token",
+                    "item-7",
+                    &body,
+                    RequestCancellation::new(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                matches!(answer, AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::Conflict { retryable }) if retryable == expected)
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn attachment_upload_quota_classification_uses_only_the_stable_code() {
         let problem = |code: &str, detail: &str| {
             json!({
@@ -2907,6 +3293,7 @@ mod tests {
             file_name: "opaque.enc".into(),
             content_type: "application/octet-stream".into(),
             file_size: 7,
+            durable_upload: None,
         };
         assert!(matches!(
             client
@@ -3376,6 +3763,108 @@ mod tests {
                 _ => panic!("unexpected manifest classification for {expected}"),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn travel_disable_requires_reconciliation_without_replaying_a_consumed_proof() {
+        for (status, expected) in [
+            (401, RuntimeErrorCode::RetryableTransport),
+            (500, RuntimeErrorCode::RetryableTransport),
+            (403, RuntimeErrorCode::AccessDenied),
+            (400, RuntimeErrorCode::AccessDenied),
+        ] {
+            let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+                status,
+                "application/problem+json",
+                json!({}),
+            )]));
+            let transport = HttpTransport::new(executor.clone());
+            let client =
+                AuthHttpClient::new(&transport, "https://vault.example.test", false, metadata())
+                    .unwrap();
+            let answer = client
+                .disable_travel_mode(
+                    "retained-session-token",
+                    crate::server_contract::DisableTravelModeRequest {
+                        attempt_id: "fresh-attempt".into(),
+                        client_public_key: "fresh-public-key".into(),
+                        client_proof: "one-use-proof".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await;
+            let error = answer
+                .err()
+                .expect("a refused request cannot confirm a policy");
+            assert_eq!(error.code, expected, "classification for HTTP {status}");
+            assert_eq!(
+                executor.requests().len(),
+                1,
+                "even an authentication failure cannot authorize another proof POST or Session renewal"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn travel_disable_consumes_one_proof_without_creating_a_session() {
+        let policy = json!({
+            "enabled": false,
+            "hiddenVaultIds": ["vault-3"],
+            "updatedAt": "2026-08-23T10:00:00Z"
+        });
+        let executor = Arc::new(ScriptedExecutor::new(vec![completed(
+            200,
+            "application/json",
+            policy.clone(),
+        )]));
+        let transport = HttpTransport::new(executor.clone());
+        let client = AuthHttpClient::new(
+            &transport,
+            "https://vault.example.test/bittery",
+            false,
+            metadata(),
+        )
+        .unwrap();
+        let reply = client
+            .disable_travel_mode(
+                "retained-session-token",
+                crate::server_contract::DisableTravelModeRequest {
+                    attempt_id: "fresh-attempt".into(),
+                    client_public_key: "fresh-public-key".into(),
+                    client_proof: "one-use-proof".into(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .expect("the password proof must reach the foreground disable endpoint");
+        assert!(!reply.enabled);
+        assert_eq!(reply.hidden_vault_ids, ["vault-3"]);
+        let requests = executor.requests();
+        assert_eq!(
+            requests.len(),
+            1,
+            "disable must neither finish login nor issue another request"
+        );
+        let request = &requests[0];
+        assert_eq!(request["method"], "POST");
+        assert_eq!(
+            request["url"],
+            "https://vault.example.test/bittery/api/v1/travel-mode/disable"
+        );
+        let body: Vec<u8> = serde_json::from_value(request["body"].clone()).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap(),
+            json!({
+                "attemptId": "fresh-attempt", "clientPublicKey": "fresh-public-key", "clientProof": "one-use-proof"
+            })
+        );
+        assert!(request["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|header| header["name"] == "Authorization"
+                && header["value"] == "Bearer retained-session-token"));
+        assert_eq!(request["maxResponseBytes"], SMALL_AUTH_RESPONSE_BYTES);
     }
 
     #[tokio::test]

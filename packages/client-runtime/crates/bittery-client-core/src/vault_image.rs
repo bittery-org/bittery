@@ -1,8 +1,7 @@
-//! Durable plaintext ingress for an optional Vault image.
+//! Bounded Vault-image ingress and protected publication, with legacy raw compatibility.
 //!
-//! This port is intentionally unrelated to the encrypted Attachment artifact port. A later
-//! create-Vault slice may reference a published artifact, but this module cannot accept an
-//! Operation or dispatch network work.
+//! This existing store owns image publication and cleanup. Core separately admits Operations,
+//! gates plaintext access and dispatches network work.
 
 use crate::{AccountId, RequestCancellation, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
@@ -13,8 +12,14 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
+mod inventory;
+pub use inventory::{
+    VaultImageInventoryContinuation, VaultImageInventoryFamily, VaultImageInventoryPage,
+    VaultImageInventorySchema, VaultImagePhysicalKey,
+};
+pub(crate) mod protected;
 #[cfg(not(target_arch = "wasm32"))]
-mod sqlite;
+pub(crate) mod sqlite;
 #[cfg(test)]
 mod tests;
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,6 +39,7 @@ const ALLOWED_CONTENT_TYPES: [&str; 5] = [
 pub struct VaultImageArtifactScope {
     account_id: AccountId,
     operation_id: String,
+    publication_id: Option<String>,
 }
 impl VaultImageArtifactScope {
     pub fn new(
@@ -46,6 +52,7 @@ impl VaultImageArtifactScope {
         Ok(Self {
             account_id,
             operation_id,
+            publication_id: None,
         })
     }
     pub fn account_id(&self) -> &AccountId {
@@ -53,6 +60,17 @@ impl VaultImageArtifactScope {
     }
     pub fn operation_id(&self) -> &str {
         &self.operation_id
+    }
+    pub fn publication_id(&self) -> Option<&str> {
+        self.publication_id.as_deref()
+    }
+    pub fn for_publication(&self, publication_id: &str) -> Result<Self, RuntimeError> {
+        validate_identity(publication_id, "Image publication")?;
+        Ok(Self {
+            account_id: self.account_id.clone(),
+            operation_id: self.operation_id.clone(),
+            publication_id: Some(publication_id.to_owned()),
+        })
     }
 }
 
@@ -63,6 +81,13 @@ pub struct VaultImageArtifactMetadata {
     byte_length: u64,
     content_type: String,
     sha256: String,
+    protected: Option<protected::ProtectedImageMetadata>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VaultImageArtifactGeneration {
+    pub scope: VaultImageArtifactScope,
+    pub metadata: Option<VaultImageArtifactMetadata>,
 }
 impl VaultImageArtifactMetadata {
     pub fn new(
@@ -75,6 +100,11 @@ impl VaultImageArtifactMetadata {
         let vault_id = vault_id.into();
         let content_type = content_type.into();
         let sha256 = sha256.into();
+        if scope.publication_id().is_some() {
+            return Err(invariant(
+                "Raw Vault image has a protected publication identity",
+            ));
+        }
         validate_identity(&vault_id, "Vault")?;
         validate_image_shape(byte_length, &content_type)?;
         if !is_lowercase_sha256(&sha256) {
@@ -86,7 +116,27 @@ impl VaultImageArtifactMetadata {
             byte_length,
             content_type,
             sha256,
+            protected: None,
         })
+    }
+    pub fn with_protection(
+        self,
+        protected: protected::ProtectedImageMetadata,
+    ) -> Result<Self, RuntimeError> {
+        if self.protected.is_some() || !protected.matches_original(&self)? {
+            return Err(invariant("Protected Vault image metadata conflicts"));
+        }
+        protected::validate_protected_metadata(&self, &protected)?;
+        Ok(Self {
+            scope: self
+                .scope
+                .for_publication(&protected.witness.publication_id)?,
+            protected: Some(protected),
+            ..self
+        })
+    }
+    pub fn protection(&self) -> Option<&protected::ProtectedImageMetadata> {
+        self.protected.as_ref()
     }
     pub fn scope(&self) -> &VaultImageArtifactScope {
         &self.scope
@@ -194,6 +244,23 @@ pub trait VaultImageSourcePort: Send + Sync {
         account_id: &AccountId,
         operation_id: &str,
     ) -> Result<(), VaultImageSourceError>;
+    async fn retire_vaults(
+        &self,
+        runtime_incarnation: &str,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError>;
+    async fn complete_vault_retirement(
+        &self,
+        runtime_incarnation: &str,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError>;
+    async fn forget_account_vault_retirements(
+        &self,
+        runtime_incarnation: &str,
+        account_id: &AccountId,
+    ) -> Result<(), VaultImageSourceError>;
     async fn retire_runtime(&self, runtime_incarnation: &str) -> Result<(), VaultImageSourceError>;
 }
 #[cfg(target_arch = "wasm32")]
@@ -225,6 +292,23 @@ pub trait VaultImageSourcePort {
         account_id: &AccountId,
         operation_id: &str,
     ) -> Result<(), VaultImageSourceError>;
+    async fn retire_vaults(
+        &self,
+        runtime_incarnation: &str,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError>;
+    async fn complete_vault_retirement(
+        &self,
+        runtime_incarnation: &str,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError>;
+    async fn forget_account_vault_retirements(
+        &self,
+        runtime_incarnation: &str,
+        account_id: &AccountId,
+    ) -> Result<(), VaultImageSourceError>;
     async fn retire_runtime(&self, runtime_incarnation: &str) -> Result<(), VaultImageSourceError>;
 }
 
@@ -241,6 +325,14 @@ pub enum VaultImagePublication {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 pub trait VaultImageArtifactPort: Send + Sync {
+    /// Complete physical-key census through this owner. Unsupported adapters must fail closed;
+    /// ordinary CoreOnly startup does not require this profile-admission capability.
+    async fn inventory_page(
+        &self,
+        _cursor: Option<&str>,
+    ) -> Result<VaultImageInventoryPage, RuntimeError> {
+        Err(inventory::invalid("Vault image inventory is unavailable"))
+    }
     async fn begin(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError>;
     async fn write_chunk(
         &self,
@@ -257,6 +349,14 @@ pub trait VaultImageArtifactPort: Send + Sync {
         metadata: &VaultImageArtifactMetadata,
         chunk_index: u32,
     ) -> Result<Option<Vec<u8>>, RuntimeError>;
+    /// One ordered generation in this Account/Operation family; empty cursor names legacy raw.
+    async fn read_generation(
+        &self,
+        family: &VaultImageArtifactScope,
+        after_publication_id: Option<&str>,
+    ) -> Result<Option<VaultImageArtifactGeneration>, RuntimeError>;
+    /// Delete exactly this generation, retaining every sibling publication.
+    async fn delete_generation(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError>;
     async fn delete(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError>;
     async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError>;
     async fn wipe(&self) -> Result<(), RuntimeError>;
@@ -269,6 +369,14 @@ pub trait VaultImageArtifactPort: Send + Sync {
 #[cfg(target_arch = "wasm32")]
 #[async_trait(?Send)]
 pub trait VaultImageArtifactPort {
+    /// Complete physical-key census through this owner. Unsupported adapters must fail closed;
+    /// ordinary CoreOnly startup does not require this profile-admission capability.
+    async fn inventory_page(
+        &self,
+        _cursor: Option<&str>,
+    ) -> Result<VaultImageInventoryPage, RuntimeError> {
+        Err(inventory::invalid("Vault image inventory is unavailable"))
+    }
     async fn begin(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError>;
     async fn write_chunk(
         &self,
@@ -285,6 +393,14 @@ pub trait VaultImageArtifactPort {
         metadata: &VaultImageArtifactMetadata,
         chunk_index: u32,
     ) -> Result<Option<Vec<u8>>, RuntimeError>;
+    /// One ordered generation in this Account/Operation family; empty cursor names legacy raw.
+    async fn read_generation(
+        &self,
+        family: &VaultImageArtifactScope,
+        after_publication_id: Option<&str>,
+    ) -> Result<Option<VaultImageArtifactGeneration>, RuntimeError>;
+    /// Delete exactly this generation, retaining every sibling publication.
+    async fn delete_generation(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError>;
     async fn delete(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError>;
     async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError>;
     async fn wipe(&self) -> Result<(), RuntimeError>;
@@ -445,12 +561,53 @@ impl VaultImageArtifactPort for MemoryVaultImageArtifactStore {
     ) -> Result<Option<Vec<u8>>, RuntimeError> {
         self.read_sync(metadata, index)
     }
-    async fn delete(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError> {
+    async fn read_generation(
+        &self,
+        family: &VaultImageArtifactScope,
+        after: Option<&str>,
+    ) -> Result<Option<VaultImageArtifactGeneration>, RuntimeError> {
+        if let Some(after) = after.filter(|value| !value.is_empty()) {
+            validate_identity(after, "Image publication cursor")?;
+        }
+        let state = self
+            .inner
+            .lock()
+            .expect("Vault image memory store lock poisoned");
+        Ok(state
+            .artifacts
+            .iter()
+            .filter(|(scope, _)| {
+                scope.account_id() == family.account_id()
+                    && scope.operation_id() == family.operation_id()
+                    && after.is_none_or(|after| scope.publication_id().unwrap_or("") > after)
+            })
+            .min_by(|(a, _), (b, _)| {
+                a.publication_id()
+                    .unwrap_or("")
+                    .cmp(b.publication_id().unwrap_or(""))
+            })
+            .map(|(scope, artifact)| VaultImageArtifactGeneration {
+                scope: scope.clone(),
+                metadata: artifact.metadata.clone(),
+            }))
+    }
+    async fn delete_generation(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError> {
         self.inner
             .lock()
             .expect("Vault image memory store lock poisoned")
             .artifacts
             .remove(scope);
+        Ok(())
+    }
+    async fn delete(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError> {
+        self.inner
+            .lock()
+            .expect("Vault image memory store lock poisoned")
+            .artifacts
+            .retain(|candidate, _| {
+                candidate.account_id() != scope.account_id()
+                    || candidate.operation_id() != scope.operation_id()
+            });
         Ok(())
     }
     async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
@@ -491,6 +648,13 @@ pub struct VaultImageIngressFacade {
     sources: Arc<dyn VaultImageSourcePort>,
     artifacts: Arc<dyn VaultImageArtifactPort>,
 }
+
+/// Ephemeral Core-only access to the existing Device key; never sent through host controls.
+pub(crate) struct VaultImageProtection<'a> {
+    pub user_id: &'a str,
+    pub device_key: &'a [u8],
+}
+
 impl VaultImageIngressFacade {
     pub fn new(
         runtime_incarnation: impl Into<String>,
@@ -522,13 +686,11 @@ impl VaultImageIngressFacade {
         .await
     }
 
-    /// Binds a host capability to Runtime-owned identities before create-Vault acceptance.
-    /// The host never learns or supplies the Runtime incarnation, Operation ID, or Vault ID.
     #[allow(
         clippy::too_many_arguments,
-        reason = "the narrow Ticket 53 facade binds every immutable artifact authority field explicitly"
+        reason = "binds the same exact Runtime image identities with ephemeral Core protection"
     )]
-    pub(crate) async fn prepare_bound(
+    pub(crate) async fn prepare_bound_protected(
         &self,
         account_id: AccountId,
         operation_id: String,
@@ -537,8 +699,11 @@ impl VaultImageIngressFacade {
         content_type: String,
         byte_length: u64,
         cancellation: &RequestCancellation,
+        protection: VaultImageProtection<'_>,
     ) -> Result<PreparedVaultImage, RuntimeError> {
-        self.prepare(
+        prepare_image_with_protection(
+            self.sources.as_ref(),
+            self.artifacts.as_ref(),
             VaultImageSourceGrant {
                 runtime_incarnation: self.runtime_incarnation.clone(),
                 account_id,
@@ -549,6 +714,7 @@ impl VaultImageIngressFacade {
                 byte_length,
             },
             cancellation,
+            Some(protection),
         )
         .await
     }
@@ -604,6 +770,247 @@ impl VaultImageIngressFacade {
         }
         Ok(bytes)
     }
+    /// Caller holds the exact accepted legacy Operation's execution fence. This prepares a
+    /// replacement only; witness commit and raw cleanup remain separate guarded Core steps.
+    pub(crate) async fn protect_legacy_bound(
+        &self,
+        original: &VaultImageArtifactMetadata,
+        protection: VaultImageProtection<'_>,
+        cancellation: &RequestCancellation,
+    ) -> Result<VaultImageArtifactMetadata, RuntimeError> {
+        if original.scope().publication_id().is_some() || original.protection().is_some() {
+            return Err(invariant(
+                "Legacy image conversion requires original raw evidence",
+            ));
+        }
+        let mut after = String::new();
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(cancelled());
+            }
+            let Some(generation) = self
+                .artifacts
+                .read_generation(original.scope(), Some(&after))
+                .await?
+            else {
+                break;
+            };
+            let publication = generation
+                .scope
+                .publication_id()
+                .ok_or_else(|| invariant("Protected image cursor returned raw publication"))?;
+            if generation.scope.account_id() != original.account_id()
+                || generation.scope.operation_id() != original.operation_id()
+                || publication <= after.as_str()
+            {
+                return Err(invariant("Protected image cursor changed scope"));
+            }
+            after = publication.to_owned();
+            if let Some(metadata) = generation.metadata {
+                if metadata.scope() != &generation.scope {
+                    return Err(invariant("Protected candidate metadata changed scope"));
+                }
+                let protected = metadata
+                    .protection()
+                    .ok_or_else(|| invariant("Protected publication has raw metadata"))?;
+                let chunks = self.read_protected_chunks(&metadata, cancellation).await?;
+                protected::verify_protected_publication(
+                    original,
+                    protection.user_id,
+                    &protected.witness,
+                    protected,
+                    &chunks,
+                    protection.device_key,
+                )?;
+                return Ok(metadata);
+            }
+            // This accepted legacy Operation has no concurrent host ingress. An unfinished
+            // replacement is abandoned output; raw authority remains intact during its removal.
+            self.artifacts.delete_generation(&generation.scope).await?;
+        }
+        let bytes = self
+            .read_published_bound(
+                original.account_id().clone(),
+                original.operation_id().into(),
+                original.vault_id().into(),
+                original.byte_length(),
+                original.content_type().into(),
+                original.sha256().into(),
+            )
+            .await?;
+        if cancellation.is_cancelled() {
+            return Err(cancelled());
+        }
+        let source = Box::new(LegacyImageSource { bytes, offset: 0 });
+        Ok(publish_image_source(
+            source,
+            self.artifacts.as_ref(),
+            original.scope().clone(),
+            original.vault_id().into(),
+            original.content_type().into(),
+            original.byte_length(),
+            cancellation,
+            Some(protection),
+        )
+        .await?
+        .metadata)
+    }
+
+    pub(crate) async fn read_protected_bound(
+        &self,
+        original: &VaultImageArtifactMetadata,
+        witness: &protected::ProtectedImageWitness,
+        protection: VaultImageProtection<'_>,
+        cancellation: &RequestCancellation,
+    ) -> Result<Zeroizing<Vec<u8>>, RuntimeError> {
+        let (metadata, chunks) = self
+            .read_protected_publication(original, witness, protection.user_id, cancellation)
+            .await?;
+        let protected_metadata = metadata
+            .protection()
+            .ok_or_else(|| invariant("Accepted protected image has raw metadata"))?;
+        let bytes = protected::read_protected_image(
+            original,
+            protection.user_id,
+            witness,
+            protected_metadata,
+            &chunks,
+            protection.device_key,
+        )?;
+        if cancellation.is_cancelled() {
+            return Err(cancelled());
+        }
+        Ok(bytes)
+    }
+
+    /// Cleanup verifies the accepted opaque dependency without unwrapping a key or reading image plaintext.
+    pub(crate) async fn verify_protected_bound(
+        &self,
+        original: &VaultImageArtifactMetadata,
+        witness: &protected::ProtectedImageWitness,
+        user_id: &str,
+        cancellation: &RequestCancellation,
+    ) -> Result<(), RuntimeError> {
+        let (metadata, chunks) = self
+            .read_protected_publication(original, witness, user_id, cancellation)
+            .await?;
+        protected::verify_ciphertext(
+            original,
+            metadata
+                .protection()
+                .ok_or_else(|| invariant("Accepted protected image has raw metadata"))?,
+            &chunks,
+        )
+    }
+
+    async fn read_protected_publication(
+        &self,
+        original: &VaultImageArtifactMetadata,
+        witness: &protected::ProtectedImageWitness,
+        user_id: &str,
+        cancellation: &RequestCancellation,
+    ) -> Result<(VaultImageArtifactMetadata, Vec<Vec<u8>>), RuntimeError> {
+        protected::validate_witness(witness, original.byte_length())?;
+        let family =
+            VaultImageArtifactScope::new(original.account_id().clone(), original.operation_id())?;
+        // Skip the legacy raw generation. Candidates are individually bounded and ordered by the
+        // existing store; only the immutable accepted publication may supply its wrapper/chunks.
+        let mut after = String::new();
+        let metadata = loop {
+            if cancellation.is_cancelled() {
+                return Err(cancelled());
+            }
+            let generation = self
+                .artifacts
+                .read_generation(&family, Some(&after))
+                .await?
+                .ok_or_else(|| invariant("Accepted protected image publication is missing"))?;
+            let publication = generation
+                .scope
+                .publication_id()
+                .ok_or_else(|| invariant("Protected image cursor returned raw publication"))?;
+            if generation.scope.account_id() != family.account_id()
+                || generation.scope.operation_id() != family.operation_id()
+                || publication <= after.as_str()
+            {
+                return Err(invariant(
+                    "Protected image publication cursor changed scope",
+                ));
+            }
+            match publication.cmp(&witness.publication_id) {
+                std::cmp::Ordering::Less => after = publication.to_owned(),
+                std::cmp::Ordering::Greater => {
+                    return Err(invariant("Accepted protected image publication is missing"));
+                }
+                std::cmp::Ordering::Equal => {
+                    break generation
+                        .metadata
+                        .ok_or_else(|| invariant("Accepted protected image is unpublished"))?;
+                }
+            }
+        };
+        let protected_metadata = metadata
+            .protection()
+            .ok_or_else(|| invariant("Accepted protected image has raw metadata"))?;
+        protected::validate_metadata_scope(original, user_id, witness, protected_metadata)?;
+        if metadata.scope() != &family.for_publication(&witness.publication_id)? {
+            return Err(invariant(
+                "Protected image metadata changed publication scope",
+            ));
+        }
+        let chunks = self.read_protected_chunks(&metadata, cancellation).await?;
+        Ok((metadata, chunks))
+    }
+
+    async fn read_protected_chunks(
+        &self,
+        metadata: &VaultImageArtifactMetadata,
+        cancellation: &RequestCancellation,
+    ) -> Result<Vec<Vec<u8>>, RuntimeError> {
+        let protected = metadata
+            .protection()
+            .ok_or_else(|| invariant("Protected publication has raw metadata"))?;
+        let witness = &protected.witness;
+        protected::validate_witness(witness, metadata.byte_length())?;
+        let mut chunks = Vec::with_capacity(witness.chunk_count as usize);
+        for index in 0..witness.chunk_count {
+            if cancellation.is_cancelled() {
+                return Err(cancelled());
+            }
+            let chunk = self
+                .artifacts
+                .read_chunk(metadata, index)
+                .await?
+                .ok_or_else(|| invariant("Accepted protected image chunk is missing"))?;
+            if chunk.is_empty() || chunk.len() > VAULT_IMAGE_CHUNK_BYTES {
+                return Err(invariant("Protected image chunk exceeded shared bound"));
+            }
+            chunks.push(chunk);
+        }
+        if self
+            .artifacts
+            .read_chunk(metadata, witness.chunk_count)
+            .await?
+            .is_some()
+        {
+            return Err(invariant("Protected image contains extra chunks"));
+        }
+        if cancellation.is_cancelled() {
+            return Err(cancelled());
+        }
+        Ok(chunks)
+    }
+
+    pub(crate) async fn delete_raw_generation(
+        &self,
+        original: &VaultImageArtifactMetadata,
+    ) -> Result<(), RuntimeError> {
+        if original.scope().publication_id().is_some() {
+            return Err(invariant("Raw cleanup requires raw scope"));
+        }
+        self.artifacts.delete_generation(original.scope()).await
+    }
+
     pub(crate) async fn delete_bound(
         &self,
         account_id: AccountId,
@@ -612,6 +1019,35 @@ impl VaultImageIngressFacade {
         self.artifacts
             .delete(&VaultImageArtifactScope::new(account_id, operation_id)?)
             .await
+    }
+    pub async fn retire_vaults(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), RuntimeError> {
+        self.sources
+            .retire_vaults(&self.runtime_incarnation, account_id, vault_ids)
+            .await
+            .map_err(source_error)
+    }
+    pub async fn complete_vault_retirement(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), RuntimeError> {
+        self.sources
+            .complete_vault_retirement(&self.runtime_incarnation, account_id, vault_ids)
+            .await
+            .map_err(source_error)
+    }
+    pub async fn forget_account_vault_retirements(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), RuntimeError> {
+        self.sources
+            .forget_account_vault_retirements(&self.runtime_incarnation, account_id)
+            .await
+            .map_err(source_error)
     }
     pub async fn retire_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         self.sources
@@ -655,6 +1091,12 @@ impl VaultImageIngressFacade {
             .retire_runtime(&self.runtime_incarnation)
             .await
             .map_err(source_error)
+    }
+    pub(crate) async fn inventory_page(
+        &self,
+        cursor: Option<&str>,
+    ) -> Result<VaultImageInventoryPage, RuntimeError> {
+        self.artifacts.inventory_page(cursor).await
     }
     /// Durable deletion belongs only to explicit Remove/Wipe after source retirement has drained.
     pub(crate) async fn delete_account_artifacts(
@@ -725,32 +1167,138 @@ async fn prepare_image<S: VaultImageSourcePort + ?Sized, A: VaultImageArtifactPo
     grant: VaultImageSourceGrant,
     cancellation: &RequestCancellation,
 ) -> Result<PreparedVaultImage, RuntimeError> {
+    prepare_image_with_protection(sources, artifacts, grant, cancellation, None).await
+}
+
+async fn prepare_image_with_protection<
+    S: VaultImageSourcePort + ?Sized,
+    A: VaultImageArtifactPort + ?Sized,
+>(
+    sources: &S,
+    artifacts: &A,
+    grant: VaultImageSourceGrant,
+    cancellation: &RequestCancellation,
+    protection: Option<VaultImageProtection<'_>>,
+) -> Result<PreparedVaultImage, RuntimeError> {
     let scope = grant.validate()?;
-    let mut source = sources.claim(&grant).await.map_err(source_error)?;
+    let source = sources.claim(&grant).await.map_err(source_error)?;
+    publish_image_source(
+        source,
+        artifacts,
+        scope,
+        grant.vault_id,
+        grant.content_type,
+        grant.byte_length,
+        cancellation,
+        protection,
+    )
+    .await
+}
+
+/// An ephemeral internal reader for verified legacy bytes, not a host grant or persisted owner.
+struct LegacyImageSource {
+    bytes: Zeroizing<Vec<u8>>,
+    offset: usize,
+}
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl VaultImageSource for LegacyImageSource {
+    async fn next_chunk(
+        &mut self,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<u8>>, VaultImageSourceError> {
+        if self.offset == self.bytes.len() {
+            return Ok(None);
+        }
+        let end = (self.offset + max_bytes).min(self.bytes.len());
+        let bytes = self.bytes[self.offset..end].to_vec();
+        self.offset = end;
+        Ok(Some(bytes))
+    }
+    async fn close(&mut self) -> Result<(), VaultImageSourceError> {
+        self.bytes.zeroize();
+        self.bytes.clear();
+        self.offset = 0;
+        Ok(())
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one publisher shares source lifetime and exact image binding across fresh and legacy ingress"
+)]
+async fn publish_image_source<A: VaultImageArtifactPort + ?Sized>(
+    mut source: Box<dyn VaultImageSource>,
+    artifacts: &A,
+    scope: VaultImageArtifactScope,
+    vault_id: String,
+    content_type: String,
+    byte_length: u64,
+    cancellation: &RequestCancellation,
+    protection: Option<VaultImageProtection<'_>>,
+) -> Result<PreparedVaultImage, RuntimeError> {
+    let mut cleanup_scope = None;
     let result = async {
-        artifacts.begin(&scope).await?;
+        let mut writer = protection
+            .as_ref()
+            .map(|context| {
+                protected::ProtectedImageWriter::new(scope.clone(), &vault_id, context.user_id)
+            })
+            .transpose()?;
+        let storage_scope = match writer.as_ref() {
+            Some(writer) => scope.clone().for_publication(writer.publication_id())?,
+            None => scope.clone(),
+        };
+        cleanup_scope = Some(storage_scope.clone());
+        let chunk_bound = if writer.is_some() {
+            protected::PROTECTED_IMAGE_PLAINTEXT_CHUNK_BYTES
+        } else {
+            VAULT_IMAGE_CHUNK_BYTES
+        };
+        artifacts.begin(&storage_scope).await?;
         let mut digest = Sha256::new();
         let mut read = 0u64;
         let mut index = 0u32;
-        while read < grant.byte_length {
+        while read < byte_length {
             if cancellation.is_cancelled() {
                 return Err(cancelled());
             }
-            let remaining =
-                usize::try_from(grant.byte_length - read).unwrap_or(VAULT_IMAGE_CHUNK_BYTES);
-            let limit = remaining.min(VAULT_IMAGE_CHUNK_BYTES);
-            let bytes = source
-                .next_chunk(limit)
-                .await
-                .map_err(source_error)?
-                .ok_or_else(|| invariant("Vault image source ended before its declared length"))?;
-            let bytes = Zeroizing::new(bytes);
-            if bytes.is_empty() || bytes.len() > limit {
-                return Err(invariant("Vault image source violated the bounded read"));
+            let remaining = usize::try_from(byte_length - read).unwrap_or(VAULT_IMAGE_CHUNK_BYTES);
+            let limit = remaining.min(chunk_bound);
+            let mut bytes = Zeroizing::new(Vec::with_capacity(limit));
+            while bytes.len() < limit {
+                if cancellation.is_cancelled() {
+                    return Err(cancelled());
+                }
+                let available = limit - bytes.len();
+                let chunk = Zeroizing::new(
+                    source
+                        .next_chunk(available)
+                        .await
+                        .map_err(source_error)?
+                        .ok_or_else(|| {
+                            invariant("Vault image source ended before its declared length")
+                        })?,
+                );
+                if chunk.is_empty() || chunk.len() > available {
+                    return Err(invariant("Vault image source violated the bounded read"));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            if cancellation.is_cancelled() {
+                return Err(cancelled());
             }
             digest.update(bytes.as_slice());
+            let encoded = writer
+                .as_mut()
+                .map(|writer| writer.push(&bytes))
+                .transpose()?;
             artifacts
-                .write_chunk(&scope, index, bytes.as_slice())
+                .write_chunk(
+                    &storage_scope,
+                    index,
+                    encoded.as_deref().unwrap_or(bytes.as_slice()),
+                )
                 .await?;
             read += bytes.len() as u64;
             index = index
@@ -763,27 +1311,36 @@ async fn prepare_image<S: VaultImageSourcePort + ?Sized, A: VaultImageArtifactPo
         }
         let metadata = VaultImageArtifactMetadata::new(
             scope.clone(),
-            grant.vault_id,
+            vault_id,
             read,
-            grant.content_type,
+            content_type,
             format!("{:x}", digest.finalize()),
         )?;
+        let metadata = match (writer, protection.as_ref()) {
+            (Some(writer), Some(context)) => {
+                let protected = writer.finish(&metadata, context.device_key)?;
+                metadata.with_protection(protected)?
+            }
+            (None, None) => metadata,
+            _ => return Err(invariant("Vault image protection context conflicts")),
+        };
+        if cancellation.is_cancelled() {
+            return Err(cancelled());
+        }
         artifacts.publish(&metadata).await?;
         Ok(PreparedVaultImage { metadata })
     }
     .await;
     let close = source.close().await.map_err(source_error);
-    match (result, close) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Ok(_), Err(error)) => {
-            artifacts.delete(&scope).await?;
-            Err(error)
-        }
-        (Err(error), _) => {
-            artifacts.delete(&scope).await?;
-            Err(error)
-        }
+    let error = match (result, close) {
+        (Ok(value), Ok(())) if !cancellation.is_cancelled() => return Ok(value),
+        (Ok(_), Ok(())) => cancelled(),
+        (Ok(_), Err(error)) | (Err(error), _) => error,
+    };
+    if let Some(scope) = cleanup_scope {
+        artifacts.delete_generation(&scope).await?;
     }
+    Err(error)
 }
 
 fn validate_image_shape(length: u64, content_type: &str) -> Result<(), RuntimeError> {
@@ -816,6 +1373,9 @@ fn verify_chunks<B: AsRef<[u8]>>(
     metadata: &VaultImageArtifactMetadata,
     chunks: &[B],
 ) -> Result<(), RuntimeError> {
+    if let Some(protection) = metadata.protection() {
+        return protected::verify_ciphertext(metadata, protection, chunks);
+    }
     if chunks.is_empty()
         || chunks
             .iter()

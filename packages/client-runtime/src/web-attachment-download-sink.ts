@@ -1,3 +1,9 @@
+import type { AttachmentDownloadSinkControl as SinkControl } from "../generated/transfer-control/contract";
+import { validateAttachmentDownloadSinkControl } from "../generated/transfer-control/validator";
+import {
+	type WebVaultCapabilityScope,
+	WebVaultCapabilityScopes,
+} from "./web-vault-capability-scopes";
 export interface AtomicAttachmentDownloadSink {
 	write(bytes: Uint8Array): Promise<void>;
 	commit(): Promise<void>;
@@ -5,6 +11,8 @@ export interface AtomicAttachmentDownloadSink {
 }
 
 export interface AttachmentDownloadSinkGrant {
+	scope: WebVaultCapabilityScope;
+	vaultId: string;
 	accountId: string;
 	attachmentId: string;
 	sink: AtomicAttachmentDownloadSink;
@@ -35,21 +43,6 @@ type RuntimeState = {
 	retiredIncarnation?: string;
 	pendingRetirement?: number;
 };
-
-type SinkControl =
-	| {
-			type: "begin";
-			accountId: string;
-			attachmentId: string;
-			capabilityId: string;
-			requestScope: string;
-	  }
-	| { type: "write"; capabilityId: string }
-	| { type: "commit"; capabilityId: string }
-	| { type: "discard"; capabilityId: string }
-	| { type: "retireAccount"; accountId: string }
-	| { type: "completeAccountRetirement"; accountId: string }
-	| { type: "retireRuntime" };
 
 const CAPABILITY_ID_MAX_BYTES = 128;
 const MAX_CAPABILITY_LIFETIME_MS = 60 * 60_000;
@@ -90,45 +83,14 @@ export function isCanonicalAttachmentDownloadCapabilityId(
 }
 
 function parseControl(value: unknown): SinkControl | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
-	const control = value as Record<string, unknown>;
-	const keys = Object.keys(control).sort();
-	if (
-		control.type === "begin" &&
-		keys.join("\0") ===
-			["accountId", "attachmentId", "capabilityId", "requestScope", "type"]
-				.sort()
-				.join("\0") &&
-		[
-			control.accountId,
-			control.attachmentId,
-			control.capabilityId,
-			control.requestScope,
-		].every((candidate) => typeof candidate === "string")
-	)
-		return control as SinkControl;
-	if (
-		["write", "commit", "discard"].includes(String(control.type)) &&
-		keys.join("\0") === ["capabilityId", "type"].join("\0") &&
-		typeof control.capabilityId === "string"
-	)
-		return control as SinkControl;
-	if (
-		["retireAccount", "completeAccountRetirement"].includes(
-			String(control.type),
-		) &&
-		keys.join("\0") === ["accountId", "type"].sort().join("\0") &&
-		typeof control.accountId === "string" &&
-		control.accountId.length > 0
-	)
-		return control as SinkControl;
-	if (control.type === "retireRuntime" && keys.join("\0") === "type")
-		return control as SinkControl;
-	return undefined;
+	return validateAttachmentDownloadSinkControl(value) ? value : undefined;
 }
 
 export class WebAttachmentDownloadSinkRegistry {
 	readonly #entries = new Map<string, SinkEntry>();
+	readonly #scopes = new WebVaultCapabilityScopes({
+		reserve: (count) => this.#assertIdentityCapacity(count),
+	});
 	readonly #cleanedCapabilities = new Map<string, string>();
 	readonly #now: () => number;
 	readonly #identity: () => string;
@@ -202,7 +164,9 @@ export class WebAttachmentDownloadSinkRegistry {
 		this.#phase = "fenced";
 		const prepare = Promise.all(
 			[...this.#entries.values()].map((entry) => this.#scheduleCleanup(entry)),
-		).then(() => undefined);
+		).then(() => {
+			this.#scopes.reset();
+		});
 		this.#activationTask = prepare;
 		try {
 			await prepare;
@@ -231,12 +195,33 @@ export class WebAttachmentDownloadSinkRegistry {
 		this.#phase = "open";
 	}
 
+	captureScope(accountId: string, vaultId: string): WebVaultCapabilityScope {
+		if (
+			this.#phase !== "open" ||
+			this.#runtimeState.pendingRetirement !== undefined ||
+			this.#accountStates.get(accountId)?.pendingRetirement !== undefined
+		)
+			throw new Error("Attachment selection is fenced");
+		const scope = this.#scopes.capture(
+			accountId,
+			vaultId,
+			this.#accountStates.has(accountId) ? 0 : 1,
+		);
+		if (!this.#accountStates.has(accountId))
+			this.#accountStates.set(accountId, { generation: 0 });
+		return scope;
+	}
+	async release(capabilityId: string): Promise<void> {
+		const entry = this.#entries.get(capabilityId);
+		if (entry) await this.#scheduleCleanup(entry);
+	}
 	grant(grant: AttachmentDownloadSinkGrant): string {
 		if (
 			this.#phase !== "open" ||
 			this.#runtimeState.pendingRetirement !== undefined ||
 			this.#accountStates.get(grant.accountId)?.pendingRetirement !==
 				undefined ||
+			!this.#scopes.matches(grant.scope, grant.accountId, grant.vaultId) ||
 			grant.accountId.length === 0 ||
 			grant.attachmentId.length === 0 ||
 			this.#runtimeState.activeIncarnation === undefined
@@ -313,9 +298,10 @@ export class WebAttachmentDownloadSinkRegistry {
 		} catch {
 			return answer("invariantViolation");
 		}
-		const expirySweep = this.#sweepExpiredUntouchedGrants();
-		if (expirySweep !== undefined) await expirySweep;
 		if (
+			control.type === "retireVaults" ||
+			control.type === "completeVaultRetirement" ||
+			control.type === "forgetAccountVaultRetirements" ||
 			control.type === "retireAccount" ||
 			control.type === "completeAccountRetirement" ||
 			control.type === "retireRuntime"
@@ -323,7 +309,10 @@ export class WebAttachmentDownloadSinkRegistry {
 			const ownsActiveScope =
 				runtimeIncarnation === this.#runtimeState.activeIncarnation;
 			const ownsPendingScope =
-				control.type === "retireRuntime" &&
+				(control.type === "retireRuntime" ||
+					((control.type === "retireVaults" ||
+						control.type === "completeVaultRetirement") &&
+						this.#activationTask === undefined)) &&
 				runtimeIncarnation === this.#runtimeState.pendingIncarnation;
 			const ownsRetiredScope =
 				control.type === "retireRuntime" &&
@@ -334,7 +323,23 @@ export class WebAttachmentDownloadSinkRegistry {
 			)
 				return answer("invariantViolation");
 			try {
-				if (control.type === "retireAccount")
+				if (control.type === "retireVaults")
+					await this.#retireVaults(control.accountId, control.vaultIds);
+				else if (control.type === "completeVaultRetirement") {
+					this.#completeVaultRetirement(control.accountId, control.vaultIds);
+					return answer("retirementCompleted");
+				} else if (control.type === "forgetAccountVaultRetirements") {
+					if (
+						this.#accountStates.get(control.accountId)?.pendingRetirement ===
+							undefined ||
+						[...this.#entries.values()].some(
+							(entry) => entry.accountId === control.accountId,
+						)
+					)
+						throw new Error("Account cleanup is not drained");
+					this.#scopes.forgetAccount(control.accountId);
+					return answer("retirementCompleted");
+				} else if (control.type === "retireAccount")
 					await this.#retireAccount(control.accountId);
 				else if (control.type === "completeAccountRetirement") {
 					this.#completeAccountRetirement(control.accountId);
@@ -345,6 +350,8 @@ export class WebAttachmentDownloadSinkRegistry {
 				return answer("sinkFailure");
 			}
 		}
+		const expirySweep = this.#sweepExpiredUntouchedGrants();
+		if (expirySweep !== undefined) await expirySweep;
 		if (!isCanonicalAttachmentDownloadCapabilityId(control.capabilityId))
 			return answer("invariantViolation");
 		if (
@@ -380,7 +387,9 @@ export class WebAttachmentDownloadSinkRegistry {
 		return this.#enqueue(entry, async () => {
 			if (
 				(entry.state === "cleanupPending" && control.type !== "discard") ||
-				(this.#phase !== "open" && control.type !== "discard")
+				(this.#phase !== "open" && control.type !== "discard") ||
+				(control.type !== "discard" &&
+					!this.#scopes.matches(entry.scope, entry.accountId, entry.vaultId))
 			)
 				return answer("invariantViolation");
 			const now = this.#now();
@@ -397,6 +406,7 @@ export class WebAttachmentDownloadSinkRegistry {
 				if (
 					entry.state !== "granted" ||
 					control.accountId !== entry.accountId ||
+					control.vaultId !== entry.vaultId ||
 					control.attachmentId !== entry.attachmentId ||
 					control.requestScope !== entry.requestScope ||
 					runtimeIncarnation !== entry.runtimeIncarnation ||
@@ -456,6 +466,31 @@ export class WebAttachmentDownloadSinkRegistry {
 		});
 	}
 
+	async #retireVaults(accountId: string, vaultIds: string[]): Promise<void> {
+		this.#scopes.retire(accountId, vaultIds);
+		await Promise.all(
+			[...this.#entries.values()]
+				.filter(
+					(entry) =>
+						entry.accountId === accountId && vaultIds.includes(entry.vaultId),
+				)
+				.map((entry) => this.#scheduleCleanup(entry)),
+		);
+	}
+	#completeVaultRetirement(accountId: string, vaultIds: string[]): void {
+		const retired = vaultIds.filter((id) =>
+			this.#scopes.isRetired(accountId, id),
+		);
+		if (
+			this.#accountStates.get(accountId)?.pendingRetirement !== undefined ||
+			[...this.#entries.values()].some(
+				(entry) =>
+					entry.accountId === accountId && retired.includes(entry.vaultId),
+			)
+		)
+			throw new Error("Vault cleanup is not drained");
+		this.#scopes.complete(accountId, vaultIds);
+	}
 	async #retireAccount(accountId: string): Promise<void> {
 		let state = this.#accountStates.get(accountId);
 		let target = state?.pendingRetirement;
@@ -464,6 +499,7 @@ export class WebAttachmentDownloadSinkRegistry {
 			const current = state?.generation ?? 0;
 			if (!Number.isSafeInteger(current) || current >= Number.MAX_SAFE_INTEGER)
 				throw new Error("Attachment Download Account generation is exhausted");
+			this.#scopes.invalidateAccount(accountId);
 			target = current + 1;
 			state = { generation: current, pendingRetirement: target };
 			this.#accountStates.set(accountId, state);
@@ -629,6 +665,7 @@ export class WebAttachmentDownloadSinkRegistry {
 
 	#releaseAccountGeneration(accountId: string): void {
 		if (
+			!this.#scopes.hasAccount(accountId) &&
 			this.#accountStates.get(accountId)?.pendingRetirement === undefined &&
 			![...this.#entries.values()].some(
 				(entry) => entry.accountId === accountId,
@@ -644,6 +681,7 @@ export class WebAttachmentDownloadSinkRegistry {
 			this.#runtimeState.retiredIncarnation !== undefined ||
 			this.#runtimeState.pendingRetirement !== undefined;
 		return (
+			this.#scopes.size +
 			this.#entries.size +
 			this.#cleanedCapabilities.size +
 			this.#accountStates.size +
@@ -802,6 +840,9 @@ export function isAttachmentDownloadSinkCleanupHostRequest(
 		const type = parseControl(JSON.parse(value.controlRequestJson))?.type;
 		return [
 			"discard",
+			"retireVaults",
+			"completeVaultRetirement",
+			"forgetAccountVaultRetirements",
 			"retireAccount",
 			"completeAccountRetirement",
 			"retireRuntime",

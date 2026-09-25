@@ -23,8 +23,94 @@
         "sessionSecret"
       ]
     },
+    "PlatformStorageDeleteResult": {
+      "type": "string",
+      "enum": [
+        "deleted",
+        "alreadyAbsent",
+        "conflict"
+      ]
+    },
+    "PlatformStorageInventoryContinuation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "maxLength": 98304,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "more"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "cursor"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "end"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "PlatformStorageInventoryFamily": {
+      "type": "string",
+      "enum": [
+        "platformStorage"
+      ]
+    },
     "PlatformStorageRequest": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "area": {
+              "$ref": "#/$defs/PlatformStorageArea"
+            },
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "maxLength": 98304,
+                  "minLength": 1
+                }
+              ]
+            },
+            "prefix": {
+              "type": "string",
+              "maxLength": 4096,
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "listKeys"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "area",
+            "prefix",
+            "cursor"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -98,7 +184,36 @@
             "area": {
               "$ref": "#/$defs/PlatformStorageArea"
             },
+            "expectedValue": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteIfUnchanged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "area",
+            "key",
+            "expectedValue"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "area": {
+              "$ref": "#/$defs/PlatformStorageArea"
+            },
             "prefix": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preserveKey": {
               "type": "string",
               "minLength": 1
             },
@@ -121,6 +236,51 @@
         {
           "type": "object",
           "properties": {
+            "backingAreas": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PlatformStorageArea"
+              },
+              "maxItems": 3,
+              "minItems": 1
+            },
+            "continuation": {
+              "$ref": "#/$defs/PlatformStorageInventoryContinuation"
+            },
+            "family": {
+              "$ref": "#/$defs/PlatformStorageInventoryFamily"
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 4096,
+                "minLength": 1
+              },
+              "maxItems": 128
+            },
+            "type": {
+              "type": "string",
+              "const": "keysPage"
+            },
+            "version": {
+              "type": "integer",
+              "const": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "version",
+            "family",
+            "backingAreas",
+            "keys",
+            "continuation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
             "type": {
               "type": "string",
               "const": "value"
@@ -136,6 +296,23 @@
           "required": [
             "type",
             "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/PlatformStorageDeleteResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteResult"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
           ]
         },
         {

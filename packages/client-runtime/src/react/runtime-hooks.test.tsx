@@ -312,6 +312,11 @@ describe("Device session", () => {
 							access: "locked",
 							failure: null,
 							replicaRevision: "3",
+							unlockCapabilities: {
+								password: false,
+								desktop: false,
+								signIn: false,
+							},
 						},
 					],
 					closed: false,

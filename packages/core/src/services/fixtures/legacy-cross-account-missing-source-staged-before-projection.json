@@ -1,0 +1,57 @@
+{
+  "accounts": [
+    {
+      "email": "source@legacy.invalid",
+      "userId": "source:user",
+      "name": "acct_legacy_α:7",
+      "serverUrl": "https://source.legacy.invalid",
+      "secretKeyHint": "ABCD••••",
+      "addedAt": 1,
+      "lastActiveAt": 1,
+      "biometricEnabled": false,
+      "accountId": "acct_legacy_α:7",
+      "insecureTransportConfirmed": false
+    },
+    {
+      "email": "target@legacy.invalid",
+      "userId": "target:user",
+      "name": "zz_second_account",
+      "serverUrl": "https://target.legacy.invalid",
+      "secretKeyHint": "ABCD••••",
+      "addedAt": 1,
+      "lastActiveAt": 1,
+      "biometricEnabled": false,
+      "accountId": "zz_second_account",
+      "insecureTransportConfirmed": false
+    }
+  ],
+  "records": [
+    {
+      "collection": "acct_legacy_α:7:meta",
+      "id": "meta",
+      "value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790124164296,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://source.legacy.invalid\",\"cursorId\":\"source-independent-deletion\"},\"itemCount\":0},\"activeGeneration\":\"muddphaf-3-vq3wq35qjdi\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:muddphaf-3-vq3wq35qjdi:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:muddphaf-3-vq3wq35qjdi:vaults:\"}}"
+    },
+    {
+      "collection": "item-cache-stage:acct_legacy_α:7:muddphaf-3-vq3wq35qjdi:vaults",
+      "id": "source:vault/雪",
+      "value": "{\"id\":\"source:vault/雪\",\"name\":\"acct_legacy_α:7 vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"serverUrl\":\"https://source.legacy.invalid\"}"
+    },
+    {
+      "collection": "item-cache-stage:zz_second_account:muddphaf-4-xwzbv6i8uc8:vaults",
+      "id": "target:vault/目标",
+      "value": "{\"id\":\"target:vault/目标\",\"name\":\"zz_second_account vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"zz_second_account\",\"accountEmail\":\"target@legacy.invalid\",\"serverUrl\":\"https://target.legacy.invalid\"}"
+    },
+    {
+      "collection": "zz_second_account:meta",
+      "id": "meta",
+      "value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790124164296,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://target.legacy.invalid\",\"cursorId\":\"target-bootstrap\"},\"itemCount\":0},\"activeGeneration\":\"muddphaf-4-xwzbv6i8uc8\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:zz_second_account:muddphaf-4-xwzbv6i8uc8:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:zz_second_account:muddphaf-4-xwzbv6i8uc8:vaults:\"}}"
+    }
+  ],
+  "sync": {
+    "sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:lastSyncCursor": "{\"id\":\"source-independent-deletion\"}",
+    "sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"source-independent-deletion\"}}",
+    "sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:lastSyncCursor": "{\"id\":\"target-bootstrap\"}",
+    "sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"target-bootstrap\"}}",
+    "bittery_pending_mutation_queues_v3": "{\"acct_legacy_α:7\":[{\"type\":\"cross_account_move\",\"entityId\":\"source:item/雪\",\"vaultId\":\"source:vault/雪\",\"targetVaultId\":\"target:vault/目标\",\"targetAccountId\":\"zz_second_account\",\"targetItemId\":\"target:item/雪\",\"category\":\"login\",\"encryptedPayload\":{\"encryptedData\":\"rsgXZut+x70lXOzqv5MiJKSSY1H3lkH745pdYLsyxaccM8ONzaZsT0z+LT6BmoSTgeQvQ5NFfFnG/E4qsrI9lUrnGAPbHPOp9tpDIec/G2/mOefsrsSd2CPiXwEoXaK2mr9QDJAZpKAXKMGbmHDTyUSMT7tXe5LCnaczVZBJ8vqvi2Ey\",\"encryptionIv\":\"vo4cfaE4yIFqVbXj\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"target:user\"},\"id\":\"original-semantic-move\",\"operationId\":\"original-semantic-move\",\"timestamp\":1789000000123,\"retryCount\":0,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"baseVersion\":6,\"status\":\"staged\",\"projectionClaimId\":\"popup-projection-claim\",\"projectionClaimExpiresAt\":30001,\"attemptId\":\"original-semantic-move\"}]}"
+  }
+}

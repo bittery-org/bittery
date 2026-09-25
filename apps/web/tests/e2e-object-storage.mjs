@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.E2E_OBJECT_STORAGE_PORT ?? 3030);
 const objects = new Map();
+const operationUploadAttempts = new Map();
+const objectUploadEvidence = new Map();
 
 // This loopback-only fake accepts the signed S3-shaped requests without
 // validating AWS credentials; the browser flows under test own the encryption.
@@ -40,11 +42,76 @@ const server = createServer(async (request, response) => {
 		response.writeHead(200, { "content-type": "text/plain" }).end("ok");
 		return;
 	}
+	if (
+		request.method === "GET" &&
+		url.pathname === "/__acceptance/object-upload"
+	) {
+		const key = url.searchParams.get("key");
+		if (!key || key.length > 2048 || !/^\/[A-Za-z0-9/_.-]+$/.test(key)) {
+			response.writeHead(400).end();
+			return;
+		}
+		response
+			.writeHead(200, { "content-type": "application/json" })
+			.end(
+				JSON.stringify(
+					objectUploadEvidence.get(key) ?? { attempts: 0, last: null },
+				),
+			);
+		return;
+	}
 
+	// Loopback fixture diagnostics count arrivals, including failed checksum requests. Never
+	// retain signed query strings, headers, image contents, or credentials in the counter.
+	if (
+		request.method === "GET" &&
+		url.pathname === "/__acceptance/image-upload-attempts"
+	) {
+		const operationId = url.searchParams.get("operationId");
+		if (
+			!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+				operationId ?? "",
+			)
+		) {
+			response.writeHead(400).end();
+			return;
+		}
+		response.writeHead(200, { "content-type": "application/json" }).end(
+			JSON.stringify({
+				attempts: operationUploadAttempts.get(operationId) ?? 0,
+			}),
+		);
+		return;
+	}
 	const key = decodeURIComponent(url.pathname);
 	if (request.method === "PUT") {
+		const operation =
+			/\/vaults\/[^/]+\/[^/]+\/create\/([0-9a-f-]{36})-[0-9a-f]{64}$/.exec(
+				key,
+			)?.[1];
+		if (operation)
+			operationUploadAttempts.set(
+				operation,
+				(operationUploadAttempts.get(operation) ?? 0) + 1,
+			);
 		const body = await readBody(request);
 		const checksum = createHash("sha256").update(body).digest("base64");
+		// Exact received facts only: no signed URL, authorization or other request headers.
+		objectUploadEvidence.set(key, {
+			attempts: (objectUploadEvidence.get(key)?.attempts ?? 0) + 1,
+			last: {
+				headers: Object.fromEntries(
+					[
+						"content-type",
+						"content-length",
+						"x-amz-content-sha256",
+						"x-amz-checksum-sha256",
+					].map((name) => [name, request.headers[name] ?? null]),
+				),
+				byteLength: body.byteLength,
+				sha256: createHash("sha256").update(body).digest("hex"),
+			},
+		});
 		const providedChecksum = request.headers["x-amz-checksum-sha256"];
 		if (providedChecksum !== undefined && providedChecksum !== checksum) {
 			response.writeHead(400).end("Checksum mismatch");

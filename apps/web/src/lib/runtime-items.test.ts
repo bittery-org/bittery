@@ -14,7 +14,7 @@ import {
 	mapRuntimeVaults,
 	toRuntimeItemDraft,
 	vaultNavEntries,
-} from "./runtime-items";
+} from "@bittery/ui/runtime-presentation";
 
 function session(
 	partial: Partial<RuntimeSessionSnapshot>,
@@ -576,6 +576,20 @@ describe("the Vaults a create can use", () => {
 });
 
 describe("the draft the Runtime is asked to seal", () => {
+	test("ordinary Login creation strips empty credential metadata and rejects private credentials", () => {
+		expect(
+			toRuntimeItemDraft("login", { title: "Login", passkeys: [] }),
+		).toEqual({
+			category: "login",
+			data: { title: "Login" },
+		});
+		expect(() =>
+			toRuntimeItemDraft("login", {
+				title: "Login",
+				passkeys: [{ privateKey: "injected" } as never],
+			}),
+		).toThrow();
+	});
 	test("preserves all categories and extended fields at creation", () => {
 		const drafts: Array<{ category: ItemCategory; data: DecryptedItemData }> = [
 			{

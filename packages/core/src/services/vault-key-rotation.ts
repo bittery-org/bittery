@@ -104,6 +104,8 @@ export interface RotationPlanClient {
 }
 
 export interface VaultKeyRotationDeps {
+	/** Shared Runtime returns the exact independently verified recipient key or rejects. */
+	verifiedMemberKey(member: MemberKeyData): Promise<string>;
 	crypto: Pick<
 		CryptoPort,
 		| "destroyKey"
@@ -239,13 +241,20 @@ export function createVaultKeyRotationCeremony(
 							) {
 								throw new Error("The account is locked.");
 							}
-							const records = await Promise.all(
-								page.records.map(async (record) => ({
+							const records = [];
+							// A cancelled verification must stop before another prompt is opened.
+							for (const record of page.records) {
+								const memberPublicKey =
+									record.payload.userId === currentUserId
+										? null
+										: await deps.verifiedMemberKey(record.payload);
+								assertActive();
+								records.push({
 									...record,
 									payload: {
 										userId: record.payload.userId,
 										encryptedVaultKey:
-											record.payload.userId === currentUserId
+											memberPublicKey === null
 												? await runCrypto(() =>
 														deps.crypto.encryptVaultKeyWithMuk(
 															newKey,
@@ -258,12 +267,12 @@ export function createVaultKeyRotationCeremony(
 												: await runCrypto(() =>
 														deps.crypto.encryptVaultKeyForMember(
 															newKey,
-															record.payload.publicKey,
+															memberPublicKey,
 														),
 													),
 									},
-								})),
-							);
+								});
+							}
 							if (records.length > 0) {
 								await deps.client.stage(
 									plan.planId,

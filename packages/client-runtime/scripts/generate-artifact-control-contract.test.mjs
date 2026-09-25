@@ -19,6 +19,17 @@ test("generated artifact control stays closed and keeps ciphertext binary", asyn
 	}
 	assert.equal(JSON.stringify(fixture).includes("bytes"), false);
 	assert.equal(
+		validateArtifactControlResponse({ type: "provisionalRecoveryUnavailable" }),
+		true,
+	);
+	assert.equal(
+		validateArtifactControlResponse({
+			type: "provisionalRecoveryUnavailable",
+			recovery: {},
+		}),
+		false,
+	);
+	assert.equal(
 		validateArtifactControlRequest({ type: "futureControl", bytes: [1] }),
 		false,
 	);

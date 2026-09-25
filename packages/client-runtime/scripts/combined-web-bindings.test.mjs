@@ -5,92 +5,21 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
+import { Worker } from "node:worker_threads";
 import { takeFullOwnedUint8ArrayIntrinsic } from "../src/binary-intrinsics.ts";
+import {
+	timerProbeRuntime,
+	unavailableDownloadSink,
+	unavailableUploadSource,
+	unavailableVaultImageArtifact,
+	unavailableVaultImageSource,
+} from "./combined-web-bindings.fixture.mjs";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const combinedRoot =
 	process.env.BITTERY_COMBINED_WEB_BINDINGS_ROOT ??
 	resolve(scriptRoot, "../../crypto/wasm/generated/wasm-bindgen");
 const standaloneRoot = resolve(scriptRoot, "../generated/web");
-
-const unavailableDownloadSink = () => ({
-	invoke: async (controlRequestJson) => {
-		const type = JSON.parse(controlRequestJson).type;
-		if (type === "retireAccount" || type === "retireRuntime")
-			return '{"type":"retired"}';
-		return type === "completeAccountRetirement"
-			? '{"type":"retirementCompleted"}'
-			: '{"type":"invariantViolation"}';
-	},
-});
-
-const unavailableUploadSource = () => ({
-	invoke: async (controlRequestJson) => {
-		const type = JSON.parse(controlRequestJson).type;
-		const answer =
-			type === "retireAccount" || type === "retireRuntime"
-				? { type: "retired" }
-				: type === "completeAccountRetirement"
-					? { type: "retirementCompleted" }
-					: { type: "invariantViolation" };
-		return { controlResponseJson: JSON.stringify(answer) };
-	},
-});
-const unavailableVaultImageArtifact = () => ({
-	invoke: async (controlRequestJson) => {
-		const type = JSON.parse(controlRequestJson).type;
-		return {
-			controlResponseJson: JSON.stringify({
-				type:
-					type === "wipe"
-						? "wiped"
-						: type === "deleteAccount"
-							? "accountDeleted"
-							: "invariantViolation",
-			}),
-		};
-	},
-});
-const unavailableVaultImageSource = () => ({
-	invoke: async (controlRequestJson) => ({
-		controlResponseJson: JSON.stringify({
-			type: [
-				"retireAccount",
-				"completeAccountRetirement",
-				"retireRuntime",
-			].includes(JSON.parse(controlRequestJson).type)
-				? "retired"
-				: "invariantViolation",
-		}),
-	}),
-});
-
-const timerProbeRuntime = (
-	bindings,
-	downloadSink = unavailableDownloadSink(),
-) =>
-	bindings.WebClientRuntime.withConfiguredAttachmentMovePreparation(
-		async () => '{"type":"deviceState","accounts":[]}',
-		async () => '{"type":"done"}',
-		async () => '{"type":"networkFailure"}',
-		() => undefined,
-		{ invoke: async () => ({ controlResponseJson: '{"type":"deviceWiped"}' }) },
-		{
-			invoke: async () => ({ controlResponseJson: '{"type":"deviceWiped"}' }),
-			close: () => undefined,
-		},
-		{ acquire: async () => null },
-		"timer-probe",
-		"web",
-		"1.0.0",
-		() => undefined,
-		downloadSink,
-		unavailableUploadSource(),
-		takeFullOwnedUint8ArrayIntrinsic,
-		unavailableVaultImageArtifact(),
-		unavailableVaultImageSource(),
-		"runtime-vault-image",
-	);
 
 test("authenticated WASM construction leaves callback-liveness probing to the trusted Worker host", async () => {
 	const bindings = await import(
@@ -219,37 +148,39 @@ test("the production WASM bridge claims, copies, digests, publishes, and retires
 });
 
 test("a missing or throwing WASM timer parks persistent sink cleanup after one attempt", async () => {
-	const bindings = await import(
-		pathToFileURL(resolve(combinedRoot, "index.js")).href
-	);
-	const wasm = await readFile(resolve(combinedRoot, "index_bg.wasm"));
-	await bindings.default({ module_or_path: wasm });
-	const originalSetTimeout = globalThis.setTimeout;
-	for (const replacement of [
-		undefined,
-		() => {
-			throw new Error("timer rejected");
-		},
-	]) {
-		let attempts = 0;
-		const runtime = timerProbeRuntime(bindings, {
-			invoke: async (controlRequestJson) => {
-				const type = JSON.parse(controlRequestJson).type;
-				if (type === "retireRuntime") {
-					attempts += 1;
-					return '{"type":"sinkFailure"}';
-				}
-				return '{"type":"invariantViolation"}';
+	for (const mode of ["missing", "throwing"]) {
+		const worker = new Worker(
+			new URL("./combined-web-bindings-timer-worker.mjs", import.meta.url),
+			{
+				workerData: {
+					mode,
+					bindings: resolve(combinedRoot, "index.js"),
+					wasm: resolve(combinedRoot, "index_bg.wasm"),
+				},
 			},
-		});
+		);
+		const timeout = new AbortController();
 		try {
-			globalThis.setTimeout = replacement;
-			void runtime.request_json("wipe-without-timer", '{"type":"wipe"}');
-			for (let turn = 0; turn < 100; turn += 1) await Promise.resolve();
-			await delay(25);
-			assert.equal(attempts, 1);
+			const result = await Promise.race([
+				new Promise((resolveMessage, rejectMessage) => {
+					worker.once("message", resolveMessage);
+					worker.once("error", rejectMessage);
+					worker.once("exit", (code) => {
+						if (code !== 0)
+							rejectMessage(new Error(`timer worker exited ${code}`));
+					});
+				}),
+				delay(5_000, undefined, { signal: timeout.signal }).then(() => {
+					throw new Error(`timer worker timed out (${mode})`);
+				}),
+			]);
+			if (result.error) throw new Error(result.error);
+			assert.deepEqual(result, { attempts: 1, settled: false });
 		} finally {
-			globalThis.setTimeout = originalSetTimeout;
+			timeout.abort();
+			// The unavailable timer deliberately parks cleanup forever, so this isolated
+			// owner is terminated instead of awaiting Runtime.close().
+			await worker.terminate();
 		}
 	}
 });
@@ -1119,6 +1050,40 @@ test("the feature-only WASM harness exercises the closed lease and transfer brid
 	harness.drop_upload();
 	await Promise.resolve();
 	assert.equal(transferRequests.at(-1).type, "cancelTransfer");
+
+	const durableHeaders = [
+		["Content-Type", "application/octet-stream"],
+		["Content-Length", "1"],
+		["x-amz-content-sha256", uploadOpened.ciphertextSha256],
+		[
+			"x-amz-checksum-sha256",
+			Buffer.from(uploadOpened.ciphertextSha256, "hex").toString("base64"),
+		],
+	];
+	await harness.open_upload(serverStorageKey, JSON.stringify(durableHeaders));
+	assert.deepEqual(
+		transferRequests.at(-1).headers,
+		durableHeaders.map(([name, value]) => ({ name, value })),
+	);
+	harness.drop_upload();
+	await Promise.resolve();
+	const priorTransfers = transferRequests.length;
+	for (const headers of [
+		durableHeaders.map(([name, value]) => [
+			name,
+			name === "Content-Length" ? "2" : value,
+		]),
+		durableHeaders.map(([name, value]) => [
+			name,
+			name === "x-amz-checksum-sha256" ? "incorrect" : value,
+		]),
+		[...durableHeaders, ["content-type", "application/octet-stream"]],
+	]) {
+		await assert.rejects(
+			harness.open_upload(serverStorageKey, JSON.stringify(headers)),
+		);
+	}
+	assert.equal(transferRequests.length, priorTransfers);
 
 	let pendingCallback;
 	pendingTransfer = {};

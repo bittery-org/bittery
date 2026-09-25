@@ -5,6 +5,10 @@ import {
 	isFullOwnedUint8Array,
 	wipeBinaryIntrinsic,
 } from "./binary-intrinsics";
+import {
+	type WebVaultCapabilityScope,
+	WebVaultCapabilityScopes,
+} from "./web-vault-capability-scopes";
 
 export interface AtomicAttachmentUploadSource {
 	read(maxBytes: number): Promise<Uint8Array | null>;
@@ -12,6 +16,8 @@ export interface AtomicAttachmentUploadSource {
 }
 
 export interface AttachmentUploadSourceGrant {
+	scope: WebVaultCapabilityScope;
+	vaultId: string;
 	accountId: string;
 	itemId: string;
 	name: string;
@@ -68,6 +74,9 @@ function parseControl(value: unknown): SourceControl | undefined {
 
 export class WebAttachmentUploadSourceRegistry {
 	readonly #entries = new Map<string, Entry>();
+	readonly #scopes = new WebVaultCapabilityScopes({
+		reserve: (count) => this.#capacity(count),
+	});
 	readonly #tombstones = new Map<string, string>();
 	readonly #accounts = new Map<string, AccountState>();
 	readonly #runtime: RuntimeState = { generation: 0 };
@@ -136,7 +145,9 @@ export class WebAttachmentUploadSourceRegistry {
 		this.#phase = "fenced";
 		const task = Promise.all(
 			[...this.#entries.values()].map((entry) => this.#scheduleCleanup(entry)),
-		).then(() => undefined);
+		).then(() => {
+			this.#scopes.reset();
+		});
 		this.#activation = task;
 		try {
 			await task;
@@ -158,12 +169,34 @@ export class WebAttachmentUploadSourceRegistry {
 		this.#phase = "open";
 	}
 
+	captureScope(accountId: string, vaultId: string): WebVaultCapabilityScope {
+		if (
+			this.#phase !== "open" ||
+			this.#runtime.pendingRetirement !== undefined ||
+			this.#accounts.get(accountId)?.pendingRetirement !== undefined
+		)
+			throw new Error("Attachment selection is fenced");
+		const scope = this.#scopes.capture(
+			accountId,
+			vaultId,
+			this.#accounts.has(accountId) ? 0 : 1,
+		);
+		if (!this.#accounts.has(accountId))
+			this.#accounts.set(accountId, { generation: 0 });
+		return scope;
+	}
+	/** Release also owns selections refused before Core claims them. */
+	async release(capabilityId: string): Promise<void> {
+		const entry = this.#entries.get(capabilityId);
+		if (entry) await this.#scheduleCleanup(entry);
+	}
 	grant(grant: AttachmentUploadSourceGrant): string {
 		if (
 			this.#phase !== "open" ||
 			this.#runtime.active === undefined ||
 			this.#runtime.pendingRetirement !== undefined ||
 			this.#accounts.get(grant.accountId)?.pendingRetirement !== undefined ||
+			!this.#scopes.matches(grant.scope, grant.accountId, grant.vaultId) ||
 			!canonical(grant.accountId) ||
 			!canonical(grant.itemId) ||
 			grant.name.trim().length === 0 ||
@@ -222,22 +255,45 @@ export class WebAttachmentUploadSourceRegistry {
 			return { controlResponseJson: answer("invariantViolation") };
 		}
 		if (
+			request.type === "retireVaults" ||
+			request.type === "completeVaultRetirement" ||
+			request.type === "forgetAccountVaultRetirements" ||
 			request.type === "retireAccount" ||
 			request.type === "completeAccountRetirement" ||
 			request.type === "retireRuntime"
 		) {
 			const owns =
 				incarnation === this.#runtime.active ||
+				((request.type === "retireRuntime" ||
+					((request.type === "retireVaults" ||
+						request.type === "completeVaultRetirement") &&
+						this.#activation === undefined)) &&
+					incarnation === this.#runtime.pending) ||
 				(request.type === "retireRuntime" &&
-					(incarnation === this.#runtime.pending ||
-						incarnation === this.#runtime.retired));
+					incarnation === this.#runtime.retired);
 			if (!owns) return { controlResponseJson: answer("invariantViolation") };
 			try {
 				if (request.type === "retireRuntime")
 					await this.#retireRuntime(incarnation);
 				else {
 					if (typeof request.accountId !== "string") throw new Error();
-					if (request.type === "retireAccount")
+					if (request.type === "retireVaults")
+						await this.#retireVaults(request.accountId, request.vaultIds);
+					else if (request.type === "completeVaultRetirement") {
+						this.#completeVaultRetirement(request.accountId, request.vaultIds);
+						return { controlResponseJson: answer("retirementCompleted") };
+					} else if (request.type === "forgetAccountVaultRetirements") {
+						if (
+							this.#accounts.get(request.accountId)?.pendingRetirement ===
+								undefined ||
+							[...this.#entries.values()].some(
+								(entry) => entry.accountId === request.accountId,
+							)
+						)
+							throw new Error("Account cleanup is not drained");
+						this.#scopes.forgetAccount(request.accountId);
+						return { controlResponseJson: answer("retirementCompleted") };
+					} else if (request.type === "retireAccount")
 						await this.#retireAccount(request.accountId);
 					else {
 						this.#completeAccountRetirement(request.accountId);
@@ -284,7 +340,8 @@ export class WebAttachmentUploadSourceRegistry {
 				entry.runtimeGeneration !== this.#runtime.generation ||
 				this.#accounts.get(entry.accountId)?.generation !==
 					entry.accountGeneration ||
-				this.#phase !== "open"
+				this.#phase !== "open" ||
+				!this.#scopes.matches(entry.scope, entry.accountId, entry.vaultId)
 			)
 				return { controlResponseJson: answer("cancelled") };
 			if (entry.state === "cleanupPending")
@@ -298,6 +355,7 @@ export class WebAttachmentUploadSourceRegistry {
 				if (
 					entry.state !== "granted" ||
 					entry.accountId !== request.accountId ||
+					entry.vaultId !== request.vaultId ||
 					entry.itemId !== request.itemId ||
 					entry.name !== request.name ||
 					entry.contentType !== request.contentType ||
@@ -324,6 +382,14 @@ export class WebAttachmentUploadSourceRegistry {
 				return { controlResponseJson: answer("sourceFailure") };
 			}
 			if (chunk === null) return { controlResponseJson: answer("end") };
+			if (
+				this.#entries.get(entry.capabilityId)?.state !== "claimed" ||
+				!this.#scopes.matches(entry.scope, entry.accountId, entry.vaultId) ||
+				this.#phase !== "open"
+			) {
+				wipeBinaryIntrinsic(chunk);
+				return { controlResponseJson: answer("cancelled") };
+			}
 			const view = inspectUint8ArrayIntrinsic(chunk);
 			if (
 				view === undefined ||
@@ -344,6 +410,31 @@ export class WebAttachmentUploadSourceRegistry {
 		});
 	}
 
+	async #retireVaults(accountId: string, vaultIds: string[]): Promise<void> {
+		this.#scopes.retire(accountId, vaultIds);
+		await Promise.all(
+			[...this.#entries.values()]
+				.filter(
+					(entry) =>
+						entry.accountId === accountId && vaultIds.includes(entry.vaultId),
+				)
+				.map((entry) => this.#scheduleCleanup(entry)),
+		);
+	}
+	#completeVaultRetirement(accountId: string, vaultIds: string[]): void {
+		const retired = vaultIds.filter((id) =>
+			this.#scopes.isRetired(accountId, id),
+		);
+		if (
+			this.#accounts.get(accountId)?.pendingRetirement !== undefined ||
+			[...this.#entries.values()].some(
+				(entry) =>
+					entry.accountId === accountId && retired.includes(entry.vaultId),
+			)
+		)
+			throw new Error("Vault cleanup is not drained");
+		this.#scopes.complete(accountId, vaultIds);
+	}
 	async #retireAccount(accountId: string): Promise<void> {
 		let state = this.#accounts.get(accountId);
 		let target = state?.pendingRetirement;
@@ -352,6 +443,7 @@ export class WebAttachmentUploadSourceRegistry {
 			const current = state?.generation ?? 0;
 			if (!Number.isSafeInteger(current) || current >= Number.MAX_SAFE_INTEGER)
 				throw new Error("Account generation exhausted");
+			this.#scopes.invalidateAccount(accountId);
 			target = current + 1;
 			state = { generation: current, pendingRetirement: target };
 			this.#accounts.set(accountId, state);
@@ -498,6 +590,7 @@ export class WebAttachmentUploadSourceRegistry {
 	}
 	#releaseAccount(accountId: string): void {
 		if (
+			!this.#scopes.hasAccount(accountId) &&
 			this.#accounts.get(accountId)?.pendingRetirement === undefined &&
 			![...this.#entries.values()].some(
 				(entry) => entry.accountId === accountId,
@@ -512,6 +605,7 @@ export class WebAttachmentUploadSourceRegistry {
 			this.#runtime.retired !== undefined ||
 			this.#runtime.pendingRetirement !== undefined;
 		const used =
+			this.#scopes.size +
 			this.#entries.size +
 			this.#tombstones.size +
 			this.#accounts.size +

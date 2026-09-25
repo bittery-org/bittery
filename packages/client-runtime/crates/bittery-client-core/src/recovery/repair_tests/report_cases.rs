@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 
 const PASSWORD: &str = "separate recovery password";
 
-fn decode_archive(bytes: &[u8]) -> Vec<DecodedRecord> {
+pub(super) fn decode_archive(bytes: &[u8]) -> Vec<DecodedRecord> {
     let mut envelope = RecoveryDecryptor::new(PASSWORD, &bytes[..RECOVERY_HEADER_BYTES]).unwrap();
     let mut decoder = RecordDecoder::default();
     let mut records = Vec::new();
@@ -30,7 +30,7 @@ fn decode_archive(bytes: &[u8]) -> Vec<DecodedRecord> {
     records
 }
 
-fn copy_records(records: &[DecodedRecord]) -> Vec<DecodedRecord> {
+pub(super) fn copy_records(records: &[DecodedRecord]) -> Vec<DecodedRecord> {
     records
         .iter()
         .map(|record| DecodedRecord {
@@ -40,7 +40,7 @@ fn copy_records(records: &[DecodedRecord]) -> Vec<DecodedRecord> {
         .collect()
 }
 
-fn encode_archive(records: &[DecodedRecord]) -> Vec<u8> {
+pub(super) fn encode_archive(records: &[DecodedRecord]) -> Vec<u8> {
     // This fixture is deliberately tiny. Production continues to stream arbitrary-sized records.
     let mut plaintext = Zeroizing::new(Vec::new());
     for record in records {

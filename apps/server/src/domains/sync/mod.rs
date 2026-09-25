@@ -94,6 +94,11 @@ item_shape! {
 pub enum BootstrapItemsResponse {
     Vaults {
         vaults: Vec<BootstrapVaultSummary>,
+        #[serde(
+            rename = "vaultKeyVersionIncluded",
+            skip_serializing_if = "Option::is_none"
+        )]
+        vault_key_version_included: Option<bool>,
         #[serde(rename = "nextCursor")]
         next_cursor: Option<String>,
         #[serde(rename = "syncCursor")]
@@ -199,6 +204,7 @@ pub(crate) async fn bootstrap_items(
     deployment_mode: DeploymentMode,
     user_id: &str,
     input: BootstrapItemsInput,
+    include_vault_key_version: bool,
 ) -> Result<BootstrapItemsResponse, AppError> {
     if let Some(cursor) = &input.cursor {
         validate_resource_id(cursor)?;
@@ -251,21 +257,28 @@ pub(crate) async fn bootstrap_items(
             };
             let vaults = result_vaults
                 .into_iter()
-                .map(|vault| BootstrapVaultSummary {
-                    id: vault.vault_id,
-                    name: vault.vault_name,
-                    vault_type: vault.vault_type,
-                    icon: vault.vault_icon,
-                    image_url: vault
-                        .vault_image_key
-                        .as_deref()
-                        .and_then(|key| object_storage.public_url(key)),
-                    encrypted_vault_key: vault.encrypted_vault_key,
-                    role: vault.role,
+                .map(|vault| {
+                    if include_vault_key_version && vault.key_version <= 0 {
+                        return Err(AppError::internal("Invalid Vault key version"));
+                    }
+                    Ok(BootstrapVaultSummary {
+                        id: vault.vault_id,
+                        name: vault.vault_name,
+                        vault_type: vault.vault_type,
+                        icon: vault.vault_icon,
+                        image_url: vault
+                            .vault_image_key
+                            .as_deref()
+                            .and_then(|key| object_storage.public_url(key)),
+                        encrypted_vault_key: vault.encrypted_vault_key,
+                        role: vault.role,
+                        key_version: include_vault_key_version.then_some(vault.key_version),
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>, AppError>>()?;
             return Ok(BootstrapItemsResponse::Vaults {
                 vaults,
+                vault_key_version_included: include_vault_key_version.then_some(true),
                 next_cursor,
                 sync_cursor,
                 has_more,

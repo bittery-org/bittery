@@ -1,6 +1,61 @@
 /* eslint-disable */
 /* This file is generated. Do not edit. */
 
+export type AttachmentDownloadSinkAnswer = ({
+type: "begun"
+} | {
+type: "written"
+} | {
+type: "committed"
+} | {
+type: "discarded"
+} | {
+type: "retired"
+} | {
+type: "retirementCompleted"
+} | {
+type: "sinkFailure"
+} | {
+type: "cancelled"
+} | {
+type: "invariantViolation"
+})
+export type AttachmentDownloadSinkControl = ({
+accountId: string
+attachmentId: string
+capabilityId: string
+requestScope: string
+type: "begin"
+vaultId: string
+} | {
+capabilityId: string
+type: "write"
+} | {
+capabilityId: string
+type: "commit"
+} | {
+capabilityId: string
+type: "discard"
+} | {
+accountId: string
+type: "retireAccount"
+} | {
+accountId: string
+type: "completeAccountRetirement"
+} | {
+accountId: string
+type: "retireVaults"
+vaultIds: string[]
+} | {
+accountId: string
+type: "completeVaultRetirement"
+vaultIds: string[]
+} | {
+accountId: string
+type: "forgetAccountVaultRetirements"
+} | {
+type: "retireRuntime"
+})
 export type AttachmentUploadSourceAnswer = ({
 type: "claimed"
 } | {
@@ -28,6 +83,7 @@ expectedBytes: string
 itemId: string
 name: string
 type: "claim"
+vaultId: string
 } | {
 capabilityId: string
 maxBytes: number
@@ -41,6 +97,17 @@ type: "retireAccount"
 } | {
 accountId: string
 type: "completeAccountRetirement"
+} | {
+accountId: string
+type: "retireVaults"
+vaultIds: string[]
+} | {
+accountId: string
+type: "completeVaultRetirement"
+vaultIds: string[]
+} | {
+accountId: string
+type: "forgetAccountVaultRetirements"
 } | {
 type: "retireRuntime"
 })
@@ -133,6 +200,8 @@ type: "httpFailure"
 })
 
 export interface TransferControlContract {
+attachmentDownloadSinkAnswer: AttachmentDownloadSinkAnswer
+attachmentDownloadSinkControl: AttachmentDownloadSinkControl
 attachmentUploadSourceAnswer: AttachmentUploadSourceAnswer
 attachmentUploadSourceControl: AttachmentUploadSourceControl
 foregroundUploadOutcome: ForegroundUploadOutcome

@@ -158,6 +158,19 @@
 					}
 				}
 			}
+		},
+		{
+			"includes": [
+				"packages/core/src/services/fixtures/legacy-cross-account-missing-source-applying-before-projection.json",
+				"packages/core/src/services/fixtures/legacy-cross-account-missing-source-conflicted-independent-copy.json",
+				"packages/core/src/services/fixtures/legacy-cross-account-missing-source-failed-independent-deletion.json",
+				"packages/core/src/services/fixtures/legacy-cross-account-missing-source-retry-acknowledgement.json",
+				"packages/core/src/services/fixtures/legacy-cross-account-missing-source-staged-before-projection.json",
+				"packages/core/src/services/fixtures/legacy-item-cache-duplicate-only-native-first-item-page.json"
+			],
+			"formatter": {
+				"enabled": false
+			}
 		}
 	]
 }

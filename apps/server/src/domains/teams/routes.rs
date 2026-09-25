@@ -126,6 +126,8 @@ response_dto!(SendInvitationResponse from team::SendInvitationResponse {
     invitation_id: String,
     token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    existing_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     existing_user_public_key: Option<String>,
 });
 response_dto!(ResendInvitationResponse from team::ResendInvitationResponse {

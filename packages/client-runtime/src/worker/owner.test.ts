@@ -1746,3 +1746,157 @@ describe("shared worker RPC", () => {
 		await hostAborted.promise;
 	});
 });
+
+for (const [admitted, kind] of (["before", "during"] as const).flatMap(
+	(admitted) =>
+		(["unobserve", "finishVaultExportOutput"] as const).map(
+			(kind) => [admitted, kind] as const,
+		),
+)) {
+	const cleanupCommand = {
+		type: kind,
+		observationId: "export",
+		...(kind === "finishVaultExportOutput" ? { outputLeaseId: "lease" } : {}),
+	};
+	test(`Export ${kind} admitted ${admitted} Close keeps its response ahead of Worker termination`, async () => {
+		const cleanupEntered = deferred<void>();
+		const releaseCleanup = deferred<void>();
+		const releaseClose = deferred<void>();
+		const worker = new MultiplexWorkerDouble({
+			runtime: {
+				request: async (payload) => {
+					if ((payload as { type?: string }).type !== kind) return "ready";
+					cleanupEntered.resolve();
+					await releaseCleanup.promise;
+					return "cleanup-ack";
+				},
+				close: () => releaseClose.promise,
+			},
+		});
+		const owner = createSharedWorkerOwner({ createWorker: () => worker });
+		const channel = owner.channel("runtime");
+		await channel.request({});
+		let cleanup: Promise<unknown>;
+		let close: Promise<void>;
+		if (admitted === "before") {
+			cleanup = channel.request(cleanupCommand);
+			await cleanupEntered.promise;
+			close = owner.close();
+		} else {
+			close = owner.close();
+			cleanup = channel.request(cleanupCommand);
+			await cleanupEntered.promise;
+		}
+		let closeFinished = false;
+		void close.then(() => {
+			closeFinished = true;
+		});
+		releaseClose.resolve();
+		await flush();
+		expect(worker.terminateCalls).toBe(0);
+		expect(closeFinished).toBe(false);
+		await expect(
+			channel.request({
+				type: "observe",
+				observationId: "new",
+				requestJson: "{}",
+			}),
+		).rejects.toMatchObject({ code: "closed" });
+		await expect(
+			channel.request({
+				...cleanupCommand,
+				extra: true,
+			}),
+		).rejects.toMatchObject({ code: "closed" });
+		await expect(
+			owner.channel("crypto").request(cleanupCommand),
+		).rejects.toMatchObject({ code: "closed" });
+		let getterCalls = 0;
+		const accessor = Object.defineProperty(
+			{ observationId: "export" },
+			"type",
+			{
+				enumerable: true,
+				get: () => {
+					getterCalls += 1;
+					return kind;
+				},
+			},
+		);
+		await expect(channel.request(accessor)).rejects.toMatchObject({
+			code: "closed",
+		});
+		if (kind === "finishVaultExportOutput") {
+			const leaseAccessor = Object.defineProperty(
+				{ type: kind, observationId: "export" },
+				"outputLeaseId",
+				{
+					enumerable: true,
+					get() {
+						getterCalls += 1;
+						return "lease";
+					},
+				},
+			);
+			await expect(channel.request(leaseAccessor)).rejects.toMatchObject({
+				code: "closed",
+			});
+		}
+		expect(getterCalls).toBe(0);
+		releaseCleanup.resolve();
+		expect(await cleanup).toBe("cleanup-ack");
+		await close;
+		expect(closeFinished).toBe(true);
+		expect(worker.terminateCalls).toBe(1);
+		await expect(channel.request(cleanupCommand)).rejects.toMatchObject({
+			code: "closed",
+		});
+	});
+}
+
+test("Worker failure retires idle channel subscribers once before termination and suppresses late frames", async () => {
+	const cleanup = deferred<void>();
+	const worker = new MultiplexWorkerDouble({
+		runtime: { request: async () => "ready" },
+	});
+	const owner = createSharedWorkerOwner({
+		createWorker: () => worker,
+		beforeWorkerTerminate: () => cleanup.promise,
+	});
+	const channel = owner.channel("runtime");
+	const events: string[] = [];
+	const payloads: unknown[] = [];
+	channel.subscribe(
+		() => undefined,
+		() => {
+			events.push("throwing");
+			throw new Error("host disposal failed");
+		},
+	);
+	channel.subscribe(
+		(value) => payloads.push(value),
+		() => events.push("retired"),
+	);
+	worker.onTerminate = () => events.push("terminated");
+	await channel.request({});
+	worker.onerror?.({ message: "actual transport failure" } as ErrorEvent);
+	worker.onmessageerror?.(new MessageEvent("messageerror"));
+	worker.emitToMain({
+		type: "notification",
+		channel: "runtime",
+		value: "late private frame",
+	});
+	await flush();
+	expect(events).toEqual(["throwing", "retired"]);
+	expect(payloads).toEqual([]);
+	expect(worker.terminateCalls).toBe(0);
+	await expect(channel.request({})).rejects.toMatchObject({
+		code: "backend-failure",
+	});
+	cleanup.resolve();
+	await expect(owner.close()).rejects.toMatchObject({
+		code: "backend-failure",
+	});
+	expect(events).toEqual(["throwing", "retired", "terminated"]);
+	expect(worker.terminateCalls).toBe(1);
+});

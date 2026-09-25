@@ -1,6 +1,8 @@
 use sha2::{Digest, Sha256};
 
-pub(crate) const MAX_TRANSFER_CHUNK_BYTES: usize = 256 * 1024;
+pub(crate) use bittery_client_core::{
+    AttachmentUploadIntegrity as UploadIntegrity, ARTIFACT_CHUNK_BYTES as MAX_TRANSFER_CHUNK_BYTES,
+};
 
 pub(crate) fn copy_validated_download_chunk(
     reported_length: u32,
@@ -28,54 +30,6 @@ pub(crate) fn validate_sha256(bytes: &[u8], expected: &str) -> Result<(), &'stat
         return Err("Binary transfer chunk digest is invalid");
     }
     Ok(())
-}
-
-pub(crate) struct UploadIntegrity {
-    expected_length: u64,
-    expected_sha256: String,
-    actual_length: u64,
-    hasher: Sha256,
-}
-
-impl UploadIntegrity {
-    pub(crate) fn new(expected_length: u64, expected_sha256: String) -> Result<Self, &'static str> {
-        if expected_sha256.len() != 64
-            || !expected_sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        {
-            return Err("Binary transfer upload digest is invalid");
-        }
-        Ok(Self {
-            expected_length,
-            expected_sha256,
-            actual_length: 0,
-            hasher: Sha256::new(),
-        })
-    }
-
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
-        if bytes.is_empty() || bytes.len() > MAX_TRANSFER_CHUNK_BYTES {
-            return Err("Binary transfer upload chunk length is invalid");
-        }
-        self.actual_length = self
-            .actual_length
-            .checked_add(bytes.len() as u64)
-            .ok_or("Binary transfer upload length is invalid")?;
-        if self.actual_length > self.expected_length {
-            return Err("Binary transfer upload length is invalid");
-        }
-        self.hasher.update(bytes);
-        Ok(())
-    }
-
-    pub(crate) fn finish(&self) -> Result<(), &'static str> {
-        let actual_sha256 = format!("{:x}", self.hasher.clone().finalize());
-        if self.actual_length != self.expected_length || actual_sha256 != self.expected_sha256 {
-            return Err("Binary transfer upload does not match ciphertext authority");
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,10 @@ import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { TravelModeConfig, VaultKeyData } from "@bittery/storage/types";
 import { type CredentialMirror, lockAccount } from "./account-lifecycle";
 import {
+	type MaterialFailureCleanup,
+	MaterialPublicationSupersededError,
+} from "./material-publication";
+import {
 	filterItemsByTravelMode,
 	filterVaultKeys,
 	isVaultHidden,
@@ -215,16 +219,23 @@ export class TravelModeEnforcer {
 		accountId: string,
 		apiClient: TravelModeApiClient | null | undefined,
 		credentialMirror: CredentialMirror,
+		cleanup?: MaterialFailureCleanup,
 	): Promise<boolean> {
 		try {
 			await this.verifyForUnlock(accountId, apiClient);
+			if (cleanup && !cleanup.isCurrent())
+				throw new MaterialPublicationSupersededError();
 			return true;
 		} catch (error) {
-			const outcome = await lockAccount(accountId, {
-				storage: this.storage,
-				itemCache: this.itemCache,
-				credentialMirror,
-			});
+			if (error instanceof MaterialPublicationSupersededError) throw error;
+			const lock = () =>
+				lockAccount(accountId, {
+					storage: this.storage,
+					itemCache: this.itemCache,
+					credentialMirror,
+				});
+			const outcome = cleanup ? await cleanup.run(lock) : await lock();
+			if (!outcome) throw new MaterialPublicationSupersededError();
 			console.error(
 				"[TravelMode] Verification failed during unlock:",
 				accountId,

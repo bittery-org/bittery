@@ -57,6 +57,7 @@ const ajv = new Ajv2020({
 	strict: true,
 });
 ajv.addFormat("uint32", true);
+ajv.addFormat("uint64", true);
 ajv.addSchema(schema);
 const ids = {
 	request: `${id}:request`,

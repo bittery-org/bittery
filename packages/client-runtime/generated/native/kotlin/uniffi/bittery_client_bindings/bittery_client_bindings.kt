@@ -628,6 +628,9 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 internal interface UniffiCallbackInterfaceObservationSinkMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`projection`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceObservationSinkMethod1 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`control`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
 internal interface UniffiCallbackInterfaceVaultImageArtifactExecutorMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`controlRequestJson`: RustBuffer.ByValue,`binaryChunkBase64`: RustBuffer.ByValue,`uniffiOutReturn`: LongByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
@@ -640,22 +643,25 @@ internal interface UniffiCallbackInterfaceVaultImagePortAnswerMethod1 : com.sun.
 internal interface UniffiCallbackInterfaceVaultImageSourceExecutorMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`controlRequestJson`: RustBuffer.ByValue,`uniffiOutReturn`: LongByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "publish")
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "publish", "control")
 internal open class UniffiVTableCallbackInterfaceObservationSink(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
     @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
     @JvmField internal var `publish`: UniffiCallbackInterfaceObservationSinkMethod0? = null,
+    @JvmField internal var `control`: UniffiCallbackInterfaceObservationSinkMethod1? = null,
 ) : Structure() {
     class UniffiByValue(
         `uniffiFree`: UniffiCallbackInterfaceFree? = null,
         `uniffiClone`: UniffiCallbackInterfaceClone? = null,
         `publish`: UniffiCallbackInterfaceObservationSinkMethod0? = null,
-    ): UniffiVTableCallbackInterfaceObservationSink(`uniffiFree`,`uniffiClone`,`publish`,), Structure.ByValue
+        `control`: UniffiCallbackInterfaceObservationSinkMethod1? = null,
+    ): UniffiVTableCallbackInterfaceObservationSink(`uniffiFree`,`uniffiClone`,`publish`,`control`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceObservationSink) {
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
         `publish` = other.`publish`
+        `control` = other.`control`
     }
 
 }
@@ -850,6 +856,38 @@ external fun uniffi_bittery_client_bindings_checksum_method_customfield_label(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_customfield_value(
 ): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_custom_fields(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_note(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_notes(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_password(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_password_history(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_tags(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_title(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_account_name(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_algorithm(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_digits(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_issuer(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_period(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_secret(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_url(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_urls(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_username(
+): Int
 external fun uniffi_bittery_client_bindings_checksum_method_identityitemdata_addresses(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_identityitemdata_custom_fields(
@@ -900,6 +938,10 @@ external fun uniffi_bittery_client_bindings_checksum_method_itemprojection_data(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_itemprojection_deleted_at(
 ): Int
+external fun uniffi_bittery_client_bindings_checksum_method_itemprojection_duplicate_source_guard(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_itemprojection_edit_guard(
+): Int
 external fun uniffi_bittery_client_bindings_checksum_method_itemprojection_favorite(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_itemprojection_item_id(
@@ -944,9 +986,15 @@ external fun uniffi_bittery_client_bindings_checksum_method_loginitemdata_urls(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_loginitemdata_username(
 ): Int
+external fun uniffi_bittery_client_bindings_checksum_method_observationhandle_begin_vault_export_output(
+): Int
 external fun uniffi_bittery_client_bindings_checksum_method_observationhandle_close(
 ): Int
+external fun uniffi_bittery_client_bindings_checksum_method_observationhandle_finish_vault_export_output(
+): Int
 external fun uniffi_bittery_client_bindings_checksum_method_observationsink_publish(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_observationsink_control(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_passkey_algorithm(
 ): Int
@@ -1000,6 +1048,12 @@ external fun uniffi_bittery_client_bindings_checksum_method_phonenumber_label(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_phonenumber_number(
 ): Int
+external fun uniffi_bittery_client_bindings_checksum_method_publicloginitemdata_editable(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_publicloginitemdata_passkeys(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_method_secretstring_reveal(
+): Int
 external fun uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_custom_fields(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_note(
@@ -1031,6 +1085,8 @@ external fun uniffi_bittery_client_bindings_checksum_constructor_clientruntime_n
 external fun uniffi_bittery_client_bindings_checksum_constructor_creditcarditemdata_new(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_constructor_customfield_new(
+): Int
+external fun uniffi_bittery_client_bindings_checksum_constructor_editableloginitemdata_new(
 ): Int
 external fun uniffi_bittery_client_bindings_checksum_constructor_identityitemdata_new(
 ): Int
@@ -1212,6 +1268,44 @@ external fun uniffi_bittery_client_bindings_fn_method_customfield_label(`ptr`: L
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_customfield_value(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_clone_editableloginitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_free_editableloginitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_constructor_editableloginitemdata_new(`title`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`urls`: RustBuffer.ByValue,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,`passwordHistory`: RustBuffer.ByValue,`notes`: RustBuffer.ByValue,`note`: RustBuffer.ByValue,`customFields`: RustBuffer.ByValue,`tags`: RustBuffer.ByValue,`totpSecret`: RustBuffer.ByValue,`totpIssuer`: RustBuffer.ByValue,`totpAccountName`: RustBuffer.ByValue,`totpAlgorithm`: RustBuffer.ByValue,`totpDigits`: RustBuffer.ByValue,`totpPeriod`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_custom_fields(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_note(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_notes(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_password(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_password_history(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_tags(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_title(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_account_name(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_algorithm(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_digits(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_issuer(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_period(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_secret(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_urls(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_editableloginitemdata_username(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_clone_identityitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_bittery_client_bindings_fn_free_identityitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1272,6 +1366,10 @@ external fun uniffi_bittery_client_bindings_fn_method_itemprojection_data(`ptr`:
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_itemprojection_deleted_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_itemprojection_duplicate_source_guard(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_method_itemprojection_edit_guard(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_itemprojection_favorite(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 external fun uniffi_bittery_client_bindings_fn_method_itemprojection_item_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1326,7 +1424,11 @@ external fun uniffi_bittery_client_bindings_fn_clone_observationhandle(`handle`:
 ): Long
 external fun uniffi_bittery_client_bindings_fn_free_observationhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
+external fun uniffi_bittery_client_bindings_fn_method_observationhandle_begin_vault_export_output(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_observationhandle_close(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_method_observationhandle_finish_vault_export_output(`ptr`: Long,`leaseId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_clone_observationsink(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
@@ -1335,6 +1437,8 @@ external fun uniffi_bittery_client_bindings_fn_free_observationsink(`handle`: Lo
 external fun uniffi_bittery_client_bindings_fn_init_callback_vtable_observationsink(`vtable`: UniffiVTableCallbackInterfaceObservationSink,
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_method_observationsink_publish(`ptr`: Long,`projection`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_method_observationsink_control(`ptr`: Long,`control`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_clone_passkey(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
@@ -1410,12 +1514,22 @@ external fun uniffi_bittery_client_bindings_fn_method_phonenumber_label(`ptr`: L
 ): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_method_phonenumber_number(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_bittery_client_bindings_fn_clone_publicloginitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_free_publicloginitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_bittery_client_bindings_fn_method_publicloginitemdata_editable(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+external fun uniffi_bittery_client_bindings_fn_method_publicloginitemdata_passkeys(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_clone_secretstring(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_bittery_client_bindings_fn_free_secretstring(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_bittery_client_bindings_fn_constructor_secretstring_new(`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Long
+external fun uniffi_bittery_client_bindings_fn_method_secretstring_reveal(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_bittery_client_bindings_fn_clone_securenoteitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_bittery_client_bindings_fn_free_securenoteitemdata(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1751,6 +1865,54 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_method_customfield_value() != 31343) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_custom_fields() != 13969) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_note() != 3536) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_notes() != 20148) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_password() != 60103) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_password_history() != 48520) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_tags() != 32456) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_title() != 59494) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_account_name() != 9255) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_algorithm() != 39562) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_digits() != 13362) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_issuer() != 29084) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_period() != 49254) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_secret() != 21445) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_url() != 14646) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_urls() != 19400) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_username() != 26709) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_identityitemdata_addresses() != 20942) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1820,10 +1982,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_method_itemprojection_created_at() != 20999) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_bittery_client_bindings_checksum_method_itemprojection_data() != 42780) {
+    if (lib.uniffi_bittery_client_bindings_checksum_method_itemprojection_data() != 48368) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_itemprojection_deleted_at() != 60661) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_itemprojection_duplicate_source_guard() != 57576) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_itemprojection_edit_guard() != 11037) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_itemprojection_favorite() != 8881) {
@@ -1892,10 +2060,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_method_loginitemdata_username() != 20095) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_observationhandle_begin_vault_export_output() != 62592) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_observationhandle_close() != 5413) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_observationhandle_finish_vault_export_output() != 41510) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_observationsink_publish() != 48581) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_observationsink_control() != 57612) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_method_passkey_algorithm() != 43902) {
@@ -1976,6 +2153,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_client_bindings_checksum_method_phonenumber_number() != 37185) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_publicloginitemdata_editable() != 27115) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_publicloginitemdata_passkeys() != 1225) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_method_secretstring_reveal() != 18375) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_custom_fields() != 33327) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2022,6 +2208,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_constructor_customfield_new() != 20737) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_bittery_client_bindings_checksum_constructor_editableloginitemdata_new() != 6283) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_client_bindings_checksum_constructor_identityitemdata_new() != 44861) {
@@ -2366,6 +2555,29 @@ public object FfiConverterULong: FfiConverter<ULong, Long> {
 
     override fun write(value: ULong, buf: ByteBuffer) {
         buf.putLong(value.toLong())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterLong: FfiConverter<Long, Long> {
+    override fun lift(value: Long): Long {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Long {
+        return buf.getLong()
+    }
+
+    override fun lower(value: Long): Long {
+        return value
+    }
+
+    override fun allocationSize(value: Long) = 8UL
+
+    override fun write(value: Long, buf: ByteBuffer) {
+        buf.putLong(value)
     }
 }
 
@@ -5289,6 +5501,489 @@ public object FfiConverterTypeCustomField: FfiConverter<CustomField, Long> {
 //
 
 
+public interface EditableLoginItemDataInterface {
+
+    fun `customFields`(): List<CustomField>
+
+    fun `note`(): kotlin.String?
+
+    fun `notes`(): kotlin.String?
+
+    fun `password`(): kotlin.String?
+
+    fun `passwordHistory`(): List<PasswordHistoryEntry>
+
+    fun `tags`(): List<kotlin.String>
+
+    fun `title`(): kotlin.String
+
+    fun `totpAccountName`(): kotlin.String?
+
+    fun `totpAlgorithm`(): TotpAlgorithm?
+
+    fun `totpDigits`(): TotpDigits?
+
+    fun `totpIssuer`(): kotlin.String?
+
+    fun `totpPeriod`(): kotlin.UInt?
+
+    fun `totpSecret`(): kotlin.String?
+
+    fun `url`(): kotlin.String?
+
+    fun `urls`(): List<kotlin.String>
+
+    fun `username`(): kotlin.String?
+
+    companion object
+}
+
+open class EditableLoginItemData: Disposable, AutoCloseable, EditableLoginItemDataInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor(`title`: kotlin.String, `url`: kotlin.String?, `urls`: List<kotlin.String>, `username`: kotlin.String?, `password`: kotlin.String?, `passwordHistory`: List<PasswordHistoryEntry>, `notes`: kotlin.String?, `note`: kotlin.String?, `customFields`: List<CustomField>, `tags`: List<kotlin.String>, `totpSecret`: kotlin.String?, `totpIssuer`: kotlin.String?, `totpAccountName`: kotlin.String?, `totpAlgorithm`: TotpAlgorithm?, `totpDigits`: TotpDigits?, `totpPeriod`: kotlin.UInt?) :
+        this(UniffiWithHandle,
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_constructor_editableloginitemdata_new(
+
+        FfiConverterString.lower(`title`),FfiConverterOptionalString.lower(`url`),FfiConverterSequenceString.lower(`urls`),FfiConverterOptionalString.lower(`username`),FfiConverterOptionalString.lower(`password`),FfiConverterSequenceTypePasswordHistoryEntry.lower(`passwordHistory`),FfiConverterOptionalString.lower(`notes`),FfiConverterOptionalString.lower(`note`),FfiConverterSequenceTypeCustomField.lower(`customFields`),FfiConverterSequenceString.lower(`tags`),FfiConverterOptionalString.lower(`totpSecret`),FfiConverterOptionalString.lower(`totpIssuer`),FfiConverterOptionalString.lower(`totpAccountName`),FfiConverterOptionalTypeTotpAlgorithm.lower(`totpAlgorithm`),FfiConverterOptionalTypeTotpDigits.lower(`totpDigits`),FfiConverterOptionalUInt.lower(`totpPeriod`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bittery_client_bindings_fn_free_editableloginitemdata(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_clone_editableloginitemdata(handle, status)
+        }
+    }
+
+    override fun `customFields`(): List<CustomField> {
+            return FfiConverterSequenceTypeCustomField.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_custom_fields(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `note`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_note(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `notes`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_notes(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `password`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_password(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `passwordHistory`(): List<PasswordHistoryEntry> {
+            return FfiConverterSequenceTypePasswordHistoryEntry.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_password_history(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `tags`(): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_tags(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `title`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_title(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `totpAccountName`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_account_name(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `totpAlgorithm`(): TotpAlgorithm? {
+            return FfiConverterOptionalTypeTotpAlgorithm.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_algorithm(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `totpDigits`(): TotpDigits? {
+            return FfiConverterOptionalTypeTotpDigits.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_digits(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `totpIssuer`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_issuer(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `totpPeriod`(): kotlin.UInt? {
+            return FfiConverterOptionalUInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_period(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `totpSecret`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_secret(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `url`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_url(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `urls`(): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_urls(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `username`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_editableloginitemdata_username(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+
+
+
+    /**
+     * @suppress
+     */
+    companion object
+
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeEditableLoginItemData: FfiConverter<EditableLoginItemData, Long> {
+    override fun lower(value: EditableLoginItemData): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): EditableLoginItemData {
+        return EditableLoginItemData(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): EditableLoginItemData {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: EditableLoginItemData) = 8UL
+
+    override fun write(value: EditableLoginItemData, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 public interface IdentityItemDataInterface {
 
     fun `addresses`(): List<Address>
@@ -5840,9 +6535,13 @@ public interface ItemProjectionInterface {
 
     fun `createdAt`(): kotlin.String
 
-    fun `data`(): ItemDraft
+    fun `data`(): PublicItemDraft
 
     fun `deletedAt`(): kotlin.String?
+
+    fun `duplicateSourceGuard`(): ItemDuplicateGuard?
+
+    fun `editGuard`(): ItemEditGuard?
 
     fun `favorite`(): kotlin.Boolean
 
@@ -5992,8 +6691,8 @@ open class ItemProjection: Disposable, AutoCloseable, ItemProjectionInterface
     }
 
 
-    override fun `data`(): ItemDraft {
-            return FfiConverterTypeItemDraft.lift(
+    override fun `data`(): PublicItemDraft {
+            return FfiConverterTypePublicItemDraft.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_bittery_client_bindings_fn_method_itemprojection_data(
@@ -6010,6 +6709,32 @@ open class ItemProjection: Disposable, AutoCloseable, ItemProjectionInterface
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_bittery_client_bindings_fn_method_itemprojection_deleted_at(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `duplicateSourceGuard`(): ItemDuplicateGuard? {
+            return FfiConverterOptionalTypeItemDuplicateGuard.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_itemprojection_duplicate_source_guard(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `editGuard`(): ItemEditGuard? {
+            return FfiConverterOptionalTypeItemEditGuard.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_itemprojection_edit_guard(
         it,
         _status)
 }
@@ -6717,7 +7442,11 @@ public object FfiConverterTypeLoginItemData: FfiConverter<LoginItemData, Long> {
 
 public interface ObservationHandleInterface {
 
+    fun `beginVaultExportOutput`(): kotlin.String
+
     fun `close`()
+
+    fun `finishVaultExportOutput`(`leaseId`: kotlin.String)
 
     companion object
 }
@@ -6818,6 +7547,20 @@ open class ObservationHandle: Disposable, AutoCloseable, ObservationHandleInterf
         }
     }
 
+
+    @Throws(BindingException::class)override fun `beginVaultExportOutput`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(BindingException) { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_observationhandle_begin_vault_export_output(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
     override fun `close`()
         =
     callWithHandle {
@@ -6825,6 +7568,19 @@ open class ObservationHandle: Disposable, AutoCloseable, ObservationHandleInterf
     UniffiLib.uniffi_bittery_client_bindings_fn_method_observationhandle_close(
         it,
         _status)
+}
+    }
+
+
+
+
+    @Throws(BindingException::class)override fun `finishVaultExportOutput`(`leaseId`: kotlin.String)
+        =
+    callWithHandle {
+    uniffiRustCallWithError(BindingException) { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_observationhandle_finish_vault_export_output(
+        it,
+        FfiConverterString.lower(`leaseId`),_status)
 }
     }
 
@@ -6968,6 +7724,8 @@ public interface ObservationSink {
 
     fun `publish`(`projection`: RuntimeProjection)
 
+    fun `control`(`control`: ObservationControl)
+
     companion object
 }
 
@@ -7079,6 +7837,18 @@ open class ObservationSinkImpl: Disposable, AutoCloseable, ObservationSink
 
 
 
+    override fun `control`(`control`: ObservationControl)
+        =
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_observationsink_control(
+        it,
+        FfiConverterTypeObservationControl.lower(`control`),_status)
+}
+    }
+
+
+
 
 
 
@@ -7109,6 +7879,18 @@ internal object uniffiCallbackInterfaceObservationSink {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
+    internal object `control`: UniffiCallbackInterfaceObservationSinkMethod1 {
+        override fun callback(`uniffiHandle`: Long,`control`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeObservationSink.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`control`(
+                    FfiConverterTypeObservationControl.lift(`control`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
 
     internal object uniffiFree: UniffiCallbackInterfaceFree {
         override fun callback(handle: Long) {
@@ -7126,6 +7908,7 @@ internal object uniffiCallbackInterfaceObservationSink {
         uniffiFree,
         uniffiClone,
         `publish`,
+        `control`,
     )
 
     // Registers the foreign callback with the Rust side.
@@ -8623,7 +9406,278 @@ public object FfiConverterTypePhoneNumber: FfiConverter<PhoneNumber, Long> {
 //
 
 
+public interface PublicLoginItemDataInterface {
+
+    fun `editable`(): EditableLoginItemData
+
+    fun `passkeys`(): List<PublicPasskey>
+
+    companion object
+}
+
+open class PublicLoginItemData: Disposable, AutoCloseable, PublicLoginItemDataInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bittery_client_bindings_fn_free_publicloginitemdata(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bittery_client_bindings_fn_clone_publicloginitemdata(handle, status)
+        }
+    }
+
+    override fun `editable`(): EditableLoginItemData {
+            return FfiConverterTypeEditableLoginItemData.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_publicloginitemdata_editable(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+    override fun `passkeys`(): List<PublicPasskey> {
+            return FfiConverterSequenceTypePublicPasskey.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_publicloginitemdata_passkeys(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+
+
+
+    /**
+     * @suppress
+     */
+    companion object
+
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePublicLoginItemData: FfiConverter<PublicLoginItemData, Long> {
+    override fun lower(value: PublicLoginItemData): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): PublicLoginItemData {
+        return PublicLoginItemData(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): PublicLoginItemData {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: PublicLoginItemData) = 8UL
+
+    override fun write(value: PublicLoginItemData, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 public interface SecretStringInterface {
+
+    /**
+     * Opens this already-delivered secret container for its explicit presentation caller.
+     * Account authorization occurs in Core's transient request and guarded response delivery.
+     */
+    fun `reveal`(): kotlin.String
 
     companion object
 }
@@ -8731,6 +9785,23 @@ open class SecretString: Disposable, AutoCloseable, SecretStringInterface
             UniffiLib.uniffi_bittery_client_bindings_fn_clone_secretstring(handle, status)
         }
     }
+
+
+    /**
+     * Opens this already-delivered secret container for its explicit presentation caller.
+     * Account authorization occurs in Core's transient request and guarded response delivery.
+     */override fun `reveal`(): kotlin.String {
+            return FfiConverterSensitiveString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bittery_client_bindings_fn_method_secretstring_reveal(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
 
 
 
@@ -10069,6 +11140,16 @@ public object FfiConverterTypeVaultImageSourceExecutor: FfiConverter<VaultImageS
 
 data class AccountDisplayIdentity (
     var `email`: kotlin.String
+    ,
+    var `name`: kotlin.String
+    ,
+    var `teamName`: kotlin.String?
+    ,
+    var `teamAvatarUrl`: kotlin.String?
+    ,
+    var `serverUrl`: kotlin.String
+    ,
+    var `secretKeyHint`: kotlin.String
 
 ){
 
@@ -10086,15 +11167,30 @@ public object FfiConverterTypeAccountDisplayIdentity: FfiConverterRustBuffer<Acc
     override fun read(buf: ByteBuffer): AccountDisplayIdentity {
         return AccountDisplayIdentity(
             FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
     override fun allocationSize(value: AccountDisplayIdentity) = (
-            FfiConverterString.allocationSize(value.`email`)
+            FfiConverterString.allocationSize(value.`email`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterOptionalString.allocationSize(value.`teamName`) +
+            FfiConverterOptionalString.allocationSize(value.`teamAvatarUrl`) +
+            FfiConverterString.allocationSize(value.`serverUrl`) +
+            FfiConverterString.allocationSize(value.`secretKeyHint`)
     )
 
     override fun write(value: AccountDisplayIdentity, buf: ByteBuffer) {
             FfiConverterString.write(value.`email`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterOptionalString.write(value.`teamName`, buf)
+            FfiConverterOptionalString.write(value.`teamAvatarUrl`, buf)
+            FfiConverterString.write(value.`serverUrl`, buf)
+            FfiConverterString.write(value.`secretKeyHint`, buf)
     }
 }
 
@@ -10106,6 +11202,8 @@ data class AccountStatus (
     var `replicaRevision`: kotlin.ULong
     ,
     var `access`: AccountAccessState
+    ,
+    var `unlockCapabilities`: AccountUnlockCapabilities
     ,
     var `waitingReason`: AccountWaitingReason?
     ,
@@ -10131,6 +11229,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterTypeAccountAccessState.read(buf),
+            FfiConverterTypeAccountUnlockCapabilities.read(buf),
             FfiConverterOptionalTypeAccountWaitingReason.read(buf),
             FfiConverterOptionalTypeRuntimeErrorCode.read(buf),
             FfiConverterOptionalTypeAccountDisplayIdentity.read(buf),
@@ -10141,6 +11240,7 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterString.allocationSize(value.`accountId`) +
             FfiConverterULong.allocationSize(value.`replicaRevision`) +
             FfiConverterTypeAccountAccessState.allocationSize(value.`access`) +
+            FfiConverterTypeAccountUnlockCapabilities.allocationSize(value.`unlockCapabilities`) +
             FfiConverterOptionalTypeAccountWaitingReason.allocationSize(value.`waitingReason`) +
             FfiConverterOptionalTypeRuntimeErrorCode.allocationSize(value.`failure`) +
             FfiConverterOptionalTypeAccountDisplayIdentity.allocationSize(value.`displayIdentity`)
@@ -10150,9 +11250,263 @@ public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatu
             FfiConverterString.write(value.`accountId`, buf)
             FfiConverterULong.write(value.`replicaRevision`, buf)
             FfiConverterTypeAccountAccessState.write(value.`access`, buf)
+            FfiConverterTypeAccountUnlockCapabilities.write(value.`unlockCapabilities`, buf)
             FfiConverterOptionalTypeAccountWaitingReason.write(value.`waitingReason`, buf)
             FfiConverterOptionalTypeRuntimeErrorCode.write(value.`failure`, buf)
             FfiConverterOptionalTypeAccountDisplayIdentity.write(value.`displayIdentity`, buf)
+    }
+}
+
+
+
+data class AccountUnlockCapabilities (
+    var `password`: kotlin.Boolean
+    ,
+    var `desktop`: kotlin.Boolean
+    ,
+    var `signIn`: kotlin.Boolean
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountUnlockCapabilities: FfiConverterRustBuffer<AccountUnlockCapabilities> {
+    override fun read(buf: ByteBuffer): AccountUnlockCapabilities {
+        return AccountUnlockCapabilities(
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountUnlockCapabilities) = (
+            FfiConverterBoolean.allocationSize(value.`password`) +
+            FfiConverterBoolean.allocationSize(value.`desktop`) +
+            FfiConverterBoolean.allocationSize(value.`signIn`)
+    )
+
+    override fun write(value: AccountUnlockCapabilities, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`password`, buf)
+            FfiConverterBoolean.write(value.`desktop`, buf)
+            FfiConverterBoolean.write(value.`signIn`, buf)
+    }
+}
+
+
+
+data class AccountUnlockResult (
+    var `accountId`: kotlin.String
+    ,
+    var `failure`: RuntimeErrorCode?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountUnlockResult: FfiConverterRustBuffer<AccountUnlockResult> {
+    override fun read(buf: ByteBuffer): AccountUnlockResult {
+        return AccountUnlockResult(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalTypeRuntimeErrorCode.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountUnlockResult) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterOptionalTypeRuntimeErrorCode.allocationSize(value.`failure`)
+    )
+
+    override fun write(value: AccountUnlockResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterOptionalTypeRuntimeErrorCode.write(value.`failure`, buf)
+    }
+}
+
+
+
+data class AvailableVaultMember (
+    var `userId`: kotlin.String
+    ,
+    var `name`: kotlin.String
+    ,
+    var `email`: kotlin.String
+    ,
+    var `publicKey`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAvailableVaultMember: FfiConverterRustBuffer<AvailableVaultMember> {
+    override fun read(buf: ByteBuffer): AvailableVaultMember {
+        return AvailableVaultMember(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AvailableVaultMember) = (
+            FfiConverterString.allocationSize(value.`userId`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`email`) +
+            FfiConverterString.allocationSize(value.`publicKey`)
+    )
+
+    override fun write(value: AvailableVaultMember, buf: ByteBuffer) {
+            FfiConverterString.write(value.`userId`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`email`, buf)
+            FfiConverterString.write(value.`publicKey`, buf)
+    }
+}
+
+
+
+data class BiometricAccountAvailability (
+    var `accountId`: kotlin.String
+    ,
+    var `enabled`: kotlin.Boolean
+    ,
+    var `failure`: BiometricFailure?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBiometricAccountAvailability: FfiConverterRustBuffer<BiometricAccountAvailability> {
+    override fun read(buf: ByteBuffer): BiometricAccountAvailability {
+        return BiometricAccountAvailability(
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalTypeBiometricFailure.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BiometricAccountAvailability) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterBoolean.allocationSize(value.`enabled`) +
+            FfiConverterOptionalTypeBiometricFailure.allocationSize(value.`failure`)
+    )
+
+    override fun write(value: BiometricAccountAvailability, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterBoolean.write(value.`enabled`, buf)
+            FfiConverterOptionalTypeBiometricFailure.write(value.`failure`, buf)
+    }
+}
+
+
+
+data class BiometricAccountUnlock (
+    var `accountId`: kotlin.String
+    ,
+    var `failure`: BiometricFailure?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBiometricAccountUnlock: FfiConverterRustBuffer<BiometricAccountUnlock> {
+    override fun read(buf: ByteBuffer): BiometricAccountUnlock {
+        return BiometricAccountUnlock(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalTypeBiometricFailure.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BiometricAccountUnlock) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterOptionalTypeBiometricFailure.allocationSize(value.`failure`)
+    )
+
+    override fun write(value: BiometricAccountUnlock, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterOptionalTypeBiometricFailure.write(value.`failure`, buf)
+    }
+}
+
+
+
+data class BiometricHardware (
+    var `hasHardware`: kotlin.Boolean
+    ,
+    var `isEnrolled`: kotlin.Boolean
+    ,
+    var `kind`: BiometricKind?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBiometricHardware: FfiConverterRustBuffer<BiometricHardware> {
+    override fun read(buf: ByteBuffer): BiometricHardware {
+        return BiometricHardware(
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalTypeBiometricKind.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BiometricHardware) = (
+            FfiConverterBoolean.allocationSize(value.`hasHardware`) +
+            FfiConverterBoolean.allocationSize(value.`isEnrolled`) +
+            FfiConverterOptionalTypeBiometricKind.allocationSize(value.`kind`)
+    )
+
+    override fun write(value: BiometricHardware, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`hasHardware`, buf)
+            FfiConverterBoolean.write(value.`isEnrolled`, buf)
+            FfiConverterOptionalTypeBiometricKind.write(value.`kind`, buf)
     }
 }
 
@@ -10206,6 +11560,267 @@ public object FfiConverterTypeCreateShareDraft: FfiConverterRustBuffer<CreateSha
 
 
 
+data class CrossAccountMoveProjection (
+    var `phase`: CrossAccountMovePhase
+    ,
+    var `destinationServerUrl`: kotlin.String
+    ,
+    var `destinationUserId`: kotlin.String
+    ,
+    var `destinationVaultId`: kotlin.String
+    ,
+    var `sourceVisible`: kotlin.Boolean
+    ,
+    var `disposition`: CrossAccountMoveDisposition
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossAccountMoveProjection: FfiConverterRustBuffer<CrossAccountMoveProjection> {
+    override fun read(buf: ByteBuffer): CrossAccountMoveProjection {
+        return CrossAccountMoveProjection(
+            FfiConverterTypeCrossAccountMovePhase.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterTypeCrossAccountMoveDisposition.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CrossAccountMoveProjection) = (
+            FfiConverterTypeCrossAccountMovePhase.allocationSize(value.`phase`) +
+            FfiConverterString.allocationSize(value.`destinationServerUrl`) +
+            FfiConverterString.allocationSize(value.`destinationUserId`) +
+            FfiConverterString.allocationSize(value.`destinationVaultId`) +
+            FfiConverterBoolean.allocationSize(value.`sourceVisible`) +
+            FfiConverterTypeCrossAccountMoveDisposition.allocationSize(value.`disposition`)
+    )
+
+    override fun write(value: CrossAccountMoveProjection, buf: ByteBuffer) {
+            FfiConverterTypeCrossAccountMovePhase.write(value.`phase`, buf)
+            FfiConverterString.write(value.`destinationServerUrl`, buf)
+            FfiConverterString.write(value.`destinationUserId`, buf)
+            FfiConverterString.write(value.`destinationVaultId`, buf)
+            FfiConverterBoolean.write(value.`sourceVisible`, buf)
+            FfiConverterTypeCrossAccountMoveDisposition.write(value.`disposition`, buf)
+    }
+}
+
+
+
+data class CrossAccountMoveResumeGuard (
+    var `accountId`: kotlin.String
+    ,
+    var `sourceIncarnation`: kotlin.String
+    ,
+    var `sourceLockEpoch`: kotlin.ULong
+    ,
+    var `targetAccountId`: kotlin.String
+    ,
+    var `targetIncarnation`: kotlin.String
+    ,
+    var `targetLockEpoch`: kotlin.ULong
+    ,
+    var `operationId`: kotlin.String
+    ,
+    var `bindingRevision`: kotlin.ULong
+    ,
+    var `sourceReplicaRevision`: kotlin.ULong
+    ,
+    var `ownerIncarnation`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossAccountMoveResumeGuard: FfiConverterRustBuffer<CrossAccountMoveResumeGuard> {
+    override fun read(buf: ByteBuffer): CrossAccountMoveResumeGuard {
+        return CrossAccountMoveResumeGuard(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CrossAccountMoveResumeGuard) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`sourceIncarnation`) +
+            FfiConverterULong.allocationSize(value.`sourceLockEpoch`) +
+            FfiConverterString.allocationSize(value.`targetAccountId`) +
+            FfiConverterString.allocationSize(value.`targetIncarnation`) +
+            FfiConverterULong.allocationSize(value.`targetLockEpoch`) +
+            FfiConverterString.allocationSize(value.`operationId`) +
+            FfiConverterULong.allocationSize(value.`bindingRevision`) +
+            FfiConverterULong.allocationSize(value.`sourceReplicaRevision`) +
+            FfiConverterString.allocationSize(value.`ownerIncarnation`)
+    )
+
+    override fun write(value: CrossAccountMoveResumeGuard, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`sourceIncarnation`, buf)
+            FfiConverterULong.write(value.`sourceLockEpoch`, buf)
+            FfiConverterString.write(value.`targetAccountId`, buf)
+            FfiConverterString.write(value.`targetIncarnation`, buf)
+            FfiConverterULong.write(value.`targetLockEpoch`, buf)
+            FfiConverterString.write(value.`operationId`, buf)
+            FfiConverterULong.write(value.`bindingRevision`, buf)
+            FfiConverterULong.write(value.`sourceReplicaRevision`, buf)
+            FfiConverterString.write(value.`ownerIncarnation`, buf)
+    }
+}
+
+
+
+data class CurrentVaultMember (
+    var `userId`: kotlin.String
+    ,
+    var `name`: kotlin.String
+    ,
+    var `email`: kotlin.String
+    ,
+    var `role`: VaultRole
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCurrentVaultMember: FfiConverterRustBuffer<CurrentVaultMember> {
+    override fun read(buf: ByteBuffer): CurrentVaultMember {
+        return CurrentVaultMember(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeVaultRole.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CurrentVaultMember) = (
+            FfiConverterString.allocationSize(value.`userId`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`email`) +
+            FfiConverterTypeVaultRole.allocationSize(value.`role`)
+    )
+
+    override fun write(value: CurrentVaultMember, buf: ByteBuffer) {
+            FfiConverterString.write(value.`userId`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`email`, buf)
+            FfiConverterTypeVaultRole.write(value.`role`, buf)
+    }
+}
+
+
+
+data class DeviceSetupDisclosure (
+    var `accountId`: kotlin.String
+    ,
+    var `incarnation`: kotlin.String
+    ,
+    var `lockEpoch`: kotlin.ULong
+    ,
+    var `email`: kotlin.String
+    ,
+    var `serverUrl`: kotlin.String
+    ,
+    var `teamName`: kotlin.String?
+    ,
+    var `secretKey`: SecretString
+
+): Disposable{
+
+
+
+
+
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`incarnation`,
+        this.`lockEpoch`,
+        this.`email`,
+        this.`serverUrl`,
+        this.`teamName`,
+        this.`secretKey`
+    )
+    }
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDeviceSetupDisclosure: FfiConverterRustBuffer<DeviceSetupDisclosure> {
+    override fun read(buf: ByteBuffer): DeviceSetupDisclosure {
+        return DeviceSetupDisclosure(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterTypeSecretString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DeviceSetupDisclosure) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`incarnation`) +
+            FfiConverterULong.allocationSize(value.`lockEpoch`) +
+            FfiConverterString.allocationSize(value.`email`) +
+            FfiConverterString.allocationSize(value.`serverUrl`) +
+            FfiConverterOptionalString.allocationSize(value.`teamName`) +
+            FfiConverterTypeSecretString.allocationSize(value.`secretKey`)
+    )
+
+    override fun write(value: DeviceSetupDisclosure, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`incarnation`, buf)
+            FfiConverterULong.write(value.`lockEpoch`, buf)
+            FfiConverterString.write(value.`email`, buf)
+            FfiConverterString.write(value.`serverUrl`, buf)
+            FfiConverterOptionalString.write(value.`teamName`, buf)
+            FfiConverterTypeSecretString.write(value.`secretKey`, buf)
+    }
+}
+
+
+
 data class ImportItemDraft (
     var `draft`: ItemDraft
     ,
@@ -10248,6 +11863,392 @@ public object FfiConverterTypeImportItemDraft: FfiConverterRustBuffer<ImportItem
     override fun write(value: ImportItemDraft, buf: ByteBuffer) {
             FfiConverterTypeItemDraft.write(value.`draft`, buf)
             FfiConverterBoolean.write(value.`favorite`, buf)
+    }
+}
+
+
+
+data class InvitationCandidate (
+    var `recipientUserId`: kotlin.String
+    ,
+    var `publicKey`: kotlin.String
+    ,
+    var `fingerprint`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInvitationCandidate: FfiConverterRustBuffer<InvitationCandidate> {
+    override fun read(buf: ByteBuffer): InvitationCandidate {
+        return InvitationCandidate(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: InvitationCandidate) = (
+            FfiConverterString.allocationSize(value.`recipientUserId`) +
+            FfiConverterString.allocationSize(value.`publicKey`) +
+            FfiConverterString.allocationSize(value.`fingerprint`)
+    )
+
+    override fun write(value: InvitationCandidate, buf: ByteBuffer) {
+            FfiConverterString.write(value.`recipientUserId`, buf)
+            FfiConverterString.write(value.`publicKey`, buf)
+            FfiConverterString.write(value.`fingerprint`, buf)
+    }
+}
+
+
+
+data class InvitationComposerData (
+    var `teamId`: kotlin.String
+    ,
+    var `vaults`: List<InvitationComposerVault>
+    ,
+    var `billingEnabled`: kotlin.Boolean
+    ,
+    var `teamPlanActive`: kotlin.Boolean
+    ,
+    var `seatPreview`: InvitationSeatPreview?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInvitationComposerData: FfiConverterRustBuffer<InvitationComposerData> {
+    override fun read(buf: ByteBuffer): InvitationComposerData {
+        return InvitationComposerData(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeInvitationComposerVault.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalTypeInvitationSeatPreview.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: InvitationComposerData) = (
+            FfiConverterString.allocationSize(value.`teamId`) +
+            FfiConverterSequenceTypeInvitationComposerVault.allocationSize(value.`vaults`) +
+            FfiConverterBoolean.allocationSize(value.`billingEnabled`) +
+            FfiConverterBoolean.allocationSize(value.`teamPlanActive`) +
+            FfiConverterOptionalTypeInvitationSeatPreview.allocationSize(value.`seatPreview`)
+    )
+
+    override fun write(value: InvitationComposerData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`teamId`, buf)
+            FfiConverterSequenceTypeInvitationComposerVault.write(value.`vaults`, buf)
+            FfiConverterBoolean.write(value.`billingEnabled`, buf)
+            FfiConverterBoolean.write(value.`teamPlanActive`, buf)
+            FfiConverterOptionalTypeInvitationSeatPreview.write(value.`seatPreview`, buf)
+    }
+}
+
+
+
+data class InvitationComposerVault (
+    var `id`: kotlin.String
+    ,
+    var `name`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInvitationComposerVault: FfiConverterRustBuffer<InvitationComposerVault> {
+    override fun read(buf: ByteBuffer): InvitationComposerVault {
+        return InvitationComposerVault(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: InvitationComposerVault) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`name`)
+    )
+
+    override fun write(value: InvitationComposerVault, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`name`, buf)
+    }
+}
+
+
+
+data class InvitationSeatPreview (
+    var `currency`: kotlin.String
+    ,
+    var `currentQuantity`: kotlin.String
+    ,
+    var `nextQuantity`: kotlin.String
+    ,
+    var `estimatedNextPaymentCents`: kotlin.String
+    ,
+    var `totalLineItemsCents`: kotlin.String
+    ,
+    var `lines`: List<InvitationSeatPreviewLine>
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInvitationSeatPreview: FfiConverterRustBuffer<InvitationSeatPreview> {
+    override fun read(buf: ByteBuffer): InvitationSeatPreview {
+        return InvitationSeatPreview(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeInvitationSeatPreviewLine.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: InvitationSeatPreview) = (
+            FfiConverterString.allocationSize(value.`currency`) +
+            FfiConverterString.allocationSize(value.`currentQuantity`) +
+            FfiConverterString.allocationSize(value.`nextQuantity`) +
+            FfiConverterString.allocationSize(value.`estimatedNextPaymentCents`) +
+            FfiConverterString.allocationSize(value.`totalLineItemsCents`) +
+            FfiConverterSequenceTypeInvitationSeatPreviewLine.allocationSize(value.`lines`)
+    )
+
+    override fun write(value: InvitationSeatPreview, buf: ByteBuffer) {
+            FfiConverterString.write(value.`currency`, buf)
+            FfiConverterString.write(value.`currentQuantity`, buf)
+            FfiConverterString.write(value.`nextQuantity`, buf)
+            FfiConverterString.write(value.`estimatedNextPaymentCents`, buf)
+            FfiConverterString.write(value.`totalLineItemsCents`, buf)
+            FfiConverterSequenceTypeInvitationSeatPreviewLine.write(value.`lines`, buf)
+    }
+}
+
+
+
+data class InvitationSeatPreviewLine (
+    var `id`: kotlin.String
+    ,
+    var `description`: kotlin.String
+    ,
+    var `amountCents`: kotlin.String
+    ,
+    var `currency`: kotlin.String
+    ,
+    var `periodStart`: kotlin.String
+    ,
+    var `periodEnd`: kotlin.String
+    ,
+    var `quantity`: kotlin.String?
+    ,
+    var `unitAmountCents`: kotlin.String?
+    ,
+    var `isProration`: kotlin.Boolean
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInvitationSeatPreviewLine: FfiConverterRustBuffer<InvitationSeatPreviewLine> {
+    override fun read(buf: ByteBuffer): InvitationSeatPreviewLine {
+        return InvitationSeatPreviewLine(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: InvitationSeatPreviewLine) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`description`) +
+            FfiConverterString.allocationSize(value.`amountCents`) +
+            FfiConverterString.allocationSize(value.`currency`) +
+            FfiConverterString.allocationSize(value.`periodStart`) +
+            FfiConverterString.allocationSize(value.`periodEnd`) +
+            FfiConverterOptionalString.allocationSize(value.`quantity`) +
+            FfiConverterOptionalString.allocationSize(value.`unitAmountCents`) +
+            FfiConverterBoolean.allocationSize(value.`isProration`)
+    )
+
+    override fun write(value: InvitationSeatPreviewLine, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`description`, buf)
+            FfiConverterString.write(value.`amountCents`, buf)
+            FfiConverterString.write(value.`currency`, buf)
+            FfiConverterString.write(value.`periodStart`, buf)
+            FfiConverterString.write(value.`periodEnd`, buf)
+            FfiConverterOptionalString.write(value.`quantity`, buf)
+            FfiConverterOptionalString.write(value.`unitAmountCents`, buf)
+            FfiConverterBoolean.write(value.`isProration`, buf)
+    }
+}
+
+
+
+data class ItemDuplicateGuard (
+    var `accountId`: kotlin.String
+    ,
+    var `incarnationId`: kotlin.String
+    ,
+    var `lockEpoch`: kotlin.ULong
+    ,
+    var `sourceItemId`: kotlin.String
+    ,
+    var `vaultId`: kotlin.String
+    ,
+    var `replicaRevision`: kotlin.ULong
+    ,
+    var `source`: DuplicateSourceGuard
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeItemDuplicateGuard: FfiConverterRustBuffer<ItemDuplicateGuard> {
+    override fun read(buf: ByteBuffer): ItemDuplicateGuard {
+        return ItemDuplicateGuard(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterTypeDuplicateSourceGuard.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ItemDuplicateGuard) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`incarnationId`) +
+            FfiConverterULong.allocationSize(value.`lockEpoch`) +
+            FfiConverterString.allocationSize(value.`sourceItemId`) +
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterULong.allocationSize(value.`replicaRevision`) +
+            FfiConverterTypeDuplicateSourceGuard.allocationSize(value.`source`)
+    )
+
+    override fun write(value: ItemDuplicateGuard, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`incarnationId`, buf)
+            FfiConverterULong.write(value.`lockEpoch`, buf)
+            FfiConverterString.write(value.`sourceItemId`, buf)
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterULong.write(value.`replicaRevision`, buf)
+            FfiConverterTypeDuplicateSourceGuard.write(value.`source`, buf)
+    }
+}
+
+
+
+data class ItemEditGuard (
+    var `accountId`: kotlin.String
+    ,
+    var `incarnation`: kotlin.String
+    ,
+    var `lockEpoch`: kotlin.ULong
+    ,
+    var `itemId`: kotlin.String
+    ,
+    var `vaultId`: kotlin.String
+    ,
+    var `itemVersion`: kotlin.Int
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeItemEditGuard: FfiConverterRustBuffer<ItemEditGuard> {
+    override fun read(buf: ByteBuffer): ItemEditGuard {
+        return ItemEditGuard(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ItemEditGuard) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`incarnation`) +
+            FfiConverterULong.allocationSize(value.`lockEpoch`) +
+            FfiConverterString.allocationSize(value.`itemId`) +
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterInt.allocationSize(value.`itemVersion`)
+    )
+
+    override fun write(value: ItemEditGuard, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`incarnation`, buf)
+            FfiConverterULong.write(value.`lockEpoch`, buf)
+            FfiConverterString.write(value.`itemId`, buf)
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterInt.write(value.`itemVersion`, buf)
     }
 }
 
@@ -10312,6 +12313,64 @@ public object FfiConverterTypeItemsProjection: FfiConverterRustBuffer<ItemsProje
 
 
 
+data class MyTeamInvitation (
+    var `id`: kotlin.String
+    ,
+    var `teamId`: kotlin.String
+    ,
+    var `teamName`: kotlin.String
+    ,
+    var `role`: TeamRole
+    ,
+    var `invitedBy`: kotlin.String
+    ,
+    var `expiresAt`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMyTeamInvitation: FfiConverterRustBuffer<MyTeamInvitation> {
+    override fun read(buf: ByteBuffer): MyTeamInvitation {
+        return MyTeamInvitation(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeTeamRole.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: MyTeamInvitation) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`teamId`) +
+            FfiConverterString.allocationSize(value.`teamName`) +
+            FfiConverterTypeTeamRole.allocationSize(value.`role`) +
+            FfiConverterString.allocationSize(value.`invitedBy`) +
+            FfiConverterString.allocationSize(value.`expiresAt`)
+    )
+
+    override fun write(value: MyTeamInvitation, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`teamId`, buf)
+            FfiConverterString.write(value.`teamName`, buf)
+            FfiConverterTypeTeamRole.write(value.`role`, buf)
+            FfiConverterString.write(value.`invitedBy`, buf)
+            FfiConverterString.write(value.`expiresAt`, buf)
+    }
+}
+
+
+
 data class OperationProjection (
     var `operationId`: kotlin.String
     ,
@@ -10326,6 +12385,8 @@ data class OperationProjection (
     var `importedCount`: kotlin.UShort?
     ,
     var `rejectionCode`: kotlin.String?
+    ,
+    var `crossAccountMove`: CrossAccountMoveProjection?
 
 ){
 
@@ -10349,6 +12410,7 @@ public object FfiConverterTypeOperationProjection: FfiConverterRustBuffer<Operat
             FfiConverterTypeOperationResolution.read(buf),
             FfiConverterOptionalUShort.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeCrossAccountMoveProjection.read(buf),
         )
     }
 
@@ -10359,7 +12421,8 @@ public object FfiConverterTypeOperationProjection: FfiConverterRustBuffer<Operat
             FfiConverterOptionalString.allocationSize(value.`nextAttemptAtMs`) +
             FfiConverterTypeOperationResolution.allocationSize(value.`resolution`) +
             FfiConverterOptionalUShort.allocationSize(value.`importedCount`) +
-            FfiConverterOptionalString.allocationSize(value.`rejectionCode`)
+            FfiConverterOptionalString.allocationSize(value.`rejectionCode`) +
+            FfiConverterOptionalTypeCrossAccountMoveProjection.allocationSize(value.`crossAccountMove`)
     )
 
     override fun write(value: OperationProjection, buf: ByteBuffer) {
@@ -10370,6 +12433,7 @@ public object FfiConverterTypeOperationProjection: FfiConverterRustBuffer<Operat
             FfiConverterTypeOperationResolution.write(value.`resolution`, buf)
             FfiConverterOptionalUShort.write(value.`importedCount`, buf)
             FfiConverterOptionalString.write(value.`rejectionCode`, buf)
+            FfiConverterOptionalTypeCrossAccountMoveProjection.write(value.`crossAccountMove`, buf)
     }
 }
 
@@ -10529,6 +12593,271 @@ public object FfiConverterTypePreparedVaultImage: FfiConverterRustBuffer<Prepare
 
 
 
+/**
+ * Ordinary native observations expose credential metadata with no signing material.
+ */
+data class PublicPasskey (
+    var `credentialId`: kotlin.String
+    ,
+    var `rpId`: kotlin.String
+    ,
+    var `rpName`: kotlin.String
+    ,
+    var `userHandle`: kotlin.String
+    ,
+    var `userName`: kotlin.String
+    ,
+    var `userDisplayName`: kotlin.String
+    ,
+    var `publicKey`: kotlin.String
+    ,
+    var `publicKeyFingerprint`: kotlin.String
+    ,
+    var `algorithm`: kotlin.Int
+    ,
+    var `signCount`: kotlin.UInt
+    ,
+    var `transports`: List<kotlin.String>
+    ,
+    var `createdAt`: kotlin.String
+    ,
+    var `lastUsedAt`: kotlin.String?
+    ,
+    var `status`: PasskeyStatus?
+    ,
+    var `statusReason`: PasskeyStatusReason?
+    ,
+    var `statusUpdatedAt`: kotlin.String?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePublicPasskey: FfiConverterRustBuffer<PublicPasskey> {
+    override fun read(buf: ByteBuffer): PublicPasskey {
+        return PublicPasskey(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypePasskeyStatus.read(buf),
+            FfiConverterOptionalTypePasskeyStatusReason.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PublicPasskey) = (
+            FfiConverterString.allocationSize(value.`credentialId`) +
+            FfiConverterString.allocationSize(value.`rpId`) +
+            FfiConverterString.allocationSize(value.`rpName`) +
+            FfiConverterString.allocationSize(value.`userHandle`) +
+            FfiConverterString.allocationSize(value.`userName`) +
+            FfiConverterString.allocationSize(value.`userDisplayName`) +
+            FfiConverterString.allocationSize(value.`publicKey`) +
+            FfiConverterString.allocationSize(value.`publicKeyFingerprint`) +
+            FfiConverterInt.allocationSize(value.`algorithm`) +
+            FfiConverterUInt.allocationSize(value.`signCount`) +
+            FfiConverterSequenceString.allocationSize(value.`transports`) +
+            FfiConverterString.allocationSize(value.`createdAt`) +
+            FfiConverterOptionalString.allocationSize(value.`lastUsedAt`) +
+            FfiConverterOptionalTypePasskeyStatus.allocationSize(value.`status`) +
+            FfiConverterOptionalTypePasskeyStatusReason.allocationSize(value.`statusReason`) +
+            FfiConverterOptionalString.allocationSize(value.`statusUpdatedAt`)
+    )
+
+    override fun write(value: PublicPasskey, buf: ByteBuffer) {
+            FfiConverterString.write(value.`credentialId`, buf)
+            FfiConverterString.write(value.`rpId`, buf)
+            FfiConverterString.write(value.`rpName`, buf)
+            FfiConverterString.write(value.`userHandle`, buf)
+            FfiConverterString.write(value.`userName`, buf)
+            FfiConverterString.write(value.`userDisplayName`, buf)
+            FfiConverterString.write(value.`publicKey`, buf)
+            FfiConverterString.write(value.`publicKeyFingerprint`, buf)
+            FfiConverterInt.write(value.`algorithm`, buf)
+            FfiConverterUInt.write(value.`signCount`, buf)
+            FfiConverterSequenceString.write(value.`transports`, buf)
+            FfiConverterString.write(value.`createdAt`, buf)
+            FfiConverterOptionalString.write(value.`lastUsedAt`, buf)
+            FfiConverterOptionalTypePasskeyStatus.write(value.`status`, buf)
+            FfiConverterOptionalTypePasskeyStatusReason.write(value.`statusReason`, buf)
+            FfiConverterOptionalString.write(value.`statusUpdatedAt`, buf)
+    }
+}
+
+
+
+data class RotationCandidate (
+    var `userId`: kotlin.String
+    ,
+    var `publicKey`: kotlin.String
+    ,
+    var `fingerprint`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRotationCandidate: FfiConverterRustBuffer<RotationCandidate> {
+    override fun read(buf: ByteBuffer): RotationCandidate {
+        return RotationCandidate(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RotationCandidate) = (
+            FfiConverterString.allocationSize(value.`userId`) +
+            FfiConverterString.allocationSize(value.`publicKey`) +
+            FfiConverterString.allocationSize(value.`fingerprint`)
+    )
+
+    override fun write(value: RotationCandidate, buf: ByteBuffer) {
+            FfiConverterString.write(value.`userId`, buf)
+            FfiConverterString.write(value.`publicKey`, buf)
+            FfiConverterString.write(value.`fingerprint`, buf)
+    }
+}
+
+
+
+data class RotationPlanSelection (
+    var `planId`: kotlin.String
+    ,
+    var `vaultId`: kotlin.String
+    ,
+    var `expectedKeyVersion`: kotlin.Int
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRotationPlanSelection: FfiConverterRustBuffer<RotationPlanSelection> {
+    override fun read(buf: ByteBuffer): RotationPlanSelection {
+        return RotationPlanSelection(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RotationPlanSelection) = (
+            FfiConverterString.allocationSize(value.`planId`) +
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterInt.allocationSize(value.`expectedKeyVersion`)
+    )
+
+    override fun write(value: RotationPlanSelection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`planId`, buf)
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterInt.write(value.`expectedKeyVersion`, buf)
+    }
+}
+
+
+
+data class RotationSelection (
+    var `accountId`: kotlin.String
+    ,
+    var `incarnationId`: kotlin.String
+    ,
+    var `lockEpoch`: kotlin.String
+    ,
+    var `authorityGenerationId`: kotlin.String
+    ,
+    var `intent`: RotationIntent
+    ,
+    var `startOperationId`: kotlin.String
+    ,
+    var `plans`: List<RotationPlanSelection>
+    ,
+    var `candidates`: List<RotationCandidate>
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRotationSelection: FfiConverterRustBuffer<RotationSelection> {
+    override fun read(buf: ByteBuffer): RotationSelection {
+        return RotationSelection(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeRotationIntent.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeRotationPlanSelection.read(buf),
+            FfiConverterSequenceTypeRotationCandidate.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RotationSelection) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`incarnationId`) +
+            FfiConverterString.allocationSize(value.`lockEpoch`) +
+            FfiConverterString.allocationSize(value.`authorityGenerationId`) +
+            FfiConverterTypeRotationIntent.allocationSize(value.`intent`) +
+            FfiConverterString.allocationSize(value.`startOperationId`) +
+            FfiConverterSequenceTypeRotationPlanSelection.allocationSize(value.`plans`) +
+            FfiConverterSequenceTypeRotationCandidate.allocationSize(value.`candidates`)
+    )
+
+    override fun write(value: RotationSelection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`incarnationId`, buf)
+            FfiConverterString.write(value.`lockEpoch`, buf)
+            FfiConverterString.write(value.`authorityGenerationId`, buf)
+            FfiConverterTypeRotationIntent.write(value.`intent`, buf)
+            FfiConverterString.write(value.`startOperationId`, buf)
+            FfiConverterSequenceTypeRotationPlanSelection.write(value.`plans`, buf)
+            FfiConverterSequenceTypeRotationCandidate.write(value.`candidates`, buf)
+    }
+}
+
+
+
 data class RuntimeStatusProjection (
     var `accountId`: kotlin.String?
     ,
@@ -10537,6 +12866,8 @@ data class RuntimeStatusProjection (
     var `accounts`: List<AccountStatus>
     ,
     var `closed`: kotlin.Boolean
+    ,
+    var `profileAdmissionCleanup`: ProfileAdmissionCleanupStatus?
 
 ){
 
@@ -10557,6 +12888,7 @@ public object FfiConverterTypeRuntimeStatusProjection: FfiConverterRustBuffer<Ru
             FfiConverterULong.read(buf),
             FfiConverterSequenceTypeAccountStatus.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterOptionalTypeProfileAdmissionCleanupStatus.read(buf),
         )
     }
 
@@ -10564,7 +12896,8 @@ public object FfiConverterTypeRuntimeStatusProjection: FfiConverterRustBuffer<Ru
             FfiConverterOptionalString.allocationSize(value.`accountId`) +
             FfiConverterULong.allocationSize(value.`revision`) +
             FfiConverterSequenceTypeAccountStatus.allocationSize(value.`accounts`) +
-            FfiConverterBoolean.allocationSize(value.`closed`)
+            FfiConverterBoolean.allocationSize(value.`closed`) +
+            FfiConverterOptionalTypeProfileAdmissionCleanupStatus.allocationSize(value.`profileAdmissionCleanup`)
     )
 
     override fun write(value: RuntimeStatusProjection, buf: ByteBuffer) {
@@ -10572,6 +12905,7 @@ public object FfiConverterTypeRuntimeStatusProjection: FfiConverterRustBuffer<Ru
             FfiConverterULong.write(value.`revision`, buf)
             FfiConverterSequenceTypeAccountStatus.write(value.`accounts`, buf)
             FfiConverterBoolean.write(value.`closed`, buf)
+            FfiConverterOptionalTypeProfileAdmissionCleanupStatus.write(value.`profileAdmissionCleanup`, buf)
     }
 }
 
@@ -10887,6 +13221,299 @@ public object FfiConverterTypeStorageRecoveryDiagnostics: FfiConverterRustBuffer
             FfiConverterTypeRecoverySchemaStatus.write(value.`schema`, buf)
             FfiConverterTypeRecoveryDeviceStatus.write(value.`device`, buf)
             FfiConverterSequenceTypeStorageRecoveryAccount.write(value.`accounts`, buf)
+    }
+}
+
+
+
+data class TeamLeaveAttempt (
+    var `teamId`: kotlin.String
+    ,
+    var `startOperationId`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTeamLeaveAttempt: FfiConverterRustBuffer<TeamLeaveAttempt> {
+    override fun read(buf: ByteBuffer): TeamLeaveAttempt {
+        return TeamLeaveAttempt(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TeamLeaveAttempt) = (
+            FfiConverterString.allocationSize(value.`teamId`) +
+            FfiConverterString.allocationSize(value.`startOperationId`)
+    )
+
+    override fun write(value: TeamLeaveAttempt, buf: ByteBuffer) {
+            FfiConverterString.write(value.`teamId`, buf)
+            FfiConverterString.write(value.`startOperationId`, buf)
+    }
+}
+
+
+
+data class TravelModePolicy (
+    var `enabled`: kotlin.Boolean
+    ,
+    var `hiddenVaultIds`: List<kotlin.String>
+    ,
+    var `serverEnabledAtMs`: kotlin.String?
+    ,
+    var `serverUpdatedAtMs`: kotlin.String?
+    ,
+    var `verifiedAtMs`: kotlin.String?
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTravelModePolicy: FfiConverterRustBuffer<TravelModePolicy> {
+    override fun read(buf: ByteBuffer): TravelModePolicy {
+        return TravelModePolicy(
+            FfiConverterBoolean.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TravelModePolicy) = (
+            FfiConverterBoolean.allocationSize(value.`enabled`) +
+            FfiConverterSequenceString.allocationSize(value.`hiddenVaultIds`) +
+            FfiConverterOptionalString.allocationSize(value.`serverEnabledAtMs`) +
+            FfiConverterOptionalString.allocationSize(value.`serverUpdatedAtMs`) +
+            FfiConverterOptionalString.allocationSize(value.`verifiedAtMs`)
+    )
+
+    override fun write(value: TravelModePolicy, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`enabled`, buf)
+            FfiConverterSequenceString.write(value.`hiddenVaultIds`, buf)
+            FfiConverterOptionalString.write(value.`serverEnabledAtMs`, buf)
+            FfiConverterOptionalString.write(value.`serverUpdatedAtMs`, buf)
+            FfiConverterOptionalString.write(value.`verifiedAtMs`, buf)
+    }
+}
+
+
+
+data class TravelModeProjection (
+    var `accountId`: kotlin.String
+    ,
+    var `revision`: kotlin.ULong
+    ,
+    var `lastVerifiedPolicy`: TravelModePolicy?
+    ,
+    var `enforcement`: TravelModeEnforcement
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTravelModeProjection: FfiConverterRustBuffer<TravelModeProjection> {
+    override fun read(buf: ByteBuffer): TravelModeProjection {
+        return TravelModeProjection(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterOptionalTypeTravelModePolicy.read(buf),
+            FfiConverterTypeTravelModeEnforcement.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TravelModeProjection) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterULong.allocationSize(value.`revision`) +
+            FfiConverterOptionalTypeTravelModePolicy.allocationSize(value.`lastVerifiedPolicy`) +
+            FfiConverterTypeTravelModeEnforcement.allocationSize(value.`enforcement`)
+    )
+
+    override fun write(value: TravelModeProjection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterULong.write(value.`revision`, buf)
+            FfiConverterOptionalTypeTravelModePolicy.write(value.`lastVerifiedPolicy`, buf)
+            FfiConverterTypeTravelModeEnforcement.write(value.`enforcement`, buf)
+    }
+}
+
+
+
+data class VaultExportItem (
+    var `accountId`: kotlin.String
+    ,
+    var `itemId`: kotlin.String
+    ,
+    var `vaultId`: kotlin.String
+    ,
+    var `data`: ItemDraft
+    ,
+    var `favorite`: kotlin.Boolean
+    ,
+    var `deletedAt`: kotlin.String?
+    ,
+    var `attachments`: List<AttachmentProjection>
+    ,
+    var `createdAt`: kotlin.String
+    ,
+    var `updatedAt`: kotlin.String
+    ,
+    var `status`: ItemProjectionStatus
+
+): Disposable{
+
+
+
+
+
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`,
+        this.`vaultId`,
+        this.`data`,
+        this.`favorite`,
+        this.`deletedAt`,
+        this.`attachments`,
+        this.`createdAt`,
+        this.`updatedAt`,
+        this.`status`
+    )
+    }
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultExportItem: FfiConverterRustBuffer<VaultExportItem> {
+    override fun read(buf: ByteBuffer): VaultExportItem {
+        return VaultExportItem(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeItemDraft.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeAttachmentProjection.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeItemProjectionStatus.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VaultExportItem) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterString.allocationSize(value.`itemId`) +
+            FfiConverterString.allocationSize(value.`vaultId`) +
+            FfiConverterTypeItemDraft.allocationSize(value.`data`) +
+            FfiConverterBoolean.allocationSize(value.`favorite`) +
+            FfiConverterOptionalString.allocationSize(value.`deletedAt`) +
+            FfiConverterSequenceTypeAttachmentProjection.allocationSize(value.`attachments`) +
+            FfiConverterString.allocationSize(value.`createdAt`) +
+            FfiConverterString.allocationSize(value.`updatedAt`) +
+            FfiConverterTypeItemProjectionStatus.allocationSize(value.`status`)
+    )
+
+    override fun write(value: VaultExportItem, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterString.write(value.`itemId`, buf)
+            FfiConverterString.write(value.`vaultId`, buf)
+            FfiConverterTypeItemDraft.write(value.`data`, buf)
+            FfiConverterBoolean.write(value.`favorite`, buf)
+            FfiConverterOptionalString.write(value.`deletedAt`, buf)
+            FfiConverterSequenceTypeAttachmentProjection.write(value.`attachments`, buf)
+            FfiConverterString.write(value.`createdAt`, buf)
+            FfiConverterString.write(value.`updatedAt`, buf)
+            FfiConverterTypeItemProjectionStatus.write(value.`status`, buf)
+    }
+}
+
+
+
+data class VaultExportProjection (
+    var `accountId`: kotlin.String
+    ,
+    var `replicaRevision`: kotlin.ULong
+    ,
+    var `items`: List<VaultExportItem>
+    ,
+    var `vaults`: List<VaultProjection>
+
+): Disposable{
+
+
+
+
+
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`replicaRevision`,
+        this.`items`,
+        this.`vaults`
+    )
+    }
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultExportProjection: FfiConverterRustBuffer<VaultExportProjection> {
+    override fun read(buf: ByteBuffer): VaultExportProjection {
+        return VaultExportProjection(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceTypeVaultExportItem.read(buf),
+            FfiConverterSequenceTypeVaultProjection.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VaultExportProjection) = (
+            FfiConverterString.allocationSize(value.`accountId`) +
+            FfiConverterULong.allocationSize(value.`replicaRevision`) +
+            FfiConverterSequenceTypeVaultExportItem.allocationSize(value.`items`) +
+            FfiConverterSequenceTypeVaultProjection.allocationSize(value.`vaults`)
+    )
+
+    override fun write(value: VaultExportProjection, buf: ByteBuffer) {
+            FfiConverterString.write(value.`accountId`, buf)
+            FfiConverterULong.write(value.`replicaRevision`, buf)
+            FfiConverterSequenceTypeVaultExportItem.write(value.`items`, buf)
+            FfiConverterSequenceTypeVaultProjection.write(value.`vaults`, buf)
     }
 }
 
@@ -11232,6 +13859,41 @@ public object FfiConverterTypeAccountWaitingReason: FfiConverterRustBuffer<Accou
 
 
 
+enum class ActivityKind {
+
+    INTERACTION,
+    FOCUS,
+    BLUR;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeActivityKind: FfiConverterRustBuffer<ActivityKind> {
+    override fun read(buf: ByteBuffer) = try {
+        ActivityKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ActivityKind) = 4UL
+
+    override fun write(value: ActivityKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 
 sealed class BindingException: kotlin.Exception() {
 
@@ -11304,6 +13966,86 @@ public object FfiConverterTypeBindingError : FfiConverterRustBuffer<BindingExcep
 
 
 
+enum class BiometricFailure {
+
+    UNAVAILABLE,
+    NOT_ENROLLED,
+    NOT_ENABLED,
+    PASSWORD_REQUIRED,
+    CANCELLED,
+    FAILED,
+    LOCKED_OUT,
+    ACCOUNT_CHANGED,
+    TRAVEL_UNVERIFIED,
+    STORAGE_UNAVAILABLE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBiometricFailure: FfiConverterRustBuffer<BiometricFailure> {
+    override fun read(buf: ByteBuffer) = try {
+        BiometricFailure.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: BiometricFailure) = 4UL
+
+    override fun write(value: BiometricFailure, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class BiometricKind {
+
+    TOUCH_ID,
+    FACE_ID,
+    WINDOWS_HELLO,
+    FINGERPRINT,
+    FACE,
+    OTHER;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBiometricKind: FfiConverterRustBuffer<BiometricKind> {
+    override fun read(buf: ByteBuffer) = try {
+        BiometricKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: BiometricKind) = 4UL
+
+    override fun write(value: BiometricKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 enum class CreateVaultType {
 
     PERSONAL,
@@ -11329,6 +14071,347 @@ public object FfiConverterTypeCreateVaultType: FfiConverterRustBuffer<CreateVaul
     override fun allocationSize(value: CreateVaultType) = 4UL
 
     override fun write(value: CreateVaultType, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class CrossAccountMoveBlockedReason {
+
+    DESTINATION_RETIRED,
+    SOURCE_CHANGED,
+    TARGET_CHANGED,
+    MISSING_PROOF,
+    MISSING_ARTIFACT,
+    MISSING_SOURCE_EVIDENCE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossAccountMoveBlockedReason: FfiConverterRustBuffer<CrossAccountMoveBlockedReason> {
+    override fun read(buf: ByteBuffer) = try {
+        CrossAccountMoveBlockedReason.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: CrossAccountMoveBlockedReason) = 4UL
+
+    override fun write(value: CrossAccountMoveBlockedReason, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class CrossAccountMoveDisposition {
+
+    object Ready : CrossAccountMoveDisposition()
+
+
+    object LegacyHeld : CrossAccountMoveDisposition()
+
+
+    data class Waiting(
+        val `reason`: uniffi.bittery_client_bindings.CrossAccountMoveWaitingReason) : CrossAccountMoveDisposition()
+
+    {
+
+
+        companion object
+    }
+
+    data class Blocked(
+        val `reason`: uniffi.bittery_client_bindings.CrossAccountMoveBlockedReason) : CrossAccountMoveDisposition()
+
+    {
+
+
+        companion object
+    }
+
+    data class Rejected(
+        val `code`: kotlin.String) : CrossAccountMoveDisposition()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossAccountMoveDisposition : FfiConverterRustBuffer<CrossAccountMoveDisposition>{
+    override fun read(buf: ByteBuffer): CrossAccountMoveDisposition {
+        return when(buf.getInt()) {
+            1 -> CrossAccountMoveDisposition.Ready
+            2 -> CrossAccountMoveDisposition.LegacyHeld
+            3 -> CrossAccountMoveDisposition.Waiting(
+                FfiConverterTypeCrossAccountMoveWaitingReason.read(buf),
+                )
+            4 -> CrossAccountMoveDisposition.Blocked(
+                FfiConverterTypeCrossAccountMoveBlockedReason.read(buf),
+                )
+            5 -> CrossAccountMoveDisposition.Rejected(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: CrossAccountMoveDisposition) = when(value) {
+        is CrossAccountMoveDisposition.Ready -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is CrossAccountMoveDisposition.LegacyHeld -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is CrossAccountMoveDisposition.Waiting -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeCrossAccountMoveWaitingReason.allocationSize(value.`reason`)
+            )
+        }
+        is CrossAccountMoveDisposition.Blocked -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeCrossAccountMoveBlockedReason.allocationSize(value.`reason`)
+            )
+        }
+        is CrossAccountMoveDisposition.Rejected -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+        }
+    }
+
+    override fun write(value: CrossAccountMoveDisposition, buf: ByteBuffer) {
+        when(value) {
+            is CrossAccountMoveDisposition.Ready -> {
+                buf.putInt(1)
+                Unit
+            }
+            is CrossAccountMoveDisposition.LegacyHeld -> {
+                buf.putInt(2)
+                Unit
+            }
+            is CrossAccountMoveDisposition.Waiting -> {
+                buf.putInt(3)
+                FfiConverterTypeCrossAccountMoveWaitingReason.write(value.`reason`, buf)
+                Unit
+            }
+            is CrossAccountMoveDisposition.Blocked -> {
+                buf.putInt(4)
+                FfiConverterTypeCrossAccountMoveBlockedReason.write(value.`reason`, buf)
+                Unit
+            }
+            is CrossAccountMoveDisposition.Rejected -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class CrossAccountMovePhase {
+
+    object TargetCreate : CrossAccountMovePhase()
+
+
+    data class Attachments(
+        val `nextIndex`: kotlin.UInt) : CrossAccountMovePhase()
+
+    {
+
+
+        companion object
+    }
+
+    object SourceTrash : CrossAccountMovePhase()
+
+
+    object SourceDelete : CrossAccountMovePhase()
+
+
+    object Completed : CrossAccountMovePhase()
+
+
+    object Rejected : CrossAccountMovePhase()
+
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossAccountMovePhase : FfiConverterRustBuffer<CrossAccountMovePhase>{
+    override fun read(buf: ByteBuffer): CrossAccountMovePhase {
+        return when(buf.getInt()) {
+            1 -> CrossAccountMovePhase.TargetCreate
+            2 -> CrossAccountMovePhase.Attachments(
+                FfiConverterUInt.read(buf),
+                )
+            3 -> CrossAccountMovePhase.SourceTrash
+            4 -> CrossAccountMovePhase.SourceDelete
+            5 -> CrossAccountMovePhase.Completed
+            6 -> CrossAccountMovePhase.Rejected
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: CrossAccountMovePhase) = when(value) {
+        is CrossAccountMovePhase.TargetCreate -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is CrossAccountMovePhase.Attachments -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterUInt.allocationSize(value.`nextIndex`)
+            )
+        }
+        is CrossAccountMovePhase.SourceTrash -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is CrossAccountMovePhase.SourceDelete -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is CrossAccountMovePhase.Completed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is CrossAccountMovePhase.Rejected -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: CrossAccountMovePhase, buf: ByteBuffer) {
+        when(value) {
+            is CrossAccountMovePhase.TargetCreate -> {
+                buf.putInt(1)
+                Unit
+            }
+            is CrossAccountMovePhase.Attachments -> {
+                buf.putInt(2)
+                FfiConverterUInt.write(value.`nextIndex`, buf)
+                Unit
+            }
+            is CrossAccountMovePhase.SourceTrash -> {
+                buf.putInt(3)
+                Unit
+            }
+            is CrossAccountMovePhase.SourceDelete -> {
+                buf.putInt(4)
+                Unit
+            }
+            is CrossAccountMovePhase.Completed -> {
+                buf.putInt(5)
+                Unit
+            }
+            is CrossAccountMovePhase.Rejected -> {
+                buf.putInt(6)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class CrossAccountMoveWaitingReason {
+
+    ACCOUNT_LOCKED,
+    OFFLINE,
+    POLICY_VERIFICATION_PENDING,
+    ACCESS_UNAVAILABLE,
+    ATTACHMENT_ACCESS_DENIED,
+    ATTACHMENT_QUOTA_EXCEEDED,
+    ATTACHMENT_SIZE_REJECTED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossAccountMoveWaitingReason: FfiConverterRustBuffer<CrossAccountMoveWaitingReason> {
+    override fun read(buf: ByteBuffer) = try {
+        CrossAccountMoveWaitingReason.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: CrossAccountMoveWaitingReason) = 4UL
+
+    override fun write(value: CrossAccountMoveWaitingReason, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -11365,6 +14448,354 @@ public object FfiConverterTypeCustomFieldKind: FfiConverterRustBuffer<CustomFiel
     override fun allocationSize(value: CustomFieldKind) = 4UL
 
     override fun write(value: CustomFieldKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class DuplicateSourceGuard {
+
+    data class Authoritative(
+        val `itemVersion`: kotlin.Int) : DuplicateSourceGuard()
+
+    {
+
+
+        companion object
+    }
+
+    data class AcceptedOverlay(
+        val `operationId`: kotlin.String) : DuplicateSourceGuard()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDuplicateSourceGuard : FfiConverterRustBuffer<DuplicateSourceGuard>{
+    override fun read(buf: ByteBuffer): DuplicateSourceGuard {
+        return when(buf.getInt()) {
+            1 -> DuplicateSourceGuard.Authoritative(
+                FfiConverterInt.read(buf),
+                )
+            2 -> DuplicateSourceGuard.AcceptedOverlay(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: DuplicateSourceGuard) = when(value) {
+        is DuplicateSourceGuard.Authoritative -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterInt.allocationSize(value.`itemVersion`)
+            )
+        }
+        is DuplicateSourceGuard.AcceptedOverlay -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`operationId`)
+            )
+        }
+    }
+
+    override fun write(value: DuplicateSourceGuard, buf: ByteBuffer) {
+        when(value) {
+            is DuplicateSourceGuard.Authoritative -> {
+                buf.putInt(1)
+                FfiConverterInt.write(value.`itemVersion`, buf)
+                Unit
+            }
+            is DuplicateSourceGuard.AcceptedOverlay -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`operationId`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class EditableItemDraft: Disposable  {
+
+    data class Login(
+        val `value`: uniffi.bittery_client_bindings.EditableLoginItemData) : EditableItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class SecureNote(
+        val `value`: uniffi.bittery_client_bindings.SecureNoteItemData) : EditableItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class CreditCard(
+        val `value`: uniffi.bittery_client_bindings.CreditCardItemData) : EditableItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class Identity(
+        val `value`: uniffi.bittery_client_bindings.IdentityItemData) : EditableItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class Authenticator(
+        val `value`: uniffi.bittery_client_bindings.AuthenticatorItemData) : EditableItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+
+
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+        when(this) {
+            is EditableItemDraft.Login -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is EditableItemDraft.SecureNote -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is EditableItemDraft.CreditCard -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is EditableItemDraft.Identity -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is EditableItemDraft.Authenticator -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeEditableItemDraft : FfiConverterRustBuffer<EditableItemDraft>{
+    override fun read(buf: ByteBuffer): EditableItemDraft {
+        return when(buf.getInt()) {
+            1 -> EditableItemDraft.Login(
+                FfiConverterTypeEditableLoginItemData.read(buf),
+                )
+            2 -> EditableItemDraft.SecureNote(
+                FfiConverterTypeSecureNoteItemData.read(buf),
+                )
+            3 -> EditableItemDraft.CreditCard(
+                FfiConverterTypeCreditCardItemData.read(buf),
+                )
+            4 -> EditableItemDraft.Identity(
+                FfiConverterTypeIdentityItemData.read(buf),
+                )
+            5 -> EditableItemDraft.Authenticator(
+                FfiConverterTypeAuthenticatorItemData.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: EditableItemDraft) = when(value) {
+        is EditableItemDraft.Login -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeEditableLoginItemData.allocationSize(value.`value`)
+            )
+        }
+        is EditableItemDraft.SecureNote -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeSecureNoteItemData.allocationSize(value.`value`)
+            )
+        }
+        is EditableItemDraft.CreditCard -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeCreditCardItemData.allocationSize(value.`value`)
+            )
+        }
+        is EditableItemDraft.Identity -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeIdentityItemData.allocationSize(value.`value`)
+            )
+        }
+        is EditableItemDraft.Authenticator -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthenticatorItemData.allocationSize(value.`value`)
+            )
+        }
+    }
+
+    override fun write(value: EditableItemDraft, buf: ByteBuffer) {
+        when(value) {
+            is EditableItemDraft.Login -> {
+                buf.putInt(1)
+                FfiConverterTypeEditableLoginItemData.write(value.`value`, buf)
+                Unit
+            }
+            is EditableItemDraft.SecureNote -> {
+                buf.putInt(2)
+                FfiConverterTypeSecureNoteItemData.write(value.`value`, buf)
+                Unit
+            }
+            is EditableItemDraft.CreditCard -> {
+                buf.putInt(3)
+                FfiConverterTypeCreditCardItemData.write(value.`value`, buf)
+                Unit
+            }
+            is EditableItemDraft.Identity -> {
+                buf.putInt(4)
+                FfiConverterTypeIdentityItemData.write(value.`value`, buf)
+                Unit
+            }
+            is EditableItemDraft.Authenticator -> {
+                buf.putInt(5)
+                FfiConverterTypeAuthenticatorItemData.write(value.`value`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class InvitationAdminAction {
+
+    CANCEL,
+    RESEND;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInvitationAdminAction: FfiConverterRustBuffer<InvitationAdminAction> {
+    override fun read(buf: ByteBuffer) = try {
+        InvitationAdminAction.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: InvitationAdminAction) = 4UL
+
+    override fun write(value: InvitationAdminAction, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class InvitationUncertainPhase {
+
+    FIRST_SEND,
+    CANCEL_ORIGINAL,
+    REPLACEMENT_SEND;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInvitationUncertainPhase: FfiConverterRustBuffer<InvitationUncertainPhase> {
+    override fun read(buf: ByteBuffer) = try {
+        InvitationUncertainPhase.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: InvitationUncertainPhase) = 4UL
+
+    override fun write(value: InvitationUncertainPhase, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -11604,13 +15035,125 @@ public object FfiConverterTypeItemProjectionStatus: FfiConverterRustBuffer<ItemP
 
 
 
+
+enum class MyInvitationAction {
+
+    ACCEPT,
+    DECLINE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMyInvitationAction: FfiConverterRustBuffer<MyInvitationAction> {
+    override fun read(buf: ByteBuffer) = try {
+        MyInvitationAction.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: MyInvitationAction) = 4UL
+
+    override fun write(value: MyInvitationAction, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class ObservationControl {
+
+    data class VaultExportRetired(
+        val `reason`: uniffi.bittery_client_bindings.VaultExportRetirementReason) : ObservationControl()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeObservationControl : FfiConverterRustBuffer<ObservationControl>{
+    override fun read(buf: ByteBuffer): ObservationControl {
+        return when(buf.getInt()) {
+            1 -> ObservationControl.VaultExportRetired(
+                FfiConverterTypeVaultExportRetirementReason.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ObservationControl) = when(value) {
+        is ObservationControl.VaultExportRetired -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeVaultExportRetirementReason.allocationSize(value.`reason`)
+            )
+        }
+    }
+
+    override fun write(value: ObservationControl, buf: ByteBuffer) {
+        when(value) {
+            is ObservationControl.VaultExportRetired -> {
+                buf.putInt(1)
+                FfiConverterTypeVaultExportRetirementReason.write(value.`reason`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
 sealed class ObservationRequest {
+
+    data class TravelMode(
+        val `accountId`: kotlin.String) : ObservationRequest()
+
+    {
+
+
+        companion object
+    }
 
     object WritableVaultCatalog : ObservationRequest()
 
 
     data class Items(
         val `accountId`: kotlin.String) : ObservationRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultExport(
+        val `accountId`: kotlin.String,
+        val `vaultIds`: List<kotlin.String>) : ObservationRequest()
 
     {
 
@@ -11661,17 +15204,24 @@ sealed class ObservationRequest {
 public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<ObservationRequest>{
     override fun read(buf: ByteBuffer): ObservationRequest {
         return when(buf.getInt()) {
-            1 -> ObservationRequest.WritableVaultCatalog
-            2 -> ObservationRequest.Items(
+            1 -> ObservationRequest.TravelMode(
                 FfiConverterString.read(buf),
                 )
-            3 -> ObservationRequest.PendingShareResults(
+            2 -> ObservationRequest.WritableVaultCatalog
+            3 -> ObservationRequest.Items(
                 FfiConverterString.read(buf),
                 )
-            4 -> ObservationRequest.Operations(
+            4 -> ObservationRequest.VaultExport(
+                FfiConverterString.read(buf),
+                FfiConverterSequenceString.read(buf),
+                )
+            5 -> ObservationRequest.PendingShareResults(
                 FfiConverterString.read(buf),
                 )
-            5 -> ObservationRequest.RuntimeStatus(
+            6 -> ObservationRequest.Operations(
+                FfiConverterString.read(buf),
+                )
+            7 -> ObservationRequest.RuntimeStatus(
                 FfiConverterOptionalString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -11679,6 +15229,13 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
     }
 
     override fun allocationSize(value: ObservationRequest) = when(value) {
+        is ObservationRequest.TravelMode -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
         is ObservationRequest.WritableVaultCatalog -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -11690,6 +15247,14 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
             (
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is ObservationRequest.VaultExport -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterSequenceString.allocationSize(value.`vaultIds`)
             )
         }
         is ObservationRequest.PendingShareResults -> {
@@ -11717,27 +15282,38 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
 
     override fun write(value: ObservationRequest, buf: ByteBuffer) {
         when(value) {
-            is ObservationRequest.WritableVaultCatalog -> {
+            is ObservationRequest.TravelMode -> {
                 buf.putInt(1)
-                Unit
-            }
-            is ObservationRequest.Items -> {
-                buf.putInt(2)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
-            is ObservationRequest.PendingShareResults -> {
+            is ObservationRequest.WritableVaultCatalog -> {
+                buf.putInt(2)
+                Unit
+            }
+            is ObservationRequest.Items -> {
                 buf.putInt(3)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
-            is ObservationRequest.Operations -> {
+            is ObservationRequest.VaultExport -> {
                 buf.putInt(4)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterSequenceString.write(value.`vaultIds`, buf)
+                Unit
+            }
+            is ObservationRequest.PendingShareResults -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is ObservationRequest.Operations -> {
+                buf.putInt(6)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is ObservationRequest.RuntimeStatus -> {
-                buf.putInt(5)
+                buf.putInt(7)
                 FfiConverterOptionalString.write(value.`accountId`, buf)
                 Unit
             }
@@ -11753,6 +15329,8 @@ public object FfiConverterTypeObservationRequest : FfiConverterRustBuffer<Observ
 enum class OperationProjectionKind {
 
     CREATE_VAULT,
+    UPDATE_VAULT,
+    DELETE_VAULT,
     CREATE_ITEM,
     UPDATE_ITEM,
     SET_ITEM_FAVORITE,
@@ -11761,7 +15339,13 @@ enum class OperationProjectionKind {
     MOVE_ITEM,
     PERMANENTLY_DELETE_ITEM,
     CREATE_SHARE,
-    IMPORT_ITEMS;
+    IMPORT_ITEMS,
+    CREATE_VAULT_MEMBER_REMOVAL_ROTATION_PLANS,
+    FINALIZE_VAULT_MEMBER_REMOVAL_ROTATION_PLANS,
+    CREATE_TEAM_LEAVE_ROTATION_PLANS,
+    FINALIZE_TEAM_LEAVE_ROTATION_PLANS,
+    CREATE_TEAM_MEMBER_REMOVAL_ROTATION_PLANS,
+    FINALIZE_TEAM_MEMBER_REMOVAL_ROTATION_PLANS;
 
 
 
@@ -11796,7 +15380,9 @@ enum class OperationResolution {
 
     PENDING,
     APPLIED,
-    REJECTED;
+    REJECTED,
+    LEGACY_FAILED,
+    LEGACY_CONFLICTED;
 
 
 
@@ -11889,6 +15475,437 @@ public object FfiConverterTypePasskeyStatusReason: FfiConverterRustBuffer<Passke
 
     override fun write(value: PasskeyStatusReason, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class ProfileAdmissionCleanupStatus {
+
+    data class Pending(
+        val `pendingObligations`: kotlin.ULong) : ProfileAdmissionCleanupStatus()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeProfileAdmissionCleanupStatus : FfiConverterRustBuffer<ProfileAdmissionCleanupStatus>{
+    override fun read(buf: ByteBuffer): ProfileAdmissionCleanupStatus {
+        return when(buf.getInt()) {
+            1 -> ProfileAdmissionCleanupStatus.Pending(
+                FfiConverterULong.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ProfileAdmissionCleanupStatus) = when(value) {
+        is ProfileAdmissionCleanupStatus.Pending -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterULong.allocationSize(value.`pendingObligations`)
+            )
+        }
+    }
+
+    override fun write(value: ProfileAdmissionCleanupStatus, buf: ByteBuffer) {
+        when(value) {
+            is ProfileAdmissionCleanupStatus.Pending -> {
+                buf.putInt(1)
+                FfiConverterULong.write(value.`pendingObligations`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class ProfileAdmissionImportPhase {
+
+    PREPARING,
+    ABORTING,
+    ABORTED,
+    COMMITTED,
+    COMPLETE;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeProfileAdmissionImportPhase: FfiConverterRustBuffer<ProfileAdmissionImportPhase> {
+    override fun read(buf: ByteBuffer) = try {
+        ProfileAdmissionImportPhase.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ProfileAdmissionImportPhase) = 4UL
+
+    override fun write(value: ProfileAdmissionImportPhase, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class ProfileAdmissionInspectionState {
+
+    object NotStarted : ProfileAdmissionInspectionState()
+
+
+    data class Import(
+        val `admissionId`: kotlin.String,
+        val `phase`: uniffi.bittery_client_bindings.ProfileAdmissionImportPhase) : ProfileAdmissionInspectionState()
+
+    {
+
+
+        companion object
+    }
+
+    data class Reset(
+        val `wipeId`: kotlin.String,
+        val `phase`: uniffi.bittery_client_bindings.ProfileAdmissionResetPhase) : ProfileAdmissionInspectionState()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeProfileAdmissionInspectionState : FfiConverterRustBuffer<ProfileAdmissionInspectionState>{
+    override fun read(buf: ByteBuffer): ProfileAdmissionInspectionState {
+        return when(buf.getInt()) {
+            1 -> ProfileAdmissionInspectionState.NotStarted
+            2 -> ProfileAdmissionInspectionState.Import(
+                FfiConverterString.read(buf),
+                FfiConverterTypeProfileAdmissionImportPhase.read(buf),
+                )
+            3 -> ProfileAdmissionInspectionState.Reset(
+                FfiConverterString.read(buf),
+                FfiConverterTypeProfileAdmissionResetPhase.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ProfileAdmissionInspectionState) = when(value) {
+        is ProfileAdmissionInspectionState.NotStarted -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ProfileAdmissionInspectionState.Import -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`admissionId`)
+                + FfiConverterTypeProfileAdmissionImportPhase.allocationSize(value.`phase`)
+            )
+        }
+        is ProfileAdmissionInspectionState.Reset -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`wipeId`)
+                + FfiConverterTypeProfileAdmissionResetPhase.allocationSize(value.`phase`)
+            )
+        }
+    }
+
+    override fun write(value: ProfileAdmissionInspectionState, buf: ByteBuffer) {
+        when(value) {
+            is ProfileAdmissionInspectionState.NotStarted -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ProfileAdmissionInspectionState.Import -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`admissionId`, buf)
+                FfiConverterTypeProfileAdmissionImportPhase.write(value.`phase`, buf)
+                Unit
+            }
+            is ProfileAdmissionInspectionState.Reset -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`wipeId`, buf)
+                FfiConverterTypeProfileAdmissionResetPhase.write(value.`phase`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class ProfileAdmissionResetPhase {
+
+    WIPING,
+    WIPED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeProfileAdmissionResetPhase: FfiConverterRustBuffer<ProfileAdmissionResetPhase> {
+    override fun read(buf: ByteBuffer) = try {
+        ProfileAdmissionResetPhase.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ProfileAdmissionResetPhase) = 4UL
+
+    override fun write(value: ProfileAdmissionResetPhase, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class PublicItemDraft: Disposable  {
+
+    data class Login(
+        val `value`: uniffi.bittery_client_bindings.PublicLoginItemData) : PublicItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class SecureNote(
+        val `value`: uniffi.bittery_client_bindings.SecureNoteItemData) : PublicItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class CreditCard(
+        val `value`: uniffi.bittery_client_bindings.CreditCardItemData) : PublicItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class Identity(
+        val `value`: uniffi.bittery_client_bindings.IdentityItemData) : PublicItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+    data class Authenticator(
+        val `value`: uniffi.bittery_client_bindings.AuthenticatorItemData) : PublicItemDraft()
+
+    {
+
+
+        companion object
+    }
+
+
+
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+        when(this) {
+            is PublicItemDraft.Login -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is PublicItemDraft.SecureNote -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is PublicItemDraft.CreditCard -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is PublicItemDraft.Identity -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is PublicItemDraft.Authenticator -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePublicItemDraft : FfiConverterRustBuffer<PublicItemDraft>{
+    override fun read(buf: ByteBuffer): PublicItemDraft {
+        return when(buf.getInt()) {
+            1 -> PublicItemDraft.Login(
+                FfiConverterTypePublicLoginItemData.read(buf),
+                )
+            2 -> PublicItemDraft.SecureNote(
+                FfiConverterTypeSecureNoteItemData.read(buf),
+                )
+            3 -> PublicItemDraft.CreditCard(
+                FfiConverterTypeCreditCardItemData.read(buf),
+                )
+            4 -> PublicItemDraft.Identity(
+                FfiConverterTypeIdentityItemData.read(buf),
+                )
+            5 -> PublicItemDraft.Authenticator(
+                FfiConverterTypeAuthenticatorItemData.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: PublicItemDraft) = when(value) {
+        is PublicItemDraft.Login -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypePublicLoginItemData.allocationSize(value.`value`)
+            )
+        }
+        is PublicItemDraft.SecureNote -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeSecureNoteItemData.allocationSize(value.`value`)
+            )
+        }
+        is PublicItemDraft.CreditCard -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeCreditCardItemData.allocationSize(value.`value`)
+            )
+        }
+        is PublicItemDraft.Identity -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeIdentityItemData.allocationSize(value.`value`)
+            )
+        }
+        is PublicItemDraft.Authenticator -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthenticatorItemData.allocationSize(value.`value`)
+            )
+        }
+    }
+
+    override fun write(value: PublicItemDraft, buf: ByteBuffer) {
+        when(value) {
+            is PublicItemDraft.Login -> {
+                buf.putInt(1)
+                FfiConverterTypePublicLoginItemData.write(value.`value`, buf)
+                Unit
+            }
+            is PublicItemDraft.SecureNote -> {
+                buf.putInt(2)
+                FfiConverterTypeSecureNoteItemData.write(value.`value`, buf)
+                Unit
+            }
+            is PublicItemDraft.CreditCard -> {
+                buf.putInt(3)
+                FfiConverterTypeCreditCardItemData.write(value.`value`, buf)
+                Unit
+            }
+            is PublicItemDraft.Identity -> {
+                buf.putInt(4)
+                FfiConverterTypeIdentityItemData.write(value.`value`, buf)
+                Unit
+            }
+            is PublicItemDraft.Authenticator -> {
+                buf.putInt(5)
+                FfiConverterTypeAuthenticatorItemData.write(value.`value`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
 
@@ -12115,8 +16132,284 @@ public object FfiConverterTypeRecoveryStorageState: FfiConverterRustBuffer<Recov
 
 
 
+enum class RotationFinalizeRejectionCode {
+
+    TEAM_MEMBERSHIP_CHANGED,
+    PERSONAL_TEAM_DEPARTURE_FORBIDDEN,
+    TEAM_OWNER_LEAVE_FORBIDDEN,
+    ROTATION_PLAN_UNAVAILABLE,
+    ROTATION_PLAN_MISMATCH,
+    ROTATION_PLAN_INCOMPLETE,
+    ROTATION_PLAN_STALE,
+    ROTATION_PLAN_SET_MISMATCH;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRotationFinalizeRejectionCode: FfiConverterRustBuffer<RotationFinalizeRejectionCode> {
+    override fun read(buf: ByteBuffer) = try {
+        RotationFinalizeRejectionCode.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RotationFinalizeRejectionCode) = 4UL
+
+    override fun write(value: RotationFinalizeRejectionCode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class RotationIntent {
+
+    data class VaultMemberRemoval(
+        val `vaultId`: kotlin.String,
+        val `userId`: kotlin.String) : RotationIntent()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamLeave(
+        val `teamId`: kotlin.String) : RotationIntent()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamMemberRemoval(
+        val `teamId`: kotlin.String,
+        val `userId`: kotlin.String) : RotationIntent()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRotationIntent : FfiConverterRustBuffer<RotationIntent>{
+    override fun read(buf: ByteBuffer): RotationIntent {
+        return when(buf.getInt()) {
+            1 -> RotationIntent.VaultMemberRemoval(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            2 -> RotationIntent.TeamLeave(
+                FfiConverterString.read(buf),
+                )
+            3 -> RotationIntent.TeamMemberRemoval(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: RotationIntent) = when(value) {
+        is RotationIntent.VaultMemberRemoval -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`vaultId`)
+                + FfiConverterString.allocationSize(value.`userId`)
+            )
+        }
+        is RotationIntent.TeamLeave -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`teamId`)
+            )
+        }
+        is RotationIntent.TeamMemberRemoval -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`teamId`)
+                + FfiConverterString.allocationSize(value.`userId`)
+            )
+        }
+    }
+
+    override fun write(value: RotationIntent, buf: ByteBuffer) {
+        when(value) {
+            is RotationIntent.VaultMemberRemoval -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterString.write(value.`userId`, buf)
+                Unit
+            }
+            is RotationIntent.TeamLeave -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`teamId`, buf)
+                Unit
+            }
+            is RotationIntent.TeamMemberRemoval -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`teamId`, buf)
+                FfiConverterString.write(value.`userId`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class RotationStartRejectionCode {
+
+    TEAM_MEMBER_NOT_FOUND,
+    PERSONAL_TEAM_DEPARTURE_FORBIDDEN,
+    TEAM_OWNER_LEAVE_FORBIDDEN;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRotationStartRejectionCode: FfiConverterRustBuffer<RotationStartRejectionCode> {
+    override fun read(buf: ByteBuffer) = try {
+        RotationStartRejectionCode.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RotationStartRejectionCode) = 4UL
+
+    override fun write(value: RotationStartRejectionCode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class RotationTerminalOutcome {
+
+    data class Applied(
+        val `personalTeamId`: kotlin.String) : RotationTerminalOutcome()
+
+    {
+
+
+        companion object
+    }
+
+    data class Rejected(
+        val `code`: uniffi.bittery_client_bindings.RotationFinalizeRejectionCode) : RotationTerminalOutcome()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRotationTerminalOutcome : FfiConverterRustBuffer<RotationTerminalOutcome>{
+    override fun read(buf: ByteBuffer): RotationTerminalOutcome {
+        return when(buf.getInt()) {
+            1 -> RotationTerminalOutcome.Applied(
+                FfiConverterString.read(buf),
+                )
+            2 -> RotationTerminalOutcome.Rejected(
+                FfiConverterTypeRotationFinalizeRejectionCode.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: RotationTerminalOutcome) = when(value) {
+        is RotationTerminalOutcome.Applied -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`personalTeamId`)
+            )
+        }
+        is RotationTerminalOutcome.Rejected -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeRotationFinalizeRejectionCode.allocationSize(value.`code`)
+            )
+        }
+    }
+
+    override fun write(value: RotationTerminalOutcome, buf: ByteBuffer) {
+        when(value) {
+            is RotationTerminalOutcome.Applied -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`personalTeamId`, buf)
+                Unit
+            }
+            is RotationTerminalOutcome.Rejected -> {
+                buf.putInt(2)
+                FfiConverterTypeRotationFinalizeRejectionCode.write(value.`code`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
 enum class RuntimeErrorCode {
 
+    RECIPIENT_KEY_UNVERIFIED,
+    RECIPIENT_KEY_CHANGED,
+    RECIPIENT_FINGERPRINT_MISMATCH,
     RUNTIME_CLOSED,
     CANCELLED,
     ACCOUNT_MISSING,
@@ -12124,8 +16417,10 @@ enum class RuntimeErrorCode {
     ACCOUNT_FAILED,
     AUTHENTICATION_REQUIRED,
     AUTHENTICATION_UNAVAILABLE,
+    CREDENTIAL_UNAVAILABLE,
     STORAGE_UNAVAILABLE,
     RETRYABLE_TRANSPORT,
+    VERSION_EVIDENCE_UNAVAILABLE,
     AUTHORITY_MISSING,
     ACCESS_DENIED,
     READ_ONLY,
@@ -12165,6 +16460,15 @@ public object FfiConverterTypeRuntimeErrorCode: FfiConverterRustBuffer<RuntimeEr
 
 sealed class RuntimeProjection: Disposable  {
 
+    data class TravelMode(
+        val `value`: uniffi.bittery_client_bindings.TravelModeProjection) : RuntimeProjection()
+
+    {
+
+
+        companion object
+    }
+
     data class WritableVaultCatalog(
         val `value`: uniffi.bittery_client_bindings.WritableVaultCatalogProjection) : RuntimeProjection()
 
@@ -12176,6 +16480,15 @@ sealed class RuntimeProjection: Disposable  {
 
     data class Items(
         val `value`: uniffi.bittery_client_bindings.ItemsProjection) : RuntimeProjection()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultExport(
+        val `value`: uniffi.bittery_client_bindings.VaultExportProjection) : RuntimeProjection()
 
     {
 
@@ -12215,6 +16528,13 @@ sealed class RuntimeProjection: Disposable  {
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
     override fun destroy() {
         when(this) {
+            is RuntimeProjection.TravelMode -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
             is RuntimeProjection.WritableVaultCatalog -> {
 
     Disposable.destroy(
@@ -12223,6 +16543,13 @@ sealed class RuntimeProjection: Disposable  {
 
             }
             is RuntimeProjection.Items -> {
+
+    Disposable.destroy(
+        this.`value`
+    )
+
+            }
+            is RuntimeProjection.VaultExport -> {
 
     Disposable.destroy(
         this.`value`
@@ -12267,19 +16594,25 @@ sealed class RuntimeProjection: Disposable  {
 public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<RuntimeProjection>{
     override fun read(buf: ByteBuffer): RuntimeProjection {
         return when(buf.getInt()) {
-            1 -> RuntimeProjection.WritableVaultCatalog(
+            1 -> RuntimeProjection.TravelMode(
+                FfiConverterTypeTravelModeProjection.read(buf),
+                )
+            2 -> RuntimeProjection.WritableVaultCatalog(
                 FfiConverterTypeWritableVaultCatalogProjection.read(buf),
                 )
-            2 -> RuntimeProjection.Items(
+            3 -> RuntimeProjection.Items(
                 FfiConverterTypeItemsProjection.read(buf),
                 )
-            3 -> RuntimeProjection.Operations(
+            4 -> RuntimeProjection.VaultExport(
+                FfiConverterTypeVaultExportProjection.read(buf),
+                )
+            5 -> RuntimeProjection.Operations(
                 FfiConverterTypeOperationsProjection.read(buf),
                 )
-            4 -> RuntimeProjection.PendingShareResults(
+            6 -> RuntimeProjection.PendingShareResults(
                 FfiConverterTypePendingShareResultsProjection.read(buf),
                 )
-            5 -> RuntimeProjection.RuntimeStatus(
+            7 -> RuntimeProjection.RuntimeStatus(
                 FfiConverterTypeRuntimeStatusProjection.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -12287,6 +16620,13 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
     }
 
     override fun allocationSize(value: RuntimeProjection) = when(value) {
+        is RuntimeProjection.TravelMode -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeTravelModeProjection.allocationSize(value.`value`)
+            )
+        }
         is RuntimeProjection.WritableVaultCatalog -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -12299,6 +16639,13 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
             (
                 4UL
                 + FfiConverterTypeItemsProjection.allocationSize(value.`value`)
+            )
+        }
+        is RuntimeProjection.VaultExport -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeVaultExportProjection.allocationSize(value.`value`)
             )
         }
         is RuntimeProjection.Operations -> {
@@ -12326,28 +16673,38 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
 
     override fun write(value: RuntimeProjection, buf: ByteBuffer) {
         when(value) {
-            is RuntimeProjection.WritableVaultCatalog -> {
+            is RuntimeProjection.TravelMode -> {
                 buf.putInt(1)
+                FfiConverterTypeTravelModeProjection.write(value.`value`, buf)
+                Unit
+            }
+            is RuntimeProjection.WritableVaultCatalog -> {
+                buf.putInt(2)
                 FfiConverterTypeWritableVaultCatalogProjection.write(value.`value`, buf)
                 Unit
             }
             is RuntimeProjection.Items -> {
-                buf.putInt(2)
+                buf.putInt(3)
                 FfiConverterTypeItemsProjection.write(value.`value`, buf)
                 Unit
             }
+            is RuntimeProjection.VaultExport -> {
+                buf.putInt(4)
+                FfiConverterTypeVaultExportProjection.write(value.`value`, buf)
+                Unit
+            }
             is RuntimeProjection.Operations -> {
-                buf.putInt(3)
+                buf.putInt(5)
                 FfiConverterTypeOperationsProjection.write(value.`value`, buf)
                 Unit
             }
             is RuntimeProjection.PendingShareResults -> {
-                buf.putInt(4)
+                buf.putInt(6)
                 FfiConverterTypePendingShareResultsProjection.write(value.`value`, buf)
                 Unit
             }
             is RuntimeProjection.RuntimeStatus -> {
-                buf.putInt(5)
+                buf.putInt(7)
                 FfiConverterTypeRuntimeStatusProjection.write(value.`value`, buf)
                 Unit
             }
@@ -12360,6 +16717,275 @@ public object FfiConverterTypeRuntimeProjection : FfiConverterRustBuffer<Runtime
 
 
 sealed class RuntimeRequest: Disposable  {
+
+    data class ListAvailableVaultMembers(
+        val `accountId`: kotlin.String,
+        val `vaultId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ListVaultMembers(
+        val `accountId`: kotlin.String,
+        val `vaultId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class AddVaultMember(
+        val `accountId`: kotlin.String,
+        val `vaultId`: kotlin.String,
+        val `userId`: kotlin.String,
+        val `role`: uniffi.bittery_client_bindings.VaultRole) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class PrepareRotation(
+        val `accountId`: kotlin.String,
+        val `intent`: uniffi.bittery_client_bindings.RotationIntent,
+        val `startOperationId`: kotlin.String?) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class CompleteRotation(
+        val `accountId`: kotlin.String,
+        val `selection`: uniffi.bittery_client_bindings.RotationSelection) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class InspectRotation(
+        val `accountId`: kotlin.String,
+        val `startOperationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ListTeamLeaveAttempts(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class AcknowledgeTeamLeaveAttempt(
+        val `accountId`: kotlin.String,
+        val `startOperationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ListMyTeamInvitations(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class AcceptMyTeamInvitation(
+        val `accountId`: kotlin.String,
+        val `invitationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class DeclineMyTeamInvitation(
+        val `accountId`: kotlin.String,
+        val `invitationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ReadInvitationComposer(
+        val `accountId`: kotlin.String,
+        val `teamId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class CreateTeamInvitation(
+        val `accountId`: kotlin.String,
+        val `teamId`: kotlin.String,
+        val `email`: kotlin.String,
+        val `role`: uniffi.bittery_client_bindings.TeamRole) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ProvisionTeamInvitation(
+        val `accountId`: kotlin.String,
+        val `continuationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ReleaseInvitationContinuation(
+        val `accountId`: kotlin.String,
+        val `continuationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class CancelTeamInvitation(
+        val `accountId`: kotlin.String,
+        val `teamId`: kotlin.String,
+        val `invitationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ResendTeamInvitation(
+        val `accountId`: kotlin.String,
+        val `teamId`: kotlin.String,
+        val `invitationId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    object InspectProfileAdmission : RuntimeRequest()
+
+
+    data class AbortProfileAdmission(
+        val `admissionId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class RecipientKeyScope(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class OwnKeyFingerprint(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class VerifyRecipientKey(
+        val `accountId`: kotlin.String,
+        val `recipientUserId`: kotlin.String,
+        val `publicKey`: kotlin.String,
+        val `expectedFingerprint`: kotlin.String,
+        val `scope`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class VerifiedRecipientKey(
+        val `accountId`: kotlin.String,
+        val `recipientUserId`: kotlin.String,
+        val `publicKey`: kotlin.String,
+        val `scope`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class RefreshTravelMode(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class SetTravelModeHiddenVaults(
+        val `accountId`: kotlin.String,
+        val `hiddenVaultIds`: List<kotlin.String>) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class EnableTravelMode(
+        val `accountId`: kotlin.String,
+        val `hiddenVaultIds`: List<kotlin.String>) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class DisableTravelMode(
+        val `accountId`: kotlin.String,
+        val `masterPassword`: uniffi.bittery_client_bindings.SecretString) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
 
     data class RebootstrapAccountRecovery(
         val `accountId`: kotlin.String) : RuntimeRequest()
@@ -12407,6 +17033,102 @@ sealed class RuntimeRequest: Disposable  {
         val `masterPassword`: uniffi.bittery_client_bindings.SecretString,
         val `secretKey`: uniffi.bittery_client_bindings.SecretString,
         val `insecureTransportConfirmed`: kotlin.Boolean) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class BiometricAvailability(
+        val `accountIds`: List<kotlin.String>) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class SetBiometricEnabled(
+        val `accountId`: kotlin.String,
+        val `enabled`: kotlin.Boolean) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class BiometricUnlock(
+        val `accountId`: kotlin.String,
+        val `promptMessage`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class BiometricUnlockAccounts(
+        val `accountIds`: List<kotlin.String>,
+        val `promptMessage`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class SetMasterPasswordReentryPeriod(
+        val `periodMs`: kotlin.Long) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class LocalSecuritySettings(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class SetInactivityTimeout(
+        val `accountId`: kotlin.String,
+        val `timeoutMs`: kotlin.Long) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class RecordActivity(
+        val `accountId`: kotlin.String,
+        val `kind`: uniffi.bittery_client_bindings.ActivityKind) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class DeviceSetup(
+        val `accountId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class QuickUnlockAccounts(
+        val `accountIds`: List<kotlin.String>,
+        val `masterPassword`: uniffi.bittery_client_bindings.SecretString) : RuntimeRequest()
 
     {
 
@@ -12465,6 +17187,29 @@ sealed class RuntimeRequest: Disposable  {
     object Wipe : RuntimeRequest()
 
 
+    data class UpdateVault(
+        val `accountId`: kotlin.String,
+        val `vaultId`: kotlin.String,
+        val `name`: kotlin.String?,
+        val `icon`: uniffi.bittery_client_bindings.VaultIconPatch,
+        val `image`: uniffi.bittery_client_bindings.VaultImageChange) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class DeleteVault(
+        val `accountId`: kotlin.String,
+        val `vaultId`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
     data class CreateVault(
         val `accountId`: kotlin.String,
         val `name`: kotlin.String,
@@ -12481,7 +17226,7 @@ sealed class RuntimeRequest: Disposable  {
     data class CreateItem(
         val `accountId`: kotlin.String,
         val `vaultId`: kotlin.String,
-        val `draft`: uniffi.bittery_client_bindings.ItemDraft) : RuntimeRequest()
+        val `draft`: uniffi.bittery_client_bindings.EditableItemDraft) : RuntimeRequest()
 
     {
 
@@ -12503,7 +17248,34 @@ sealed class RuntimeRequest: Disposable  {
     data class UpdateItem(
         val `accountId`: kotlin.String,
         val `itemId`: kotlin.String,
-        val `draft`: uniffi.bittery_client_bindings.ItemDraft) : RuntimeRequest()
+        val `guard`: uniffi.bittery_client_bindings.ItemEditGuard,
+        val `draft`: uniffi.bittery_client_bindings.EditableItemDraft) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class RemovePasskey(
+        val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
+        val `guard`: uniffi.bittery_client_bindings.ItemEditGuard,
+        val `rpId`: kotlin.String,
+        val `credentialId`: kotlin.String,
+        val `publicKeyFingerprint`: kotlin.String) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class DuplicateItem(
+        val `accountId`: kotlin.String,
+        val `sourceItemId`: kotlin.String,
+        val `sourceGuard`: uniffi.bittery_client_bindings.ItemDuplicateGuard,
+        val `title`: kotlin.String) : RuntimeRequest()
 
     {
 
@@ -12545,7 +17317,29 @@ sealed class RuntimeRequest: Disposable  {
     data class MoveItem(
         val `accountId`: kotlin.String,
         val `itemId`: kotlin.String,
-        val `targetVaultId`: kotlin.String) : RuntimeRequest()
+        val `targetVaultId`: kotlin.String,
+        val `targetAccountId`: kotlin.String?) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class PrepareCrossAccountMoveResume(
+        val `accountId`: kotlin.String,
+        val `operationId`: kotlin.String,
+        val `targetAccountId`: kotlin.String,
+        val `expectedBindingRevision`: kotlin.ULong) : RuntimeRequest()
+
+    {
+
+
+        companion object
+    }
+
+    data class ResumeCrossAccountMove(
+        val `guard`: uniffi.bittery_client_bindings.CrossAccountMoveResumeGuard) : RuntimeRequest()
 
     {
 
@@ -12596,6 +17390,7 @@ sealed class RuntimeRequest: Disposable  {
 
     data class ListShareAccessLogs(
         val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
         val `linkId`: kotlin.String) : RuntimeRequest()
 
     {
@@ -12606,6 +17401,7 @@ sealed class RuntimeRequest: Disposable  {
 
     data class RevokeShareLink(
         val `accountId`: kotlin.String,
+        val `itemId`: kotlin.String,
         val `linkId`: kotlin.String) : RuntimeRequest()
 
     {
@@ -12664,6 +17460,222 @@ sealed class RuntimeRequest: Disposable  {
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
     override fun destroy() {
         when(this) {
+            is RuntimeRequest.ListAvailableVaultMembers -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`vaultId`
+    )
+
+            }
+            is RuntimeRequest.ListVaultMembers -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`vaultId`
+    )
+
+            }
+            is RuntimeRequest.AddVaultMember -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`vaultId`,
+        this.`userId`,
+        this.`role`
+    )
+
+            }
+            is RuntimeRequest.PrepareRotation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`intent`,
+        this.`startOperationId`
+    )
+
+            }
+            is RuntimeRequest.CompleteRotation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`selection`
+    )
+
+            }
+            is RuntimeRequest.InspectRotation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`startOperationId`
+    )
+
+            }
+            is RuntimeRequest.ListTeamLeaveAttempts -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.AcknowledgeTeamLeaveAttempt -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`startOperationId`
+    )
+
+            }
+            is RuntimeRequest.ListMyTeamInvitations -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.AcceptMyTeamInvitation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`invitationId`
+    )
+
+            }
+            is RuntimeRequest.DeclineMyTeamInvitation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`invitationId`
+    )
+
+            }
+            is RuntimeRequest.ReadInvitationComposer -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`teamId`
+    )
+
+            }
+            is RuntimeRequest.CreateTeamInvitation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`teamId`,
+        this.`email`,
+        this.`role`
+    )
+
+            }
+            is RuntimeRequest.ProvisionTeamInvitation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`continuationId`
+    )
+
+            }
+            is RuntimeRequest.ReleaseInvitationContinuation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`continuationId`
+    )
+
+            }
+            is RuntimeRequest.CancelTeamInvitation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`teamId`,
+        this.`invitationId`
+    )
+
+            }
+            is RuntimeRequest.ResendTeamInvitation -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`teamId`,
+        this.`invitationId`
+    )
+
+            }
+            is RuntimeRequest.InspectProfileAdmission -> {// Nothing to destroy
+            }
+            is RuntimeRequest.AbortProfileAdmission -> {
+
+    Disposable.destroy(
+        this.`admissionId`
+    )
+
+            }
+            is RuntimeRequest.RecipientKeyScope -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.OwnKeyFingerprint -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.VerifyRecipientKey -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`recipientUserId`,
+        this.`publicKey`,
+        this.`expectedFingerprint`,
+        this.`scope`
+    )
+
+            }
+            is RuntimeRequest.VerifiedRecipientKey -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`recipientUserId`,
+        this.`publicKey`,
+        this.`scope`
+    )
+
+            }
+            is RuntimeRequest.RefreshTravelMode -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.SetTravelModeHiddenVaults -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`hiddenVaultIds`
+    )
+
+            }
+            is RuntimeRequest.EnableTravelMode -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`hiddenVaultIds`
+    )
+
+            }
+            is RuntimeRequest.DisableTravelMode -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`masterPassword`
+    )
+
+            }
             is RuntimeRequest.RebootstrapAccountRecovery -> {
 
     Disposable.destroy(
@@ -12707,6 +17719,82 @@ sealed class RuntimeRequest: Disposable  {
     )
 
             }
+            is RuntimeRequest.BiometricAvailability -> {
+
+    Disposable.destroy(
+        this.`accountIds`
+    )
+
+            }
+            is RuntimeRequest.SetBiometricEnabled -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`enabled`
+    )
+
+            }
+            is RuntimeRequest.BiometricUnlock -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`promptMessage`
+    )
+
+            }
+            is RuntimeRequest.BiometricUnlockAccounts -> {
+
+    Disposable.destroy(
+        this.`accountIds`,
+        this.`promptMessage`
+    )
+
+            }
+            is RuntimeRequest.SetMasterPasswordReentryPeriod -> {
+
+    Disposable.destroy(
+        this.`periodMs`
+    )
+
+            }
+            is RuntimeRequest.LocalSecuritySettings -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.SetInactivityTimeout -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`timeoutMs`
+    )
+
+            }
+            is RuntimeRequest.RecordActivity -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`kind`
+    )
+
+            }
+            is RuntimeRequest.DeviceSetup -> {
+
+    Disposable.destroy(
+        this.`accountId`
+    )
+
+            }
+            is RuntimeRequest.QuickUnlockAccounts -> {
+
+    Disposable.destroy(
+        this.`accountIds`,
+        this.`masterPassword`
+    )
+
+            }
             is RuntimeRequest.QuickUnlock -> {
 
     Disposable.destroy(
@@ -12747,6 +17835,25 @@ sealed class RuntimeRequest: Disposable  {
             }
             is RuntimeRequest.Wipe -> {// Nothing to destroy
             }
+            is RuntimeRequest.UpdateVault -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`vaultId`,
+        this.`name`,
+        this.`icon`,
+        this.`image`
+    )
+
+            }
+            is RuntimeRequest.DeleteVault -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`vaultId`
+    )
+
+            }
             is RuntimeRequest.CreateVault -> {
 
     Disposable.destroy(
@@ -12781,7 +17888,30 @@ sealed class RuntimeRequest: Disposable  {
     Disposable.destroy(
         this.`accountId`,
         this.`itemId`,
+        this.`guard`,
         this.`draft`
+    )
+
+            }
+            is RuntimeRequest.RemovePasskey -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`,
+        this.`guard`,
+        this.`rpId`,
+        this.`credentialId`,
+        this.`publicKeyFingerprint`
+    )
+
+            }
+            is RuntimeRequest.DuplicateItem -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`sourceItemId`,
+        this.`sourceGuard`,
+        this.`title`
     )
 
             }
@@ -12815,7 +17945,25 @@ sealed class RuntimeRequest: Disposable  {
     Disposable.destroy(
         this.`accountId`,
         this.`itemId`,
-        this.`targetVaultId`
+        this.`targetVaultId`,
+        this.`targetAccountId`
+    )
+
+            }
+            is RuntimeRequest.PrepareCrossAccountMoveResume -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`operationId`,
+        this.`targetAccountId`,
+        this.`expectedBindingRevision`
+    )
+
+            }
+            is RuntimeRequest.ResumeCrossAccountMove -> {
+
+    Disposable.destroy(
+        this.`guard`
     )
 
             }
@@ -12856,6 +18004,7 @@ sealed class RuntimeRequest: Disposable  {
 
     Disposable.destroy(
         this.`accountId`,
+        this.`itemId`,
         this.`linkId`
     )
 
@@ -12864,6 +18013,7 @@ sealed class RuntimeRequest: Disposable  {
 
     Disposable.destroy(
         this.`accountId`,
+        this.`itemId`,
         this.`linkId`
     )
 
@@ -12922,128 +18072,313 @@ sealed class RuntimeRequest: Disposable  {
 public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeRequest>{
     override fun read(buf: ByteBuffer): RuntimeRequest {
         return when(buf.getInt()) {
-            1 -> RuntimeRequest.RebootstrapAccountRecovery(
+            1 -> RuntimeRequest.ListAvailableVaultMembers(
+                FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            2 -> RuntimeRequest.InspectRecovery(
+            2 -> RuntimeRequest.ListVaultMembers(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            3 -> RuntimeRequest.AddVaultMember(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeVaultRole.read(buf),
+                )
+            4 -> RuntimeRequest.PrepareRotation(
+                FfiConverterString.read(buf),
+                FfiConverterTypeRotationIntent.read(buf),
                 FfiConverterOptionalString.read(buf),
                 )
-            3 -> RuntimeRequest.ExportAccountRecovery(
+            5 -> RuntimeRequest.CompleteRotation(
+                FfiConverterString.read(buf),
+                FfiConverterTypeRotationSelection.read(buf),
+                )
+            6 -> RuntimeRequest.InspectRotation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            7 -> RuntimeRequest.ListTeamLeaveAttempts(
+                FfiConverterString.read(buf),
+                )
+            8 -> RuntimeRequest.AcknowledgeTeamLeaveAttempt(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            9 -> RuntimeRequest.ListMyTeamInvitations(
+                FfiConverterString.read(buf),
+                )
+            10 -> RuntimeRequest.AcceptMyTeamInvitation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            11 -> RuntimeRequest.DeclineMyTeamInvitation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            12 -> RuntimeRequest.ReadInvitationComposer(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            13 -> RuntimeRequest.CreateTeamInvitation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeTeamRole.read(buf),
+                )
+            14 -> RuntimeRequest.ProvisionTeamInvitation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            15 -> RuntimeRequest.ReleaseInvitationContinuation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            16 -> RuntimeRequest.CancelTeamInvitation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            17 -> RuntimeRequest.ResendTeamInvitation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            18 -> RuntimeRequest.InspectProfileAdmission
+            19 -> RuntimeRequest.AbortProfileAdmission(
+                FfiConverterString.read(buf),
+                )
+            20 -> RuntimeRequest.RecipientKeyScope(
+                FfiConverterString.read(buf),
+                )
+            21 -> RuntimeRequest.OwnKeyFingerprint(
+                FfiConverterString.read(buf),
+                )
+            22 -> RuntimeRequest.VerifyRecipientKey(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            23 -> RuntimeRequest.VerifiedRecipientKey(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            24 -> RuntimeRequest.RefreshTravelMode(
+                FfiConverterString.read(buf),
+                )
+            25 -> RuntimeRequest.SetTravelModeHiddenVaults(
+                FfiConverterString.read(buf),
+                FfiConverterSequenceString.read(buf),
+                )
+            26 -> RuntimeRequest.EnableTravelMode(
+                FfiConverterString.read(buf),
+                FfiConverterSequenceString.read(buf),
+                )
+            27 -> RuntimeRequest.DisableTravelMode(
+                FfiConverterString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                )
+            28 -> RuntimeRequest.RebootstrapAccountRecovery(
+                FfiConverterString.read(buf),
+                )
+            29 -> RuntimeRequest.InspectRecovery(
+                FfiConverterOptionalString.read(buf),
+                )
+            30 -> RuntimeRequest.ExportAccountRecovery(
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            4 -> RuntimeRequest.RepairAccountRecovery(
+            31 -> RuntimeRequest.RepairAccountRecovery(
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            5 -> RuntimeRequest.SignIn(
+            32 -> RuntimeRequest.SignIn(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            6 -> RuntimeRequest.QuickUnlock(
+            33 -> RuntimeRequest.BiometricAvailability(
+                FfiConverterSequenceString.read(buf),
+                )
+            34 -> RuntimeRequest.SetBiometricEnabled(
+                FfiConverterString.read(buf),
+                FfiConverterBoolean.read(buf),
+                )
+            35 -> RuntimeRequest.BiometricUnlock(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            36 -> RuntimeRequest.BiometricUnlockAccounts(
+                FfiConverterSequenceString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            37 -> RuntimeRequest.SetMasterPasswordReentryPeriod(
+                FfiConverterLong.read(buf),
+                )
+            38 -> RuntimeRequest.LocalSecuritySettings(
+                FfiConverterString.read(buf),
+                )
+            39 -> RuntimeRequest.SetInactivityTimeout(
+                FfiConverterString.read(buf),
+                FfiConverterLong.read(buf),
+                )
+            40 -> RuntimeRequest.RecordActivity(
+                FfiConverterString.read(buf),
+                FfiConverterTypeActivityKind.read(buf),
+                )
+            41 -> RuntimeRequest.DeviceSetup(
+                FfiConverterString.read(buf),
+                )
+            42 -> RuntimeRequest.QuickUnlockAccounts(
+                FfiConverterSequenceString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                )
+            43 -> RuntimeRequest.QuickUnlock(
                 FfiConverterString.read(buf),
                 FfiConverterTypeSecretString.read(buf),
                 )
-            7 -> RuntimeRequest.Lock(
+            44 -> RuntimeRequest.Lock(
                 FfiConverterString.read(buf),
                 )
-            8 -> RuntimeRequest.SignOut(
+            45 -> RuntimeRequest.SignOut(
                 FfiConverterString.read(buf),
                 )
-            9 -> RuntimeRequest.RemoveAccount(
+            46 -> RuntimeRequest.RemoveAccount(
                 FfiConverterString.read(buf),
                 )
-            10 -> RuntimeRequest.DeleteServerAccount(
+            47 -> RuntimeRequest.DeleteServerAccount(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            11 -> RuntimeRequest.Wipe
-            12 -> RuntimeRequest.CreateVault(
+            48 -> RuntimeRequest.Wipe
+            49 -> RuntimeRequest.UpdateVault(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterOptionalString.read(buf),
+                FfiConverterTypeVaultIconPatch.read(buf),
+                FfiConverterTypeVaultImageChange.read(buf),
+                )
+            50 -> RuntimeRequest.DeleteVault(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            51 -> RuntimeRequest.CreateVault(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeCreateVaultType.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterOptionalTypeVaultImageSourceInput.read(buf),
                 )
-            13 -> RuntimeRequest.CreateItem(
+            52 -> RuntimeRequest.CreateItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
-                FfiConverterTypeItemDraft.read(buf),
+                FfiConverterTypeEditableItemDraft.read(buf),
                 )
-            14 -> RuntimeRequest.ImportItems(
+            53 -> RuntimeRequest.ImportItems(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterSequenceTypeImportItemDraft.read(buf),
                 )
-            15 -> RuntimeRequest.UpdateItem(
+            54 -> RuntimeRequest.UpdateItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
-                FfiConverterTypeItemDraft.read(buf),
+                FfiConverterTypeItemEditGuard.read(buf),
+                FfiConverterTypeEditableItemDraft.read(buf),
                 )
-            16 -> RuntimeRequest.SetItemFavorite(
+            55 -> RuntimeRequest.RemovePasskey(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeItemEditGuard.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            56 -> RuntimeRequest.DuplicateItem(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterTypeItemDuplicateGuard.read(buf),
+                FfiConverterString.read(buf),
+                )
+            57 -> RuntimeRequest.SetItemFavorite(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterBoolean.read(buf),
                 )
-            17 -> RuntimeRequest.TrashItem(
+            58 -> RuntimeRequest.TrashItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            18 -> RuntimeRequest.RestoreItem(
+            59 -> RuntimeRequest.RestoreItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            19 -> RuntimeRequest.MoveItem(
+            60 -> RuntimeRequest.MoveItem(
                 FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterOptionalString.read(buf),
+                )
+            61 -> RuntimeRequest.PrepareCrossAccountMoveResume(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            62 -> RuntimeRequest.ResumeCrossAccountMove(
+                FfiConverterTypeCrossAccountMoveResumeGuard.read(buf),
+                )
+            63 -> RuntimeRequest.PermanentlyDeleteItem(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            20 -> RuntimeRequest.PermanentlyDeleteItem(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            21 -> RuntimeRequest.CreateShare(
+            64 -> RuntimeRequest.CreateShare(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeCreateShareDraft.read(buf),
                 )
-            22 -> RuntimeRequest.AcknowledgeShareResult(
+            65 -> RuntimeRequest.AcknowledgeShareResult(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            23 -> RuntimeRequest.ListItemShareLinks(
+            66 -> RuntimeRequest.ListItemShareLinks(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            24 -> RuntimeRequest.ListShareAccessLogs(
+            67 -> RuntimeRequest.ListShareAccessLogs(
                 FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            25 -> RuntimeRequest.RevokeShareLink(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            26 -> RuntimeRequest.RenameAttachment(
+            68 -> RuntimeRequest.RevokeShareLink(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            69 -> RuntimeRequest.RenameAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeAttachmentName.read(buf),
                 )
-            27 -> RuntimeRequest.DeleteAttachment(
+            70 -> RuntimeRequest.DeleteAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            28 -> RuntimeRequest.DownloadAttachment(
+            71 -> RuntimeRequest.DownloadAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            29 -> RuntimeRequest.UploadAttachment(
+            72 -> RuntimeRequest.UploadAttachment(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeAttachmentUploadMetadata.read(buf),
@@ -13055,6 +18390,226 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
     }
 
     override fun allocationSize(value: RuntimeRequest) = when(value) {
+        is RuntimeRequest.ListAvailableVaultMembers -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
+            )
+        }
+        is RuntimeRequest.ListVaultMembers -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
+            )
+        }
+        is RuntimeRequest.AddVaultMember -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
+                + FfiConverterString.allocationSize(value.`userId`)
+                + FfiConverterTypeVaultRole.allocationSize(value.`role`)
+            )
+        }
+        is RuntimeRequest.PrepareRotation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeRotationIntent.allocationSize(value.`intent`)
+                + FfiConverterOptionalString.allocationSize(value.`startOperationId`)
+            )
+        }
+        is RuntimeRequest.CompleteRotation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeRotationSelection.allocationSize(value.`selection`)
+            )
+        }
+        is RuntimeRequest.InspectRotation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`startOperationId`)
+            )
+        }
+        is RuntimeRequest.ListTeamLeaveAttempts -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.AcknowledgeTeamLeaveAttempt -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`startOperationId`)
+            )
+        }
+        is RuntimeRequest.ListMyTeamInvitations -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.AcceptMyTeamInvitation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`invitationId`)
+            )
+        }
+        is RuntimeRequest.DeclineMyTeamInvitation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`invitationId`)
+            )
+        }
+        is RuntimeRequest.ReadInvitationComposer -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`teamId`)
+            )
+        }
+        is RuntimeRequest.CreateTeamInvitation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`teamId`)
+                + FfiConverterString.allocationSize(value.`email`)
+                + FfiConverterTypeTeamRole.allocationSize(value.`role`)
+            )
+        }
+        is RuntimeRequest.ProvisionTeamInvitation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`continuationId`)
+            )
+        }
+        is RuntimeRequest.ReleaseInvitationContinuation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`continuationId`)
+            )
+        }
+        is RuntimeRequest.CancelTeamInvitation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`teamId`)
+                + FfiConverterString.allocationSize(value.`invitationId`)
+            )
+        }
+        is RuntimeRequest.ResendTeamInvitation -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`teamId`)
+                + FfiConverterString.allocationSize(value.`invitationId`)
+            )
+        }
+        is RuntimeRequest.InspectProfileAdmission -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is RuntimeRequest.AbortProfileAdmission -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`admissionId`)
+            )
+        }
+        is RuntimeRequest.RecipientKeyScope -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.OwnKeyFingerprint -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.VerifyRecipientKey -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`recipientUserId`)
+                + FfiConverterString.allocationSize(value.`publicKey`)
+                + FfiConverterString.allocationSize(value.`expectedFingerprint`)
+                + FfiConverterString.allocationSize(value.`scope`)
+            )
+        }
+        is RuntimeRequest.VerifiedRecipientKey -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`recipientUserId`)
+                + FfiConverterString.allocationSize(value.`publicKey`)
+                + FfiConverterString.allocationSize(value.`scope`)
+            )
+        }
+        is RuntimeRequest.RefreshTravelMode -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.SetTravelModeHiddenVaults -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterSequenceString.allocationSize(value.`hiddenVaultIds`)
+            )
+        }
+        is RuntimeRequest.EnableTravelMode -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterSequenceString.allocationSize(value.`hiddenVaultIds`)
+            )
+        }
+        is RuntimeRequest.DisableTravelMode -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeSecretString.allocationSize(value.`masterPassword`)
+            )
+        }
         is RuntimeRequest.RebootstrapAccountRecovery -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -13096,6 +18651,82 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterTypeSecretString.allocationSize(value.`masterPassword`)
                 + FfiConverterTypeSecretString.allocationSize(value.`secretKey`)
                 + FfiConverterBoolean.allocationSize(value.`insecureTransportConfirmed`)
+            )
+        }
+        is RuntimeRequest.BiometricAvailability -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceString.allocationSize(value.`accountIds`)
+            )
+        }
+        is RuntimeRequest.SetBiometricEnabled -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterBoolean.allocationSize(value.`enabled`)
+            )
+        }
+        is RuntimeRequest.BiometricUnlock -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`promptMessage`)
+            )
+        }
+        is RuntimeRequest.BiometricUnlockAccounts -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceString.allocationSize(value.`accountIds`)
+                + FfiConverterString.allocationSize(value.`promptMessage`)
+            )
+        }
+        is RuntimeRequest.SetMasterPasswordReentryPeriod -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterLong.allocationSize(value.`periodMs`)
+            )
+        }
+        is RuntimeRequest.LocalSecuritySettings -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.SetInactivityTimeout -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterLong.allocationSize(value.`timeoutMs`)
+            )
+        }
+        is RuntimeRequest.RecordActivity -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeActivityKind.allocationSize(value.`kind`)
+            )
+        }
+        is RuntimeRequest.DeviceSetup -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+            )
+        }
+        is RuntimeRequest.QuickUnlockAccounts -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceString.allocationSize(value.`accountIds`)
+                + FfiConverterTypeSecretString.allocationSize(value.`masterPassword`)
             )
         }
         is RuntimeRequest.QuickUnlock -> {
@@ -13142,6 +18773,25 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 4UL
             )
         }
+        is RuntimeRequest.UpdateVault -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
+                + FfiConverterOptionalString.allocationSize(value.`name`)
+                + FfiConverterTypeVaultIconPatch.allocationSize(value.`icon`)
+                + FfiConverterTypeVaultImageChange.allocationSize(value.`image`)
+            )
+        }
+        is RuntimeRequest.DeleteVault -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
+            )
+        }
         is RuntimeRequest.CreateVault -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -13159,7 +18809,7 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
                 + FfiConverterString.allocationSize(value.`vaultId`)
-                + FfiConverterTypeItemDraft.allocationSize(value.`draft`)
+                + FfiConverterTypeEditableItemDraft.allocationSize(value.`draft`)
             )
         }
         is RuntimeRequest.ImportItems -> {
@@ -13177,7 +18827,30 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
                 + FfiConverterString.allocationSize(value.`itemId`)
-                + FfiConverterTypeItemDraft.allocationSize(value.`draft`)
+                + FfiConverterTypeItemEditGuard.allocationSize(value.`guard`)
+                + FfiConverterTypeEditableItemDraft.allocationSize(value.`draft`)
+            )
+        }
+        is RuntimeRequest.RemovePasskey -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterTypeItemEditGuard.allocationSize(value.`guard`)
+                + FfiConverterString.allocationSize(value.`rpId`)
+                + FfiConverterString.allocationSize(value.`credentialId`)
+                + FfiConverterString.allocationSize(value.`publicKeyFingerprint`)
+            )
+        }
+        is RuntimeRequest.DuplicateItem -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`sourceItemId`)
+                + FfiConverterTypeItemDuplicateGuard.allocationSize(value.`sourceGuard`)
+                + FfiConverterString.allocationSize(value.`title`)
             )
         }
         is RuntimeRequest.SetItemFavorite -> {
@@ -13212,6 +18885,24 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 + FfiConverterString.allocationSize(value.`accountId`)
                 + FfiConverterString.allocationSize(value.`itemId`)
                 + FfiConverterString.allocationSize(value.`targetVaultId`)
+                + FfiConverterOptionalString.allocationSize(value.`targetAccountId`)
+            )
+        }
+        is RuntimeRequest.PrepareCrossAccountMoveResume -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`operationId`)
+                + FfiConverterString.allocationSize(value.`targetAccountId`)
+                + FfiConverterULong.allocationSize(value.`expectedBindingRevision`)
+            )
+        }
+        is RuntimeRequest.ResumeCrossAccountMove -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeCrossAccountMoveResumeGuard.allocationSize(value.`guard`)
             )
         }
         is RuntimeRequest.PermanentlyDeleteItem -> {
@@ -13252,6 +18943,7 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             (
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
                 + FfiConverterString.allocationSize(value.`linkId`)
             )
         }
@@ -13260,6 +18952,7 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
             (
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterString.allocationSize(value.`itemId`)
                 + FfiConverterString.allocationSize(value.`linkId`)
             )
         }
@@ -13304,32 +18997,198 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
 
     override fun write(value: RuntimeRequest, buf: ByteBuffer) {
         when(value) {
-            is RuntimeRequest.RebootstrapAccountRecovery -> {
+            is RuntimeRequest.ListAvailableVaultMembers -> {
                 buf.putInt(1)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ListVaultMembers -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
+                Unit
+            }
+            is RuntimeRequest.AddVaultMember -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterString.write(value.`userId`, buf)
+                FfiConverterTypeVaultRole.write(value.`role`, buf)
+                Unit
+            }
+            is RuntimeRequest.PrepareRotation -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeRotationIntent.write(value.`intent`, buf)
+                FfiConverterOptionalString.write(value.`startOperationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.CompleteRotation -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeRotationSelection.write(value.`selection`, buf)
+                Unit
+            }
+            is RuntimeRequest.InspectRotation -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`startOperationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ListTeamLeaveAttempts -> {
+                buf.putInt(7)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.AcknowledgeTeamLeaveAttempt -> {
+                buf.putInt(8)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`startOperationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ListMyTeamInvitations -> {
+                buf.putInt(9)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.AcceptMyTeamInvitation -> {
+                buf.putInt(10)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`invitationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.DeclineMyTeamInvitation -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`invitationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ReadInvitationComposer -> {
+                buf.putInt(12)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`teamId`, buf)
+                Unit
+            }
+            is RuntimeRequest.CreateTeamInvitation -> {
+                buf.putInt(13)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`teamId`, buf)
+                FfiConverterString.write(value.`email`, buf)
+                FfiConverterTypeTeamRole.write(value.`role`, buf)
+                Unit
+            }
+            is RuntimeRequest.ProvisionTeamInvitation -> {
+                buf.putInt(14)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`continuationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ReleaseInvitationContinuation -> {
+                buf.putInt(15)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`continuationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.CancelTeamInvitation -> {
+                buf.putInt(16)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`teamId`, buf)
+                FfiConverterString.write(value.`invitationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.ResendTeamInvitation -> {
+                buf.putInt(17)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`teamId`, buf)
+                FfiConverterString.write(value.`invitationId`, buf)
+                Unit
+            }
+            is RuntimeRequest.InspectProfileAdmission -> {
+                buf.putInt(18)
+                Unit
+            }
+            is RuntimeRequest.AbortProfileAdmission -> {
+                buf.putInt(19)
+                FfiConverterString.write(value.`admissionId`, buf)
+                Unit
+            }
+            is RuntimeRequest.RecipientKeyScope -> {
+                buf.putInt(20)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.OwnKeyFingerprint -> {
+                buf.putInt(21)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.VerifyRecipientKey -> {
+                buf.putInt(22)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`recipientUserId`, buf)
+                FfiConverterString.write(value.`publicKey`, buf)
+                FfiConverterString.write(value.`expectedFingerprint`, buf)
+                FfiConverterString.write(value.`scope`, buf)
+                Unit
+            }
+            is RuntimeRequest.VerifiedRecipientKey -> {
+                buf.putInt(23)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`recipientUserId`, buf)
+                FfiConverterString.write(value.`publicKey`, buf)
+                FfiConverterString.write(value.`scope`, buf)
+                Unit
+            }
+            is RuntimeRequest.RefreshTravelMode -> {
+                buf.putInt(24)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.SetTravelModeHiddenVaults -> {
+                buf.putInt(25)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterSequenceString.write(value.`hiddenVaultIds`, buf)
+                Unit
+            }
+            is RuntimeRequest.EnableTravelMode -> {
+                buf.putInt(26)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterSequenceString.write(value.`hiddenVaultIds`, buf)
+                Unit
+            }
+            is RuntimeRequest.DisableTravelMode -> {
+                buf.putInt(27)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
+                Unit
+            }
+            is RuntimeRequest.RebootstrapAccountRecovery -> {
+                buf.putInt(28)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.InspectRecovery -> {
-                buf.putInt(2)
+                buf.putInt(29)
                 FfiConverterOptionalString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.ExportAccountRecovery -> {
-                buf.putInt(3)
+                buf.putInt(30)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterTypeSecretString.write(value.`password`, buf)
                 FfiConverterString.write(value.`sinkCapabilityId`, buf)
                 Unit
             }
             is RuntimeRequest.RepairAccountRecovery -> {
-                buf.putInt(4)
+                buf.putInt(31)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterTypeSecretString.write(value.`password`, buf)
                 FfiConverterString.write(value.`sourceCapabilityId`, buf)
                 Unit
             }
             is RuntimeRequest.SignIn -> {
-                buf.putInt(5)
+                buf.putInt(32)
                 FfiConverterString.write(value.`serverUrl`, buf)
                 FfiConverterString.write(value.`email`, buf)
                 FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
@@ -13337,40 +19196,111 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 FfiConverterBoolean.write(value.`insecureTransportConfirmed`, buf)
                 Unit
             }
+            is RuntimeRequest.BiometricAvailability -> {
+                buf.putInt(33)
+                FfiConverterSequenceString.write(value.`accountIds`, buf)
+                Unit
+            }
+            is RuntimeRequest.SetBiometricEnabled -> {
+                buf.putInt(34)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterBoolean.write(value.`enabled`, buf)
+                Unit
+            }
+            is RuntimeRequest.BiometricUnlock -> {
+                buf.putInt(35)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`promptMessage`, buf)
+                Unit
+            }
+            is RuntimeRequest.BiometricUnlockAccounts -> {
+                buf.putInt(36)
+                FfiConverterSequenceString.write(value.`accountIds`, buf)
+                FfiConverterString.write(value.`promptMessage`, buf)
+                Unit
+            }
+            is RuntimeRequest.SetMasterPasswordReentryPeriod -> {
+                buf.putInt(37)
+                FfiConverterLong.write(value.`periodMs`, buf)
+                Unit
+            }
+            is RuntimeRequest.LocalSecuritySettings -> {
+                buf.putInt(38)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.SetInactivityTimeout -> {
+                buf.putInt(39)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterLong.write(value.`timeoutMs`, buf)
+                Unit
+            }
+            is RuntimeRequest.RecordActivity -> {
+                buf.putInt(40)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeActivityKind.write(value.`kind`, buf)
+                Unit
+            }
+            is RuntimeRequest.DeviceSetup -> {
+                buf.putInt(41)
+                FfiConverterString.write(value.`accountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.QuickUnlockAccounts -> {
+                buf.putInt(42)
+                FfiConverterSequenceString.write(value.`accountIds`, buf)
+                FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
+                Unit
+            }
             is RuntimeRequest.QuickUnlock -> {
-                buf.putInt(6)
+                buf.putInt(43)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterTypeSecretString.write(value.`masterPassword`, buf)
                 Unit
             }
             is RuntimeRequest.Lock -> {
-                buf.putInt(7)
+                buf.putInt(44)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.SignOut -> {
-                buf.putInt(8)
+                buf.putInt(45)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.RemoveAccount -> {
-                buf.putInt(9)
+                buf.putInt(46)
                 FfiConverterString.write(value.`accountId`, buf)
                 Unit
             }
             is RuntimeRequest.DeleteServerAccount -> {
-                buf.putInt(10)
+                buf.putInt(47)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`confirmEmail`, buf)
                 FfiConverterString.write(value.`requestId`, buf)
                 Unit
             }
             is RuntimeRequest.Wipe -> {
-                buf.putInt(11)
+                buf.putInt(48)
+                Unit
+            }
+            is RuntimeRequest.UpdateVault -> {
+                buf.putInt(49)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterOptionalString.write(value.`name`, buf)
+                FfiConverterTypeVaultIconPatch.write(value.`icon`, buf)
+                FfiConverterTypeVaultImageChange.write(value.`image`, buf)
+                Unit
+            }
+            is RuntimeRequest.DeleteVault -> {
+                buf.putInt(50)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
                 Unit
             }
             is RuntimeRequest.CreateVault -> {
-                buf.putInt(12)
+                buf.putInt(51)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`name`, buf)
                 FfiConverterTypeCreateVaultType.write(value.`vaultType`, buf)
@@ -13379,111 +19309,146 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
                 Unit
             }
             is RuntimeRequest.CreateItem -> {
-                buf.putInt(13)
+                buf.putInt(52)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
-                FfiConverterTypeItemDraft.write(value.`draft`, buf)
+                FfiConverterTypeEditableItemDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.ImportItems -> {
-                buf.putInt(14)
+                buf.putInt(53)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterSequenceTypeImportItemDraft.write(value.`items`, buf)
                 Unit
             }
             is RuntimeRequest.UpdateItem -> {
-                buf.putInt(15)
+                buf.putInt(54)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
-                FfiConverterTypeItemDraft.write(value.`draft`, buf)
+                FfiConverterTypeItemEditGuard.write(value.`guard`, buf)
+                FfiConverterTypeEditableItemDraft.write(value.`draft`, buf)
+                Unit
+            }
+            is RuntimeRequest.RemovePasskey -> {
+                buf.putInt(55)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterTypeItemEditGuard.write(value.`guard`, buf)
+                FfiConverterString.write(value.`rpId`, buf)
+                FfiConverterString.write(value.`credentialId`, buf)
+                FfiConverterString.write(value.`publicKeyFingerprint`, buf)
+                Unit
+            }
+            is RuntimeRequest.DuplicateItem -> {
+                buf.putInt(56)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`sourceItemId`, buf)
+                FfiConverterTypeItemDuplicateGuard.write(value.`sourceGuard`, buf)
+                FfiConverterString.write(value.`title`, buf)
                 Unit
             }
             is RuntimeRequest.SetItemFavorite -> {
-                buf.putInt(16)
+                buf.putInt(57)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterBoolean.write(value.`favorite`, buf)
                 Unit
             }
             is RuntimeRequest.TrashItem -> {
-                buf.putInt(17)
+                buf.putInt(58)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.RestoreItem -> {
-                buf.putInt(18)
+                buf.putInt(59)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.MoveItem -> {
-                buf.putInt(19)
+                buf.putInt(60)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`targetVaultId`, buf)
+                FfiConverterOptionalString.write(value.`targetAccountId`, buf)
+                Unit
+            }
+            is RuntimeRequest.PrepareCrossAccountMoveResume -> {
+                buf.putInt(61)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`operationId`, buf)
+                FfiConverterString.write(value.`targetAccountId`, buf)
+                FfiConverterULong.write(value.`expectedBindingRevision`, buf)
+                Unit
+            }
+            is RuntimeRequest.ResumeCrossAccountMove -> {
+                buf.putInt(62)
+                FfiConverterTypeCrossAccountMoveResumeGuard.write(value.`guard`, buf)
                 Unit
             }
             is RuntimeRequest.PermanentlyDeleteItem -> {
-                buf.putInt(20)
+                buf.putInt(63)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.CreateShare -> {
-                buf.putInt(21)
+                buf.putInt(64)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeCreateShareDraft.write(value.`draft`, buf)
                 Unit
             }
             is RuntimeRequest.AcknowledgeShareResult -> {
-                buf.putInt(22)
+                buf.putInt(65)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
             is RuntimeRequest.ListItemShareLinks -> {
-                buf.putInt(23)
+                buf.putInt(66)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 Unit
             }
             is RuntimeRequest.ListShareAccessLogs -> {
-                buf.putInt(24)
+                buf.putInt(67)
                 FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`linkId`, buf)
                 Unit
             }
             is RuntimeRequest.RevokeShareLink -> {
-                buf.putInt(25)
+                buf.putInt(68)
                 FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`linkId`, buf)
                 Unit
             }
             is RuntimeRequest.RenameAttachment -> {
-                buf.putInt(26)
+                buf.putInt(69)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterTypeAttachmentName.write(value.`name`, buf)
                 Unit
             }
             is RuntimeRequest.DeleteAttachment -> {
-                buf.putInt(27)
+                buf.putInt(70)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeRequest.DownloadAttachment -> {
-                buf.putInt(28)
+                buf.putInt(71)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterString.write(value.`sinkCapabilityId`, buf)
                 Unit
             }
             is RuntimeRequest.UploadAttachment -> {
-                buf.putInt(29)
+                buf.putInt(72)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterTypeAttachmentUploadMetadata.write(value.`metadata`, buf)
@@ -13499,7 +19464,368 @@ public object FfiConverterTypeRuntimeRequest : FfiConverterRustBuffer<RuntimeReq
 
 
 
-sealed class RuntimeResponse {
+sealed class RuntimeResponse: Disposable  {
+
+    data class AvailableVaultMembers(
+        val `members`: List<uniffi.bittery_client_bindings.AvailableVaultMember>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultMembers(
+        val `members`: List<uniffi.bittery_client_bindings.CurrentVaultMember>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultMemberAdded(
+        val `vaultId`: kotlin.String,
+        val `userId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultMemberAddUncertain(
+        val `vaultId`: kotlin.String,
+        val `userId`: kotlin.String,
+        val `currentRole`: uniffi.bittery_client_bindings.VaultRole?) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationPrepared(
+        val `selection`: uniffi.bittery_client_bindings.RotationSelection) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationStartPending(
+        val `startOperationId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationStartRejected(
+        val `code`: uniffi.bittery_client_bindings.RotationStartRejectionCode) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationPreparationRequiresCrypto(
+        val `startOperationId`: kotlin.String,
+        val `plans`: List<uniffi.bittery_client_bindings.RotationPlanSelection>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationAttemptConsumed(
+        val `startOperationId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationFinalizePending(
+        val `finalizeOperationId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationRefreshRequired(
+        val `finalizeOperationId`: kotlin.String,
+        val `outcome`: uniffi.bittery_client_bindings.RotationTerminalOutcome) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationCompleted(
+        val `personalTeamId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RotationRejected(
+        val `code`: uniffi.bittery_client_bindings.RotationFinalizeRejectionCode) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamLeaveAttempts(
+        val `attempts`: List<uniffi.bittery_client_bindings.TeamLeaveAttempt>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    object TeamLeaveAttemptAcknowledged : RuntimeResponse()
+
+
+    data class MyTeamInvitations(
+        val `invitations`: List<uniffi.bittery_client_bindings.MyTeamInvitation>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class MyTeamInvitationAccepted(
+        val `teamId`: kotlin.String,
+        val `teamName`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class MyTeamInvitationAcceptRefreshRequired(
+        val `teamId`: kotlin.String,
+        val `teamName`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    object MyTeamInvitationDeclined : RuntimeResponse()
+
+
+    data class MyTeamInvitationUncertain(
+        val `action`: uniffi.bittery_client_bindings.MyInvitationAction,
+        val `invitationId`: kotlin.String,
+        val `pending`: kotlin.Boolean?,
+        val `currentTeamId`: kotlin.String?) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class InvitationComposer(
+        val `composer`: uniffi.bittery_client_bindings.InvitationComposerData) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamInvitationCreated(
+        val `invitationId`: kotlin.String,
+        val `token`: uniffi.bittery_client_bindings.SecretString,
+        val `candidate`: uniffi.bittery_client_bindings.InvitationCandidate?,
+        val `continuationId`: kotlin.String?) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamInvitationProvisioned(
+        val `invitationId`: kotlin.String,
+        val `token`: uniffi.bittery_client_bindings.SecretString) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamInvitationProvisioningNotRequired(
+        val `invitationId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamInvitationUncertain(
+        val `phase`: uniffi.bittery_client_bindings.InvitationUncertainPhase,
+        val `originalInvitationId`: kotlin.String?) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    object InvitationContinuationReleased : RuntimeResponse()
+
+
+    data class TeamInvitationCancelled(
+        val `invitationId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamInvitationResent(
+        val `invitationId`: kotlin.String,
+        val `token`: uniffi.bittery_client_bindings.SecretString) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TeamInvitationAdminUncertain(
+        val `action`: uniffi.bittery_client_bindings.InvitationAdminAction,
+        val `invitationId`: kotlin.String,
+        val `pending`: kotlin.Boolean?) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class ProfileAdmissionAborted(
+        val `admissionId`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class ProfileAdmissionInspection(
+        val `state`: uniffi.bittery_client_bindings.ProfileAdmissionInspectionState) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class CrossAccountMoveResumePrepared(
+        val `guard`: uniffi.bittery_client_bindings.CrossAccountMoveResumeGuard) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class RecipientKeyScope(
+        val `scope`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class OwnKeyFingerprint(
+        val `userId`: kotlin.String,
+        val `fingerprint`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    object RecipientKeyVerified : RuntimeResponse()
+
+
+    data class VerifiedRecipientKey(
+        val `publicKey`: kotlin.String) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class TravelMode(
+        val `accountId`: kotlin.String,
+        val `result`: uniffi.bittery_client_bindings.TravelModeCommandResult) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    object ActivityRecorded : RuntimeResponse()
+
+
+    data class LocalSecuritySettings(
+        val `accountId`: kotlin.String,
+        val `inactivityTimeoutMs`: kotlin.Long,
+        val `masterPasswordReentryPeriodMs`: kotlin.Long) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class DeviceSetup(
+        val `disclosure`: uniffi.bittery_client_bindings.DeviceSetupDisclosure) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class AccountsUnlocked(
+        val `accounts`: List<uniffi.bittery_client_bindings.AccountUnlockResult>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
 
     data class RecoveryDiagnosed(
         val `diagnostics`: uniffi.bittery_client_bindings.StorageRecoveryDiagnostics) : RuntimeResponse()
@@ -13524,6 +19850,45 @@ sealed class RuntimeResponse {
     data class RecoveryRepaired(
         val `accountId`: kotlin.String,
         val `replicaRevision`: kotlin.ULong) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class BiometricAvailability(
+        val `hardware`: uniffi.bittery_client_bindings.BiometricHardware,
+        val `accounts`: List<uniffi.bittery_client_bindings.BiometricAccountAvailability>,
+        val `masterPasswordReentryPeriodMs`: kotlin.Long) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class BiometricEnabled(
+        val `accountId`: kotlin.String,
+        val `enabled`: kotlin.Boolean) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class BiometricUnlock(
+        val `accounts`: List<uniffi.bittery_client_bindings.BiometricAccountUnlock>) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class MasterPasswordReentryPeriod(
+        val `periodMs`: kotlin.Long) : RuntimeResponse()
 
     {
 
@@ -13565,6 +19930,28 @@ sealed class RuntimeResponse {
     data class Accepted(
         val `operationId`: kotlin.String,
         val `itemId`: kotlin.String,
+        val `replicaRevision`: kotlin.ULong) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultUpdateAccepted(
+        val `operationId`: kotlin.String,
+        val `vaultId`: kotlin.String,
+        val `replicaRevision`: kotlin.ULong) : RuntimeResponse()
+
+    {
+
+
+        companion object
+    }
+
+    data class VaultDeletionAccepted(
+        val `operationId`: kotlin.String,
+        val `vaultId`: kotlin.String,
         val `replicaRevision`: kotlin.ULong) : RuntimeResponse()
 
     {
@@ -13692,6 +20079,498 @@ sealed class RuntimeResponse {
 
 
 
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+        when(this) {
+            is RuntimeResponse.AvailableVaultMembers -> {
+
+    Disposable.destroy(
+        this.`members`
+    )
+
+            }
+            is RuntimeResponse.VaultMembers -> {
+
+    Disposable.destroy(
+        this.`members`
+    )
+
+            }
+            is RuntimeResponse.VaultMemberAdded -> {
+
+    Disposable.destroy(
+        this.`vaultId`,
+        this.`userId`
+    )
+
+            }
+            is RuntimeResponse.VaultMemberAddUncertain -> {
+
+    Disposable.destroy(
+        this.`vaultId`,
+        this.`userId`,
+        this.`currentRole`
+    )
+
+            }
+            is RuntimeResponse.RotationPrepared -> {
+
+    Disposable.destroy(
+        this.`selection`
+    )
+
+            }
+            is RuntimeResponse.RotationStartPending -> {
+
+    Disposable.destroy(
+        this.`startOperationId`
+    )
+
+            }
+            is RuntimeResponse.RotationStartRejected -> {
+
+    Disposable.destroy(
+        this.`code`
+    )
+
+            }
+            is RuntimeResponse.RotationPreparationRequiresCrypto -> {
+
+    Disposable.destroy(
+        this.`startOperationId`,
+        this.`plans`
+    )
+
+            }
+            is RuntimeResponse.RotationAttemptConsumed -> {
+
+    Disposable.destroy(
+        this.`startOperationId`
+    )
+
+            }
+            is RuntimeResponse.RotationFinalizePending -> {
+
+    Disposable.destroy(
+        this.`finalizeOperationId`
+    )
+
+            }
+            is RuntimeResponse.RotationRefreshRequired -> {
+
+    Disposable.destroy(
+        this.`finalizeOperationId`,
+        this.`outcome`
+    )
+
+            }
+            is RuntimeResponse.RotationCompleted -> {
+
+    Disposable.destroy(
+        this.`personalTeamId`
+    )
+
+            }
+            is RuntimeResponse.RotationRejected -> {
+
+    Disposable.destroy(
+        this.`code`
+    )
+
+            }
+            is RuntimeResponse.TeamLeaveAttempts -> {
+
+    Disposable.destroy(
+        this.`attempts`
+    )
+
+            }
+            is RuntimeResponse.TeamLeaveAttemptAcknowledged -> {// Nothing to destroy
+            }
+            is RuntimeResponse.MyTeamInvitations -> {
+
+    Disposable.destroy(
+        this.`invitations`
+    )
+
+            }
+            is RuntimeResponse.MyTeamInvitationAccepted -> {
+
+    Disposable.destroy(
+        this.`teamId`,
+        this.`teamName`
+    )
+
+            }
+            is RuntimeResponse.MyTeamInvitationAcceptRefreshRequired -> {
+
+    Disposable.destroy(
+        this.`teamId`,
+        this.`teamName`
+    )
+
+            }
+            is RuntimeResponse.MyTeamInvitationDeclined -> {// Nothing to destroy
+            }
+            is RuntimeResponse.MyTeamInvitationUncertain -> {
+
+    Disposable.destroy(
+        this.`action`,
+        this.`invitationId`,
+        this.`pending`,
+        this.`currentTeamId`
+    )
+
+            }
+            is RuntimeResponse.InvitationComposer -> {
+
+    Disposable.destroy(
+        this.`composer`
+    )
+
+            }
+            is RuntimeResponse.TeamInvitationCreated -> {
+
+    Disposable.destroy(
+        this.`invitationId`,
+        this.`token`,
+        this.`candidate`,
+        this.`continuationId`
+    )
+
+            }
+            is RuntimeResponse.TeamInvitationProvisioned -> {
+
+    Disposable.destroy(
+        this.`invitationId`,
+        this.`token`
+    )
+
+            }
+            is RuntimeResponse.TeamInvitationProvisioningNotRequired -> {
+
+    Disposable.destroy(
+        this.`invitationId`
+    )
+
+            }
+            is RuntimeResponse.TeamInvitationUncertain -> {
+
+    Disposable.destroy(
+        this.`phase`,
+        this.`originalInvitationId`
+    )
+
+            }
+            is RuntimeResponse.InvitationContinuationReleased -> {// Nothing to destroy
+            }
+            is RuntimeResponse.TeamInvitationCancelled -> {
+
+    Disposable.destroy(
+        this.`invitationId`
+    )
+
+            }
+            is RuntimeResponse.TeamInvitationResent -> {
+
+    Disposable.destroy(
+        this.`invitationId`,
+        this.`token`
+    )
+
+            }
+            is RuntimeResponse.TeamInvitationAdminUncertain -> {
+
+    Disposable.destroy(
+        this.`action`,
+        this.`invitationId`,
+        this.`pending`
+    )
+
+            }
+            is RuntimeResponse.ProfileAdmissionAborted -> {
+
+    Disposable.destroy(
+        this.`admissionId`
+    )
+
+            }
+            is RuntimeResponse.ProfileAdmissionInspection -> {
+
+    Disposable.destroy(
+        this.`state`
+    )
+
+            }
+            is RuntimeResponse.CrossAccountMoveResumePrepared -> {
+
+    Disposable.destroy(
+        this.`guard`
+    )
+
+            }
+            is RuntimeResponse.RecipientKeyScope -> {
+
+    Disposable.destroy(
+        this.`scope`
+    )
+
+            }
+            is RuntimeResponse.OwnKeyFingerprint -> {
+
+    Disposable.destroy(
+        this.`userId`,
+        this.`fingerprint`
+    )
+
+            }
+            is RuntimeResponse.RecipientKeyVerified -> {// Nothing to destroy
+            }
+            is RuntimeResponse.VerifiedRecipientKey -> {
+
+    Disposable.destroy(
+        this.`publicKey`
+    )
+
+            }
+            is RuntimeResponse.TravelMode -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`result`
+    )
+
+            }
+            is RuntimeResponse.ActivityRecorded -> {// Nothing to destroy
+            }
+            is RuntimeResponse.LocalSecuritySettings -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`inactivityTimeoutMs`,
+        this.`masterPasswordReentryPeriodMs`
+    )
+
+            }
+            is RuntimeResponse.DeviceSetup -> {
+
+    Disposable.destroy(
+        this.`disclosure`
+    )
+
+            }
+            is RuntimeResponse.AccountsUnlocked -> {
+
+    Disposable.destroy(
+        this.`accounts`
+    )
+
+            }
+            is RuntimeResponse.RecoveryDiagnosed -> {
+
+    Disposable.destroy(
+        this.`diagnostics`
+    )
+
+            }
+            is RuntimeResponse.RecoveryExported -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`classification`,
+        this.`byteLength`
+    )
+
+            }
+            is RuntimeResponse.RecoveryRepaired -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`replicaRevision`
+    )
+
+            }
+            is RuntimeResponse.BiometricAvailability -> {
+
+    Disposable.destroy(
+        this.`hardware`,
+        this.`accounts`,
+        this.`masterPasswordReentryPeriodMs`
+    )
+
+            }
+            is RuntimeResponse.BiometricEnabled -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`enabled`
+    )
+
+            }
+            is RuntimeResponse.BiometricUnlock -> {
+
+    Disposable.destroy(
+        this.`accounts`
+    )
+
+            }
+            is RuntimeResponse.MasterPasswordReentryPeriod -> {
+
+    Disposable.destroy(
+        this.`periodMs`
+    )
+
+            }
+            is RuntimeResponse.SignedIn -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`userId`
+    )
+
+            }
+            is RuntimeResponse.AccessChanged -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`access`
+    )
+
+            }
+            is RuntimeResponse.ServerAccountDeletion -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`requestId`,
+        this.`outcome`
+    )
+
+            }
+            is RuntimeResponse.Accepted -> {
+
+    Disposable.destroy(
+        this.`operationId`,
+        this.`itemId`,
+        this.`replicaRevision`
+    )
+
+            }
+            is RuntimeResponse.VaultUpdateAccepted -> {
+
+    Disposable.destroy(
+        this.`operationId`,
+        this.`vaultId`,
+        this.`replicaRevision`
+    )
+
+            }
+            is RuntimeResponse.VaultDeletionAccepted -> {
+
+    Disposable.destroy(
+        this.`operationId`,
+        this.`vaultId`,
+        this.`replicaRevision`
+    )
+
+            }
+            is RuntimeResponse.VaultCreationAccepted -> {
+
+    Disposable.destroy(
+        this.`operationId`,
+        this.`vaultId`,
+        this.`replicaRevision`
+    )
+
+            }
+            is RuntimeResponse.ImportBatchAccepted -> {
+
+    Disposable.destroy(
+        this.`operationId`,
+        this.`vaultId`,
+        this.`itemIds`,
+        this.`replicaRevision`
+    )
+
+            }
+            is RuntimeResponse.ShareResultAcknowledged -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`operationId`
+    )
+
+            }
+            is RuntimeResponse.ItemShareLinks -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`itemId`,
+        this.`links`,
+        this.`baseShareUrl`
+    )
+
+            }
+            is RuntimeResponse.ShareAccessLogs -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`linkId`,
+        this.`logs`
+    )
+
+            }
+            is RuntimeResponse.ShareLinkRevoked -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`linkId`
+    )
+
+            }
+            is RuntimeResponse.AttachmentRenamed -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`attachmentId`
+    )
+
+            }
+            is RuntimeResponse.AttachmentDeleted -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`attachmentId`
+    )
+
+            }
+            is RuntimeResponse.AttachmentDownloaded -> {
+
+    Disposable.destroy(
+        this.`accountId`,
+        this.`attachmentId`
+    )
+
+            }
+            is RuntimeResponse.AttachmentUploaded -> {
+
+    Disposable.destroy(
+        this.`attachmentId`,
+        this.`replicaRevision`
+    )
+
+            }
+            is RuntimeResponse.Teardown -> {
+
+    Disposable.destroy(
+        this.`scope`,
+        this.`status`,
+        this.`failures`
+    )
+
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
 
 
 
@@ -13706,83 +20585,243 @@ sealed class RuntimeResponse {
 public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeResponse>{
     override fun read(buf: ByteBuffer): RuntimeResponse {
         return when(buf.getInt()) {
-            1 -> RuntimeResponse.RecoveryDiagnosed(
+            1 -> RuntimeResponse.AvailableVaultMembers(
+                FfiConverterSequenceTypeAvailableVaultMember.read(buf),
+                )
+            2 -> RuntimeResponse.VaultMembers(
+                FfiConverterSequenceTypeCurrentVaultMember.read(buf),
+                )
+            3 -> RuntimeResponse.VaultMemberAdded(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            4 -> RuntimeResponse.VaultMemberAddUncertain(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterOptionalTypeVaultRole.read(buf),
+                )
+            5 -> RuntimeResponse.RotationPrepared(
+                FfiConverterTypeRotationSelection.read(buf),
+                )
+            6 -> RuntimeResponse.RotationStartPending(
+                FfiConverterString.read(buf),
+                )
+            7 -> RuntimeResponse.RotationStartRejected(
+                FfiConverterTypeRotationStartRejectionCode.read(buf),
+                )
+            8 -> RuntimeResponse.RotationPreparationRequiresCrypto(
+                FfiConverterString.read(buf),
+                FfiConverterSequenceTypeRotationPlanSelection.read(buf),
+                )
+            9 -> RuntimeResponse.RotationAttemptConsumed(
+                FfiConverterString.read(buf),
+                )
+            10 -> RuntimeResponse.RotationFinalizePending(
+                FfiConverterString.read(buf),
+                )
+            11 -> RuntimeResponse.RotationRefreshRequired(
+                FfiConverterString.read(buf),
+                FfiConverterTypeRotationTerminalOutcome.read(buf),
+                )
+            12 -> RuntimeResponse.RotationCompleted(
+                FfiConverterString.read(buf),
+                )
+            13 -> RuntimeResponse.RotationRejected(
+                FfiConverterTypeRotationFinalizeRejectionCode.read(buf),
+                )
+            14 -> RuntimeResponse.TeamLeaveAttempts(
+                FfiConverterSequenceTypeTeamLeaveAttempt.read(buf),
+                )
+            15 -> RuntimeResponse.TeamLeaveAttemptAcknowledged
+            16 -> RuntimeResponse.MyTeamInvitations(
+                FfiConverterSequenceTypeMyTeamInvitation.read(buf),
+                )
+            17 -> RuntimeResponse.MyTeamInvitationAccepted(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            18 -> RuntimeResponse.MyTeamInvitationAcceptRefreshRequired(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            19 -> RuntimeResponse.MyTeamInvitationDeclined
+            20 -> RuntimeResponse.MyTeamInvitationUncertain(
+                FfiConverterTypeMyInvitationAction.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterOptionalBoolean.read(buf),
+                FfiConverterOptionalString.read(buf),
+                )
+            21 -> RuntimeResponse.InvitationComposer(
+                FfiConverterTypeInvitationComposerData.read(buf),
+                )
+            22 -> RuntimeResponse.TeamInvitationCreated(
+                FfiConverterString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                FfiConverterOptionalTypeInvitationCandidate.read(buf),
+                FfiConverterOptionalString.read(buf),
+                )
+            23 -> RuntimeResponse.TeamInvitationProvisioned(
+                FfiConverterString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                )
+            24 -> RuntimeResponse.TeamInvitationProvisioningNotRequired(
+                FfiConverterString.read(buf),
+                )
+            25 -> RuntimeResponse.TeamInvitationUncertain(
+                FfiConverterTypeInvitationUncertainPhase.read(buf),
+                FfiConverterOptionalString.read(buf),
+                )
+            26 -> RuntimeResponse.InvitationContinuationReleased
+            27 -> RuntimeResponse.TeamInvitationCancelled(
+                FfiConverterString.read(buf),
+                )
+            28 -> RuntimeResponse.TeamInvitationResent(
+                FfiConverterString.read(buf),
+                FfiConverterTypeSecretString.read(buf),
+                )
+            29 -> RuntimeResponse.TeamInvitationAdminUncertain(
+                FfiConverterTypeInvitationAdminAction.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterOptionalBoolean.read(buf),
+                )
+            30 -> RuntimeResponse.ProfileAdmissionAborted(
+                FfiConverterString.read(buf),
+                )
+            31 -> RuntimeResponse.ProfileAdmissionInspection(
+                FfiConverterTypeProfileAdmissionInspectionState.read(buf),
+                )
+            32 -> RuntimeResponse.CrossAccountMoveResumePrepared(
+                FfiConverterTypeCrossAccountMoveResumeGuard.read(buf),
+                )
+            33 -> RuntimeResponse.RecipientKeyScope(
+                FfiConverterString.read(buf),
+                )
+            34 -> RuntimeResponse.OwnKeyFingerprint(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            35 -> RuntimeResponse.RecipientKeyVerified
+            36 -> RuntimeResponse.VerifiedRecipientKey(
+                FfiConverterString.read(buf),
+                )
+            37 -> RuntimeResponse.TravelMode(
+                FfiConverterString.read(buf),
+                FfiConverterTypeTravelModeCommandResult.read(buf),
+                )
+            38 -> RuntimeResponse.ActivityRecorded
+            39 -> RuntimeResponse.LocalSecuritySettings(
+                FfiConverterString.read(buf),
+                FfiConverterLong.read(buf),
+                FfiConverterLong.read(buf),
+                )
+            40 -> RuntimeResponse.DeviceSetup(
+                FfiConverterTypeDeviceSetupDisclosure.read(buf),
+                )
+            41 -> RuntimeResponse.AccountsUnlocked(
+                FfiConverterSequenceTypeAccountUnlockResult.read(buf),
+                )
+            42 -> RuntimeResponse.RecoveryDiagnosed(
                 FfiConverterTypeStorageRecoveryDiagnostics.read(buf),
                 )
-            2 -> RuntimeResponse.RecoveryExported(
+            43 -> RuntimeResponse.RecoveryExported(
                 FfiConverterString.read(buf),
                 FfiConverterTypeRecoveryClassification.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            3 -> RuntimeResponse.RecoveryRepaired(
+            44 -> RuntimeResponse.RecoveryRepaired(
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            4 -> RuntimeResponse.SignedIn(
+            45 -> RuntimeResponse.BiometricAvailability(
+                FfiConverterTypeBiometricHardware.read(buf),
+                FfiConverterSequenceTypeBiometricAccountAvailability.read(buf),
+                FfiConverterLong.read(buf),
+                )
+            46 -> RuntimeResponse.BiometricEnabled(
+                FfiConverterString.read(buf),
+                FfiConverterBoolean.read(buf),
+                )
+            47 -> RuntimeResponse.BiometricUnlock(
+                FfiConverterSequenceTypeBiometricAccountUnlock.read(buf),
+                )
+            48 -> RuntimeResponse.MasterPasswordReentryPeriod(
+                FfiConverterLong.read(buf),
+                )
+            49 -> RuntimeResponse.SignedIn(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            5 -> RuntimeResponse.AccessChanged(
+            50 -> RuntimeResponse.AccessChanged(
                 FfiConverterString.read(buf),
                 FfiConverterTypeAccountAccessState.read(buf),
                 )
-            6 -> RuntimeResponse.ServerAccountDeletion(
+            51 -> RuntimeResponse.ServerAccountDeletion(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterTypeServerAccountDeletionOutcome.read(buf),
                 )
-            7 -> RuntimeResponse.Accepted(
+            52 -> RuntimeResponse.Accepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            8 -> RuntimeResponse.VaultCreationAccepted(
+            53 -> RuntimeResponse.VaultUpdateAccepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            9 -> RuntimeResponse.ImportBatchAccepted(
+            54 -> RuntimeResponse.VaultDeletionAccepted(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            55 -> RuntimeResponse.VaultCreationAccepted(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            56 -> RuntimeResponse.ImportBatchAccepted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterSequenceString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            10 -> RuntimeResponse.ShareResultAcknowledged(
+            57 -> RuntimeResponse.ShareResultAcknowledged(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            11 -> RuntimeResponse.ItemShareLinks(
+            58 -> RuntimeResponse.ItemShareLinks(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterSequenceTypeShareLinkSummary.read(buf),
                 FfiConverterString.read(buf),
                 )
-            12 -> RuntimeResponse.ShareAccessLogs(
+            59 -> RuntimeResponse.ShareAccessLogs(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterSequenceTypeShareAccessLog.read(buf),
                 )
-            13 -> RuntimeResponse.ShareLinkRevoked(
+            60 -> RuntimeResponse.ShareLinkRevoked(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            14 -> RuntimeResponse.AttachmentRenamed(
+            61 -> RuntimeResponse.AttachmentRenamed(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            15 -> RuntimeResponse.AttachmentDeleted(
+            62 -> RuntimeResponse.AttachmentDeleted(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            16 -> RuntimeResponse.AttachmentDownloaded(
+            63 -> RuntimeResponse.AttachmentDownloaded(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            17 -> RuntimeResponse.AttachmentUploaded(
+            64 -> RuntimeResponse.AttachmentUploaded(
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
                 )
-            18 -> RuntimeResponse.Teardown(
+            65 -> RuntimeResponse.Teardown(
                 FfiConverterTypeTeardownScope.read(buf),
                 FfiConverterTypeTeardownStatus.read(buf),
                 FfiConverterSequenceTypeTeardownPhase.read(buf),
@@ -13792,6 +20831,310 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
     }
 
     override fun allocationSize(value: RuntimeResponse) = when(value) {
+        is RuntimeResponse.AvailableVaultMembers -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeAvailableVaultMember.allocationSize(value.`members`)
+            )
+        }
+        is RuntimeResponse.VaultMembers -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeCurrentVaultMember.allocationSize(value.`members`)
+            )
+        }
+        is RuntimeResponse.VaultMemberAdded -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`vaultId`)
+                + FfiConverterString.allocationSize(value.`userId`)
+            )
+        }
+        is RuntimeResponse.VaultMemberAddUncertain -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`vaultId`)
+                + FfiConverterString.allocationSize(value.`userId`)
+                + FfiConverterOptionalTypeVaultRole.allocationSize(value.`currentRole`)
+            )
+        }
+        is RuntimeResponse.RotationPrepared -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeRotationSelection.allocationSize(value.`selection`)
+            )
+        }
+        is RuntimeResponse.RotationStartPending -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`startOperationId`)
+            )
+        }
+        is RuntimeResponse.RotationStartRejected -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeRotationStartRejectionCode.allocationSize(value.`code`)
+            )
+        }
+        is RuntimeResponse.RotationPreparationRequiresCrypto -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`startOperationId`)
+                + FfiConverterSequenceTypeRotationPlanSelection.allocationSize(value.`plans`)
+            )
+        }
+        is RuntimeResponse.RotationAttemptConsumed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`startOperationId`)
+            )
+        }
+        is RuntimeResponse.RotationFinalizePending -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`finalizeOperationId`)
+            )
+        }
+        is RuntimeResponse.RotationRefreshRequired -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`finalizeOperationId`)
+                + FfiConverterTypeRotationTerminalOutcome.allocationSize(value.`outcome`)
+            )
+        }
+        is RuntimeResponse.RotationCompleted -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`personalTeamId`)
+            )
+        }
+        is RuntimeResponse.RotationRejected -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeRotationFinalizeRejectionCode.allocationSize(value.`code`)
+            )
+        }
+        is RuntimeResponse.TeamLeaveAttempts -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeTeamLeaveAttempt.allocationSize(value.`attempts`)
+            )
+        }
+        is RuntimeResponse.TeamLeaveAttemptAcknowledged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is RuntimeResponse.MyTeamInvitations -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeMyTeamInvitation.allocationSize(value.`invitations`)
+            )
+        }
+        is RuntimeResponse.MyTeamInvitationAccepted -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`teamId`)
+                + FfiConverterString.allocationSize(value.`teamName`)
+            )
+        }
+        is RuntimeResponse.MyTeamInvitationAcceptRefreshRequired -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`teamId`)
+                + FfiConverterString.allocationSize(value.`teamName`)
+            )
+        }
+        is RuntimeResponse.MyTeamInvitationDeclined -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is RuntimeResponse.MyTeamInvitationUncertain -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeMyInvitationAction.allocationSize(value.`action`)
+                + FfiConverterString.allocationSize(value.`invitationId`)
+                + FfiConverterOptionalBoolean.allocationSize(value.`pending`)
+                + FfiConverterOptionalString.allocationSize(value.`currentTeamId`)
+            )
+        }
+        is RuntimeResponse.InvitationComposer -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeInvitationComposerData.allocationSize(value.`composer`)
+            )
+        }
+        is RuntimeResponse.TeamInvitationCreated -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`invitationId`)
+                + FfiConverterTypeSecretString.allocationSize(value.`token`)
+                + FfiConverterOptionalTypeInvitationCandidate.allocationSize(value.`candidate`)
+                + FfiConverterOptionalString.allocationSize(value.`continuationId`)
+            )
+        }
+        is RuntimeResponse.TeamInvitationProvisioned -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`invitationId`)
+                + FfiConverterTypeSecretString.allocationSize(value.`token`)
+            )
+        }
+        is RuntimeResponse.TeamInvitationProvisioningNotRequired -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`invitationId`)
+            )
+        }
+        is RuntimeResponse.TeamInvitationUncertain -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeInvitationUncertainPhase.allocationSize(value.`phase`)
+                + FfiConverterOptionalString.allocationSize(value.`originalInvitationId`)
+            )
+        }
+        is RuntimeResponse.InvitationContinuationReleased -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is RuntimeResponse.TeamInvitationCancelled -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`invitationId`)
+            )
+        }
+        is RuntimeResponse.TeamInvitationResent -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`invitationId`)
+                + FfiConverterTypeSecretString.allocationSize(value.`token`)
+            )
+        }
+        is RuntimeResponse.TeamInvitationAdminUncertain -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeInvitationAdminAction.allocationSize(value.`action`)
+                + FfiConverterString.allocationSize(value.`invitationId`)
+                + FfiConverterOptionalBoolean.allocationSize(value.`pending`)
+            )
+        }
+        is RuntimeResponse.ProfileAdmissionAborted -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`admissionId`)
+            )
+        }
+        is RuntimeResponse.ProfileAdmissionInspection -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeProfileAdmissionInspectionState.allocationSize(value.`state`)
+            )
+        }
+        is RuntimeResponse.CrossAccountMoveResumePrepared -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeCrossAccountMoveResumeGuard.allocationSize(value.`guard`)
+            )
+        }
+        is RuntimeResponse.RecipientKeyScope -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`scope`)
+            )
+        }
+        is RuntimeResponse.OwnKeyFingerprint -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`userId`)
+                + FfiConverterString.allocationSize(value.`fingerprint`)
+            )
+        }
+        is RuntimeResponse.RecipientKeyVerified -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is RuntimeResponse.VerifiedRecipientKey -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`publicKey`)
+            )
+        }
+        is RuntimeResponse.TravelMode -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterTypeTravelModeCommandResult.allocationSize(value.`result`)
+            )
+        }
+        is RuntimeResponse.ActivityRecorded -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is RuntimeResponse.LocalSecuritySettings -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterLong.allocationSize(value.`inactivityTimeoutMs`)
+                + FfiConverterLong.allocationSize(value.`masterPasswordReentryPeriodMs`)
+            )
+        }
+        is RuntimeResponse.DeviceSetup -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeDeviceSetupDisclosure.allocationSize(value.`disclosure`)
+            )
+        }
+        is RuntimeResponse.AccountsUnlocked -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeAccountUnlockResult.allocationSize(value.`accounts`)
+            )
+        }
         is RuntimeResponse.RecoveryDiagnosed -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -13814,6 +21157,37 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 4UL
                 + FfiConverterString.allocationSize(value.`accountId`)
                 + FfiConverterULong.allocationSize(value.`replicaRevision`)
+            )
+        }
+        is RuntimeResponse.BiometricAvailability -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeBiometricHardware.allocationSize(value.`hardware`)
+                + FfiConverterSequenceTypeBiometricAccountAvailability.allocationSize(value.`accounts`)
+                + FfiConverterLong.allocationSize(value.`masterPasswordReentryPeriodMs`)
+            )
+        }
+        is RuntimeResponse.BiometricEnabled -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`accountId`)
+                + FfiConverterBoolean.allocationSize(value.`enabled`)
+            )
+        }
+        is RuntimeResponse.BiometricUnlock -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeBiometricAccountUnlock.allocationSize(value.`accounts`)
+            )
+        }
+        is RuntimeResponse.MasterPasswordReentryPeriod -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterLong.allocationSize(value.`periodMs`)
             )
         }
         is RuntimeResponse.SignedIn -> {
@@ -13847,6 +21221,24 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 4UL
                 + FfiConverterString.allocationSize(value.`operationId`)
                 + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterULong.allocationSize(value.`replicaRevision`)
+            )
+        }
+        is RuntimeResponse.VaultUpdateAccepted -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`operationId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
+                + FfiConverterULong.allocationSize(value.`replicaRevision`)
+            )
+        }
+        is RuntimeResponse.VaultDeletionAccepted -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`operationId`)
+                + FfiConverterString.allocationSize(value.`vaultId`)
                 + FfiConverterULong.allocationSize(value.`replicaRevision`)
             )
         }
@@ -13949,59 +21341,318 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
 
     override fun write(value: RuntimeResponse, buf: ByteBuffer) {
         when(value) {
-            is RuntimeResponse.RecoveryDiagnosed -> {
+            is RuntimeResponse.AvailableVaultMembers -> {
                 buf.putInt(1)
+                FfiConverterSequenceTypeAvailableVaultMember.write(value.`members`, buf)
+                Unit
+            }
+            is RuntimeResponse.VaultMembers -> {
+                buf.putInt(2)
+                FfiConverterSequenceTypeCurrentVaultMember.write(value.`members`, buf)
+                Unit
+            }
+            is RuntimeResponse.VaultMemberAdded -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterString.write(value.`userId`, buf)
+                Unit
+            }
+            is RuntimeResponse.VaultMemberAddUncertain -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterString.write(value.`userId`, buf)
+                FfiConverterOptionalTypeVaultRole.write(value.`currentRole`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationPrepared -> {
+                buf.putInt(5)
+                FfiConverterTypeRotationSelection.write(value.`selection`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationStartPending -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`startOperationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationStartRejected -> {
+                buf.putInt(7)
+                FfiConverterTypeRotationStartRejectionCode.write(value.`code`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationPreparationRequiresCrypto -> {
+                buf.putInt(8)
+                FfiConverterString.write(value.`startOperationId`, buf)
+                FfiConverterSequenceTypeRotationPlanSelection.write(value.`plans`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationAttemptConsumed -> {
+                buf.putInt(9)
+                FfiConverterString.write(value.`startOperationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationFinalizePending -> {
+                buf.putInt(10)
+                FfiConverterString.write(value.`finalizeOperationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationRefreshRequired -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`finalizeOperationId`, buf)
+                FfiConverterTypeRotationTerminalOutcome.write(value.`outcome`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationCompleted -> {
+                buf.putInt(12)
+                FfiConverterString.write(value.`personalTeamId`, buf)
+                Unit
+            }
+            is RuntimeResponse.RotationRejected -> {
+                buf.putInt(13)
+                FfiConverterTypeRotationFinalizeRejectionCode.write(value.`code`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamLeaveAttempts -> {
+                buf.putInt(14)
+                FfiConverterSequenceTypeTeamLeaveAttempt.write(value.`attempts`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamLeaveAttemptAcknowledged -> {
+                buf.putInt(15)
+                Unit
+            }
+            is RuntimeResponse.MyTeamInvitations -> {
+                buf.putInt(16)
+                FfiConverterSequenceTypeMyTeamInvitation.write(value.`invitations`, buf)
+                Unit
+            }
+            is RuntimeResponse.MyTeamInvitationAccepted -> {
+                buf.putInt(17)
+                FfiConverterString.write(value.`teamId`, buf)
+                FfiConverterString.write(value.`teamName`, buf)
+                Unit
+            }
+            is RuntimeResponse.MyTeamInvitationAcceptRefreshRequired -> {
+                buf.putInt(18)
+                FfiConverterString.write(value.`teamId`, buf)
+                FfiConverterString.write(value.`teamName`, buf)
+                Unit
+            }
+            is RuntimeResponse.MyTeamInvitationDeclined -> {
+                buf.putInt(19)
+                Unit
+            }
+            is RuntimeResponse.MyTeamInvitationUncertain -> {
+                buf.putInt(20)
+                FfiConverterTypeMyInvitationAction.write(value.`action`, buf)
+                FfiConverterString.write(value.`invitationId`, buf)
+                FfiConverterOptionalBoolean.write(value.`pending`, buf)
+                FfiConverterOptionalString.write(value.`currentTeamId`, buf)
+                Unit
+            }
+            is RuntimeResponse.InvitationComposer -> {
+                buf.putInt(21)
+                FfiConverterTypeInvitationComposerData.write(value.`composer`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamInvitationCreated -> {
+                buf.putInt(22)
+                FfiConverterString.write(value.`invitationId`, buf)
+                FfiConverterTypeSecretString.write(value.`token`, buf)
+                FfiConverterOptionalTypeInvitationCandidate.write(value.`candidate`, buf)
+                FfiConverterOptionalString.write(value.`continuationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamInvitationProvisioned -> {
+                buf.putInt(23)
+                FfiConverterString.write(value.`invitationId`, buf)
+                FfiConverterTypeSecretString.write(value.`token`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamInvitationProvisioningNotRequired -> {
+                buf.putInt(24)
+                FfiConverterString.write(value.`invitationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamInvitationUncertain -> {
+                buf.putInt(25)
+                FfiConverterTypeInvitationUncertainPhase.write(value.`phase`, buf)
+                FfiConverterOptionalString.write(value.`originalInvitationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.InvitationContinuationReleased -> {
+                buf.putInt(26)
+                Unit
+            }
+            is RuntimeResponse.TeamInvitationCancelled -> {
+                buf.putInt(27)
+                FfiConverterString.write(value.`invitationId`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamInvitationResent -> {
+                buf.putInt(28)
+                FfiConverterString.write(value.`invitationId`, buf)
+                FfiConverterTypeSecretString.write(value.`token`, buf)
+                Unit
+            }
+            is RuntimeResponse.TeamInvitationAdminUncertain -> {
+                buf.putInt(29)
+                FfiConverterTypeInvitationAdminAction.write(value.`action`, buf)
+                FfiConverterString.write(value.`invitationId`, buf)
+                FfiConverterOptionalBoolean.write(value.`pending`, buf)
+                Unit
+            }
+            is RuntimeResponse.ProfileAdmissionAborted -> {
+                buf.putInt(30)
+                FfiConverterString.write(value.`admissionId`, buf)
+                Unit
+            }
+            is RuntimeResponse.ProfileAdmissionInspection -> {
+                buf.putInt(31)
+                FfiConverterTypeProfileAdmissionInspectionState.write(value.`state`, buf)
+                Unit
+            }
+            is RuntimeResponse.CrossAccountMoveResumePrepared -> {
+                buf.putInt(32)
+                FfiConverterTypeCrossAccountMoveResumeGuard.write(value.`guard`, buf)
+                Unit
+            }
+            is RuntimeResponse.RecipientKeyScope -> {
+                buf.putInt(33)
+                FfiConverterString.write(value.`scope`, buf)
+                Unit
+            }
+            is RuntimeResponse.OwnKeyFingerprint -> {
+                buf.putInt(34)
+                FfiConverterString.write(value.`userId`, buf)
+                FfiConverterString.write(value.`fingerprint`, buf)
+                Unit
+            }
+            is RuntimeResponse.RecipientKeyVerified -> {
+                buf.putInt(35)
+                Unit
+            }
+            is RuntimeResponse.VerifiedRecipientKey -> {
+                buf.putInt(36)
+                FfiConverterString.write(value.`publicKey`, buf)
+                Unit
+            }
+            is RuntimeResponse.TravelMode -> {
+                buf.putInt(37)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterTypeTravelModeCommandResult.write(value.`result`, buf)
+                Unit
+            }
+            is RuntimeResponse.ActivityRecorded -> {
+                buf.putInt(38)
+                Unit
+            }
+            is RuntimeResponse.LocalSecuritySettings -> {
+                buf.putInt(39)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterLong.write(value.`inactivityTimeoutMs`, buf)
+                FfiConverterLong.write(value.`masterPasswordReentryPeriodMs`, buf)
+                Unit
+            }
+            is RuntimeResponse.DeviceSetup -> {
+                buf.putInt(40)
+                FfiConverterTypeDeviceSetupDisclosure.write(value.`disclosure`, buf)
+                Unit
+            }
+            is RuntimeResponse.AccountsUnlocked -> {
+                buf.putInt(41)
+                FfiConverterSequenceTypeAccountUnlockResult.write(value.`accounts`, buf)
+                Unit
+            }
+            is RuntimeResponse.RecoveryDiagnosed -> {
+                buf.putInt(42)
                 FfiConverterTypeStorageRecoveryDiagnostics.write(value.`diagnostics`, buf)
                 Unit
             }
             is RuntimeResponse.RecoveryExported -> {
-                buf.putInt(2)
+                buf.putInt(43)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterTypeRecoveryClassification.write(value.`classification`, buf)
                 FfiConverterULong.write(value.`byteLength`, buf)
                 Unit
             }
             is RuntimeResponse.RecoveryRepaired -> {
-                buf.putInt(3)
+                buf.putInt(44)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
+            is RuntimeResponse.BiometricAvailability -> {
+                buf.putInt(45)
+                FfiConverterTypeBiometricHardware.write(value.`hardware`, buf)
+                FfiConverterSequenceTypeBiometricAccountAvailability.write(value.`accounts`, buf)
+                FfiConverterLong.write(value.`masterPasswordReentryPeriodMs`, buf)
+                Unit
+            }
+            is RuntimeResponse.BiometricEnabled -> {
+                buf.putInt(46)
+                FfiConverterString.write(value.`accountId`, buf)
+                FfiConverterBoolean.write(value.`enabled`, buf)
+                Unit
+            }
+            is RuntimeResponse.BiometricUnlock -> {
+                buf.putInt(47)
+                FfiConverterSequenceTypeBiometricAccountUnlock.write(value.`accounts`, buf)
+                Unit
+            }
+            is RuntimeResponse.MasterPasswordReentryPeriod -> {
+                buf.putInt(48)
+                FfiConverterLong.write(value.`periodMs`, buf)
+                Unit
+            }
             is RuntimeResponse.SignedIn -> {
-                buf.putInt(4)
+                buf.putInt(49)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`userId`, buf)
                 Unit
             }
             is RuntimeResponse.AccessChanged -> {
-                buf.putInt(5)
+                buf.putInt(50)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterTypeAccountAccessState.write(value.`access`, buf)
                 Unit
             }
             is RuntimeResponse.ServerAccountDeletion -> {
-                buf.putInt(6)
+                buf.putInt(51)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`requestId`, buf)
                 FfiConverterTypeServerAccountDeletionOutcome.write(value.`outcome`, buf)
                 Unit
             }
             is RuntimeResponse.Accepted -> {
-                buf.putInt(7)
+                buf.putInt(52)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
+            is RuntimeResponse.VaultUpdateAccepted -> {
+                buf.putInt(53)
+                FfiConverterString.write(value.`operationId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterULong.write(value.`replicaRevision`, buf)
+                Unit
+            }
+            is RuntimeResponse.VaultDeletionAccepted -> {
+                buf.putInt(54)
+                FfiConverterString.write(value.`operationId`, buf)
+                FfiConverterString.write(value.`vaultId`, buf)
+                FfiConverterULong.write(value.`replicaRevision`, buf)
+                Unit
+            }
             is RuntimeResponse.VaultCreationAccepted -> {
-                buf.putInt(8)
+                buf.putInt(55)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
             is RuntimeResponse.ImportBatchAccepted -> {
-                buf.putInt(9)
+                buf.putInt(56)
                 FfiConverterString.write(value.`operationId`, buf)
                 FfiConverterString.write(value.`vaultId`, buf)
                 FfiConverterSequenceString.write(value.`itemIds`, buf)
@@ -14009,13 +21660,13 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 Unit
             }
             is RuntimeResponse.ShareResultAcknowledged -> {
-                buf.putInt(10)
+                buf.putInt(57)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`operationId`, buf)
                 Unit
             }
             is RuntimeResponse.ItemShareLinks -> {
-                buf.putInt(11)
+                buf.putInt(58)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterSequenceTypeShareLinkSummary.write(value.`links`, buf)
@@ -14023,44 +21674,44 @@ public object FfiConverterTypeRuntimeResponse : FfiConverterRustBuffer<RuntimeRe
                 Unit
             }
             is RuntimeResponse.ShareAccessLogs -> {
-                buf.putInt(12)
+                buf.putInt(59)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`linkId`, buf)
                 FfiConverterSequenceTypeShareAccessLog.write(value.`logs`, buf)
                 Unit
             }
             is RuntimeResponse.ShareLinkRevoked -> {
-                buf.putInt(13)
+                buf.putInt(60)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`linkId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentRenamed -> {
-                buf.putInt(14)
+                buf.putInt(61)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentDeleted -> {
-                buf.putInt(15)
+                buf.putInt(62)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentDownloaded -> {
-                buf.putInt(16)
+                buf.putInt(63)
                 FfiConverterString.write(value.`accountId`, buf)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 Unit
             }
             is RuntimeResponse.AttachmentUploaded -> {
-                buf.putInt(17)
+                buf.putInt(64)
                 FfiConverterString.write(value.`attachmentId`, buf)
                 FfiConverterULong.write(value.`replicaRevision`, buf)
                 Unit
             }
             is RuntimeResponse.Teardown -> {
-                buf.putInt(18)
+                buf.putInt(65)
                 FfiConverterTypeTeardownScope.write(value.`scope`, buf)
                 FfiConverterTypeTeardownStatus.write(value.`status`, buf)
                 FfiConverterSequenceTypeTeardownPhase.write(value.`failures`, buf)
@@ -14208,6 +21859,41 @@ public object FfiConverterTypeShareLinkStatus: FfiConverterRustBuffer<ShareLinkS
     override fun allocationSize(value: ShareLinkStatus) = 4UL
 
     override fun write(value: ShareLinkStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class TeamRole {
+
+    OWNER,
+    ADMIN,
+    MEMBER;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTeamRole: FfiConverterRustBuffer<TeamRole> {
+    override fun read(buf: ByteBuffer) = try {
+        TeamRole.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TeamRole) = 4UL
+
+    override fun write(value: TeamRole, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -14429,6 +22115,362 @@ public object FfiConverterTypeTotpDigits: FfiConverterRustBuffer<TotpDigits> {
 
 
 
+sealed class TravelModeCommandResult {
+
+    data class Confirmed(
+        val `policy`: uniffi.bittery_client_bindings.TravelModePolicy,
+        val `enforcement`: uniffi.bittery_client_bindings.TravelModeEnforcement) : TravelModeCommandResult()
+
+    {
+
+
+        companion object
+    }
+
+    data class RetryRequired(
+        val `policy`: uniffi.bittery_client_bindings.TravelModePolicy) : TravelModeCommandResult()
+
+    {
+
+
+        companion object
+    }
+
+    data class Uncertain(
+        val `lastVerifiedPolicy`: uniffi.bittery_client_bindings.TravelModePolicy?) : TravelModeCommandResult()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTravelModeCommandResult : FfiConverterRustBuffer<TravelModeCommandResult>{
+    override fun read(buf: ByteBuffer): TravelModeCommandResult {
+        return when(buf.getInt()) {
+            1 -> TravelModeCommandResult.Confirmed(
+                FfiConverterTypeTravelModePolicy.read(buf),
+                FfiConverterTypeTravelModeEnforcement.read(buf),
+                )
+            2 -> TravelModeCommandResult.RetryRequired(
+                FfiConverterTypeTravelModePolicy.read(buf),
+                )
+            3 -> TravelModeCommandResult.Uncertain(
+                FfiConverterOptionalTypeTravelModePolicy.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: TravelModeCommandResult) = when(value) {
+        is TravelModeCommandResult.Confirmed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeTravelModePolicy.allocationSize(value.`policy`)
+                + FfiConverterTypeTravelModeEnforcement.allocationSize(value.`enforcement`)
+            )
+        }
+        is TravelModeCommandResult.RetryRequired -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeTravelModePolicy.allocationSize(value.`policy`)
+            )
+        }
+        is TravelModeCommandResult.Uncertain -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterOptionalTypeTravelModePolicy.allocationSize(value.`lastVerifiedPolicy`)
+            )
+        }
+    }
+
+    override fun write(value: TravelModeCommandResult, buf: ByteBuffer) {
+        when(value) {
+            is TravelModeCommandResult.Confirmed -> {
+                buf.putInt(1)
+                FfiConverterTypeTravelModePolicy.write(value.`policy`, buf)
+                FfiConverterTypeTravelModeEnforcement.write(value.`enforcement`, buf)
+                Unit
+            }
+            is TravelModeCommandResult.RetryRequired -> {
+                buf.putInt(2)
+                FfiConverterTypeTravelModePolicy.write(value.`policy`, buf)
+                Unit
+            }
+            is TravelModeCommandResult.Uncertain -> {
+                buf.putInt(3)
+                FfiConverterOptionalTypeTravelModePolicy.write(value.`lastVerifiedPolicy`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class TravelModeEnforcement {
+
+    UNVERIFIED,
+    RETIRING,
+    READY,
+    REFRESHING;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTravelModeEnforcement: FfiConverterRustBuffer<TravelModeEnforcement> {
+    override fun read(buf: ByteBuffer) = try {
+        TravelModeEnforcement.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TravelModeEnforcement) = 4UL
+
+    override fun write(value: TravelModeEnforcement, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class VaultExportRetirementReason {
+
+    SCOPE_RETIRED,
+    RUNTIME_CLOSED,
+    CONNECTION_CLOSED;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultExportRetirementReason: FfiConverterRustBuffer<VaultExportRetirementReason> {
+    override fun read(buf: ByteBuffer) = try {
+        VaultExportRetirementReason.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: VaultExportRetirementReason) = 4UL
+
+    override fun write(value: VaultExportRetirementReason, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class VaultIconPatch {
+
+    object Unchanged : VaultIconPatch()
+
+
+    object Clear : VaultIconPatch()
+
+
+    data class Set(
+        val `value`: kotlin.String) : VaultIconPatch()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultIconPatch : FfiConverterRustBuffer<VaultIconPatch>{
+    override fun read(buf: ByteBuffer): VaultIconPatch {
+        return when(buf.getInt()) {
+            1 -> VaultIconPatch.Unchanged
+            2 -> VaultIconPatch.Clear
+            3 -> VaultIconPatch.Set(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: VaultIconPatch) = when(value) {
+        is VaultIconPatch.Unchanged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is VaultIconPatch.Clear -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is VaultIconPatch.Set -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`value`)
+            )
+        }
+    }
+
+    override fun write(value: VaultIconPatch, buf: ByteBuffer) {
+        when(value) {
+            is VaultIconPatch.Unchanged -> {
+                buf.putInt(1)
+                Unit
+            }
+            is VaultIconPatch.Clear -> {
+                buf.putInt(2)
+                Unit
+            }
+            is VaultIconPatch.Set -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`value`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class VaultImageChange {
+
+    object Unchanged : VaultImageChange()
+
+
+    object Remove : VaultImageChange()
+
+
+    data class Source(
+        val `source`: uniffi.bittery_client_bindings.VaultImageSourceInput) : VaultImageChange()
+
+    {
+
+
+        companion object
+    }
+
+
+
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultImageChange : FfiConverterRustBuffer<VaultImageChange>{
+    override fun read(buf: ByteBuffer): VaultImageChange {
+        return when(buf.getInt()) {
+            1 -> VaultImageChange.Unchanged
+            2 -> VaultImageChange.Remove
+            3 -> VaultImageChange.Source(
+                FfiConverterTypeVaultImageSourceInput.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: VaultImageChange) = when(value) {
+        is VaultImageChange.Unchanged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is VaultImageChange.Remove -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is VaultImageChange.Source -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeVaultImageSourceInput.allocationSize(value.`source`)
+            )
+        }
+    }
+
+    override fun write(value: VaultImageChange, buf: ByteBuffer) {
+        when(value) {
+            is VaultImageChange.Unchanged -> {
+                buf.putInt(1)
+                Unit
+            }
+            is VaultImageChange.Remove -> {
+                buf.putInt(2)
+                Unit
+            }
+            is VaultImageChange.Source -> {
+                buf.putInt(3)
+                FfiConverterTypeVaultImageSourceInput.write(value.`source`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
 /**
  * One Account's membership in one Vault, in the Server's own closed set.
  */
@@ -14494,6 +22536,42 @@ public object FfiConverterTypeVaultProjectionType: FfiConverterRustBuffer<VaultP
     override fun allocationSize(value: VaultProjectionType) = 4UL
 
     override fun write(value: VaultProjectionType, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class VaultRole {
+
+    OWNER,
+    ADMIN,
+    MEMBER,
+    READ_ONLY;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVaultRole: FfiConverterRustBuffer<VaultRole> {
+    override fun read(buf: ByteBuffer) = try {
+        VaultRole.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: VaultRole) = 4UL
+
+    override fun write(value: VaultRole, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -14602,6 +22680,38 @@ public object FfiConverterOptionalInt: FfiConverterRustBuffer<kotlin.Int?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalBoolean: FfiConverterRustBuffer<kotlin.Boolean?> {
+    override fun read(buf: ByteBuffer): kotlin.Boolean? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterBoolean.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Boolean?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterBoolean.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Boolean?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterBoolean.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
     override fun read(buf: ByteBuffer): kotlin.String? {
         if (buf.get().toInt() == 0) {
@@ -14656,6 +22766,198 @@ public object FfiConverterOptionalTypeAccountDisplayIdentity: FfiConverterRustBu
         } else {
             buf.put(1)
             FfiConverterTypeAccountDisplayIdentity.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeCrossAccountMoveProjection: FfiConverterRustBuffer<CrossAccountMoveProjection?> {
+    override fun read(buf: ByteBuffer): CrossAccountMoveProjection? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeCrossAccountMoveProjection.read(buf)
+    }
+
+    override fun allocationSize(value: CrossAccountMoveProjection?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeCrossAccountMoveProjection.allocationSize(value)
+        }
+    }
+
+    override fun write(value: CrossAccountMoveProjection?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeCrossAccountMoveProjection.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeInvitationCandidate: FfiConverterRustBuffer<InvitationCandidate?> {
+    override fun read(buf: ByteBuffer): InvitationCandidate? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeInvitationCandidate.read(buf)
+    }
+
+    override fun allocationSize(value: InvitationCandidate?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeInvitationCandidate.allocationSize(value)
+        }
+    }
+
+    override fun write(value: InvitationCandidate?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeInvitationCandidate.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeInvitationSeatPreview: FfiConverterRustBuffer<InvitationSeatPreview?> {
+    override fun read(buf: ByteBuffer): InvitationSeatPreview? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeInvitationSeatPreview.read(buf)
+    }
+
+    override fun allocationSize(value: InvitationSeatPreview?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeInvitationSeatPreview.allocationSize(value)
+        }
+    }
+
+    override fun write(value: InvitationSeatPreview?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeInvitationSeatPreview.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeItemDuplicateGuard: FfiConverterRustBuffer<ItemDuplicateGuard?> {
+    override fun read(buf: ByteBuffer): ItemDuplicateGuard? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeItemDuplicateGuard.read(buf)
+    }
+
+    override fun allocationSize(value: ItemDuplicateGuard?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeItemDuplicateGuard.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ItemDuplicateGuard?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeItemDuplicateGuard.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeItemEditGuard: FfiConverterRustBuffer<ItemEditGuard?> {
+    override fun read(buf: ByteBuffer): ItemEditGuard? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeItemEditGuard.read(buf)
+    }
+
+    override fun allocationSize(value: ItemEditGuard?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeItemEditGuard.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ItemEditGuard?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeItemEditGuard.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeTravelModePolicy: FfiConverterRustBuffer<TravelModePolicy?> {
+    override fun read(buf: ByteBuffer): TravelModePolicy? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeTravelModePolicy.read(buf)
+    }
+
+    override fun allocationSize(value: TravelModePolicy?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeTravelModePolicy.allocationSize(value)
+        }
+    }
+
+    override fun write(value: TravelModePolicy?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeTravelModePolicy.write(value, buf)
         }
     }
 }
@@ -14730,6 +23032,70 @@ public object FfiConverterOptionalTypeAccountWaitingReason: FfiConverterRustBuff
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeBiometricFailure: FfiConverterRustBuffer<BiometricFailure?> {
+    override fun read(buf: ByteBuffer): BiometricFailure? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeBiometricFailure.read(buf)
+    }
+
+    override fun allocationSize(value: BiometricFailure?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeBiometricFailure.allocationSize(value)
+        }
+    }
+
+    override fun write(value: BiometricFailure?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeBiometricFailure.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeBiometricKind: FfiConverterRustBuffer<BiometricKind?> {
+    override fun read(buf: ByteBuffer): BiometricKind? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeBiometricKind.read(buf)
+    }
+
+    override fun allocationSize(value: BiometricKind?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeBiometricKind.allocationSize(value)
+        }
+    }
+
+    override fun write(value: BiometricKind?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeBiometricKind.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypePasskeyStatus: FfiConverterRustBuffer<PasskeyStatus?> {
     override fun read(buf: ByteBuffer): PasskeyStatus? {
         if (buf.get().toInt() == 0) {
@@ -14784,6 +23150,38 @@ public object FfiConverterOptionalTypePasskeyStatusReason: FfiConverterRustBuffe
         } else {
             buf.put(1)
             FfiConverterTypePasskeyStatusReason.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeProfileAdmissionCleanupStatus: FfiConverterRustBuffer<ProfileAdmissionCleanupStatus?> {
+    override fun read(buf: ByteBuffer): ProfileAdmissionCleanupStatus? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeProfileAdmissionCleanupStatus.read(buf)
+    }
+
+    override fun allocationSize(value: ProfileAdmissionCleanupStatus?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeProfileAdmissionCleanupStatus.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ProfileAdmissionCleanupStatus?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeProfileAdmissionCleanupStatus.write(value, buf)
         }
     }
 }
@@ -14912,6 +23310,38 @@ public object FfiConverterOptionalTypeTotpDigits: FfiConverterRustBuffer<TotpDig
         } else {
             buf.put(1)
             FfiConverterTypeTotpDigits.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeVaultRole: FfiConverterRustBuffer<VaultRole?> {
+    override fun read(buf: ByteBuffer): VaultRole? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeVaultRole.read(buf)
+    }
+
+    override fun allocationSize(value: VaultRole?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeVaultRole.allocationSize(value)
+        }
+    }
+
+    override fun write(value: VaultRole?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeVaultRole.write(value, buf)
         }
     }
 }
@@ -15202,6 +23632,146 @@ public object FfiConverterSequenceTypeAccountStatus: FfiConverterRustBuffer<List
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeAccountUnlockResult: FfiConverterRustBuffer<List<AccountUnlockResult>> {
+    override fun read(buf: ByteBuffer): List<AccountUnlockResult> {
+        val len = buf.getInt()
+        return List<AccountUnlockResult>(len) {
+            FfiConverterTypeAccountUnlockResult.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<AccountUnlockResult>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeAccountUnlockResult.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<AccountUnlockResult>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeAccountUnlockResult.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeAvailableVaultMember: FfiConverterRustBuffer<List<AvailableVaultMember>> {
+    override fun read(buf: ByteBuffer): List<AvailableVaultMember> {
+        val len = buf.getInt()
+        return List<AvailableVaultMember>(len) {
+            FfiConverterTypeAvailableVaultMember.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<AvailableVaultMember>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeAvailableVaultMember.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<AvailableVaultMember>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeAvailableVaultMember.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeBiometricAccountAvailability: FfiConverterRustBuffer<List<BiometricAccountAvailability>> {
+    override fun read(buf: ByteBuffer): List<BiometricAccountAvailability> {
+        val len = buf.getInt()
+        return List<BiometricAccountAvailability>(len) {
+            FfiConverterTypeBiometricAccountAvailability.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BiometricAccountAvailability>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBiometricAccountAvailability.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BiometricAccountAvailability>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBiometricAccountAvailability.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeBiometricAccountUnlock: FfiConverterRustBuffer<List<BiometricAccountUnlock>> {
+    override fun read(buf: ByteBuffer): List<BiometricAccountUnlock> {
+        val len = buf.getInt()
+        return List<BiometricAccountUnlock>(len) {
+            FfiConverterTypeBiometricAccountUnlock.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BiometricAccountUnlock>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBiometricAccountUnlock.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BiometricAccountUnlock>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBiometricAccountUnlock.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeCurrentVaultMember: FfiConverterRustBuffer<List<CurrentVaultMember>> {
+    override fun read(buf: ByteBuffer): List<CurrentVaultMember> {
+        val len = buf.getInt()
+        return List<CurrentVaultMember>(len) {
+            FfiConverterTypeCurrentVaultMember.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<CurrentVaultMember>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeCurrentVaultMember.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<CurrentVaultMember>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeCurrentVaultMember.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeImportItemDraft: FfiConverterRustBuffer<List<ImportItemDraft>> {
     override fun read(buf: ByteBuffer): List<ImportItemDraft> {
         val len = buf.getInt()
@@ -15230,6 +23800,90 @@ public object FfiConverterSequenceTypeImportItemDraft: FfiConverterRustBuffer<Li
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeInvitationComposerVault: FfiConverterRustBuffer<List<InvitationComposerVault>> {
+    override fun read(buf: ByteBuffer): List<InvitationComposerVault> {
+        val len = buf.getInt()
+        return List<InvitationComposerVault>(len) {
+            FfiConverterTypeInvitationComposerVault.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<InvitationComposerVault>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeInvitationComposerVault.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<InvitationComposerVault>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeInvitationComposerVault.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeInvitationSeatPreviewLine: FfiConverterRustBuffer<List<InvitationSeatPreviewLine>> {
+    override fun read(buf: ByteBuffer): List<InvitationSeatPreviewLine> {
+        val len = buf.getInt()
+        return List<InvitationSeatPreviewLine>(len) {
+            FfiConverterTypeInvitationSeatPreviewLine.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<InvitationSeatPreviewLine>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeInvitationSeatPreviewLine.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<InvitationSeatPreviewLine>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeInvitationSeatPreviewLine.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeMyTeamInvitation: FfiConverterRustBuffer<List<MyTeamInvitation>> {
+    override fun read(buf: ByteBuffer): List<MyTeamInvitation> {
+        val len = buf.getInt()
+        return List<MyTeamInvitation>(len) {
+            FfiConverterTypeMyTeamInvitation.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<MyTeamInvitation>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMyTeamInvitation.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<MyTeamInvitation>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMyTeamInvitation.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeOperationProjection: FfiConverterRustBuffer<List<OperationProjection>> {
     override fun read(buf: ByteBuffer): List<OperationProjection> {
         val len = buf.getInt()
@@ -15248,6 +23902,90 @@ public object FfiConverterSequenceTypeOperationProjection: FfiConverterRustBuffe
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeOperationProjection.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypePublicPasskey: FfiConverterRustBuffer<List<PublicPasskey>> {
+    override fun read(buf: ByteBuffer): List<PublicPasskey> {
+        val len = buf.getInt()
+        return List<PublicPasskey>(len) {
+            FfiConverterTypePublicPasskey.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PublicPasskey>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePublicPasskey.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PublicPasskey>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePublicPasskey.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeRotationCandidate: FfiConverterRustBuffer<List<RotationCandidate>> {
+    override fun read(buf: ByteBuffer): List<RotationCandidate> {
+        val len = buf.getInt()
+        return List<RotationCandidate>(len) {
+            FfiConverterTypeRotationCandidate.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RotationCandidate>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRotationCandidate.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RotationCandidate>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRotationCandidate.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeRotationPlanSelection: FfiConverterRustBuffer<List<RotationPlanSelection>> {
+    override fun read(buf: ByteBuffer): List<RotationPlanSelection> {
+        val len = buf.getInt()
+        return List<RotationPlanSelection>(len) {
+            FfiConverterTypeRotationPlanSelection.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RotationPlanSelection>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRotationPlanSelection.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RotationPlanSelection>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRotationPlanSelection.write(it, buf)
         }
     }
 }
@@ -15360,6 +24098,62 @@ public object FfiConverterSequenceTypeStorageRecoveryAccount: FfiConverterRustBu
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeStorageRecoveryAccount.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTeamLeaveAttempt: FfiConverterRustBuffer<List<TeamLeaveAttempt>> {
+    override fun read(buf: ByteBuffer): List<TeamLeaveAttempt> {
+        val len = buf.getInt()
+        return List<TeamLeaveAttempt>(len) {
+            FfiConverterTypeTeamLeaveAttempt.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TeamLeaveAttempt>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTeamLeaveAttempt.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TeamLeaveAttempt>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTeamLeaveAttempt.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeVaultExportItem: FfiConverterRustBuffer<List<VaultExportItem>> {
+    override fun read(buf: ByteBuffer): List<VaultExportItem> {
+        val len = buf.getInt()
+        return List<VaultExportItem>(len) {
+            FfiConverterTypeVaultExportItem.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<VaultExportItem>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeVaultExportItem.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<VaultExportItem>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeVaultExportItem.write(it, buf)
         }
     }
 }

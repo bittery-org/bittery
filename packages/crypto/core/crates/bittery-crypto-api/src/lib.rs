@@ -608,21 +608,13 @@ pub async fn decrypt_rsa_wrapped_key(
 ) -> Result<Arc<KeyHandle>, CryptoError> {
     run_crypto(move || {
         let wrapping_material = private_key_wrapping_key.copy_material()?;
-        let mut private_key = decrypt_inner(
-            encrypted_private_key,
+        let context = private_key_context.map(Into::into);
+        let decoded = core::decrypt_rsa_wrapped_key(
+            &ciphertext,
+            &encrypted_private_key.into(),
             &wrapping_material,
-            private_key_context,
+            context.as_ref(),
         )?;
-        let mut unwrapped = core::rsa_decrypt(&ciphertext, &private_key)?;
-        private_key.zeroize();
-        let decoded = BASE64.decode(unwrapped.as_bytes())?;
-        unwrapped.zeroize();
-        if decoded.len() != 32 {
-            return Err(CryptoError::InvalidKeyLength {
-                expected: 32,
-                actual: decoded.len() as u64,
-            });
-        }
         Ok(KeyHandle::new(decoded))
     })
     .await

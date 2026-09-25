@@ -63,6 +63,12 @@ class RuntimeDouble {
 	request_json(): Promise<string> {
 		return Promise.resolve("{}");
 	}
+	begin_vault_export_output(): string {
+		throw new Error("Unexpected Export output admission");
+	}
+	finish_vault_export_output(): void {
+		throw new Error("Unexpected Export output cleanup");
+	}
 	unobserve(): void {}
 }
 

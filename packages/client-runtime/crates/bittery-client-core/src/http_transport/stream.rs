@@ -13,7 +13,7 @@ use super::*;
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub(super) enum HttpStreamCommand {
+pub enum HttpStreamCommand {
     // maxResponseBytes bounds each pulled chunk, never the connection's lifetime.
     OpenStream {
         request: HttpRequest,
@@ -35,7 +35,7 @@ pub(super) enum HttpStreamCommand {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub(super) enum HttpStreamResponse {
+pub enum HttpStreamResponse {
     Opened {
         #[cfg_attr(feature = "http-transport-contract-schema", schemars(range(max = 599)))]
         status: u16,
@@ -160,8 +160,11 @@ async fn invoke_stream(
     command: HttpStreamCommand,
     cancellation: RequestCancellation,
 ) -> Result<HttpStreamResponse, RuntimeError> {
-    let request = serde_json::to_string(&command)
-        .map_err(|_| transport_invariant("HTTP stream command could not be serialized"))?;
+    let request = Zeroizing::new(
+        serde_json::to_string(&command)
+            .map_err(|_| transport_invariant("HTTP stream command could not be serialized"))?,
+    );
+    drop(command);
     tokio::select! {
         biased;
         () = cancellation.cancelled() => Ok(HttpStreamResponse::Cancelled),
@@ -185,7 +188,10 @@ mod tests {
 
     #[async_trait]
     impl SerializedHttpExecutor for Executor {
-        async fn invoke(&self, command: String) -> Result<String, RuntimeError> {
+        async fn invoke(
+            &self,
+            command: zeroize::Zeroizing<String>,
+        ) -> Result<String, RuntimeError> {
             self.commands
                 .lock()
                 .unwrap()

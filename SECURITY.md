@@ -1,6 +1,6 @@
 # Security
 
-Bittery encrypts and decrypts vault data on your device. Your account password, full Secret Key, and Master Unlock Key are not sent to the server. Shared-vault confidentiality currently depends on the server providing authentic recipient public keys; see [Shared Vaults (Teams)](#shared-vaults-teams).
+Bittery encrypts and decrypts vault data on your device. Your account password, full Secret Key, and Master Unlock Key are not sent to the server. Sharing and key rotation require independently verified recipient keys; see [Shared Vaults (Teams)](#shared-vaults-teams).
 
 This document describes the security architecture, cryptographic design, and vulnerability reporting process.
 
@@ -18,7 +18,7 @@ We appreciate responsible disclosure and will credit reporters (with permission)
 
 ## Security Model Overview
 
-Bittery uses a **dual-key architecture**: your master password and a randomly generated **Secret Key** are both required to derive your account encryption keys. A stolen database snapshot alone does not provide either factor or enable decryption of your vault data. This protection does not cover an active attacker substituting recipient public keys during shared-vault sharing or key rotation.
+Bittery uses a **dual-key architecture**: your master password and a randomly generated **Secret Key** are both required to derive your account encryption keys. A stolen database snapshot alone does not provide either factor or enable decryption of your vault data. Shared vaults additionally use independent recipient-key verification to protect against public-key substitution by the server.
 
 ### What the Server Stores
 
@@ -29,12 +29,12 @@ Bittery uses a **dual-key architecture**: your master password and a randomly ge
 | SRP salt and verifier | Hex strings | Cannot recover password |
 | RSA public key | PEM plaintext | Yes (needed for sharing) |
 | RSA private key | AES-GCM-AAD-V1 encrypted | No |
-| Vault encryption keys | AES-GCM-AAD-V1 or RSA-OAEP encrypted | Not from stored ciphertext alone; see shared-vault limitation below |
-| Vault item data | AES-GCM-AAD-V1 encrypted | Not from stored ciphertext alone; see shared-vault limitation below |
+| Vault encryption keys | AES-GCM-AAD-V1 or RSA-OAEP encrypted | No |
+| Vault item data | AES-GCM-AAD-V1 encrypted | No |
 | Shared item snapshots | AES-GCM-AAD-V1 encrypted | No |
 | Session tokens | SHA-256 hashed | No (only hash stored) |
 
-Shared-vault sharing and key rotation trust the server to provide authentic recipient public keys. A malicious or compromised server can substitute a public key, obtain the affected vault key, and decrypt vault contents. See [Shared Vaults (Teams)](#shared-vaults-teams).
+These protections assume an authentic, uncompromised client and correct out-of-band fingerprint verification. They do not protect against malicious client code, a compromised device, or someone obtaining plaintext that was already disclosed. In particular, a server that can replace the Web client's delivered JavaScript can bypass client-side protections.
 
 ### What Clients Do Not Send to the Server in Plaintext
 
@@ -193,22 +193,23 @@ SRP-6a Authentication
 
 When you share a vault with another user:
 
-1. The vault key is encrypted with the recipient's **RSA-4096 public key** (OAEP padding)
-2. The encrypted vault key is stored in the `vaultKey` table for the recipient
-3. The recipient decrypts the vault key using their RSA private key (which they decrypt using their own Master Unlock Key)
+1. Obtain the recipient's fingerprint from their **Settings → Security** page through an independent channel, such as an in-person conversation, and enter it in the verification dialog.
+2. The Rust client runtime compares that fingerprint with the recipient public key supplied by the server. An unknown key requires verification; a mismatch blocks sharing.
+3. Once verified, the vault key is encrypted with the recipient's **RSA-4096 public key** (OAEP padding) and stored in the `vaultKey` table for that recipient.
+4. The recipient decrypts the vault key using their RSA private key, which is encrypted under their Master Unlock Key.
 
-The client obtains the recipient's public key from the server. It currently has no independent recipient-key verification or contact-key pinning. If the server supplies the authentic key, only the recipient holds the private key needed to decrypt that wrapped copy of the vault key.
+Fingerprints use the full SHA-256 digest of a versioned, domain-separated canonical public-key encoding. Your own fingerprint is derived locally from your decrypted RSA private key, not from a public key returned by the server.
 
-A malicious server operator or an attacker able to tamper with the server's public-key responses can instead supply a key they control. When a client shares a vault or rotates its key, the attacker can decrypt the resulting wrapped vault key and access vault contents encrypted under that key. The attacker can also re-encrypt the vault key to the real recipient, allowing sharing to appear successful.
+Verification is stored locally for the recipient's User ID, scoped to your account, server and local account incarnation. It survives locking and restarting the app. A new device, account removal and re-addition, or a changed recipient key requires independent verification again. Verification is never established automatically on first contact or restored from server responses. Invalid or unavailable verification storage blocks sharing.
 
-This is an active key-substitution attack, not an attack enabled by a stolen database snapshot alone. The trust assumption also applies to self-hosted deployments if their server is compromised. Key rotation uses the same server-provided recipient keys and does not by itself remove this limitation.
+Sharing, invitation key provisioning and rotation encrypt keys only to verified recipient keys. A server-supplied replacement is rejected unless its fingerprint is independently verified. This protects an authentic client against API key substitution, including first contact; it does not protect against maliciously replaced client code or undo earlier disclosure.
 
 ### Key Rotation
 
 When a member is removed from a shared vault, key rotation occurs automatically:
 
 1. A new random vault key is generated
-2. The new key is encrypted for each remaining member (RSA-OAEP for shared members, `AES-GCM-AAD-V1` for the owner)
+2. Recipient keys are checked against local verification; unknown or changed keys require independent verification before the new key is encrypted for those members (RSA-OAEP for shared members, `AES-GCM-AAD-V1` for the initiating user's own copy)
 3. All items in the vault are re-encrypted with the new key (each with a fresh random IV)
 4. The old vault key entries for the removed member are deleted
 

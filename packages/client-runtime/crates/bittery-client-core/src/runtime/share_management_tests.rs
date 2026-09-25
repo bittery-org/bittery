@@ -14,7 +14,7 @@ struct ShareServer {
 }
 #[async_trait]
 impl SerializedHttpExecutor for ShareServer {
-    async fn invoke(&self, request: String) -> Result<String, RuntimeError> {
+    async fn invoke(&self, request: zeroize::Zeroizing<String>) -> Result<String, RuntimeError> {
         self.requests
             .lock()
             .unwrap()
@@ -34,7 +34,7 @@ impl SerializedHttpExecutor for ShareServer {
     fn cancel(&self, _: &str) {}
 }
 async fn setup(replies: Vec<Value>, hold: bool) -> (Arc<Runtime>, AccountId, Arc<ShareServer>) {
-    let seed = seeded(true).await;
+    let seed = seeded_with_share_item(true).await;
     let server = Arc::new(ShareServer {
         replies: Mutex::new(replies.into()),
         requests: Mutex::new(Vec::new()),
@@ -58,6 +58,13 @@ async fn setup(replies: Vec<Value>, hold: bool) -> (Arc<Runtime>, AccountId, Arc
     runtime.unlock_account(&seed.account_id).await.unwrap();
     (runtime, seed.account_id, server)
 }
+async fn setup_link(
+    mut replies: Vec<Value>,
+    hold: bool,
+) -> (Arc<Runtime>, AccountId, Arc<ShareServer>) {
+    replies.insert(0, answer(200, links()));
+    setup(replies, hold).await
+}
 fn answer(status: u16, body: Value) -> Value {
     completed(status, serde_json::to_vec(&body).unwrap())
 }
@@ -71,18 +78,20 @@ fn links() -> Value {
 fn list(account_id: &AccountId) -> RuntimeRequest {
     RuntimeRequest::ListItemShareLinks {
         account_id: account_id.clone(),
-        item_id: "item-1".into(),
+        item_id: "item-existing".into(),
     }
 }
 fn logs(account_id: &AccountId) -> RuntimeRequest {
     RuntimeRequest::ListShareAccessLogs {
         account_id: account_id.clone(),
+        item_id: "item-existing".into(),
         link_id: "link-1".into(),
     }
 }
 fn revoke(account_id: &AccountId) -> RuntimeRequest {
     RuntimeRequest::RevokeShareLink {
         account_id: account_id.clone(),
+        item_id: "item-existing".into(),
         link_id: "link-1".into(),
     }
 }
@@ -125,7 +134,7 @@ async fn share_history_uses_private_session_and_returns_existing_nonsecret_summa
         panic!("wrong Share result")
     };
     assert_eq!(account_id, account);
-    assert_eq!(item_id, "item-1");
+    assert_eq!(item_id, "item-existing");
     assert_eq!(base_share_url, "https://vault.example.test/share");
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].status, crate::ShareLinkStatus::Active);
@@ -143,7 +152,7 @@ async fn share_history_uses_private_session_and_returns_existing_nonsecret_summa
     assert_eq!(requests[0]["method"], "GET");
     assert_eq!(
         requests[0]["url"],
-        format!("{SERVER_URL}/api/v1/items/item-1/share-links")
+        format!("{SERVER_URL}/api/v1/items/item-existing/share-links")
     );
     assert_eq!(bearer(&requests[0]), format!("Bearer {FIRST_TOKEN}"));
     assert_eq!(requests[0]["body"], json!([]));
@@ -157,7 +166,7 @@ async fn share_history_uses_private_session_and_returns_existing_nonsecret_summa
 #[tokio::test]
 async fn share_logs_preserve_page_order_and_opaque_cursors_with_one_renewal_budget_across_pages() {
     let cursor = "opaque+/=cursor";
-    let (runtime, account, server) = setup(
+    let (runtime, account, server) = setup_link(
         vec![
             answer(
                 200,
@@ -185,15 +194,15 @@ async fn share_logs_preserve_page_order_and_opaque_cursors_with_one_renewal_budg
         vec!["first", "second"]
     );
     let requests = server.requests.lock().unwrap();
-    assert_eq!(requests.len(), 4);
-    assert_eq!(requests[1]["url"], requests[3]["url"]);
-    let url = url::Url::parse(requests[1]["url"].as_str().unwrap()).unwrap();
+    assert_eq!(requests.len(), 5);
+    assert_eq!(requests[2]["url"], requests[4]["url"]);
+    let url = url::Url::parse(requests[2]["url"].as_str().unwrap()).unwrap();
     assert_eq!(
         url.query_pairs().collect::<Vec<_>>(),
         vec![("cursor".into(), cursor.into())]
     );
-    assert_eq!(bearer(&requests[3]), format!("Bearer {SECOND_TOKEN}"));
-    assert_eq!(requests[2]["method"], "POST");
+    assert_eq!(bearer(&requests[4]), format!("Bearer {SECOND_TOKEN}"));
+    assert_eq!(requests[3]["method"], "POST");
 }
 
 #[tokio::test]
@@ -211,8 +220,8 @@ async fn share_logs_reject_missing_or_repeated_cursors_without_publishing_partia
             ),
         ],
     ] {
-        let count = replies.len();
-        let (runtime, account, server) = setup(replies, false).await;
+        let count = replies.len() + 1;
+        let (runtime, account, server) = setup_link(replies, false).await;
         assert_eq!(
             runtime
                 .request(logs(&account), RequestCancellation::new())
@@ -244,7 +253,7 @@ async fn share_revoke_requires_explicit_success_and_never_replays_ambiguous_or_r
             RuntimeErrorCode::InvariantViolation,
         ),
     ] {
-        let (runtime, account, server) = setup(vec![reply], false).await;
+        let (runtime, account, server) = setup_link(vec![reply], false).await;
         assert_eq!(
             runtime
                 .request(revoke(&account), RequestCancellation::new())
@@ -254,9 +263,9 @@ async fn share_revoke_requires_explicit_success_and_never_replays_ambiguous_or_r
             expected
         );
         let requests = server.requests.lock().unwrap();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0]["method"], "DELETE");
-        assert!(!requests[0]["headers"]
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1]["method"], "DELETE");
+        assert!(!requests[1]["headers"]
             .as_array()
             .unwrap()
             .iter()
@@ -268,7 +277,7 @@ async fn share_revoke_requires_explicit_success_and_never_replays_ambiguous_or_r
             .operations
             .is_empty());
     }
-    let (runtime, account, _) = setup(vec![answer(200, json!({"success":true}))], false).await;
+    let (runtime, account, _) = setup_link(vec![answer(200, json!({"success":true}))], false).await;
     assert_eq!(
         runtime
             .request(revoke(&account), RequestCancellation::new())
@@ -284,7 +293,7 @@ async fn share_revoke_requires_explicit_success_and_never_replays_ambiguous_or_r
 #[tokio::test]
 async fn share_revoke_renews_only_after_explicit_401_and_second_401_requires_reauthentication() {
     for final_status in [200, 401] {
-        let (runtime, account, server) = setup(
+        let (runtime, account, server) = setup_link(
             vec![
                 answer(401, json!({})),
                 refresh(),
@@ -305,9 +314,9 @@ async fn share_revoke_renews_only_after_explicit_401_and_second_401_requires_rea
             );
         }
         let requests = server.requests.lock().unwrap();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(requests[0]["url"], requests[2]["url"]);
-        assert_eq!(bearer(&requests[2]), format!("Bearer {SECOND_TOKEN}"));
+        assert_eq!(requests.len(), 4);
+        assert_eq!(requests[1]["url"], requests[3]["url"]);
+        assert_eq!(bearer(&requests[3]), format!("Bearer {SECOND_TOKEN}"));
     }
 }
 
@@ -390,12 +399,23 @@ async fn share_management_caller_cancel_lock_and_signout_cancel_hung_requests_be
 
 #[tokio::test]
 async fn share_management_scopes_the_server_and_private_session_to_the_explicit_account() {
-    let seed = seeded(true).await;
+    let seed = seeded_with_share_item(true).await;
     let other = AccountId::from("account-2");
     let incarnation = crate::Incarnation::from("incarnation-2");
     seed.replica
         .state
         .install(other.clone(), "user-2".into(), incarnation.clone())
+        .unwrap();
+    let authority = seed
+        .replica
+        .state
+        .snapshot(&seed.account_id)
+        .unwrap()
+        .bootstrap
+        .snapshot();
+    seed.replica
+        .state
+        .seed_ready_authority(&other, authority.visible_vaults, authority.visible_items)
         .unwrap();
     let server = Arc::new(ShareServer {
         replies: Mutex::new(vec![answer(200, links()), answer(200, links())].into()),
@@ -459,19 +479,19 @@ async fn share_management_scopes_the_server_and_private_session_to_the_explicit_
     let requests = server.requests.lock().unwrap();
     assert_eq!(
         requests[0]["url"],
-        "https://other.example.test/api/v1/items/item-1/share-links"
+        "https://other.example.test/api/v1/items/item-existing/share-links"
     );
     assert_eq!(bearer(&requests[0]), "Bearer other-private-session");
     assert_eq!(
         requests[1]["url"],
-        format!("{SERVER_URL}/api/v1/items/item-1/share-links")
+        format!("{SERVER_URL}/api/v1/items/item-existing/share-links")
     );
     assert_eq!(bearer(&requests[1]), format!("Bearer {FIRST_TOKEN}"));
 }
 
 #[tokio::test]
 async fn share_log_pagination_does_not_reset_the_session_renewal_budget() {
-    let (runtime, account, server) = setup(
+    let (runtime, account, server) = setup_link(
         vec![
             answer(401, json!({})),
             refresh(),
@@ -492,5 +512,70 @@ async fn share_log_pagination_does_not_reset_the_session_renewal_budget() {
             .code,
         RuntimeErrorCode::AuthenticationRequired
     );
-    assert_eq!(server.requests.lock().unwrap().len(), 4);
+    assert_eq!(server.requests.lock().unwrap().len(), 5);
+}
+
+#[tokio::test]
+async fn selective_share_actions_require_authenticated_parent_membership() {
+    for request in [logs, revoke] {
+        let (runtime, account, server) = setup(
+            vec![answer(
+                200,
+                json!({"baseShareUrl":"https://vault.example.test/share", "links":[]}),
+            )],
+            false,
+        )
+        .await;
+        let failure = runtime
+            .request(request(&account), RequestCancellation::new())
+            .await
+            .expect_err("unproven Link parent must be refused");
+        assert_eq!(failure.code, RuntimeErrorCode::AccessDenied);
+        let requests = server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0]["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/items/item-existing/share-links"));
+    }
+}
+
+#[tokio::test]
+async fn selective_share_retirement_cancels_its_parent_vault_before_http_returns() {
+    let (runtime, account, server) = setup(vec![], true).await;
+    let mut request = tokio::spawn({
+        let runtime = runtime.clone();
+        let account = account.clone();
+        async move {
+            runtime
+                .request(list(&account), RequestCancellation::new())
+                .await
+        }
+    });
+    server.entered.acquire().await.unwrap().forget();
+    let retirement = runtime
+        .foreground_attachments
+        .begin_vault_retirement(
+            &account,
+            &runtime.replica.snapshot(&account).unwrap().incarnation,
+            &[crate::test_fixtures::TEST_VAULT_ID.into()],
+            super::foreground_attachment_lifecycle::VaultRetirementProof::DurableJournal {
+                revision: runtime.replica.snapshot(&account).unwrap().revision,
+            },
+        )
+        .unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(1), &mut request).await;
+    if result.is_err() {
+        request.abort();
+    }
+    assert_eq!(
+        result
+            .expect("Vault retirement must cancel its Share request")
+            .unwrap()
+            .err()
+            .unwrap()
+            .code,
+        RuntimeErrorCode::Cancelled
+    );
+    retirement.drain().await;
 }

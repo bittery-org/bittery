@@ -91,4 +91,31 @@ describe("Web Runtime Item mutation adapters", () => {
 			},
 		});
 	});
+	test("ordinary Login edits omit public credential metadata and refuse credential edits", () => {
+		const item = {
+			...ITEM,
+			data: {
+				category: "login",
+				data: {
+					title: "Bank",
+					passkeys: [
+						{
+							credentialId: "credential-1",
+							rpId: "bank.test",
+							publicKey: "cose",
+						},
+					],
+				},
+			},
+		} as ItemProjection;
+		expect(mergeRuntimeItemDraft(item, { title: "Edited" })).toEqual({
+			category: "login",
+			data: { title: "Edited" },
+		});
+		expect(() =>
+			mergeRuntimeItemDraft(item, {
+				passkeys: [] as never[],
+			}),
+		).toThrow();
+	});
 });

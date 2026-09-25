@@ -8,7 +8,7 @@ use bittery_crypto_core::replica_recovery::RECOVERY_CHUNK_BYTES;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
-pub(super) const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
+pub(super) use super::limits::MAX_RECORD_BYTES;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 pub(super) const MAX_RECORDS: usize = 100_000;
 
@@ -68,6 +68,22 @@ pub(crate) enum EntryHeader {
         account_id: String,
         operation_id: String,
         chunk_index: u32,
+    },
+    ProtectedVaultImageMetadata {
+        account_id: String,
+        operation_id: String,
+        publication_id: String,
+    },
+    ProtectedVaultImageChunk {
+        account_id: String,
+        operation_id: String,
+        publication_id: String,
+        chunk_index: u32,
+    },
+    ProtectedVaultImageKey {
+        account_id: String,
+        operation_id: String,
+        publication_id: String,
     },
 }
 
@@ -175,6 +191,16 @@ impl RecordDecoder {
                     && body_length > super::report::MAX_REPORT_BYTES
                 {
                     return Err(exceeded(RecoveryBound::ReportBytes));
+                }
+                if matches!(
+                    self.header,
+                    Some(
+                        EntryHeader::ProtectedVaultImageMetadata { .. }
+                            | EntryHeader::ProtectedVaultImageKey { .. }
+                    )
+                ) && body_length > 8192
+                {
+                    return Err(exceeded(RecoveryBound::RecordBytes));
                 }
                 // Allocate only after checking the record-specific bound, before copying plaintext.
                 self.body = Zeroizing::new(Vec::with_capacity(body_length));

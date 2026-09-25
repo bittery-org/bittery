@@ -79,6 +79,7 @@ pub struct PendingTeamInvitationResponse {
 pub struct SendInvitationResponse {
     pub invitation_id: String,
     pub token: String,
+    pub existing_user_id: Option<String>,
     pub existing_user_public_key: Option<String>,
 }
 
@@ -221,7 +222,7 @@ pub(crate) async fn send_invitation(
     }
 
     let existing_user = query_as::<_, DbExistingInviteeRow>(
-        "SELECT team_id, public_key FROM \"user\" WHERE email = $1 LIMIT 1",
+        "SELECT id, team_id, public_key FROM \"user\" WHERE email = $1 LIMIT 1",
     )
     .bind(&input.email)
     .fetch_optional(pool)
@@ -288,6 +289,7 @@ pub(crate) async fn send_invitation(
     Ok(SendInvitationResponse {
         invitation_id,
         token,
+        existing_user_id: existing_user.as_ref().map(|value| value.id.clone()),
         existing_user_public_key: existing_user.and_then(|value| value.public_key),
     })
 }

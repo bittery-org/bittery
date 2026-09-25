@@ -4,12 +4,14 @@ import type { AtomicAttachmentUploadSource } from "@bittery/client-runtime/web";
 import { useApiClient } from "@bittery/shared/api";
 import { apiQueries } from "@bittery/shared/api-query";
 import type { AttachmentItem, AttachmentUploadErrorCode } from "@bittery/ui";
+import {
+	observeAccountDeparture,
+	useRuntimeMutation,
+} from "@bittery/ui/runtime-presentation";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createAttachmentDownloadBuffer } from "@/lib/attachment-download-buffer";
 import { attachmentDownloadSinks, attachmentUploadSources } from "@/lib/crypto";
-import { observeAccountDeparture } from "@/lib/runtime-account-presentation";
-import { useRuntimeMutation } from "./use-runtime-mutation";
 
 export { createAttachmentDownloadBuffer } from "@/lib/attachment-download-buffer";
 
@@ -45,6 +47,7 @@ export function getRuntimeAttachmentUploadErrorCode(
 }
 
 interface RuntimeAttachmentOwner {
+	vaultId: string;
 	id: string;
 	accountId?: string;
 	attachments?: AttachmentItem[];
@@ -59,8 +62,12 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 	});
 	const accountId = item?.accountId;
 	const itemId = item?.id;
+	const vaultId = item?.vaultId;
 	const downloads = useRef(new Set<AbortController>());
-	const owner = useMemo(() => ({ accountId, itemId }), [accountId, itemId]);
+	const owner = useMemo(
+		() => ({ accountId, itemId, vaultId }),
+		[accountId, itemId, vaultId],
+	);
 	const displayedOwner = useRef(owner);
 	displayedOwner.current = owner;
 	const mounted = useRef(true);
@@ -74,14 +81,25 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 		};
 	}, [owner]);
 
-	const upload = useRuntimeMutation({
+	const uploadMutation = useRuntimeMutation({
 		accountId: () => accountId,
-		mutationFn: async (file: File & { displayName?: string }, signal) => {
-			if (!accountId || !itemId)
+		mutationFn: async (
+			{
+				file,
+				scope,
+			}: {
+				file: File & { displayName?: string };
+				scope: ReturnType<typeof attachmentUploadSources.captureScope>;
+			},
+			signal,
+		) => {
+			if (!accountId || !itemId || !vaultId)
 				throw new Error("Runtime Item authority is unavailable");
 			const name = file.displayName?.trim() || file.name;
 			const contentType = file.type.trim() || "application/octet-stream";
 			const sourceCapabilityId = attachmentUploadSources.grant({
+				scope,
+				vaultId,
 				accountId,
 				itemId,
 				name,
@@ -89,37 +107,71 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 				expectedBytes: BigInt(file.size),
 				source: createFileAttachmentUploadSource(file),
 			});
-			return runtime.uploadAttachment(
-				{
-					accountId,
-					itemId,
-					name,
-					contentType,
-					fileSize: String(file.size),
-					sourceCapabilityId,
-				},
-				{ signal },
-			);
+			try {
+				return await runtime.uploadAttachment(
+					{
+						accountId,
+						itemId,
+						name,
+						contentType,
+						fileSize: String(file.size),
+						sourceCapabilityId,
+					},
+					{ signal },
+				);
+			} finally {
+				await attachmentUploadSources.release(sourceCapabilityId);
+			}
 		},
 	});
+
+	const prepareUpload = () => {
+		if (
+			!mounted.current ||
+			displayedOwner.current !== owner ||
+			!accountId ||
+			!vaultId
+		)
+			throw new DOMException("Upload presentation detached", "AbortError");
+		const scope = attachmentUploadSources.captureScope(accountId, vaultId);
+		return (file: File & { displayName?: string }) => {
+			if (!mounted.current || displayedOwner.current !== owner)
+				throw new DOMException("Upload presentation detached", "AbortError");
+			return uploadMutation.mutateAsync({ file, scope });
+		};
+	};
+	const upload = {
+		mutateAsync: (file: File & { displayName?: string }) =>
+			prepareUpload()(file),
+	};
 
 	const download = useCallback(
 		async (attachment: AttachmentItem) => {
 			if (!mounted.current || displayedOwner.current !== owner)
 				throw new DOMException("Download presentation detached", "AbortError");
-			if (!accountId || !itemId || attachment.itemId !== itemId)
+			if (
+				!accountId ||
+				!itemId ||
+				!vaultId ||
+				attachment.itemId !== itemId ||
+				attachment.vaultId !== vaultId
+			)
 				throw new Error("Runtime Item authority is unavailable");
 			if (!attachment.name)
 				throw new Error("Runtime Attachment name is unavailable");
+			const scope = attachmentDownloadSinks.captureScope(accountId, vaultId);
 			const attempt = new AbortController();
 			downloads.current.add(attempt);
 			const release = observeAccountDeparture(runtime, accountId, () =>
 				attempt.abort(),
 			);
 			const sink = createAttachmentDownloadBuffer(attachment.fileSize);
+			let sinkCapabilityId: string | undefined;
 			try {
 				attempt.signal.throwIfAborted();
-				const sinkCapabilityId = attachmentDownloadSinks.grant({
+				sinkCapabilityId = attachmentDownloadSinks.grant({
+					scope,
+					vaultId,
 					accountId,
 					attachmentId: attachment.id,
 					sink,
@@ -134,11 +186,16 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 				await sink.discard();
 				throw error;
 			} finally {
-				release();
-				downloads.current.delete(attempt);
+				try {
+					if (sinkCapabilityId !== undefined)
+						await attachmentDownloadSinks.release(sinkCapabilityId);
+				} finally {
+					release();
+					downloads.current.delete(attempt);
+				}
 			}
 		},
-		[runtime, accountId, itemId, owner],
+		[runtime, accountId, itemId, vaultId, owner],
 	);
 
 	const rename = useRuntimeMutation({
@@ -179,6 +236,7 @@ export function useRuntimeItemAttachments(item: RuntimeAttachmentOwner | null) {
 			return { name: attachment.name };
 		},
 		upload,
+		prepareUpload,
 		// Foreground plaintext goes to the caller, never into a mutation cache.
 		download: { mutateAsync: download },
 		rename,

@@ -24,6 +24,7 @@
 		"./services/api-client": "./src/services/api-client.ts",
 		"./services/auth-service": "./src/services/auth-service.ts",
 		"./services/item-commands": "./src/services/item-commands.ts",
+		"./services/material-publication": "./src/services/material-publication.ts",
 		"./services/cross-account-item-command-executor": "./src/services/cross-account-item-command-executor.ts",
 		"./services/vault-service": "./src/services/vault-service.ts",
 		"./services/share-url": "./src/services/share-url.ts",
@@ -52,6 +53,7 @@
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
+		"@bittery/crypto-wasm": "workspace:*",
 		"@types/react": "catalog:",
 		"@types/zxcvbn": "^4.4.5",
 		"typescript": "^5.7.2"

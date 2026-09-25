@@ -8,9 +8,13 @@ use crate::{
     attachment_artifact_store::{
         AttachmentArtifactOwner, AttachmentArtifactStore, AttachmentArtifactStoreRequest,
         AttachmentArtifactStoreResponse, ExclusiveStartupBoundary,
+        ProvisionalAttachmentArtifactScope,
     },
     protocol::Incarnation,
-    replica::{AttachmentMoveProgress, AttachmentMoveRecovery, ReplicaSnapshot},
+    replica::{
+        AttachmentMoveProgress, AttachmentMoveRecovery, CrossAccountMoveAttachmentProgress,
+        CrossAccountMoveStage, ReplicaSnapshot,
+    },
     AccountId, RuntimeError, RuntimeErrorCode,
 };
 use async_trait::async_trait;
@@ -83,8 +87,22 @@ impl AttachmentMoveLifecycle {
             .any(|(account, generation)| account == account_id && generation == incarnation)
     }
 
+    pub(crate) fn require_sweep(&self, account_id: &AccountId, incarnation: &Incarnation) {
+        self.swept_generations
+            .lock()
+            .expect("Attachment Move swept-generation lock poisoned")
+            .retain(|(account, generation)| account != account_id || generation != incarnation);
+    }
+
     pub(crate) fn artifacts(&self) -> Arc<dyn AttachmentArtifactStore> {
         Arc::clone(&self.artifacts)
+    }
+
+    pub(crate) async fn acquire(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<Box<dyn AttachmentMoveAccountLease>>, RuntimeError> {
+        self.lease_port.acquire(account_id).await
     }
 
     pub(crate) async fn run_account(
@@ -95,7 +113,7 @@ impl AttachmentMoveLifecycle {
         operation_id: Option<String>,
         now_ms: u64,
     ) -> Result<LifecyclePass, RuntimeError> {
-        let Some(lease) = self.lease_port.acquire(&selected.account_id).await? else {
+        let Some(lease) = self.acquire(&selected.account_id).await? else {
             return Ok(LifecyclePass::LeaseUnavailable);
         };
         if !lease.is_live() {
@@ -111,7 +129,8 @@ impl AttachmentMoveLifecycle {
         }
         let current = runtime
             .replica
-            .snapshot(&selected.account_id)
+            .load_uncached(&selected.account_id)
+            .await?
             .ok_or_else(|| {
                 lifecycle_invariant("Attachment Move Account disappeared after lease")
             })?;
@@ -125,7 +144,7 @@ impl AttachmentMoveLifecycle {
         let must_sweep =
             operation_id.is_some() || !self.has_swept(&current.account_id, &current.incarnation);
         if must_sweep {
-            let live = live_artifact_owners(&current)?;
+            let inventory = artifact_inventory(&current)?;
             if !lease.is_live() || !runtime.generation_is_preparation_eligible(&current) {
                 return Ok(LifecyclePass::GenerationRetired);
             }
@@ -134,7 +153,8 @@ impl AttachmentMoveLifecycle {
                 .invoke(AttachmentArtifactStoreRequest::SweepOrphans {
                     boundary: ExclusiveStartupBoundary::proven_by_runtime_startup(),
                     account_id: current.account_id.clone(),
-                    live,
+                    live: inventory.live,
+                    pending: inventory.pending,
                 });
             tokio::pin!(sweep);
             let response = tokio::select! {
@@ -167,6 +187,37 @@ impl AttachmentMoveLifecycle {
         if !lease.is_live() || !runtime.generation_is_preparation_eligible(&current) {
             return Ok(LifecyclePass::GenerationRetired);
         }
+        let preparation = current
+            .attachment_move_preparations
+            .iter()
+            .find(|preparation| preparation.operation_id == operation_id)
+            .or_else(|| {
+                current
+                    .operations
+                    .iter()
+                    .find(|operation| operation.operation_id == operation_id)
+                    .and_then(|operation| operation.attachment_move_recovery.as_ref())
+                    .map(|recovery| match recovery {
+                        AttachmentMoveRecovery::Prepared { preparation }
+                        | AttachmentMoveRecovery::RejectStaleAuthority { preparation } => {
+                            preparation.as_ref()
+                        }
+                    })
+            })
+            .ok_or_else(|| lifecycle_invariant("selected Attachment Move has no durable scope"))?;
+        let cancellation = crate::RequestCancellation::new();
+        let Ok(_plaintext_lifetime) = runtime.foreground_attachments.register_target(
+            &current.account_id,
+            &current.incarnation,
+            super::foreground_attachment_lifecycle::ForegroundAttachmentTarget::Move {
+                source_vault_id: preparation.source_vault_id.clone(),
+                destination_vault_id: preparation.target_vault_id.clone(),
+                item_id: preparation.item_id.clone(),
+            },
+            cancellation.clone(),
+        ) else {
+            return Ok(LifecyclePass::GenerationRetired);
+        };
         let mut unlocked = std::collections::HashSet::new();
         unlocked.insert(current.account_id.clone());
         let drive = scheduler.drive_eligible(
@@ -181,15 +232,28 @@ impl AttachmentMoveLifecycle {
         tokio::pin!(drive);
         tokio::select! {
             biased;
+            () = cancellation.cancelled() => Ok(LifecyclePass::GenerationRetired),
             () = lease.lost() => Ok(LifecyclePass::GenerationRetired),
             result = &mut drive => Ok(LifecyclePass::Driven(result?)),
         }
     }
 }
 
+pub(crate) struct ArtifactInventory {
+    pub(crate) live: Vec<AttachmentArtifactOwner>,
+    pub(crate) pending: Vec<ProvisionalAttachmentArtifactScope>,
+}
+
+#[cfg(test)]
 pub(crate) fn live_artifact_owners(
     snapshot: &ReplicaSnapshot,
 ) -> Result<Vec<AttachmentArtifactOwner>, RuntimeError> {
+    Ok(artifact_inventory(snapshot)?.live)
+}
+
+pub(crate) fn artifact_inventory(
+    snapshot: &ReplicaSnapshot,
+) -> Result<ArtifactInventory, RuntimeError> {
     let preparations =
         snapshot
             .attachment_move_preparations
@@ -206,6 +270,7 @@ pub(crate) fn live_artifact_owners(
                     })
             }));
     let mut live = Vec::new();
+    let mut pending = Vec::new();
     for preparation in preparations {
         if preparation.account_id != snapshot.account_id {
             return Err(lifecycle_invariant(
@@ -213,18 +278,52 @@ pub(crate) fn live_artifact_owners(
             ));
         }
         for progress in &preparation.progress {
-            if let AttachmentMoveProgress::Encrypted {
-                attachment_id,
-                artifact,
-                ..
-            } = progress
-            {
-                live.push(AttachmentArtifactOwner::new(
-                    snapshot.account_id.clone(),
-                    preparation.operation_id.clone(),
-                    attachment_id.clone(),
-                    artifact.clone(),
-                )?);
+            match progress {
+                AttachmentMoveProgress::Pending { attachment_id, .. } => {
+                    pending.push(ProvisionalAttachmentArtifactScope::new(
+                        snapshot.account_id.clone(),
+                        preparation.operation_id.clone(),
+                        attachment_id.clone(),
+                    )?);
+                }
+                AttachmentMoveProgress::Encrypted {
+                    attachment_id,
+                    artifact,
+                    ..
+                } => {
+                    live.push(AttachmentArtifactOwner::new(
+                        snapshot.account_id.clone(),
+                        preparation.operation_id.clone(),
+                        attachment_id.clone(),
+                        artifact.clone(),
+                    )?);
+                }
+            }
+        }
+    }
+    for record in snapshot
+        .cross_account_moves
+        .iter()
+        .filter_map(|record| record.captured())
+        .filter(|record| record.stage != CrossAccountMoveStage::Completed)
+    {
+        for checkpoint in &record.attachments {
+            match &checkpoint.progress {
+                CrossAccountMoveAttachmentProgress::Pending => {
+                    pending.push(ProvisionalAttachmentArtifactScope::new(
+                        snapshot.account_id.clone(),
+                        record.operation_id.clone(),
+                        checkpoint.target_attachment_id.clone(),
+                    )?);
+                }
+                CrossAccountMoveAttachmentProgress::Encrypted { artifact, .. } => {
+                    live.push(AttachmentArtifactOwner::new(
+                        snapshot.account_id.clone(),
+                        record.operation_id.clone(),
+                        checkpoint.target_attachment_id.clone(),
+                        artifact.clone(),
+                    )?);
+                }
             }
         }
     }
@@ -234,7 +333,13 @@ pub(crate) fn live_artifact_owners(
             .then_with(|| left.attachment_id().cmp(right.attachment_id()))
     });
     live.dedup();
-    Ok(live)
+    pending.sort_by(|left, right| {
+        left.operation_id()
+            .cmp(right.operation_id())
+            .then_with(|| left.attachment_id().cmp(right.attachment_id()))
+    });
+    pending.dedup();
+    Ok(ArtifactInventory { live, pending })
 }
 
 fn lifecycle_invariant(message: &str) -> RuntimeError {

@@ -1,3 +1,4 @@
+use super::vault_key::unwrap_vault_key;
 use super::*;
 use crate::{
     http_transport::{HttpHeader, HttpMethod},
@@ -5,18 +6,17 @@ use crate::{
         attachment_move_intent_fingerprint,
         item_operation_fingerprint as shared_item_operation_fingerprint,
         AttachmentMovePreparationRecord, AttachmentMoveProgress, AuthorityItemCategory,
-        AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType, ImmutableHttpRequest,
-        OperationKind, OperationSchedulingState, ProtectedShareCapabilityRecord, ReplicaSnapshot,
-        ReplicaState, ResourceRef, Sha256Fingerprint,
+        AuthorityVaultRole, ImmutableHttpRequest, OperationKind, OperationSchedulingState,
+        ProtectedShareCapabilityRecord, ReplicaSnapshot, ReplicaState, ResourceRef,
+        Sha256Fingerprint,
     },
     server_contract::{CreateItemBody, FavoriteBody, ItemCategory, MoveItemBody, UpdateItemBody},
     CreateShareDraft, ItemDraft, ItemProjection, ShareAccessMode,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bittery_crypto_core::{
-    decrypt_vault_key_with_muk, decrypt_with_aad, encrypt, encrypt_share_capability,
-    encrypt_with_aad, generate_encryption_key, AadContext, EncryptedData,
-    ShareCapabilityAadContext, WrappedVaultKeyData,
+    decrypt_with_aad, encrypt, encrypt_share_capability, encrypt_with_aad, generate_encryption_key,
+    AadContext, EncryptedData, ShareCapabilityAadContext,
 };
 use serde::Serialize;
 use sha2::Digest;
@@ -63,6 +63,30 @@ fn apply_login_password_history(
             entry.changed_at.zeroize();
         }
     }
+}
+
+fn require_current_edit_selection(
+    snapshot: &ReplicaSnapshot,
+    item: &crate::replica::AuthorityItemRecord,
+    guard: &crate::protocol::ItemEditGuard,
+) -> Result<(), RuntimeError> {
+    if guard.account_id != snapshot.account_id
+        || guard.incarnation != snapshot.incarnation
+        || guard.lock_epoch != snapshot.lock_epoch
+        || guard.item_id != item.id
+        || guard.vault_id != item.vault_id
+        || guard.item_version != item.version
+        || snapshot
+            .items
+            .iter()
+            .any(|overlay| overlay.item_id == item.id)
+    {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::InvariantViolation,
+            "the selected Item edit guard is stale or belongs to another Item",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -163,11 +187,26 @@ struct PreparedCreate {
 }
 
 pub(super) enum ExistingItemIntent {
-    Update(Box<ItemDraft>),
+    Update {
+        draft: Box<ItemDraft>,
+        guard: crate::protocol::ItemEditGuard,
+    },
+    RemovePasskey {
+        guard: crate::protocol::ItemEditGuard,
+        rp_id: String,
+        credential_id: String,
+        public_key_fingerprint: String,
+    },
+    PrivateUpdate {
+        draft: Box<ItemDraft>,
+        guard: crate::protocol::ItemEditGuard,
+    },
     SetFavorite(bool),
     Trash,
     Restore,
-    Move { target_vault_id: String },
+    Move {
+        target_vault_id: String,
+    },
     PermanentlyDelete,
 }
 
@@ -293,6 +332,7 @@ impl Runtime {
                     "the selected Item is not authoritative in this Replica",
                 )
             })?;
+        self.require_vault_accepting_work(&snapshot, &item.vault_id)?;
         let vault = snapshot
             .bootstrap
             .vaults
@@ -310,7 +350,7 @@ impl Runtime {
             ));
         }
         let master_unlock_key = self
-            .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+            .copy_live_vault_key_material(&snapshot.account_id, &snapshot.incarnation)
             .ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::AuthenticationRequired,
@@ -449,9 +489,12 @@ impl Runtime {
                 body: body.clone(),
             },
             request_fingerprint: share_operation_fingerprint(&item_id, &body),
+            accepted_item_category: None,
             attachment_move_recovery: None,
+            update_vault: None,
             create_vault: None,
             scheduling: OperationSchedulingState::default(),
+            legacy_admission: None,
         };
         let result = self
             .replica
@@ -554,6 +597,28 @@ impl Runtime {
         accepted: impl FnOnce(),
     ) -> Result<RuntimeResponse, RuntimeError> {
         self.ensure_open()?;
+        if matches!(&draft, ItemDraft::Login(login) if !login.passkeys.is_empty()) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvariantViolation,
+                "ordinary Item creation cannot submit private credentials",
+            ));
+        }
+        self.accept_create_from_current_snapshot(account_id, cancellation, accepted, move |_, _| {
+            Ok((vault_id, draft))
+        })
+        .await
+    }
+
+    /// Semantic private commands select their source after acquiring this same Account execution
+    /// fence, then use the ordinary Create operation/overlay commit without a recursive lock.
+    pub(super) async fn accept_create_from_current_snapshot(
+        &self,
+        account_id: AccountId,
+        cancellation: RequestCancellation,
+        accepted: impl FnOnce(),
+        select_draft: impl FnOnce(&Self, &ReplicaSnapshot) -> Result<(String, ItemDraft), RuntimeError>,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.ensure_open()?;
         if cancellation.is_cancelled() {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::Cancelled,
@@ -614,6 +679,7 @@ impl Runtime {
             .entry(account_id.clone())
             .or_insert(0);
 
+        let (vault_id, draft) = select_draft(self, &snapshot)?;
         // One instant stamps the Operation's Item, so the overlay and the projection can never
         // disagree about when this Device accepted it.
         let accepted_at = rfc3339(self.clock.now_ms()?)?;
@@ -946,6 +1012,7 @@ impl Runtime {
         draft: ItemDraft,
         accepted_at: &str,
     ) -> Result<PreparedCreate, RuntimeError> {
+        self.require_vault_accepting_work(snapshot, vault_id)?;
         if snapshot.bootstrap.state != ReplicaState::Ready {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
@@ -972,12 +1039,6 @@ impl Runtime {
                     "the selected Vault is not visible in this Replica",
                 )
             })?;
-        if vault.vault_type != AuthorityVaultType::Personal {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "the first create slice writes only to a personal Vault",
-            ));
-        }
         if vault.role == AuthorityVaultRole::ReadOnly {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
@@ -985,7 +1046,7 @@ impl Runtime {
             ));
         }
         let master_unlock_key = self
-            .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+            .copy_live_vault_key_material(&snapshot.account_id, &snapshot.incarnation)
             .ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::AuthenticationRequired,
@@ -1065,9 +1126,12 @@ impl Runtime {
                     body,
                 },
                 request_fingerprint,
+                accepted_item_category: Some(authority_item_category(draft.category())),
                 attachment_move_recovery: None,
+                update_vault: None,
                 create_vault: None,
                 scheduling: OperationSchedulingState::default(),
+                legacy_admission: None,
             },
             overlay: ReplicaItemRecord {
                 account_id: snapshot.account_id.clone(),
@@ -1092,7 +1156,7 @@ impl Runtime {
                 account_id: snapshot.account_id.clone(),
                 item_id,
                 vault_id: vault_id.to_owned(),
-                data: draft,
+                data: crate::protocol::PublicItemDraft::from(&draft),
                 favorite: false,
                 deleted_at: None,
                 attachments: Vec::new(),
@@ -1101,6 +1165,8 @@ impl Runtime {
                 created_at: accepted_at.to_owned(),
                 updated_at: accepted_at.to_owned(),
                 status: ItemProjectionStatus::Pending,
+                edit_guard: None,
+                duplicate_source_guard: None,
             },
         })
     }
@@ -1138,6 +1204,7 @@ impl Runtime {
                     "the selected Item is not authoritative in this Replica",
                 )
             })?;
+        self.require_vault_accepting_work(snapshot, &item.vault_id)?;
         if item.version <= 0 {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
@@ -1161,13 +1228,70 @@ impl Runtime {
             ));
         }
         let master_unlock_key = self
-            .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+            .copy_live_vault_key_material(&snapshot.account_id, &snapshot.incarnation)
             .ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::AuthenticationRequired,
                     "the selected Account is signed out or locked",
                 )
             })?;
+        let intent = match intent {
+            ExistingItemIntent::RemovePasskey {
+                guard,
+                rp_id,
+                credential_id,
+                public_key_fingerprint,
+            } => {
+                require_current_edit_selection(snapshot, item, &guard)?;
+                if item.category != AuthorityItemCategory::Login {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "only a Login Item can hold a credential",
+                    ));
+                }
+                let ItemDraft::Login(mut login) = super::bootstrap::decrypt_item(
+                    &master_unlock_key,
+                    &snapshot.user_id,
+                    source_vault,
+                    &super::bootstrap::SealedItem::from_authority(item),
+                    &item.category,
+                )?
+                else {
+                    unreachable!("the authoritative Login category determines its draft")
+                };
+                let mut matches =
+                    login
+                        .passkeys
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, passkey)| {
+                            (passkey.rp_id == rp_id
+                                && passkey.credential_id == credential_id
+                                && crate::protocol::public_key_fingerprint(&passkey.public_key)
+                                    == public_key_fingerprint)
+                                .then_some(index)
+                        });
+                let Some(index) = matches.next() else {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "the selected credential is no longer current",
+                    ));
+                };
+                if matches.next().is_some() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "the selected credential identity is ambiguous",
+                    ));
+                }
+                let mut removed = login.passkeys.remove(index);
+                removed.private_key.zeroize();
+                ExistingItemIntent::PrivateUpdate {
+                    draft: Box::new(ItemDraft::Login(login)),
+                    guard,
+                }
+            }
+            other => other,
+        };
         let operation_id = bittery_crypto_core::generate_uuid();
         let mut overlay = ReplicaItemRecord {
             account_id: snapshot.account_id.clone(),
@@ -1198,8 +1322,11 @@ impl Runtime {
             name: "If-Match".into(),
             value: format!("\"{expected_version}\""),
         };
+        let private_update = matches!(&intent, ExistingItemIntent::PrivateUpdate { .. });
         let (kind, method, route, path, mut headers, body, operation_vault_id) = match intent {
-            ExistingItemIntent::Update(mut draft) => {
+            ExistingItemIntent::Update { mut draft, guard }
+            | ExistingItemIntent::PrivateUpdate { mut draft, guard } => {
+                require_current_edit_selection(snapshot, item, &guard)?;
                 if authority_item_category(draft.category()) != item.category {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
@@ -1212,48 +1339,65 @@ impl Runtime {
                     &master_unlock_key,
                 )?);
                 if let ItemDraft::Login(login) = draft.as_mut() {
-                    let previous_plaintext = Zeroizing::new(
-                        decrypt_with_aad(
-                            &EncryptedData {
-                                ciphertext: item.encrypted_data.clone(),
-                                iv: item.encryption_iv.clone(),
-                                algorithm: item.encryption_algorithm.clone(),
-                            },
-                            &vault_key,
-                            &AadContext {
-                                vault_id: item.vault_id.clone(),
-                                entity_id: item.id.clone(),
-                                entity_type: "item".into(),
-                                version: item.encryption_version as u64,
-                                user_id: item.encrypted_by_user_id.clone(),
-                            },
-                        )
-                        .map_err(|_| {
-                            RuntimeError::new(
-                                RuntimeErrorCode::InvariantViolation,
-                                "the selected Item ciphertext could not be opened",
-                            )
-                        })?,
-                    );
-                    let previous = ZeroizingJsonValue::new(
-                        serde_json::from_str(&previous_plaintext).map_err(|_| {
-                            RuntimeError::new(
-                                RuntimeErrorCode::InvariantViolation,
-                                "the selected Login plaintext is invalid",
-                            )
-                        })?,
-                    );
-                    let password = match previous.0.get("password") {
-                        None | Some(serde_json::Value::Null) => None,
-                        Some(serde_json::Value::String(value)) => Some(value.as_str()),
-                        _ => {
+                    if !private_update {
+                        if !login.passkeys.is_empty() {
                             return Err(RuntimeError::new(
                                 RuntimeErrorCode::InvariantViolation,
-                                "the selected Login password is invalid",
-                            ))
+                                "ordinary Item edits cannot submit private credentials",
+                            ));
                         }
-                    };
-                    apply_login_password_history(login, password, accepted_at);
+                        let previous_plaintext = Zeroizing::new(
+                            decrypt_with_aad(
+                                &EncryptedData {
+                                    ciphertext: item.encrypted_data.clone(),
+                                    iv: item.encryption_iv.clone(),
+                                    algorithm: item.encryption_algorithm.clone(),
+                                },
+                                &vault_key,
+                                &AadContext {
+                                    vault_id: item.vault_id.clone(),
+                                    entity_id: item.id.clone(),
+                                    entity_type: "item".into(),
+                                    version: item.encryption_version as u64,
+                                    user_id: item.encrypted_by_user_id.clone(),
+                                },
+                            )
+                            .map_err(|_| {
+                                RuntimeError::new(
+                                    RuntimeErrorCode::InvariantViolation,
+                                    "the selected Item ciphertext could not be opened",
+                                )
+                            })?,
+                        );
+                        let previous = ZeroizingJsonValue::new(
+                            serde_json::from_str(&previous_plaintext).map_err(|_| {
+                                RuntimeError::new(
+                                    RuntimeErrorCode::InvariantViolation,
+                                    "the selected Login plaintext is invalid",
+                                )
+                            })?,
+                        );
+                        let password = match previous.0.get("password") {
+                            None | Some(serde_json::Value::Null) => None,
+                            Some(serde_json::Value::String(value)) => Some(value.as_str()),
+                            _ => {
+                                return Err(RuntimeError::new(
+                                    RuntimeErrorCode::InvariantViolation,
+                                    "the selected Login password is invalid",
+                                ));
+                            }
+                        };
+                        apply_login_password_history(login, password, accepted_at);
+                        login.passkeys = match previous.0.get("passkeys") {
+                            None => Vec::new(),
+                            Some(value) => serde_json::from_value(value.clone()).map_err(|_| {
+                                RuntimeError::new(
+                                    RuntimeErrorCode::InvariantViolation,
+                                    "the selected Login credentials are invalid",
+                                )
+                            })?,
+                        };
+                    }
                 }
                 let plaintext = Zeroizing::new(item_plaintext(&draft).map_err(|_| {
                     RuntimeError::new(
@@ -1337,6 +1481,7 @@ impl Runtime {
                 )
             }
             ExistingItemIntent::Move { target_vault_id } => {
+                self.require_vault_accepting_work(snapshot, &target_vault_id)?;
                 let target_vault = snapshot
                     .bootstrap
                     .vaults
@@ -1421,6 +1566,7 @@ impl Runtime {
                         })
                         .collect();
                     let mut preparation = AttachmentMovePreparationRecord {
+                        accepted_item_category: Some(item.category.clone()),
                         account_id: snapshot.account_id.clone(),
                         operation_id: operation_id.clone(),
                         item_id: item.id.clone(),
@@ -1474,6 +1620,9 @@ impl Runtime {
                     item.vault_id.clone(),
                 )
             }
+            ExistingItemIntent::RemovePasskey { .. } => {
+                unreachable!("credential removal was normalized to a private Update")
+            }
         };
         drop(master_unlock_key);
         headers.push(if_match);
@@ -1494,9 +1643,12 @@ impl Runtime {
                     body,
                 },
                 request_fingerprint,
+                accepted_item_category: Some(item.category.clone()),
                 attachment_move_recovery: None,
+                update_vault: None,
                 create_vault: None,
                 scheduling: OperationSchedulingState::default(),
+                legacy_admission: None,
             },
             overlay,
         })
@@ -1682,37 +1834,4 @@ fn rfc3339(now_ms: u64) -> Result<String, RuntimeError> {
                 "the Device clock is outside the supported range",
             )
         })
-}
-
-/// Opens the Vault key exactly the way the Bootstrap read path opens it, including the wrap-context
-/// equality that stops another Vault's or another User's key from being accepted.
-pub(super) fn unwrap_vault_key(
-    vault: &AuthorityVaultRecord,
-    user_id: &str,
-    master_unlock_key: &[u8; 32],
-) -> Result<Vec<u8>, RuntimeError> {
-    let wrapped: WrappedVaultKeyData =
-        serde_json::from_str(&vault.encrypted_vault_key).map_err(|_| {
-            RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "wrapped Vault key is invalid",
-            )
-        })?;
-    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != user_id {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::InvariantViolation,
-            "wrapped Vault key context does not match",
-        ));
-    }
-    decrypt_vault_key_with_muk(
-        &vault.encrypted_vault_key,
-        master_unlock_key,
-        &wrapped.context,
-    )
-    .map_err(|_| {
-        RuntimeError::new(
-            RuntimeErrorCode::AuthenticationRequired,
-            "Vault key could not be unwrapped",
-        )
-    })
 }

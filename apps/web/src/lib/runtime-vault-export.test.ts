@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { buildWebImportGraph } from "../../scripts/web-import-graph";
 
@@ -19,6 +20,7 @@ import { createRuntimeClient } from "@bittery/client-runtime/client";
 import type {
 	ItemDraft,
 	ItemsProjection,
+	VaultExportProjection,
 } from "@bittery/client-runtime/protocol";
 import { createFakeRuntimeTransport } from "@bittery/client-runtime/testing";
 import type {
@@ -27,12 +29,31 @@ import type {
 } from "@bittery/client-runtime/web";
 import JSZip from "jszip";
 import type { VaultExportPayload } from "./export-types";
+import { bitteryBttrxImportProvider } from "./import/providers/bittery-bttrx";
 import {
 	createRuntimeVaultArchive,
 	type ExportProgress,
+	type RuntimeVaultArchive,
 } from "./runtime-vault-export";
 
 const accountId = "runtime-account-without-legacy-bearer";
+const credential = {
+	credentialId: "credential-1",
+	rpId: "example.test",
+	rpName: "Example",
+	userHandle: "dXNlcg",
+	userName: "alice",
+	userDisplayName: "Alice",
+	privateKey: "EXACT_PRIVATE_ES256_SCALAR",
+	publicKey: "EXACT_PUBLIC_ES256_POINT",
+	algorithm: -7,
+	signCount: 3,
+	transports: ["internal"],
+	createdAt: "2026-01-01T00:00:00Z",
+};
+const credentialFingerprint = createHash("sha256")
+	.update(credential.publicKey)
+	.digest("hex");
 const drafts: ItemDraft[] = [
 	{
 		category: "login",
@@ -45,6 +66,7 @@ const drafts: ItemDraft[] = [
 			customFields: [
 				{ id: "custom", label: "Extra", value: "kept", type: "text" },
 			],
+			passkeys: [credential],
 		},
 	},
 	{
@@ -74,6 +96,39 @@ const attachmentBytes = new Uint8Array(140_000).map((_, index) => index % 256);
 async function fixture(withAttachment = false) {
 	const transport = createFakeRuntimeTransport();
 	const runtime = createRuntimeClient({ transport });
+	const observe = transport.observe.bind(transport);
+	transport.observe = async (id, json, listener, options) => {
+		await observe(id, json, listener, options);
+		if (JSON.parse(json).type === "vaultExport") {
+			const source = runtime.items(accountId).getSnapshot();
+			if (source.state !== "ready")
+				throw new Error("Fixture snapshot unavailable");
+			const privateExport: VaultExportProjection = {
+				...source.value,
+				items: source.value.items.map((item, index) => {
+					const data = drafts[index];
+					if (!data) throw new Error("Fixture private Item is unavailable");
+					return { ...item, data };
+				}),
+			};
+			transport.publish({ type: "vaultExport", value: privateExport }, id);
+		}
+	};
+	transport.beginVaultExportOutput = async (id) => {
+		expect(
+			transport
+				.openObservations()
+				.some(
+					(entry) =>
+						entry.observationId === id && entry.request.type === "vaultExport",
+				),
+		).toBe(true);
+		return `lease:${id}`;
+	};
+	transport.finishVaultExportOutput = async (id, lease) => {
+		expect(lease).toBe(`lease:${id}`);
+		await transport.unobserve(id);
+	};
 	const releases = [
 		runtime.session().subscribe(() => {}),
 		runtime.items(accountId).subscribe(() => {}),
@@ -95,7 +150,19 @@ async function fixture(withAttachment = false) {
 						access,
 						failure: null,
 						replicaRevision: "2",
-						displayIdentity: { email: "runtime@example.test" },
+						unlockCapabilities: {
+							password: false,
+							desktop: false,
+							signIn: false,
+						},
+						displayIdentity: {
+							email: "runtime@example.test",
+							name: "Test Account",
+							teamName: null,
+							teamAvatarUrl: null,
+							serverUrl: "https://vault.example.test",
+							secretKeyHint: "A3-A••••",
+						},
 					},
 				],
 			},
@@ -115,11 +182,25 @@ async function fixture(withAttachment = false) {
 				icon: "key",
 			},
 		],
-		items: drafts.map((data, index) => ({
+		items: drafts.map((privateDraft, index) => ({
 			accountId,
 			itemId: `item-${index}`,
 			vaultId: "vault",
-			data,
+			data:
+				privateDraft.category === "login"
+					? {
+							category: "login" as const,
+							data: {
+								...privateDraft.data,
+								passkeys: privateDraft.data.passkeys?.map(
+									({ privateKey: _privateKey, ...publicMetadata }) => ({
+										...publicMetadata,
+										publicKeyFingerprint: credentialFingerprint,
+									}),
+								),
+							},
+						}
+					: privateDraft,
 			favorite: index % 2 === 0,
 			status: "authoritative",
 			createdAt: "2026-01-01",
@@ -143,10 +224,15 @@ async function fixture(withAttachment = false) {
 		})),
 	};
 	transport.publish({ type: "items", value: projection });
+	expect(JSON.stringify(projection)).not.toContain(credential.privateKey);
 	let sink: AtomicAttachmentDownloadSink | undefined;
 	const sinks: AttachmentDownloadSinkGrants = {
+		captureScope: () =>
+			({}) as ReturnType<AttachmentDownloadSinkGrants["captureScope"]>,
+		release: async () => {},
 		grant(input) {
 			expect(input.accountId).toBe(accountId);
+			expect(input.vaultId).toBe("vault");
 			expect(input.attachmentId).toBe("attachment");
 			sink = input.sink;
 			return "opaque-download-grant";
@@ -178,7 +264,8 @@ test("archives all categories, favorites and fields from Runtime without a beare
 	const f = await fixture();
 	try {
 		const archive = await f.export();
-		const zip = await JSZip.loadAsync(await archive.arrayBuffer());
+		const bytes = await downloadBytes(archive);
+		const zip = await JSZip.loadAsync(bytes);
 		const payload: VaultExportPayload = JSON.parse(
 			await requiredEntry(zip, "export.json").async("string"),
 		);
@@ -192,6 +279,18 @@ test("archives all categories, favorites and fields from Runtime without a beare
 		expect(JSON.stringify(payload.items.map((item) => item.data))).toBe(
 			JSON.stringify(drafts.map((draft) => draft.data)),
 		);
+		expect(payload.items[0]?.data.passkeys?.[0]?.privateKey).toBe(
+			credential.privateKey,
+		);
+		const imported = await bitteryBttrxImportProvider.parse(
+			new File([bytes], "round-trip.bttrx"),
+		);
+		const importedItem = imported.sourceItems[0];
+		if (!importedItem) throw new Error("Imported Login is unavailable");
+		expect(
+			bitteryBttrxImportProvider.toDecryptedItemData(importedItem).data
+				.passkeys?.[0]?.privateKey,
+		).toBe(credential.privateKey);
 		expect(payload.items.map((item) => item.favorite)).toEqual([
 			true,
 			false,
@@ -234,7 +333,7 @@ test("includes authenticated Attachment bytes in both v1 JSON and ZIP files", as
 				attachmentId: "attachment",
 			},
 		});
-		const zip = await JSZip.loadAsync(await (await exporting).arrayBuffer());
+		const zip = await JSZip.loadAsync(await downloadBytes(await exporting));
 		const payload = JSON.parse(
 			await requiredEntry(zip, "export.json").async("string"),
 		);
@@ -339,7 +438,7 @@ test("a ready empty Account exports an empty archive", async () => {
 			type: "items",
 			value: { ...f.projection, items: [] },
 		});
-		const zip = await JSZip.loadAsync(await (await f.export()).arrayBuffer());
+		const zip = await JSZip.loadAsync(await downloadBytes(await f.export()));
 		const payload = JSON.parse(
 			await requiredEntry(zip, "export.json").async("string"),
 		);
@@ -371,6 +470,9 @@ for (const transition of ["Lock then Unlock", "Account A to B to A"] as const) {
 			const exporting = createRuntimeVaultArchive(
 				f.runtime,
 				{
+					captureScope: () =>
+						({}) as ReturnType<AttachmentDownloadSinkGrants["captureScope"]>,
+					release: async () => {},
 					grant() {
 						throw new Error("No Attachments in this fixture");
 					},
@@ -390,4 +492,58 @@ for (const transition of ["Lock then Unlock", "Account A to B to A"] as const) {
 			await f.close();
 		}
 	});
+}
+
+/** Observe browser output while preserving the attempt's Begin/Finish path. */
+async function downloadBytes(
+	archive: RuntimeVaultArchive,
+): Promise<ArrayBuffer> {
+	const documentDescriptor = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"document",
+	);
+	const create = URL.createObjectURL;
+	const revoke = URL.revokeObjectURL;
+	let output: Blob | undefined;
+	let clicked = false;
+	let revoked = false;
+	URL.createObjectURL = (value) => {
+		if (!(value instanceof Blob)) throw new Error("Expected archive Blob");
+		output = value;
+		return "blob:export-test";
+	};
+	URL.revokeObjectURL = (url) => {
+		expect(url).toBe("blob:export-test");
+		revoked = true;
+	};
+	Object.defineProperty(globalThis, "document", {
+		configurable: true,
+		value: {
+			createElement(tag: string) {
+				expect(tag).toBe("a");
+				return {
+					href: "",
+					download: "",
+					click() {
+						clicked = true;
+					},
+				};
+			},
+		},
+	});
+	try {
+		await archive.download();
+		expect(clicked).toBe(true);
+		expect(revoked).toBe(true);
+		if (!output) throw new Error("No browser output");
+		return await output.arrayBuffer();
+	} finally {
+		output = undefined;
+		URL.createObjectURL = create;
+		URL.revokeObjectURL = revoke;
+		if (documentDescriptor)
+			Object.defineProperty(globalThis, "document", documentDescriptor);
+		else Reflect.deleteProperty(globalThis, "document");
+		await archive.dispose();
+	}
 }

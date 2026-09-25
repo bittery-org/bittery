@@ -9,15 +9,19 @@ use std::{
 };
 
 mod domain;
+mod inventory;
 pub(crate) mod persistence_contract;
+mod profile_admission;
 pub(crate) mod recovery;
 #[cfg(all(
     any(test, feature = "replica-conformance"),
     not(target_arch = "wasm32")
 ))]
 pub(crate) mod replica_conformance;
+#[cfg(test)]
+mod rotation_start_tests;
 #[cfg(not(target_arch = "wasm32"))]
-mod sqlite;
+pub(crate) mod sqlite;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod sqlite_tests;
 
@@ -33,9 +37,14 @@ use domain::AccountReplica;
 )]
 pub(crate) use domain::{
     attachment_move_artifact_ref, attachment_move_intent_fingerprint,
-    canonical_create_vault_request, create_item_fingerprint, import_items_fingerprint,
-    import_items_path, item_operation_fingerprint, share_operation_fingerprint,
-    validate_create_vault_text_fields, AbandonBootstrapPlan, AttachmentMoveArtifactRef,
+    attachment_registration_matches, canonical_create_vault_request,
+    canonical_vault_image_update_request, create_item_fingerprint, cross_account_item_matches,
+    cross_account_item_metadata_matches, encode_component, import_items_fingerprint,
+    import_items_path, item_operation_fingerprint, legacy_sync_source_id, rotation_plan_digest,
+    share_operation_fingerprint, source_timestamp, team_leave_finalize_operation,
+    team_leave_start_operation, validate_authority_page, validate_create_vault_text_fields,
+    validate_vault_update_fields, vault_deletion_fingerprint, vault_update_fields,
+    vault_update_fingerprint, AbandonBootstrapPlan, AttachmentMoveArtifactRef,
     AttachmentMovePreparationRecord, AttachmentMoveProgress, AttachmentMoveRecovery,
     AttachmentMoveUploadState, AuthorityAttachmentRecord, AuthorityItemCategory,
     AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
@@ -44,14 +53,31 @@ pub(crate) use domain::{
     BootstrapPhase, CanonicalCreateVaultRequest, CleanupBootstrapGenerationPlan,
     CleanupBootstrapGenerationResult, CreateVaultCheckpoint, CreateVaultCleanupObligation,
     CreateVaultImageRecord, CreateVaultOperationRecord, CreateVaultOperationRejectionCode,
-    CursorAdvance, ForegroundAttachmentCommitPlan, ForegroundAttachmentCommitResult,
-    GuardedCommitPlan, ImmutableHttpRequest, ImportItemsOperationRejectionCode,
-    MarkRefreshRequiredPlan, ObservedOutcome, OperationKind, OperationOutcomeResult,
-    OperationReceiptRecord, OperationRecord, OperationRejectionCode, OperationSchedulingState,
-    PlanMutation, PlanResult, PreparedMoveAttachment, PromoteBootstrapPlan,
-    ProtectedShareCapabilityRecord, RecomputedPlanResult, ReplicaItemRecord, ReplicaSnapshot,
-    ReplicaState, ResourceRef, Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult,
-    SyncCursor, MAX_IMPORT_ITEMS,
+    CrossAccountMoveAttachmentCheckpoint, CrossAccountMoveAttachmentEvidence,
+    CrossAccountMoveAttachmentProgress, CrossAccountMoveAttachmentRegistration,
+    CrossAccountMoveBindingStatus, CrossAccountMoveBlockedReason, CrossAccountMoveChild,
+    CrossAccountMoveDestinationBinding, CrossAccountMoveDisposition, CrossAccountMoveEndpoint,
+    CrossAccountMoveEntry, CrossAccountMoveIdentity, CrossAccountMoveItemOperation,
+    CrossAccountMoveRecord, CrossAccountMoveSourceAuthority, CrossAccountMoveStage,
+    CrossAccountMoveStep, CrossAccountMoveWaitingReason, CursorAdvance,
+    ForegroundAttachmentCommitPlan, ForegroundAttachmentCommitResult, GuardedCommitPlan,
+    ImmutableHttpRequest, ImmutableRequestPayload, ImportItemsOperationRejectionCode,
+    LegacyAdmissionBootstrap, LegacyAdmissionOrigin, LegacyAdmissionRefreshReason,
+    LegacyCheckpointEvidence, LegacyCreateFailureCode, LegacyCrossAccountCompletionProof,
+    LegacyCrossAccountMoveAdmission, LegacyItemCacheBaseline, LegacyItemCacheMetadata,
+    LegacyItemCategory, LegacyItemCommandKind, LegacyItemCommandStatus, LegacyItemCommandV1,
+    LegacyOperationAdmission, LegacyOperationDisposition, LegacyOperationReceiptLineage,
+    LegacySourceUnavailableMove, LegacyWorkflowAuthorization, LegacyWorkflowDisposition,
+    LegacyWorkflowPriorHold, MarkRefreshRequiredPlan, ObservedOutcome, OperationKind,
+    OperationOutcomeResult, OperationReceiptRecord, OperationRecord, OperationRejectionCode,
+    OperationSchedulingState, PlanMutation, PlanResult, PreparedMoveAttachment,
+    PromoteBootstrapPlan, ProtectedShareCapabilityRecord, RecomputedPlanResult, ReplicaItemRecord,
+    ReplicaSnapshot, ReplicaState, ResourceRef, RotationAttemptPhase, RotationAttemptRecord,
+    RotationFinalizeRejectionCode, RotationIntent, RotationMemberRecord, RotationPlanRecord,
+    RotationResultRecord, RotationStaleDetails, RotationStaleReason, RotationStartRejectionCode,
+    Sha256Fingerprint, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
+    UpdateVaultImageOperationRecord, VaultMutationOperationRejectionCode, WorkflowAcceptedPayload,
+    LEGACY_OPERATION_ADMISSION_VERSION, MAX_IMPORT_ITEMS,
 };
 
 #[cfg(feature = "persistence-contract-schema")]
@@ -63,7 +89,10 @@ use persistence_contract::{
     reconstruct_snapshot, replica_invariant, snapshot_rows, ExpectedReplicaInstall,
     LockEpochAdvanceResult, PreparedCommitOutcome, PreparedLockEpochAdvance, ReplicaInstallResult,
 };
-pub(crate) use persistence_contract::{ReplicaPersistenceRequest, ReplicaPersistenceResponse};
+pub(crate) use persistence_contract::{
+    ReplicaInventoryContinuation, ReplicaInventoryFamily, ReplicaInventoryPage,
+    ReplicaPersistenceRequest, ReplicaPersistenceResponse, ReplicaPhysicalKey,
+};
 #[cfg(test)]
 use persistence_contract::{ReplicaRowKey, ReplicaStore, StoredReplicaRow};
 
@@ -126,6 +155,7 @@ mod bootstrap_authority_tests {
             image_url: None,
             encrypted_vault_key: format!("wrapped-{value}"),
             role: AuthorityVaultRole::Owner,
+            key_version: None,
         }
     }
 
@@ -289,6 +319,7 @@ mod bootstrap_authority_tests {
             raw_response_fingerprint: Sha256Fingerprint([fingerprint_byte; 32]),
             pinned_watermark: watermark,
             continuation,
+            vault_key_version_included: false,
             vaults: vec![vault("vault-1")],
             items: vec![item(item_id, "vault-1")],
         }
@@ -302,6 +333,7 @@ mod bootstrap_authority_tests {
     ) -> PlanResult {
         replica
             .promote_bootstrap(PromoteBootstrapPlan {
+                additional_retired_vault_ids: Vec::new(),
                 guard: guard(account_id, revision),
                 generation_id: generation(generation_id),
             })
@@ -335,6 +367,7 @@ mod bootstrap_authority_tests {
                 id: "pinned-watermark".into(),
             },
             continuation,
+            vault_key_version_included: false,
             vaults,
             items,
         }
@@ -367,6 +400,7 @@ mod bootstrap_authority_tests {
         );
         assert!(replica
             .promote_bootstrap(PromoteBootstrapPlan {
+                additional_retired_vault_ids: Vec::new(),
                 guard: guard(&account_id, 1),
                 generation_id: generation("two-phase"),
             })
@@ -430,6 +464,7 @@ mod bootstrap_authority_tests {
         );
         assert!(replica
             .promote_bootstrap(PromoteBootstrapPlan {
+                additional_retired_vault_ids: Vec::new(),
                 guard: guard(&account_id, 1),
                 generation_id: generation("two-phase"),
             })
@@ -476,6 +511,7 @@ mod bootstrap_authority_tests {
         );
         assert!(replica
             .promote_bootstrap(PromoteBootstrapPlan {
+                additional_retired_vault_ids: Vec::new(),
                 guard: guard(&account_id, 1),
                 generation_id: generation("generation-1"),
             })
@@ -779,6 +815,7 @@ mod bootstrap_authority_tests {
         assert_eq!(
             replica
                 .promote_bootstrap(PromoteBootstrapPlan {
+                    additional_retired_vault_ids: Vec::new(),
                     guard: stale_promote,
                     generation_id: generation("guarded"),
                 })
@@ -1194,6 +1231,12 @@ impl ReplicaPersistence for SerializedReplicaPersistence {
         &self,
         request: ReplicaPersistenceRequest,
     ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
+        let inventory_request = if let ReplicaPersistenceRequest::Inventory { cursor } = &request {
+            inventory::validate_cursor_size(cursor.as_deref())?;
+            true
+        } else {
+            false
+        };
         let request_json = serde_json::to_string(&request).map_err(|_| {
             RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
@@ -1201,6 +1244,9 @@ impl ReplicaPersistence for SerializedReplicaPersistence {
             )
         })?;
         let response_json = self.executor.invoke(request_json).await?;
+        if inventory_request {
+            inventory::validate_response_size(response_json.len())?;
+        }
         serde_json::from_str(&response_json).map_err(|_| {
             RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
@@ -1263,6 +1309,7 @@ impl Replica {
             raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"binding-upload-vaults"),
             pinned_watermark: SyncCursor::CapturedEmpty,
             continuation: BootstrapContinuation::Final,
+            vault_key_version_included: false,
             vaults: vec![vault],
             items: Vec::new(),
         })
@@ -1279,6 +1326,7 @@ impl Replica {
             raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"binding-upload-items"),
             pinned_watermark: SyncCursor::CapturedEmpty,
             continuation: BootstrapContinuation::Final,
+            vault_key_version_included: false,
             vaults: Vec::new(),
             items: vec![item],
         })
@@ -1288,6 +1336,7 @@ impl Replica {
             .await?
             .ok_or_else(|| replica_invariant("binding Upload seed lost its Item page"))?;
         self.promote_bootstrap(PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard(&snapshot),
             generation_id,
         })
@@ -1350,6 +1399,25 @@ impl Replica {
         })
     }
 
+    /// A bounded census of physical keys; it never populates the Account cache.
+    pub(crate) async fn inventory_page(
+        &self,
+        cursor: Option<String>,
+    ) -> Result<ReplicaInventoryPage, RuntimeError> {
+        inventory::validate_cursor_size(cursor.as_deref())?;
+        let response = self
+            .persistence
+            .invoke(ReplicaPersistenceRequest::Inventory { cursor })
+            .await?;
+        let ReplicaPersistenceResponse::InventoryPage(page) = response else {
+            return Err(replica_invariant(
+                "Replica returned a non-inventory response",
+            ));
+        };
+        inventory::validate_page(&page)?;
+        Ok(page)
+    }
+
     pub(crate) async fn delete_account(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         let response = self
             .persistence
@@ -1386,6 +1454,7 @@ impl Replica {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) async fn restore_known_accounts(
         &self,
         account_ids: &[AccountId],
@@ -1624,6 +1693,13 @@ impl Replica {
                     return Ok(PlanResult::Missing);
                 }
                 PlanResult::Stale { actual_revision } => {
+                    if plan.mutations.iter().any(|mutation| {
+                        matches!(mutation, PlanMutation::CompleteVaultRetirements { .. })
+                    }) {
+                        self.load(&account_id).await?;
+                        return Ok(PlanResult::Stale { actual_revision });
+                    }
+
                     let attempted_revision = plan.expected_replica_revision;
                     let latest = self.load(&account_id).await?;
                     let Some(latest) = latest else {
@@ -1657,6 +1733,15 @@ impl Replica {
         &self,
         mut plan: GuardedCommitPlan,
     ) -> Result<RecomputedPlanResult, RuntimeError> {
+        if plan
+            .mutations
+            .iter()
+            .any(|mutation| matches!(mutation, PlanMutation::CompleteVaultRetirements { .. }))
+        {
+            return Err(replica_invariant(
+                "Vault cleanup completion requires an exact captured revision",
+            ));
+        }
         let account_id = plan.account_id.clone();
         let expected_incarnation = plan.expected_incarnation.clone();
         loop {
@@ -1733,8 +1818,20 @@ impl Replica {
         &self,
         plan: GuardedCommitPlan,
     ) -> Result<PlanResult, RuntimeError> {
+        self.execute_exact_while_current(plan, || Ok(())).await
+    }
+
+    /// An issued persistence invocation must drain even if its foreground scope is lost.
+    /// Check scope before admission and before adopting any response into the owner's cache.
+    pub(crate) async fn execute_exact_while_current(
+        &self,
+        plan: GuardedCommitPlan,
+        require_current: impl Fn() -> Result<(), RuntimeError>,
+    ) -> Result<PlanResult, RuntimeError> {
         let account_id = plan.account_id.clone();
-        let Some(current) = self.load_uncached(&account_id).await? else {
+        let loaded = self.load_uncached(&account_id).await;
+        require_current()?;
+        let Some(current) = loaded? else {
             return Ok(PlanResult::Missing);
         };
         if current.incarnation != plan.expected_incarnation {
@@ -1757,10 +1854,13 @@ impl Replica {
             wire: prepared,
             next_snapshot,
         } = prepare_commit(current, plan)?;
+        require_current()?;
         let response = self
             .persistence
             .invoke(ReplicaPersistenceRequest::Commit { prepared })
-            .await?;
+            .await;
+        require_current()?;
+        let response = response?;
         let ReplicaPersistenceResponse::Committed { result } = response else {
             return Err(replica_invariant(
                 "Replica persistence returned a non-commit response for a commit",
@@ -1776,13 +1876,14 @@ impl Replica {
             PlanResult::Applied { .. } => Err(replica_invariant(
                 "Replica persistence committed an unexpected revision",
             )),
-            PlanResult::Missing => {
-                self.load(&account_id).await?;
-                Ok(PlanResult::Missing)
-            }
-            PlanResult::Stale { actual_revision } => {
-                self.load(&account_id).await?;
-                Ok(PlanResult::Stale { actual_revision })
+            PlanResult::Missing | PlanResult::Stale { .. } => {
+                let loaded = self.load_uncached(&account_id).await;
+                require_current()?;
+                match loaded? {
+                    Some(snapshot) => self.cache(snapshot),
+                    None => self.remove_cached(&account_id),
+                }
+                Ok(result)
             }
         }
     }
@@ -1877,6 +1978,25 @@ impl Replica {
     ) -> Result<PlanResult, RuntimeError> {
         let account_id = plan.guard.account_id.clone();
         self.persist_applied_bootstrap(&account_id, true, |account| account.begin_bootstrap(plan))
+            .await
+    }
+
+    pub(crate) async fn set_policy_verification_pending(
+        &self,
+        guard: BootstrapGuard,
+        pending: bool,
+    ) -> Result<PlanResult, RuntimeError> {
+        let account_id = guard.account_id.clone();
+        let Some(current) = self.load_uncached(&account_id).await? else {
+            return Ok(PlanResult::Missing);
+        };
+        let mut account = AccountReplica::from_snapshot(current.clone());
+        let result = account.set_policy_verification_pending(guard, pending)?;
+        if !matches!(result, PlanResult::Applied { replica_revision } if replica_revision != current.revision)
+        {
+            return Ok(result);
+        }
+        self.commit_bootstrap_snapshot(current, account.snapshot(), true)
             .await
     }
 
@@ -2070,9 +2190,11 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
     let Some(current) = current else {
         return next.items.is_empty()
             && next.operations.is_empty()
+            && next.cross_account_moves.is_empty()
             && next.share_capabilities.is_empty()
             && next.attachment_move_preparations.is_empty()
-            && next.receipts.is_empty();
+            && next.receipts.is_empty()
+            && next.bootstrap.pending_vault_retirements.is_empty();
     };
     let current_items: HashMap<_, _> = current
         .items
@@ -2124,7 +2246,21 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
         .iter()
         .map(|receipt| (&receipt.operation_id, receipt))
         .collect();
-    current_items == next_items
+    let current_cross_moves: HashMap<_, _> = current
+        .cross_account_moves
+        .iter()
+        .map(|record| (record.operation_id(), record))
+        .collect();
+    let next_cross_moves: HashMap<_, _> = next
+        .cross_account_moves
+        .iter()
+        .map(|record| (record.operation_id(), record))
+        .collect();
+    current_cross_moves == next_cross_moves
+        && current.bootstrap.policy_verification_pending
+            == next.bootstrap.policy_verification_pending
+        && current.bootstrap.pending_vault_retirements == next.bootstrap.pending_vault_retirements
+        && current_items == next_items
         && current_operations == next_operations
         && current_share_capabilities == next_share_capabilities
         && current_preparations == next_preparations
@@ -2134,6 +2270,7 @@ fn same_replica_rows(current: Option<&ReplicaSnapshot>, next: &ReplicaSnapshot) 
 #[derive(Default)]
 pub(crate) struct InMemoryReplica {
     state: Mutex<InMemoryReplicaState>,
+    inventory_nonce: std::sync::OnceLock<String>,
     #[cfg(test)]
     pending_commit_failures: AtomicUsize,
 }
@@ -2174,9 +2311,11 @@ impl InMemoryReplica {
                 lock_epoch: 0,
                 items: HashMap::new(),
                 operations: HashMap::new(),
+                cross_account_moves: HashMap::new(),
                 share_capabilities: HashMap::new(),
                 attachment_move_preparations: HashMap::new(),
                 receipts: HashMap::new(),
+                rotation_attempts: HashMap::new(),
                 failure: None,
                 bootstrap: domain::BootstrapAuthority::default(),
             },
@@ -2315,6 +2454,7 @@ impl InMemoryReplica {
                     raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"test-vault-phase"),
                     pinned_watermark: plan.pinned_watermark.clone(),
                     continuation: BootstrapContinuation::Final,
+                    vault_key_version_included: false,
                     vaults: std::mem::take(&mut plan.vaults),
                     items: Vec::new(),
                 };
@@ -2412,6 +2552,7 @@ impl InMemoryReplica {
             raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"seeded-vault-page"),
             pinned_watermark: SyncCursor::CapturedEmpty,
             continuation: BootstrapContinuation::Final,
+            vault_key_version_included: false,
             vaults,
             items: Vec::new(),
         })?;
@@ -2423,10 +2564,12 @@ impl InMemoryReplica {
             raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"seeded-item-page"),
             pinned_watermark: SyncCursor::CapturedEmpty,
             continuation: BootstrapContinuation::Final,
+            vault_key_version_included: false,
             vaults: Vec::new(),
             items,
         })?;
         account.promote_bootstrap(PromoteBootstrapPlan {
+            additional_retired_vault_ids: Vec::new(),
             guard: guard(account),
             generation_id,
         })?;
@@ -2472,6 +2615,46 @@ impl ReplicaPersistence for InMemoryReplica {
         request: ReplicaPersistenceRequest,
     ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
         match request {
+            ReplicaPersistenceRequest::Inventory { cursor } => {
+                let owner = self
+                    .inventory_nonce
+                    .get_or_init(bittery_crypto_core::generate_uuid);
+                let after = inventory::decode_cursor(owner, cursor.as_deref())?;
+                let state = self.state.lock().expect("replica lock poisoned");
+                let mut selected = Vec::with_capacity(inventory::PAGE_ENTRIES + 1);
+                for account in state.accounts.values() {
+                    inventory::select_key(
+                        &mut selected,
+                        after.as_ref(),
+                        ReplicaPhysicalKey::Head {
+                            account_id: account.account_id.clone(),
+                        },
+                    )?;
+                    // Reuse the physical row mapping; inventory never reconstructs or installs.
+                    for row in snapshot_rows(account.snapshot())? {
+                        inventory::select_key(
+                            &mut selected,
+                            after.as_ref(),
+                            ReplicaPhysicalKey::Row {
+                                account_id: row.key.account_id,
+                                store: row.store,
+                                record_id: row.key.record_id,
+                            },
+                        )?;
+                    }
+                }
+                let mut page = inventory::PageBuilder::new(owner, after.as_ref());
+                let mut more = false;
+                for key in selected {
+                    if !page.push(key)? {
+                        more = true;
+                        break;
+                    }
+                }
+                Ok(ReplicaPersistenceResponse::InventoryPage(
+                    page.finish(more)?,
+                ))
+            }
             ReplicaPersistenceRequest::Load { account_id } => {
                 let snapshot = self.snapshot(&account_id);
                 let (head, rows) = match snapshot {
@@ -2543,9 +2726,11 @@ impl ReplicaPersistence for InMemoryReplica {
                                 lock_epoch: head.lock_epoch,
                                 items: HashMap::new(),
                                 operations: HashMap::new(),
+                                cross_account_moves: HashMap::new(),
                                 share_capabilities: HashMap::new(),
                                 attachment_move_preparations: HashMap::new(),
                                 receipts: HashMap::new(),
+                                rotation_attempts: HashMap::new(),
                                 failure: head.failure,
                                 bootstrap: domain::BootstrapAuthority::default(),
                             },
@@ -2553,7 +2738,12 @@ impl ReplicaPersistence for InMemoryReplica {
                     }
                 }
                 if let Some(current) = state.accounts.get_mut(&account_id) {
-                    current.bootstrap = domain::BootstrapAuthority::default();
+                    let pending_vault_retirements =
+                        std::mem::take(&mut current.bootstrap.pending_vault_retirements);
+                    current.bootstrap = domain::BootstrapAuthority {
+                        pending_vault_retirements,
+                        ..domain::BootstrapAuthority::default()
+                    };
                     let rows = apply_prepared_writes_to_rows(
                         snapshot_rows(current.snapshot())?,
                         &prepared.writes,
@@ -2666,6 +2856,50 @@ impl ReplicaPersistence for InMemoryReplica {
                     },
                 })
             }
+            ReplicaPersistenceRequest::DeleteAccountIfUnchanged {
+                account_id,
+                expected_head,
+                expected_rows,
+            } => {
+                use persistence_contract::{
+                    admission_deletion_matches, ReplicaAccountDeletionResult,
+                };
+                admission_deletion_matches(
+                    &account_id,
+                    &expected_head,
+                    &expected_rows,
+                    &expected_head,
+                    &expected_rows,
+                )?;
+                let mut state = self.state.lock().expect("replica lock poisoned");
+                let result = match state.accounts.get(&account_id) {
+                    None => ReplicaAccountDeletionResult::AlreadyAbsent {},
+                    Some(current) => {
+                        let snapshot = current.snapshot();
+                        let head = ReplicaHead {
+                            account_id: snapshot.account_id.clone(),
+                            user_id: snapshot.user_id.clone(),
+                            incarnation: snapshot.incarnation.clone(),
+                            replica_revision: snapshot.revision,
+                            lock_epoch: snapshot.lock_epoch,
+                            failure: snapshot.failure,
+                        };
+                        if admission_deletion_matches(
+                            &account_id,
+                            &expected_head,
+                            &expected_rows,
+                            &head,
+                            &snapshot_rows(snapshot)?,
+                        )? {
+                            state.accounts.remove(&account_id);
+                            ReplicaAccountDeletionResult::Deleted {}
+                        } else {
+                            ReplicaAccountDeletionResult::Conflict {}
+                        }
+                    }
+                };
+                Ok(ReplicaPersistenceResponse::AccountDeletion { result })
+            }
             ReplicaPersistenceRequest::DeleteAccount { account_id } => {
                 if account_id.as_str().is_empty() {
                     return Err(replica_invariant("Replica Account identity is empty"));
@@ -2768,8 +3002,10 @@ mod persistence_contract_tests {
                 }
                 ReplicaPersistenceRequest::Commit { .. }
                 | ReplicaPersistenceRequest::AdvanceLockEpoch { .. }
+                | ReplicaPersistenceRequest::DeleteAccountIfUnchanged { .. }
                 | ReplicaPersistenceRequest::DeleteAccount { .. }
-                | ReplicaPersistenceRequest::WipeDevice => unreachable!(),
+                | ReplicaPersistenceRequest::WipeDevice
+                | ReplicaPersistenceRequest::Inventory { .. } => unreachable!(),
             }
         }
     }
@@ -2871,8 +3107,10 @@ mod persistence_contract_tests {
                     })
                 }
                 ReplicaPersistenceRequest::Commit { .. }
+                | ReplicaPersistenceRequest::DeleteAccountIfUnchanged { .. }
                 | ReplicaPersistenceRequest::DeleteAccount { .. }
-                | ReplicaPersistenceRequest::WipeDevice => unreachable!(),
+                | ReplicaPersistenceRequest::WipeDevice
+                | ReplicaPersistenceRequest::Inventory { .. } => unreachable!(),
             }
         }
     }
@@ -3061,9 +3299,11 @@ mod persistence_contract_tests {
                     lock_epoch: 0,
                     items: vec![item("account-1", "item-1", "operation-1")],
                     operations: vec![operation("operation-1", "item-1")],
+                    cross_account_moves: Vec::new(),
                     share_capabilities: vec![],
                     attachment_move_preparations: vec![],
                     receipts: vec![],
+                    rotation_attempts: vec![],
                     failure: None,
                     bootstrap: BootstrapAuthority::default(),
                 },
@@ -3097,9 +3337,11 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![item("account-1", "item-1", "operation-1")],
                 operations: vec![operation("operation-1", "item-1")],
+                cross_account_moves: Vec::new(),
                 share_capabilities: vec![],
                 attachment_move_preparations: vec![],
                 receipts: vec![],
+                rotation_attempts: vec![],
                 failure: None,
                 bootstrap: BootstrapAuthority::default(),
             },
@@ -3480,9 +3722,11 @@ mod persistence_contract_tests {
                 lock_epoch: 0,
                 items: vec![],
                 operations: vec![operation("operation-1", "item-1")],
+                cross_account_moves: Vec::new(),
                 share_capabilities: vec![],
                 attachment_move_preparations: vec![],
                 receipts: vec![],
+                rotation_attempts: vec![],
                 failure: None,
                 bootstrap: BootstrapAuthority::default(),
             },
@@ -3594,9 +3838,11 @@ mod persistence_contract_tests {
             lock_epoch: 0,
             items: vec![],
             operations: vec![operation("operation-old", "item-old")],
+            cross_account_moves: Vec::new(),
             share_capabilities: vec![],
             attachment_move_preparations: vec![],
             receipts: vec![],
+            rotation_attempts: vec![],
             failure: None,
             bootstrap: BootstrapAuthority::default(),
         };

@@ -1,10 +1,11 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { type DragItemData, VaultItemListRow } from "@bittery/ui";
+import { VaultItemListRow } from "@bittery/ui";
 import { IconClock, IconPasskey } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
+import type { DesktopPrivateDragItemData } from "../../lib/legacy-item-move";
 import { useVaultDnd } from "../../providers/dnd-provider";
 import { useI18n } from "../../providers/i18n-provider";
 import { Favicon } from "./favicon";
@@ -34,7 +35,7 @@ export function ItemListRow({
 		item.category === "login" && (item.passkeys?.length ?? 0) > 0;
 
 	const accountId = item.accountId ?? item.account?.accountId;
-	const dragData: DragItemData | undefined = accountId
+	const dragData: DesktopPrivateDragItemData | undefined = accountId
 		? {
 				type: "vault-item",
 				item,

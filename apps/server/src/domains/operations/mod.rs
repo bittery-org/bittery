@@ -312,6 +312,24 @@ pub(crate) enum CreateVaultOperationRejectionCode {
     SharedVaultLimitReached,
 }
 
+/// Vault mutations retain identity, never a stale metadata snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(crate) enum VaultMutationOperationResult {
+    Applied {
+        #[serde(rename = "vaultId")]
+        vault_id: String,
+    },
+    Rejected {
+        code: VaultMutationOperationRejectionCode,
+    },
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum VaultMutationOperationRejectionCode {
+    VaultAccessDenied,
+}
+
 /// The closed retained answer for one Import batch. Runtime dispatch remains gated until Ticket 57.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -408,6 +426,16 @@ pub(crate) enum OperationOutcome {
         operation_id: String,
         result: CreateVaultOperationResult,
     },
+    UpdateVault {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: VaultMutationOperationResult,
+    },
+    DeleteVault {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        result: VaultMutationOperationResult,
+    },
     ImportItems {
         #[serde(rename = "operationId")]
         operation_id: String,
@@ -479,7 +507,9 @@ impl OperationOutcome {
             OperationKind::CreateShare => {
                 unreachable!("Share outcomes use their non-secret applied payload")
             }
-            OperationKind::CreateVault => {
+            OperationKind::CreateVault
+            | OperationKind::UpdateVault
+            | OperationKind::DeleteVault => {
                 unreachable!("create-Vault outcomes use their Vault applied payload")
             }
             OperationKind::ImportItems => {
@@ -513,6 +543,24 @@ impl OperationOutcome {
         Self::CreateVault {
             operation_id,
             result,
+        }
+    }
+
+    pub(crate) fn new_vault_mutation(
+        kind: OperationKind,
+        operation_id: String,
+        result: VaultMutationOperationResult,
+    ) -> Self {
+        match kind {
+            OperationKind::UpdateVault => Self::UpdateVault {
+                operation_id,
+                result,
+            },
+            OperationKind::DeleteVault => Self::DeleteVault {
+                operation_id,
+                result,
+            },
+            _ => unreachable!("Vault mutation outcomes require a Vault mutation kind"),
         }
     }
 
@@ -616,6 +664,30 @@ pub(crate) fn create_vault_operation_fingerprint(vault_id: &str, raw_body: &[u8]
     hasher.finalize().into()
 }
 
+pub(crate) fn vault_mutation_operation_fingerprint(
+    kind: OperationKind,
+    vault_id: &str,
+    raw_body: &[u8],
+) -> [u8; 32] {
+    let route = match kind {
+        OperationKind::UpdateVault => "POST /api/v1/vaults/{vaultId}/metadata-updates",
+        OperationKind::DeleteVault => "POST /api/v1/vaults/{vaultId}/deletions",
+        _ => unreachable!("Vault mutation fingerprint requires a Vault mutation kind"),
+    };
+    let mut hasher = Sha256::new();
+    for part in [
+        OPERATION_DISCRIMINATOR,
+        kind.as_str().as_bytes(),
+        route.as_bytes(),
+        vault_id.as_bytes(),
+        raw_body,
+        b"".as_slice(),
+    ] {
+        fingerprint_part(&mut hasher, part);
+    }
+    hasher.finalize().into()
+}
+
 /// Hashes one Import batch: protocol, kind, the concrete route, and the exact ordered body bytes.
 ///
 /// This is the one Server fingerprint whose route part carries no HTTP method. The Runtime froze
@@ -689,6 +761,38 @@ fn outcome_from_row(
             };
         return Ok(OperationOutcome::new_import_items(
             operation_id.to_owned(),
+            result,
+        ));
+    }
+    if matches!(
+        row.operation_kind,
+        OperationKind::UpdateVault | OperationKind::DeleteVault
+    ) {
+        let result = match row.result_status {
+            OperationOutcomeStatus::Applied => {
+                let payload: CreateVaultAppliedPayload =
+                    serde_json::from_str(&row.applied_payload.ok_or_else(|| {
+                        AppError::internal("Stored Vault mutation has no applied payload")
+                    })?)
+                    .map_err(|_| AppError::internal("Stored Vault mutation payload is invalid"))?;
+                VaultMutationOperationResult::Applied {
+                    vault_id: payload.vault_id,
+                }
+            }
+            OperationOutcomeStatus::Rejected => {
+                if row.rejection_code != Some(OperationRejectionCode::VaultAccessDenied) {
+                    return Err(AppError::internal(
+                        "Stored Vault mutation has a foreign rejection",
+                    ));
+                }
+                VaultMutationOperationResult::Rejected {
+                    code: VaultMutationOperationRejectionCode::VaultAccessDenied,
+                }
+            }
+        };
+        return Ok(OperationOutcome::new_vault_mutation(
+            row.operation_kind,
+            operation_id.into(),
             result,
         ));
     }

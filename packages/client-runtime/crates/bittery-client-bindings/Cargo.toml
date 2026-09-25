@@ -9,7 +9,7 @@ description = "Shallow native and Web bindings for the Bittery Client Runtime"
 default = []
 artifact-control-contract-schema = ["dep:schemars"]
 transfer-control-contract-schema = ["dep:schemars"]
-vault-image-control-contract-schema = ["dep:schemars"]
+vault-image-control-contract-schema = ["dep:schemars", "bittery-client-core/vault-image-contract-schema"]
 binding-test-harness = ["bittery-client-core/binding-test-harness"]
 
 [lib]

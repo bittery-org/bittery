@@ -1,7 +1,7 @@
 import type { ShareLinkSummary } from "@bittery/client-runtime/protocol";
 import { useRuntimeClient } from "@bittery/client-runtime/react";
+import { observeAccountDeparture } from "@bittery/ui/runtime-presentation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { observeAccountDeparture } from "@/lib/runtime-account-presentation";
 
 interface HistoryScope {
 	accountId: string;
@@ -86,7 +86,7 @@ export function useRuntimeShareHistory(
 		async (linkId: string) => {
 			const scope = requireScope();
 			await runtime.revokeShareLink(
-				{ accountId: scope.accountId, linkId },
+				{ accountId: scope.accountId, itemId: scope.itemId, linkId },
 				{ signal: scope.controller.signal },
 			);
 			scope.controller.signal.throwIfAborted();
@@ -98,7 +98,7 @@ export function useRuntimeShareHistory(
 		async (linkId: string) => {
 			const scope = requireScope();
 			const result = await runtime.listShareAccessLogs(
-				{ accountId: scope.accountId, linkId },
+				{ accountId: scope.accountId, itemId: scope.itemId, linkId },
 				{ signal: scope.controller.signal },
 			);
 			scope.controller.signal.throwIfAborted();

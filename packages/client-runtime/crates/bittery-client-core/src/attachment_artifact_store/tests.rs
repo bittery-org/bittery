@@ -1,15 +1,14 @@
 use super::{
-    ArtifactChunkWrite, ArtifactPublication, AttachmentArtifactOwner, ExclusiveStartupBoundary,
-    ProvisionalAttachmentArtifactRecovery, ProvisionalAttachmentArtifactScope,
-    ProvisionalAttachmentArtifactStore, ProvisionalAttachmentArtifactStoreRequest,
-    ProvisionalAttachmentArtifactStoreResponse, ProvisionalAttachmentArtifactWriter,
-    SqliteAttachmentArtifactStore, SqliteFailureOperation, ARTIFACT_CHUNK_BYTES,
+    authenticated_target_for, ArtifactChunkWrite, ArtifactPublication, AttachmentArtifactOwner,
+    ExclusiveStartupBoundary, ProvisionalAttachmentArtifactRecovery,
+    ProvisionalAttachmentArtifactScope, ProvisionalAttachmentArtifactStore,
+    ProvisionalAttachmentArtifactStoreRequest, ProvisionalAttachmentArtifactStoreResponse,
+    ProvisionalAttachmentArtifactWriter, SqliteAttachmentArtifactStore, SqliteFailureOperation,
+    ARTIFACT_CHUNK_BYTES,
 };
 use crate::{replica::attachment_move_artifact_ref, AccountId};
 use bittery_crypto_core::{
-    attachment_move::{AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveTranscryptor},
-    attachment_move::{AttachmentPublicationIdentity, AttachmentPublicationProof},
-    encrypt_with_aad, AadContext,
+    attachment_move::AttachmentPublicationProof, encrypt_with_aad, AadContext,
 };
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
@@ -17,6 +16,9 @@ use std::{
     path::PathBuf,
     sync::{Arc, Barrier},
 };
+
+#[path = "recovery_validation_tests.rs"]
+mod recovery_validation;
 
 struct TestDatabase(PathBuf);
 
@@ -135,53 +137,6 @@ fn authenticated_target(plaintext: &str) -> (Vec<u8>, AttachmentPublicationProof
         "operation-1",
         "attachment-1",
     )
-}
-
-fn authenticated_target_for(
-    plaintext: &str,
-    account_id: &str,
-    user_id: &str,
-    operation_id: &str,
-    attachment_id: &str,
-) -> (Vec<u8>, AttachmentPublicationProof) {
-    let source_key = [31_u8; 32];
-    let target_key = [47_u8; 32];
-    let source_context = AadContext {
-        vault_id: "vault-source".into(),
-        entity_id: attachment_id.into(),
-        entity_type: "attachment_blob".into(),
-        version: 1,
-        user_id: user_id.into(),
-    };
-    let source =
-        serde_json::to_vec(&encrypt_with_aad(plaintext, &source_key, &source_context).unwrap())
-            .unwrap();
-    let mut scanner = AttachmentEnvelopeScanner::new();
-    for chunk in source.chunks(8_191) {
-        scanner.push(chunk).unwrap();
-    }
-    let mut transcryptor = AttachmentMoveTranscryptor::new(
-        scanner.finish().unwrap(),
-        source_key,
-        AttachmentBlobScope::new("vault-source".into(), attachment_id.into(), user_id.into()),
-        target_key,
-        AttachmentBlobScope::new("vault-target".into(), attachment_id.into(), user_id.into()),
-        AttachmentPublicationIdentity::new(
-            account_id.into(),
-            user_id.into(),
-            operation_id.into(),
-            attachment_id.into(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let mut target = Vec::new();
-    for chunk in source.chunks(7_919) {
-        target.extend(transcryptor.push(chunk).unwrap());
-    }
-    let finished = transcryptor.finish().unwrap();
-    target.extend(finished.final_chunk);
-    (target, finished.publication_proof)
 }
 
 #[test]
@@ -1499,4 +1454,165 @@ fn replay_and_publication_reject_corrupt_durable_chunk_digests() {
     assert!(restored.write_chunk(&replay, 0, &bytes).is_err());
     assert!(restored.publish(&publication).is_err());
     assert!(restored.read_chunk(&publication, 0).is_err());
+}
+
+#[test]
+fn selective_operation_sweep_preserves_other_writers_and_accepted_ciphertext() {
+    let database = TestDatabase::new("selective-operation-sweep");
+    let store = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+    let account = AccountId::from("account-1");
+    let live_bytes = vec![7; 31];
+    let live = owner("account-1", "accepted", "attachment", &live_bytes);
+    let old = owner("account-1", "accepted", "attachment", &[8; 31]);
+    let done = owner("account-1", "completed", "attachment", &[9; 31]);
+    let unrelated = owner("account-1", "unrelated-active", "attachment", &[10; 31]);
+    for (owner, bytes) in [
+        (&live, &[7; 31][..]),
+        (&old, &[8; 31][..]),
+        (&done, &[9; 31][..]),
+        (&unrelated, &[10; 31][..]),
+    ] {
+        store.write_chunk(owner, 0, bytes).unwrap();
+        if owner != &unrelated {
+            store.publish(owner).unwrap();
+        }
+    }
+    assert_eq!(
+        store
+            .sweep_operation_orphans(
+                &account,
+                &["accepted".into(), "completed".into()],
+                std::slice::from_ref(&live),
+                &[]
+            )
+            .unwrap(),
+        2
+    );
+    assert_eq!(store.read_chunk(&live, 0).unwrap().bytes, live_bytes);
+    assert!(store.read_chunk(&old, 0).is_err());
+    assert!(store.read_chunk(&done, 0).is_err());
+    store.publish(&unrelated).unwrap();
+    assert_eq!(store.read_chunk(&unrelated, 0).unwrap().bytes, vec![10; 31]);
+}
+
+#[tokio::test]
+async fn selective_sweep_preserves_pending_recovery_after_lost_publication_checkpoint() {
+    for interrupted_at in [
+        SqliteFailureOperation::VerifyProvisional,
+        SqliteFailureOperation::FinalizeProvisional,
+    ] {
+        let database = TestDatabase::new(match interrupted_at {
+            SqliteFailureOperation::VerifyProvisional => "selected-pending-verifying",
+            _ => "selected-pending-finalized",
+        });
+        let account = AccountId::from("account-1");
+        let scope =
+            ProvisionalAttachmentArtifactScope::new(account.clone(), "operation-1", "attachment-1")
+                .unwrap();
+        let (bytes, publication) = authenticated_target("accepted before Replica checkpoint");
+        let store = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+        let writer = store.begin_provisional(&scope).unwrap();
+        store.write_provisional_chunk(&writer, 0, &bytes).unwrap();
+        drop(store);
+        let interrupted =
+            SqliteAttachmentArtifactStore::open_failing_after(&database.0, interrupted_at, 1)
+                .unwrap();
+        assert!(interrupted
+            .finalize_provisional(&writer, publication)
+            .is_err());
+        drop(interrupted);
+        drop(writer);
+        let restarted = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+        assert_eq!(
+            restarted
+                .sweep_operation_orphans(
+                    &account,
+                    &["operation-1".into()],
+                    &[],
+                    std::slice::from_ref(&scope)
+                )
+                .unwrap(),
+            0
+        );
+        let ProvisionalAttachmentArtifactStoreResponse::RecoveryAvailable(recovery) = restarted
+            .invoke_provisional(ProvisionalAttachmentArtifactStoreRequest::Begin {
+                writer: ProvisionalAttachmentArtifactWriter::new(scope),
+            })
+            .await
+            .unwrap()
+        else {
+            panic!("accepted Pending scope must retain its authenticated recoverable generation");
+        };
+        let ProvisionalAttachmentArtifactStoreResponse::Finalized(owner) = restarted
+            .invoke_provisional(ProvisionalAttachmentArtifactStoreRequest::ResumeRecovered {
+                recovery,
+            })
+            .await
+            .unwrap()
+        else {
+            panic!("recover final ciphertext");
+        };
+        assert_eq!(restarted.read_chunk(&owner, 0).unwrap().bytes, bytes);
+    }
+}
+
+#[test]
+fn selective_operation_sweep_failure_reopens_with_accepted_and_unrelated_rows_intact() {
+    let database = TestDatabase::new("selected-sweep-failure");
+    let account = AccountId::from("account-1");
+    let live = owner("account-1", "selected", "attachment-live", &[1; 31]);
+    let garbage = owner("account-1", "selected", "attachment-old", &[2; 31]);
+    let other = owner("account-1", "other", "attachment", &[3; 31]);
+    let store = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+    for (scope, bytes) in [
+        (&live, &[1; 31][..]),
+        (&garbage, &[2; 31][..]),
+        (&other, &[3; 31][..]),
+    ] {
+        store.write_chunk(scope, 0, bytes).unwrap();
+        store.publish(scope).unwrap();
+    }
+    drop(store);
+    let failed = SqliteAttachmentArtifactStore::open_failing_after(
+        &database.0,
+        SqliteFailureOperation::SweepOrphans,
+        1,
+    )
+    .unwrap();
+    assert!(failed
+        .sweep_operation_orphans(
+            &account,
+            &["selected".into()],
+            std::slice::from_ref(&live),
+            &[]
+        )
+        .is_err());
+    drop(failed);
+    let reopened = SqliteAttachmentArtifactStore::open(&database.0).unwrap();
+    assert_eq!(reopened.read_chunk(&live, 0).unwrap().bytes, vec![1; 31]);
+    assert_eq!(reopened.read_chunk(&garbage, 0).unwrap().bytes, vec![2; 31]);
+    assert_eq!(reopened.read_chunk(&other, 0).unwrap().bytes, vec![3; 31]);
+    assert_eq!(
+        reopened
+            .sweep_operation_orphans(
+                &account,
+                &["selected".into()],
+                std::slice::from_ref(&live),
+                &[]
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(reopened.read_chunk(&other, 0).unwrap().bytes, vec![3; 31]);
+    assert!(reopened
+        .sweep_operation_orphans(
+            &account,
+            &["selected".into()],
+            std::slice::from_ref(&other),
+            &[]
+        )
+        .is_err());
+    assert!(reopened
+        .sweep_operation_orphans(&account, &["selected".into(), "selected".into()], &[], &[])
+        .is_err());
 }

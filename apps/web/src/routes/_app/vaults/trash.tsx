@@ -19,10 +19,10 @@ import {
 	IconArchiveRestore as Restore,
 	IconTrash as Trash,
 } from "@bittery/ui/icons";
+import { useAccountPresentationState } from "@bittery/ui/runtime-presentation";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { Favicon } from "@/components/vault/favicon";
-import { useAccountPresentationState } from "@/hooks/use-account-presentation-state";
 import {
 	usePermanentDeleteItem,
 	useRestoreItem,

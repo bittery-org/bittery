@@ -255,6 +255,7 @@ pub(crate) enum ForegroundUploadOutcome {
 pub(crate) enum AttachmentUploadSourceControl {
     Claim {
         account_id: String,
+        vault_id: String,
         item_id: String,
         name: String,
         content_type: String,
@@ -282,6 +283,17 @@ pub(crate) enum AttachmentUploadSourceControl {
     CompleteAccountRetirement {
         account_id: String,
     },
+    RetireVaults {
+        account_id: String,
+        vault_ids: Vec<String>,
+    },
+    CompleteVaultRetirement {
+        account_id: String,
+        vault_ids: Vec<String>,
+    },
+    ForgetAccountVaultRetirements {
+        account_id: String,
+    },
     RetireRuntime,
 }
 
@@ -303,6 +315,72 @@ pub(crate) enum AttachmentUploadSourceAnswer {
     InvariantViolation,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum AttachmentDownloadSinkControl {
+    Begin {
+        account_id: String,
+        vault_id: String,
+        attachment_id: String,
+        capability_id: String,
+        request_scope: String,
+    },
+    Write {
+        capability_id: String,
+    },
+    Commit {
+        capability_id: String,
+    },
+    Discard {
+        capability_id: String,
+    },
+    RetireAccount {
+        account_id: String,
+    },
+    CompleteAccountRetirement {
+        account_id: String,
+    },
+    RetireVaults {
+        account_id: String,
+        vault_ids: Vec<String>,
+    },
+    CompleteVaultRetirement {
+        account_id: String,
+        vault_ids: Vec<String>,
+    },
+    ForgetAccountVaultRetirements {
+        account_id: String,
+    },
+    RetireRuntime,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "transfer-control-contract-schema",
+    derive(schemars::JsonSchema)
+)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum AttachmentDownloadSinkAnswer {
+    Begun,
+    Written,
+    Committed,
+    Discarded,
+    Retired,
+    RetirementCompleted,
+    SinkFailure,
+    Cancelled,
+    InvariantViolation,
+}
+
 #[cfg(feature = "transfer-control-contract-schema")]
 #[derive(schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -312,6 +390,8 @@ struct TransferControlContract {
     foreground_upload_outcome: ForegroundUploadOutcome,
     attachment_upload_source_control: AttachmentUploadSourceControl,
     attachment_upload_source_answer: AttachmentUploadSourceAnswer,
+    attachment_download_sink_control: AttachmentDownloadSinkControl,
+    attachment_download_sink_answer: AttachmentDownloadSinkAnswer,
 }
 
 #[cfg(feature = "transfer-control-contract-schema")]
@@ -388,6 +468,7 @@ pub fn transfer_control_contract_fixture() -> serde_json::Value {
             {
                 "type": "claim",
                 "accountId": "account-1",
+                "vaultId": "vault-1",
                 "itemId": "item-1",
                 "name": "secret.txt",
                 "contentType": "text/plain",
@@ -398,7 +479,27 @@ pub fn transfer_control_contract_fixture() -> serde_json::Value {
             { "type": "close", "capabilityId": "source-1" },
             { "type": "retireAccount", "accountId": "account-1" },
             { "type": "completeAccountRetirement", "accountId": "account-1" },
+            { "type": "retireVaults", "accountId": "account-1", "vaultIds": ["vault-1"] },
+            { "type": "completeVaultRetirement", "accountId": "account-1", "vaultIds": ["vault-1"] },
+            { "type": "forgetAccountVaultRetirements", "accountId": "account-1" },
             { "type": "retireRuntime" }
+        ],
+        "attachmentDownloadSinkControls": [
+            { "type": "begin", "accountId": "account-1", "vaultId": "vault-1", "attachmentId": "attachment-1", "capabilityId": "sink-1", "requestScope": "request-1" },
+            { "type": "write", "capabilityId": "sink-1" },
+            { "type": "commit", "capabilityId": "sink-1" },
+            { "type": "discard", "capabilityId": "sink-1" },
+            { "type": "retireAccount", "accountId": "account-1" },
+            { "type": "completeAccountRetirement", "accountId": "account-1" },
+            { "type": "retireVaults", "accountId": "account-1", "vaultIds": ["vault-1"] },
+            { "type": "completeVaultRetirement", "accountId": "account-1", "vaultIds": ["vault-1"] },
+            { "type": "forgetAccountVaultRetirements", "accountId": "account-1" },
+            { "type": "retireRuntime" }
+        ],
+        "attachmentDownloadSinkAnswers": [
+            { "type": "begun" }, { "type": "written" }, { "type": "committed" },
+            { "type": "discarded" }, { "type": "retired" }, { "type": "retirementCompleted" },
+            { "type": "sinkFailure" }, { "type": "cancelled" }, { "type": "invariantViolation" }
         ],
         "attachmentUploadSourceAnswers": [
             { "type": "claimed" },

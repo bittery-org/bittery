@@ -147,6 +147,146 @@ describe("desktop-client native transport", () => {
 });
 
 describe("native-messaging-client", () => {
+	test("late failure cleanup cannot erase a newer material owner", async () => {
+		const client = new NativeMessagingClient();
+		const generation = await client.captureDeliveryGeneration();
+		const oldInvocation = client.newMaterialInvocation();
+		const newInvocation = client.newMaterialInvocation();
+		let material = "empty";
+		await client.withMaterialMutation(
+			generation,
+			"account-alice",
+			async () => {
+				material = "old";
+			},
+			oldInvocation,
+		);
+		await client.withMaterialMutation(
+			generation,
+			"account-alice",
+			async () => {
+				material = "new";
+			},
+			newInvocation,
+		);
+		await client.withOwnedFailureCleanup(
+			generation,
+			"account-alice",
+			oldInvocation,
+			async () => {
+				material = "cleared";
+				return {
+					affected: [{ accountId: "account-alice", email: "a@example.test" }],
+					activeAccountId: undefined,
+					activeAccount: null,
+					wasActive: false,
+					remaining: [],
+					failures: [],
+				};
+			},
+		);
+		expect(material).toBe("new");
+		await client.withOwnedFailureCleanup(
+			generation,
+			"account-alice",
+			newInvocation,
+			async () => {
+				material = "cleared";
+				return {
+					affected: [{ accountId: "account-alice", email: "a@example.test" }],
+					activeAccountId: undefined,
+					activeAccount: null,
+					wasActive: false,
+					remaining: [],
+					failures: [],
+				};
+			},
+		);
+		expect(material).toBe("cleared");
+	});
+
+	test("a lock event retires a buffered reply before DesktopClient can cache it", async () => {
+		const fakePort = createFakePort();
+		const transport = new NativeMessagingClient({
+			connectNative: () => fakePort.port,
+		});
+		const client = new DesktopClient({ nativeClient: transport });
+		const unsubscribe = transport.subscribeToDesktopEvents(() => {});
+		const subscription = fakePort.postedMessages[0] as { requestId: string };
+		fakePort.emitMessage({
+			protocolVersion: 1,
+			requestId: subscription.requestId,
+			type: "DESKTOP_EVENT_SUBSCRIPTION",
+			subscribed: true,
+		});
+		await Promise.resolve();
+
+		const stale = client.getAuthToken("account-alice");
+		const tokenRequest = fakePort.postedMessages[1] as { requestId: string };
+		fakePort.emitMessage({
+			protocolVersion: 1,
+			type: "DESKTOP_EVENT",
+			event: "lock",
+			payload: { reason: "Core lock", timestamp: 1 },
+		});
+		fakePort.emitMessage({
+			protocolVersion: 1,
+			requestId: tokenRequest.requestId,
+			type: "DESKTOP_AUTH_TOKEN",
+			accountId: "account-alice",
+			email: "alice@example.com",
+			authToken: "stale",
+		});
+		expect(await stale).toBeNull();
+		expect(fakePort.postedMessages).toHaveLength(2);
+		unsubscribe();
+	});
+
+	test("a reply already resolved cannot publish a cache after invalidation", async () => {
+		const fakePort = createFakePort();
+		const transport = new NativeMessagingClient({
+			connectNative: () => fakePort.port,
+		});
+		const client = new DesktopClient({ nativeClient: transport });
+		transport.subscribeToDesktopEvents(() => {});
+		const subscription = fakePort.postedMessages[0] as { requestId: string };
+		fakePort.emitMessage({
+			protocolVersion: 1,
+			requestId: subscription.requestId,
+			type: "DESKTOP_EVENT_SUBSCRIPTION",
+			subscribed: true,
+		});
+		await Promise.resolve();
+
+		const stale = client.getAuthToken("account-alice");
+		const first = fakePort.postedMessages[1] as { requestId: string };
+		fakePort.emitMessage({
+			protocolVersion: 1,
+			requestId: first.requestId,
+			type: "DESKTOP_AUTH_TOKEN",
+			accountId: "account-alice",
+			email: "alice@example.com",
+			authToken: "stale",
+		});
+		fakePort.emitMessage({
+			protocolVersion: 1,
+			type: "DESKTOP_EVENT",
+			event: "lock",
+			payload: { reason: "Core lock", timestamp: 2 },
+		});
+		expect(await stale).toBeNull();
+		const fresh = client.getAuthToken("account-alice");
+		const second = fakePort.postedMessages[2] as { requestId: string };
+		fakePort.emitMessage({
+			protocolVersion: 1,
+			requestId: second.requestId,
+			type: "DESKTOP_AUTH_TOKEN",
+			accountId: "account-alice",
+			email: "alice@example.com",
+			authToken: "fresh",
+		});
+		expect(await fresh).toBe("fresh");
+	});
 	test("includes the current desktop protocol version on requests", () => {
 		const fakePort = createFakePort();
 		const client = new NativeMessagingClient({
@@ -216,6 +356,61 @@ describe("native-messaging-client", () => {
 			timestamp: 2,
 			autolockTimeoutMs: 3,
 		});
+	});
+
+	test("port loss waits for C1 before successor acquisition and old callbacks stay retired", async () => {
+		const firstPort = createFakePort();
+		const secondPort = createFakePort();
+		let connects = 0;
+		let cleanups = 0;
+		let releaseCleanup!: () => void;
+		let markCleanup!: () => void;
+		const cleanupStarted = new Promise<void>((resolve) => {
+			markCleanup = resolve;
+		});
+		const cleanupGate = new Promise<void>((resolve) => {
+			releaseCleanup = resolve;
+		});
+		const client = new NativeMessagingClient({
+			connectNative: () =>
+				++connects === 1 ? firstPort.port : secondPort.port,
+		});
+		client.configureRetirementCleanup(async () => {
+			cleanups += 1;
+			markCleanup();
+			await cleanupGate;
+		});
+		client.subscribeToDesktopEvents(() => {});
+		const subscription = firstPort.postedMessages[0] as { requestId: string };
+		firstPort.emitMessage({
+			protocolVersion: 1,
+			requestId: subscription.requestId,
+			type: "DESKTOP_EVENT_SUBSCRIPTION",
+			subscribed: true,
+		});
+		await Promise.resolve();
+		firstPort.emitDisconnect();
+		await cleanupStarted;
+		const successor = client.request({ type: "PING" });
+		expect(secondPort.postedMessages).toHaveLength(0);
+		releaseCleanup();
+		await client.captureDeliveryGeneration();
+		const ping = secondPort.postedMessages[0] as { requestId: string };
+		secondPort.emitMessage({
+			protocolVersion: 1,
+			requestId: ping.requestId,
+			type: "PONG",
+		});
+		await successor;
+		const generation = client.currentDeliveryGeneration();
+		firstPort.emitMessage({
+			protocolVersion: 1,
+			type: "DESKTOP_EVENT",
+			event: "lock",
+			payload: { reason: "old port", timestamp: 3 },
+		});
+		expect(client.currentDeliveryGeneration()).toBe(generation);
+		expect(cleanups).toBe(1);
 	});
 
 	test("delivers desktop events through the persistent native port", async () => {

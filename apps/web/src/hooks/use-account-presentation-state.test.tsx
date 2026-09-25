@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { createRuntimeClient } from "@bittery/client-runtime/client";
 import { RuntimeProvider } from "@bittery/client-runtime/react";
 import { createFakeRuntimeTransport } from "@bittery/client-runtime/testing";
+import { useAccountPresentationState } from "@bittery/ui/runtime-presentation";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { useAccountPresentationState } from "./use-account-presentation-state";
 
 for (const departure of ["lock", "account"] as const)
 	test(`dialog and drag selections retire during transient ${departure}`, async () => {
@@ -28,7 +28,19 @@ for (const departure of ["lock", "account"] as const)
 							access,
 							failure: null,
 							replicaRevision: "1",
-							displayIdentity: { email: "a@example.test" },
+							unlockCapabilities: {
+								password: false,
+								desktop: false,
+								signIn: false,
+							},
+							displayIdentity: {
+								email: "a@example.test",
+								name: "Test Account",
+								teamName: null,
+								teamAvatarUrl: null,
+								serverUrl: "https://vault.example.test",
+								secretKeyHint: "A3-A••••",
+							},
 						},
 					],
 				},

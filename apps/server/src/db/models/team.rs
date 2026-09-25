@@ -85,6 +85,7 @@ pub struct DbTeamInvitationSendTeamRow {
 
 #[derive(Clone, Debug, FromRow)]
 pub struct DbExistingInviteeRow {
+    pub id: String,
     pub team_id: Option<String>,
     pub public_key: Option<String>,
 }

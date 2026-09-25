@@ -1,3 +1,4 @@
+import type { WebVaultCapabilityScope } from "../web-vault-capability-scopes";
 import {
 	activateWebVaultImageSourceRegistry,
 	type VaultImageSourceAnswer,
@@ -8,6 +9,7 @@ import {
 
 export interface VaultImageSourceRegistryOwner {
 	readonly grants: {
+		captureScope(accountId: string, vaultId?: string): WebVaultCapabilityScope;
 		grant(source: VaultImageSourceGrant): string;
 		discard(capabilityId: string): Promise<void>;
 	};
@@ -50,6 +52,8 @@ export function createVaultImageSourceRegistryOwner(
 		return task;
 	};
 	const grants = {
+		captureScope: (accountId: string, vaultId?: string) =>
+			registry.captureScope(accountId, vaultId),
 		grant: (source: VaultImageSourceGrant) => registry.grant(source),
 		discard: (capabilityId: string) => registry.discard(capabilityId),
 	};

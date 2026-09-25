@@ -211,52 +211,8 @@ mod wasm {
         })
     }
 
-    #[derive(serde::Serialize)]
-    #[serde(
-        tag = "type",
-        rename_all = "camelCase",
-        rename_all_fields = "camelCase"
-    )]
-    enum SinkControl<'a> {
-        Begin {
-            account_id: &'a str,
-            attachment_id: &'a str,
-            capability_id: &'a str,
-            request_scope: &'a str,
-        },
-        Write {
-            capability_id: &'a str,
-        },
-        Commit {
-            capability_id: &'a str,
-        },
-        Discard {
-            capability_id: &'a str,
-        },
-        RetireAccount {
-            account_id: &'a str,
-        },
-        CompleteAccountRetirement {
-            account_id: &'a str,
-        },
-        RetireRuntime,
-    }
-
-    #[derive(serde::Deserialize, PartialEq, Eq)]
-    #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
-    enum SinkAnswer {
-        Begun,
-        Written,
-        Committed,
-        Discarded,
-        Retired,
-        RetirementCompleted,
-        SinkFailure,
-        Cancelled,
-        InvariantViolation,
-    }
-
     use crate::web_binary_transfer_control::{
+        AttachmentDownloadSinkAnswer as SinkAnswer, AttachmentDownloadSinkControl as SinkControl,
         AttachmentUploadSourceAnswer as SourceAnswer,
         AttachmentUploadSourceControl as SourceControl,
     };
@@ -423,6 +379,7 @@ mod wasm {
         async fn claim(
             &self,
             account_id: &core::AccountId,
+            vault_id: &str,
             item_id: &str,
             name: &str,
             content_type: &str,
@@ -440,6 +397,7 @@ mod wasm {
             match self
                 .invoke(SourceControl::Claim {
                     account_id: identity.0.clone(),
+                    vault_id: vault_id.to_owned(),
                     item_id: identity.1.clone(),
                     name: identity.2.clone(),
                     content_type: identity.3.clone(),
@@ -478,6 +436,55 @@ mod wasm {
         ) -> Result<(), core::AttachmentUploadSourceError> {
             match self
                 .invoke(SourceControl::CompleteAccountRetirement {
+                    account_id: account_id.as_str().to_owned(),
+                })
+                .await?
+                .0
+            {
+                SourceAnswer::RetirementCompleted => Ok(()),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+        async fn retire_vaults(
+            &self,
+            account_id: &core::AccountId,
+            vault_ids: &[String],
+        ) -> Result<(), core::AttachmentUploadSourceError> {
+            match self
+                .invoke(SourceControl::RetireVaults {
+                    account_id: account_id.as_str().to_owned(),
+                    vault_ids: vault_ids.to_vec(),
+                })
+                .await?
+                .0
+            {
+                SourceAnswer::Retired => Ok(()),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+        async fn complete_vault_retirement(
+            &self,
+            account_id: &core::AccountId,
+            vault_ids: &[String],
+        ) -> Result<(), core::AttachmentUploadSourceError> {
+            match self
+                .invoke(SourceControl::CompleteVaultRetirement {
+                    account_id: account_id.as_str().to_owned(),
+                    vault_ids: vault_ids.to_vec(),
+                })
+                .await?
+                .0
+            {
+                SourceAnswer::RetirementCompleted => Ok(()),
+                _ => Err(core::AttachmentUploadSourceError::Invariant),
+            }
+        }
+        async fn forget_account_vault_retirements(
+            &self,
+            account_id: &core::AccountId,
+        ) -> Result<(), core::AttachmentUploadSourceError> {
+            match self
+                .invoke(SourceControl::ForgetAccountVaultRetirements {
                     account_id: account_id.as_str().to_owned(),
                 })
                 .await?
@@ -686,7 +693,7 @@ mod wasm {
 
         async fn invoke(
             &self,
-            request: SinkControl<'_>,
+            request: SinkControl,
             bytes: Option<&[u8]>,
         ) -> Result<SinkAnswer, core::AttachmentDownloadSinkError> {
             let invoke = function(&self.executor, "invoke")
@@ -721,6 +728,7 @@ mod wasm {
     struct JsAttachmentDownloadSink {
         port: Arc<JsAttachmentDownloadSinkPort>,
         account_id: String,
+        vault_id: String,
         attachment_id: String,
         capability_id: String,
     }
@@ -732,10 +740,11 @@ mod wasm {
                 .port
                 .invoke(
                     SinkControl::Begin {
-                        account_id: &self.account_id,
-                        attachment_id: &self.attachment_id,
-                        capability_id: &self.capability_id,
-                        request_scope: &self.capability_id,
+                        account_id: self.account_id.clone(),
+                        vault_id: self.vault_id.clone(),
+                        attachment_id: self.attachment_id.clone(),
+                        capability_id: self.capability_id.clone(),
+                        request_scope: self.capability_id.clone(),
                     },
                     None,
                 )
@@ -751,7 +760,7 @@ mod wasm {
                 .port
                 .invoke(
                     SinkControl::Write {
-                        capability_id: &self.capability_id,
+                        capability_id: self.capability_id.clone(),
                     },
                     Some(bytes),
                 )
@@ -767,7 +776,7 @@ mod wasm {
                 .port
                 .invoke(
                     SinkControl::Commit {
-                        capability_id: &self.capability_id,
+                        capability_id: self.capability_id.clone(),
                     },
                     None,
                 )
@@ -783,7 +792,7 @@ mod wasm {
                 .port
                 .invoke(
                     SinkControl::Discard {
-                        capability_id: &self.capability_id,
+                        capability_id: self.capability_id.clone(),
                     },
                     None,
                 )
@@ -800,6 +809,7 @@ mod wasm {
         fn claim(
             &self,
             account_id: &core::AccountId,
+            vault_id: &str,
             attachment_id: &str,
             capability_id: &str,
         ) -> Result<Box<dyn core::AttachmentDownloadSink>, core::AttachmentDownloadSinkError>
@@ -807,6 +817,7 @@ mod wasm {
             Ok(Box::new(JsAttachmentDownloadSink {
                 port: Arc::new(self.clone()),
                 account_id: account_id.as_str().to_owned(),
+                vault_id: vault_id.to_owned(),
                 attachment_id: attachment_id.to_owned(),
                 capability_id: capability_id.to_owned(),
             }))
@@ -819,7 +830,7 @@ mod wasm {
             match self
                 .invoke(
                     SinkControl::RetireAccount {
-                        account_id: account_id.as_str(),
+                        account_id: account_id.as_str().to_owned(),
                     },
                     None,
                 )
@@ -837,7 +848,7 @@ mod wasm {
             match self
                 .invoke(
                     SinkControl::CompleteAccountRetirement {
-                        account_id: account_id.as_str(),
+                        account_id: account_id.as_str().to_owned(),
                     },
                     None,
                 )
@@ -848,6 +859,61 @@ mod wasm {
             }
         }
 
+        async fn retire_vaults(
+            &self,
+            account_id: &core::AccountId,
+            vault_ids: &[String],
+        ) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .invoke(
+                    SinkControl::RetireVaults {
+                        account_id: account_id.as_str().to_owned(),
+                        vault_ids: vault_ids.to_vec(),
+                    },
+                    None,
+                )
+                .await?
+            {
+                SinkAnswer::Retired => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+        async fn complete_vault_retirement(
+            &self,
+            account_id: &core::AccountId,
+            vault_ids: &[String],
+        ) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .invoke(
+                    SinkControl::CompleteVaultRetirement {
+                        account_id: account_id.as_str().to_owned(),
+                        vault_ids: vault_ids.to_vec(),
+                    },
+                    None,
+                )
+                .await?
+            {
+                SinkAnswer::RetirementCompleted => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
+        async fn forget_account_vault_retirements(
+            &self,
+            account_id: &core::AccountId,
+        ) -> Result<(), core::AttachmentDownloadSinkError> {
+            match self
+                .invoke(
+                    SinkControl::ForgetAccountVaultRetirements {
+                        account_id: account_id.as_str().to_owned(),
+                    },
+                    None,
+                )
+                .await?
+            {
+                SinkAnswer::RetirementCompleted => Ok(()),
+                _ => Err(core::AttachmentDownloadSinkError::Invariant),
+            }
+        }
         async fn retire_runtime(&self) -> Result<(), core::AttachmentDownloadSinkError> {
             match self.invoke(SinkControl::RetireRuntime, None).await? {
                 SinkAnswer::Retired => Ok(()),
@@ -957,7 +1023,7 @@ mod wasm {
                     identity.artifact_id,
                     identity.spool_generation,
                     grant.upload_url.clone(),
-                    Vec::new(),
+                    grant.validated_headers(owner)?,
                     identity.ciphertext_sha256,
                     identity.byte_length,
                     MAX_TRANSFER_CHUNK_BYTES,
@@ -1167,6 +1233,7 @@ mod wasm {
     fn lease_error() -> core::RuntimeError {
         core::RuntimeError {
             recovery_bound: None,
+            team_page_problem: None,
             code: core::RuntimeErrorCode::InvariantViolation,
             message: "Attachment Move Account lease invocation failed".into(),
         }
@@ -1298,6 +1365,7 @@ mod wasm {
             };
             destroyed.map(|()| answer).map_err(|()| core::RuntimeError {
                 recovery_bound: None,
+                team_page_problem: None,
                 code: core::RuntimeErrorCode::InvariantViolation,
                 message: "Ciphertext spool cleanup failed".into(),
             })
@@ -1433,6 +1501,7 @@ mod wasm {
             let source = core::AttachmentUploadSourcePort::claim(
                 self.port.as_ref(),
                 &core::AccountId::from("account-source"),
+                "vault-source",
                 "item-source",
                 "held.txt",
                 "text/plain",
@@ -1585,7 +1654,11 @@ mod wasm {
             self.download.borrow_mut().take();
         }
 
-        pub async fn open_upload(&self, server_storage_key: String) -> Result<(), JsValue> {
+        pub async fn open_upload(
+            &self,
+            server_storage_key: String,
+            signed_headers: Option<String>,
+        ) -> Result<(), JsValue> {
             use sha2::{Digest, Sha256};
 
             let account_id = core::AccountId::from("account-upload");
@@ -1619,6 +1692,11 @@ mod wasm {
                 attachment_id: attachment_id.into(),
                 storage_key: server_storage_key,
                 upload_url: "https://objects.test/upload?opaque=credential".into(),
+                headers: signed_headers
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()
+                    .map_err(|_| JsValue::from_str("invalid test upload headers"))?
+                    .unwrap_or_default(),
             };
             let upload = core::AttachmentMoveTransferPort::open_upload(
                 self.transfer.as_ref(),
@@ -1753,6 +1831,7 @@ mod wasm {
         pub fn observe_lifecycle_error(&self, callback: Function) {
             let error = core::RuntimeError {
                 recovery_bound: None,
+                team_page_problem: None,
                 code: core::RuntimeErrorCode::InvariantViolation,
                 message: "TEST_PRIVATE_LIFECYCLE_DETAIL".into(),
             };
@@ -1941,6 +2020,7 @@ mod tests {
     fn lifecycle_error_observation_redacts_internal_details() {
         let error = bittery_client_core::RuntimeError {
             recovery_bound: None,
+            team_page_problem: None,
             code: bittery_client_core::RuntimeErrorCode::InvariantViolation,
             message: "UNIQUE_SIGNED_URL_AND_HOST_DETAIL".into(),
         };

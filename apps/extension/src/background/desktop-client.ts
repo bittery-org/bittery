@@ -50,14 +50,26 @@ type DesktopClientDeps = {
 	nativeClient?: Pick<
 		NativeMessagingClient,
 		"request" | "subscribeToDesktopEvents"
-	>;
+	> &
+		Partial<
+			Pick<
+				NativeMessagingClient,
+				"currentDeliveryGeneration" | "isCurrentDelivery" | "onDeliveryRetired"
+			>
+		>;
 };
 
 export class DesktopClient {
 	private readonly nativeClient: Pick<
 		NativeMessagingClient,
 		"request" | "subscribeToDesktopEvents"
-	>;
+	> &
+		Partial<
+			Pick<
+				NativeMessagingClient,
+				"currentDeliveryGeneration" | "isCurrentDelivery" | "onDeliveryRetired"
+			>
+		>;
 	private accountsCache: CachedData<DesktopAccountsResponse> | null = null;
 	private vaultKeysCache = new Map<
 		string,
@@ -80,6 +92,15 @@ export class DesktopClient {
 
 	constructor(deps: DesktopClientDeps = {}) {
 		this.nativeClient = deps.nativeClient ?? nativeMessagingClient;
+		this.nativeClient.onDeliveryRetired?.(() => this.clearCache());
+	}
+
+	private deliveryGeneration(): number {
+		return this.nativeClient.currentDeliveryGeneration?.() ?? 0;
+	}
+
+	private isCurrent(generation: number): boolean {
+		return this.nativeClient.isCurrentDelivery?.(generation) ?? true;
 	}
 
 	private isFresh(timestamp: number): boolean {
@@ -93,10 +114,11 @@ export class DesktopClient {
 
 	async getLockStatus(): Promise<DesktopStatus | null> {
 		try {
+			const generation = this.deliveryGeneration();
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_STATUS",
 			});
-			if (response.type !== "DESKTOP_STATUS") {
+			if (!this.isCurrent(generation) || response.type !== "DESKTOP_STATUS") {
 				return null;
 			}
 
@@ -119,10 +141,11 @@ export class DesktopClient {
 		}
 
 		try {
+			const generation = this.deliveryGeneration();
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_ACCOUNTS",
 			});
-			if (response.type !== "DESKTOP_ACCOUNTS") {
+			if (!this.isCurrent(generation) || response.type !== "DESKTOP_ACCOUNTS") {
 				return null;
 			}
 
@@ -144,11 +167,15 @@ export class DesktopClient {
 		}
 
 		try {
+			const generation = this.deliveryGeneration();
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_AUTH_TOKEN",
 				accountId,
 			});
-			if (response.type !== "DESKTOP_AUTH_TOKEN") {
+			if (
+				!this.isCurrent(generation) ||
+				response.type !== "DESKTOP_AUTH_TOKEN"
+			) {
 				return null;
 			}
 
@@ -172,11 +199,15 @@ export class DesktopClient {
 		}
 
 		try {
+			const generation = this.deliveryGeneration();
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_VAULT_KEYS",
 				accountId,
 			});
-			if (response.type !== "DESKTOP_VAULT_KEYS") {
+			if (
+				!this.isCurrent(generation) ||
+				response.type !== "DESKTOP_VAULT_KEYS"
+			) {
 				return null;
 			}
 
@@ -203,10 +234,12 @@ export class DesktopClient {
 		}
 
 		try {
+			const generation = this.deliveryGeneration();
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_ITEMS_SNAPSHOT",
 				accountIds: normalizedAccountIds,
 			});
+			if (!this.isCurrent(generation)) return null;
 			if (response.type === "ERROR") {
 				console.warn("[desktop-client] Desktop snapshot request failed", {
 					accountIds: normalizedAccountIds,
@@ -238,11 +271,14 @@ export class DesktopClient {
 
 	async triggerDesktopUnlock(): Promise<boolean> {
 		try {
+			const generation = this.deliveryGeneration();
 			const response = await this.nativeClient.request({
 				type: "TRIGGER_DESKTOP_UNLOCK",
 			});
 			return (
-				response.type === "TRIGGER_DESKTOP_UNLOCK_RESULT" && response.success
+				this.isCurrent(generation) &&
+				response.type === "TRIGGER_DESKTOP_UNLOCK_RESULT" &&
+				response.success
 			);
 		} catch {
 			return false;

@@ -37,6 +37,237 @@ function hostilePlaintext(values: number[]) {
 }
 
 describe("WebAttachmentUploadSourceRegistry", () => {
+	test("full capacity still fences and drains an already selected Vault", async () => {
+		let next = 0;
+		let closed = 0;
+		const registry = new WebAttachmentUploadSourceRegistry({
+			identity: () => `capacity-${next++}`,
+		});
+		await activate(registry);
+		const scope = registry.captureScope("account-a", "vault-a");
+		let accepted = 0;
+		for (;;) {
+			try {
+				registry.grant({
+					scope,
+					accountId: "account-a",
+					vaultId: "vault-a",
+					itemId: "item",
+					name: "a",
+					contentType: "text/plain",
+					expectedBytes: 1n,
+					source: {
+						read: async () => null,
+						close: async () => {
+							closed++;
+						},
+					},
+				});
+				accepted++;
+			} catch {
+				break;
+			}
+		}
+		expect(accepted).toBeGreaterThan(1000);
+		const result = await registry.invoke(
+			JSON.stringify({
+				type: "retireVaults",
+				accountId: "account-a",
+				vaultIds: ["vault-a"],
+			}),
+			"runtime-a",
+		);
+		expect(JSON.parse(result.controlResponseJson)).toEqual({ type: "retired" });
+		expect(closed).toBe(accepted);
+		expect(() => registry.captureScope("account-a", "vault-a")).toThrow();
+	});
+	test("caller release wipes a pending source read before cleanup completes", async () => {
+		const registry = new WebAttachmentUploadSourceRegistry();
+		await activate(registry);
+		let resolveRead!: (value: Uint8Array) => void;
+		let started!: () => void;
+		const ready = new Promise<void>((r) => (started = r));
+		const bytes = new Uint8Array([71]);
+		const capabilityId = registry.grant({
+			scope: registry.captureScope("account", "vault"),
+			accountId: "account",
+			vaultId: "vault",
+			itemId: "item",
+			name: "x",
+			contentType: "text/plain",
+			expectedBytes: 1n,
+			source: {
+				read: async () => {
+					started();
+					return new Promise<Uint8Array>((r) => (resolveRead = r));
+				},
+				close: async () => {
+					resolveRead(bytes);
+				},
+			},
+		});
+		await registry.invoke(
+			JSON.stringify({
+				type: "claim",
+				capabilityId,
+				accountId: "account",
+				vaultId: "vault",
+				itemId: "item",
+				name: "x",
+				contentType: "text/plain",
+				expectedBytes: "1",
+			}),
+			"runtime-a",
+		);
+		const reading = registry.invoke(
+			JSON.stringify({ type: "read", capabilityId, maxBytes: 1 }),
+			"runtime-a",
+		);
+		await ready;
+		await registry.release(capabilityId);
+		const result = await reading;
+		expect(result.binaryChunk).toBeUndefined();
+		expect([...bytes]).toEqual([0]);
+		await registry.release(capabilityId);
+	});
+	test("retirement wipes a late plaintext read and permanently fences preselection scopes", async () => {
+		const registry = new WebAttachmentUploadSourceRegistry();
+		await activate(registry);
+		const scope = registry.captureScope("account-a", "vault-a");
+		const bytes = new Uint8Array([42]);
+		let finishRead!: (value: Uint8Array) => void;
+		let beganRead!: () => void;
+		const began = new Promise<void>((resolve) => {
+			beganRead = resolve;
+		});
+		const source = {
+			read: async () => {
+				beganRead();
+				return new Promise<Uint8Array>((resolve) => {
+					finishRead = resolve;
+				});
+			},
+			close: async () => {
+				finishRead(bytes);
+			},
+		};
+		const grant = {
+			scope,
+			accountId: "account-a",
+			vaultId: "vault-a",
+			itemId: "item-a",
+			name: "a",
+			contentType: "text/plain",
+			expectedBytes: 1n,
+			source,
+		};
+		const capabilityId = registry.grant(grant);
+		await registry.invoke(
+			JSON.stringify({
+				type: "claim",
+				capabilityId,
+				accountId: "account-a",
+				vaultId: "vault-a",
+				itemId: "item-a",
+				name: "a",
+				contentType: "text/plain",
+				expectedBytes: "1",
+			}),
+			"runtime-a",
+		);
+		const read = registry.invoke(
+			JSON.stringify({ type: "read", capabilityId, maxBytes: 1 }),
+			"runtime-a",
+		);
+		await began;
+		const retire = registry.invoke(
+			JSON.stringify({
+				type: "retireVaults",
+				accountId: "account-a",
+				vaultIds: ["vault-a"],
+			}),
+			"runtime-a",
+		);
+		expect(() => registry.grant(grant)).toThrow();
+		expect(JSON.parse((await retire).controlResponseJson)).toEqual({
+			type: "retired",
+		});
+		expect((await read).binaryChunk).toBeUndefined();
+		expect([...bytes]).toEqual([0]);
+		await registry.invoke(
+			JSON.stringify({
+				type: "completeVaultRetirement",
+				accountId: "account-a",
+				vaultIds: ["vault-a"],
+			}),
+			"runtime-a",
+		);
+		expect(() => registry.grant(grant)).toThrow();
+		const replacement = registry.grant({
+			...grant,
+			scope: registry.captureScope("account-a", "vault-a"),
+			source: { read: async () => null, close: async () => {} },
+		});
+		await registry.release(replacement);
+		await registry.release(replacement);
+	});
+	test("Vault retirement closes only its sources, including an unused moved Item selection", async () => {
+		const registry = new WebAttachmentUploadSourceRegistry();
+		await activate(registry);
+		const closed: string[] = [];
+		const grant = (accountId: string, vaultId: string) =>
+			registry.grant({
+				scope: registry.captureScope(accountId, vaultId),
+				accountId,
+				vaultId,
+				itemId: "same-item",
+				name: "a.txt",
+				contentType: "text/plain",
+				expectedBytes: 1n,
+				source: {
+					read: async () => new Uint8Array([9]),
+					close: async () => {
+						closed.push(`${accountId}/${vaultId}`);
+					},
+				},
+			});
+		grant("account-a", "hidden");
+		const visible = grant("account-a", "visible");
+		grant("account-b", "hidden");
+		const retired = await registry.invoke(
+			JSON.stringify({
+				type: "retireVaults",
+				accountId: "account-a",
+				vaultIds: ["hidden"],
+			}),
+			"runtime-a",
+		);
+		expect(JSON.parse(retired.controlResponseJson)).toEqual({
+			type: "retired",
+		});
+		expect(closed).toEqual(["account-a/hidden"]);
+		expect(() => grant("account-a", "hidden")).toThrow();
+		expect(
+			JSON.parse(
+				(
+					await registry.invoke(
+						JSON.stringify({
+							type: "claim",
+							capabilityId: visible,
+							accountId: "account-a",
+							vaultId: "visible",
+							itemId: "same-item",
+							name: "a.txt",
+							contentType: "text/plain",
+							expectedBytes: "1",
+						}),
+						"runtime-a",
+					)
+				).controlResponseJson,
+			),
+		).toEqual({ type: "claimed" });
+		await registry.drainClose();
+	});
 	test("rejects every non-exact upload source control shape without leaking parser exceptions", async () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
@@ -50,6 +281,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 			{
 				type: "claim",
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "a.txt",
 				contentType: "text/plain",
@@ -87,7 +319,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -107,6 +341,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 						JSON.stringify({
 							type: "claim",
 							accountId: "account-a",
+							vaultId: "vault-a",
 							itemId: "item-a",
 							name: "report.txt",
 							contentType: "text/plain",
@@ -142,7 +377,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "hostile.txt",
 			contentType: "text/plain",
@@ -153,6 +390,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 			JSON.stringify({
 				type: "claim",
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "hostile.txt",
 				contentType: "text/plain",
@@ -179,7 +417,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -197,6 +437,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 							JSON.stringify({
 								type: "claim",
 								accountId: "account-a",
+								vaultId: "vault-a",
 								itemId: "item-a",
 								...metadata,
 								capabilityId,
@@ -214,7 +455,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -224,6 +467,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const control = JSON.stringify({
 			type: "claim",
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -252,7 +496,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -268,6 +514,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 			JSON.stringify({
 				type: "claim",
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -296,7 +543,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		await activate(registry);
 		let closes = 0;
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -335,7 +584,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		await activate(registry, "fresh-runtime");
 		expect(
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -353,7 +604,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
 		registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -377,7 +630,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		const registry = new WebAttachmentUploadSourceRegistry();
 		await activate(registry);
 		registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -396,7 +651,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		).toEqual({ type: "retired" });
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -410,7 +667,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		);
 		expect(
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -445,11 +704,13 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		}
 		for (
 			let index = 0;
-			index < MAX_ATTACHMENT_UPLOAD_SOURCE_IDENTITIES - 2;
+			index < MAX_ATTACHMENT_UPLOAD_SOURCE_IDENTITIES - 3;
 			index++
 		) {
 			registry.grant({
+				scope: registry.captureScope("account-capacity", "vault-a"),
 				accountId: "account-capacity",
+				vaultId: "vault-a",
 				itemId: `item-${index}`,
 				name: "report.txt",
 				contentType: "text/plain",
@@ -459,7 +720,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		}
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("account-capacity", "vault-a"),
 				accountId: "account-capacity",
+				vaultId: "vault-a",
 				itemId: "overflow",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -479,7 +742,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		});
 		let attempts = 0;
 		registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -502,7 +767,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		);
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-b",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -533,7 +800,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		});
 		await activate(registry);
 		const expired = registry.grant({
+			scope: registry.captureScope("account-expired", "vault-a"),
 			accountId: "account-expired",
+			vaultId: "vault-a",
 			itemId: "item",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -549,6 +818,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 						JSON.stringify({
 							type: "claim",
 							accountId: "account-expired",
+							vaultId: "vault-a",
 							itemId: "item",
 							name: "report.txt",
 							contentType: "text/plain",
@@ -562,11 +832,13 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		).toEqual({ type: "sourceFailure" });
 		for (
 			let index = 0;
-			index < MAX_ATTACHMENT_UPLOAD_SOURCE_IDENTITIES - 3;
+			index < MAX_ATTACHMENT_UPLOAD_SOURCE_IDENTITIES - 6;
 			index++
 		) {
 			registry.grant({
+				scope: registry.captureScope("account-capacity", "vault-a"),
 				accountId: "account-capacity",
+				vaultId: "vault-a",
 				itemId: `item-${index}`,
 				name: "report.txt",
 				contentType: "text/plain",
@@ -576,7 +848,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		}
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("account-capacity", "vault-a"),
 				accountId: "account-capacity",
+				vaultId: "vault-a",
 				itemId: "overflow",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -594,7 +868,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		});
 		await activate(registry);
 		registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -607,6 +883,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 			JSON.stringify({
 				type: "claim",
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "report.txt",
 				contentType: "text/plain",
@@ -617,7 +894,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		);
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-b",
 				name: "other.txt",
 				contentType: "text/plain",
@@ -635,7 +914,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		});
 		await activate(registry);
 		registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "report.txt",
 			contentType: "text/plain",
@@ -650,6 +931,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 						JSON.stringify({
 							type: "claim",
 							accountId: "account-a",
+							vaultId: "vault-a",
 							itemId: "item-a",
 							name: "report.txt",
 							contentType: "text/plain",
@@ -663,7 +945,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		).toEqual({ type: "sourceFailure" });
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("account-a", "vault-a"),
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-b",
 				name: "other.txt",
 				contentType: "text/plain",
@@ -684,7 +968,9 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 		});
 		await activate(registry);
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
+			vaultId: "vault-a",
 			itemId: "item-a",
 			name: "held.txt",
 			contentType: "text/plain",
@@ -703,6 +989,7 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 			JSON.stringify({
 				type: "claim",
 				accountId: "account-a",
+				vaultId: "vault-a",
 				itemId: "item-a",
 				name: "held.txt",
 				contentType: "text/plain",
@@ -735,4 +1022,95 @@ describe("WebAttachmentUploadSourceRegistry", () => {
 			),
 		).toEqual({ type: "closed" });
 	});
+});
+
+test("startup Vault cleanup owns only the prepared Runtime and survives commit", async () => {
+	const registry = new WebAttachmentUploadSourceRegistry();
+	await prepareWebAttachmentUploadRuntimeIncarnation(registry, "startup");
+	const retiring = JSON.stringify({
+		type: "retireVaults",
+		accountId: "account-a",
+		vaultIds: ["hidden"],
+	});
+	expect(
+		JSON.parse(
+			(await registry.invoke(retiring, "foreign")).controlResponseJson,
+		),
+	).toEqual({ type: "invariantViolation" });
+	expect(
+		JSON.parse(
+			(await registry.invoke(retiring, "startup")).controlResponseJson,
+		),
+	).toEqual({ type: "retired" });
+	expect(() => registry.captureScope("account-a", "visible")).toThrow();
+	await commitWebAttachmentUploadRuntimeIncarnation(registry, "startup");
+	expect(() => registry.captureScope("account-a", "hidden")).toThrow();
+	expect(() => registry.captureScope("account-a", "visible")).not.toThrow();
+	expect(() => registry.captureScope("account-b", "hidden")).not.toThrow();
+	expect(
+		JSON.parse(
+			(
+				await registry.invoke(
+					JSON.stringify({
+						type: "completeVaultRetirement",
+						accountId: "account-a",
+						vaultIds: ["hidden"],
+					}),
+					"startup",
+				)
+			).controlResponseJson,
+		),
+	).toEqual({ type: "retirementCompleted" });
+	expect(() => registry.captureScope("account-a", "hidden")).not.toThrow();
+	await registry.drainClose();
+});
+
+test("prepared cleanup waits for prepare and cannot broaden Account admission", async () => {
+	const registry = new WebAttachmentUploadSourceRegistry();
+	const preparation = prepareWebAttachmentUploadRuntimeIncarnation(
+		registry,
+		"startup",
+	);
+	const control = JSON.stringify({
+		type: "retireVaults",
+		accountId: "account-a",
+		vaultIds: ["visible-again"],
+	});
+	expect(
+		JSON.parse((await registry.invoke(control, "startup")).controlResponseJson),
+	).toEqual({ type: "invariantViolation" });
+	await preparation;
+	expect(
+		JSON.parse((await registry.invoke(control, "startup")).controlResponseJson),
+	).toEqual({ type: "retired" });
+	expect(
+		JSON.parse(
+			(
+				await registry.invoke(
+					JSON.stringify({ type: "retireAccount", accountId: "account-a" }),
+					"startup",
+				)
+			).controlResponseJson,
+		),
+	).toEqual({ type: "invariantViolation" });
+	expect(
+		JSON.parse(
+			(
+				await registry.invoke(
+					JSON.stringify({
+						type: "completeVaultRetirement",
+						accountId: "account-a",
+						vaultIds: ["visible-again"],
+					}),
+					"startup",
+				)
+			).controlResponseJson,
+		),
+	).toEqual({ type: "retirementCompleted" });
+	expect(() => registry.captureScope("account-a", "visible-again")).toThrow();
+	await commitWebAttachmentUploadRuntimeIncarnation(registry, "startup");
+	expect(() =>
+		registry.captureScope("account-a", "visible-again"),
+	).not.toThrow();
+	await registry.drainClose();
 });

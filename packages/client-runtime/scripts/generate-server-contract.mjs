@@ -20,6 +20,7 @@ const outputPath = path.join(
 
 export const ROOT_ALLOWLIST = Object.freeze([
 	"BootstrapItemsResponse",
+	"AddVaultMemberBody",
 	"AttachmentUploadBody",
 	"AttachmentUploadResponse",
 	"CreateAttachmentBody",
@@ -27,6 +28,8 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"CreateItemBody",
 	"DeleteAccountRequest",
 	"DeleteAccountResponse",
+	"DisableTravelModeRequest",
+	"HiddenVaultsRequest",
 	"FavoriteBody",
 	"ItemResponseDto",
 	"MoveItemBody",
@@ -34,9 +37,25 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"FinishLoginRequest",
 	"FinishLoginResponse",
 	"LoginAttemptResponse",
+	"MeResponse",
+	"TeamSummaryResponse",
+	"TeamDetailsResponse",
+	"TeamMemberResponse",
+	"TeamVaultResponse",
+	"InvitationListResponse",
+	"PendingInvitationResponse",
+	"AcceptInvitationResponse",
+	"SendInvitationRequest",
+	"SendInvitationResponse",
+	"ResendInvitationResponse",
+	"BillingStatusResponse",
+	"TeamSeatInvoicePreviewResponse",
+	"BillingEntitlementsResponse",
 	"ProblemDetails",
+	"PreparationPage",
 	"RefreshSessionResponse",
 	"StartLoginRequest",
+	"StageRequest",
 	"SyncChangesResponse",
 	"SuccessResponse",
 	"ShareLinkListResponse",
@@ -45,10 +64,13 @@ export const ROOT_ALLOWLIST = Object.freeze([
 	"UpdateItemBody",
 	"UpdateAttachmentBody",
 	"VaultDetailsResponseDto",
+	"VaultMetadataUpdateBody",
 	"VaultImageStagingBody",
 	"VaultImageStagingGrantResponse",
 	"VaultImageStagingStatusResponse",
 	"VaultAttachmentResponse",
+	"VaultAvailableMemberResponse",
+	"VaultMemberResponse",
 ]);
 
 // These fields are intentionally unconstrained JSON in the Server contract. Every other schema in
@@ -66,6 +88,15 @@ const WIRE_FIELD_ORDER = new Map([
 	["StartLoginRequest", ["email", "clientPublicKey"]],
 	["FinishLoginRequest", ["clientPublicKey", "clientProof"]],
 	["DeleteAccountRequest", ["confirmEmail"]],
+]);
+
+// These closed Server enums also cross the Runtime protocol. Derive their schema from the same
+// generated Rust definition so the Runtime cannot widen them into a second string vocabulary.
+const RUNTIME_PROTOCOL_ENUMS = new Set([
+	"ErrorCode",
+	"InvitationStatus",
+	"TeamRole",
+	"VaultRole",
 ]);
 
 const RUST_RESERVED = new Set([
@@ -294,7 +325,12 @@ function renderEnum(name, schema) {
 			`    #[serde(rename = ${JSON.stringify(value)})]\n    ${pascalCase(value)},`,
 	);
 	return [
-		"#[derive(Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]",
+		`#[derive(Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize${RUNTIME_PROTOCOL_ENUMS.has(name) ? ", Debug" : ""})]`,
+		...(RUNTIME_PROTOCOL_ENUMS.has(name)
+			? [
+					'#[cfg_attr(feature = "runtime-protocol-contract-schema", derive(schemars::JsonSchema))]',
+				]
+			: []),
 		`pub enum ${rustTypeName(name)} {`,
 		...variants,
 		"}",
@@ -437,7 +473,20 @@ function renderSchema(name, schema) {
 }
 
 export function generateServerContract(document, sourceBytes) {
-	const schemas = document.components?.schemas ?? {};
+	const schemas = { ...(document.components?.schemas ?? {}) };
+	// Utoipa inlines the nullable seat preview on its one authenticated route. Select the
+	// present branch from OpenAPI instead of maintaining a second hand-written DTO.
+	const seatPreview =
+		document.paths?.["/api/v1/billing/team-seats/addition-preview"]?.get
+			?.responses?.["200"]?.content?.["application/json"]?.schema;
+	if (
+		seatPreview?.oneOf?.length !== 2 ||
+		seatPreview.oneOf[0]?.type !== "null" ||
+		seatPreview.oneOf[1]?.type !== "object"
+	) {
+		throw new Error("Billing seat preview route schema changed");
+	}
+	schemas.TeamSeatInvoicePreviewResponse = seatPreview.oneOf[1];
 	const selected = new Set(ROOT_ALLOWLIST);
 	for (const root of ROOT_ALLOWLIST) {
 		if (!schemas[root])

@@ -8,12 +8,14 @@ import type {
 	ShareExpiration,
 } from "@bittery/client-runtime/protocol";
 import { useRuntimeClient } from "@bittery/client-runtime/react";
-import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { observeAccountDeparture } from "@/lib/runtime-account-presentation";
-import { useRuntimeMutation } from "./use-runtime-mutation";
+import type { PublicDecryptedItemWithContext } from "@bittery/shared/types";
+import {
+	observeAccountDeparture,
+	useRuntimeMutation,
+} from "@bittery/ui/runtime-presentation";
 
 export interface CreateShareInput {
-	item: DecryptedItemWithContext;
+	item: PublicDecryptedItemWithContext;
 	accessMode: ShareAccessMode;
 	expiresIn: ShareExpiration;
 	isOneTimeUse: boolean;

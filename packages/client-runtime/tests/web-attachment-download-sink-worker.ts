@@ -54,6 +54,12 @@ class FocusedDownloadRuntime {
 			throw new Error("focused open failure");
 	}
 	observe_json(): void {}
+	begin_vault_export_output(): string {
+		throw new Error("Unexpected Export output admission");
+	}
+	finish_vault_export_output(): void {
+		throw new Error("Unexpected Export output cleanup");
+	}
 	unobserve(): void {}
 	cancel(requestId: string): void {
 		this.#cancelled.add(requestId);
@@ -75,6 +81,9 @@ class FocusedDownloadRuntime {
 	async request_json(requestId: string, requestJson: string): Promise<string> {
 		if (requestJson === "warmup") return "warmed";
 		if (requestJson === '{"type":"wipe"}') return '{"type":"wiped"}';
+		const control = JSON.parse(requestJson);
+		if (control.type === "sinkControl")
+			return this.#sink.invoke(JSON.stringify(control.control));
 		const request = JSON.parse(requestJson) as {
 			accountId: string;
 			attachmentId: string;
@@ -85,6 +94,7 @@ class FocusedDownloadRuntime {
 		const begin = await this.#sink.invoke(
 			JSON.stringify({
 				type: "begin",
+				vaultId: "vault-one",
 				accountId: request.accountId,
 				attachmentId: request.attachmentId,
 				capabilityId,

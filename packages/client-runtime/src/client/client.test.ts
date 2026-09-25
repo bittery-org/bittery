@@ -1,8 +1,322 @@
 import { describe, expect, test } from "bun:test";
 import { createFakeRuntimeTransport } from "../testing";
-import { createRuntimeClient, RuntimeRequestError } from "./index";
+import {
+	createRuntimeClient,
+	decodeOutcome,
+	RuntimeRequestError,
+} from "./index";
 
 describe("Runtime client requests", () => {
+	test("Team leave recovery lists Core-retained original start Operations", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const reading = client.listTeamLeaveAttempts({ accountId: "same-account" });
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "listTeamLeaveAttempts",
+			accountId: "same-account",
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "teamLeaveAttempts",
+				attempts: [{ teamId: "old-team", startOperationId: "original-start" }],
+			},
+		});
+		expect(await reading).toEqual([
+			{ teamId: "old-team", startOperationId: "original-start" },
+		]);
+		const acknowledging = client.acknowledgeTeamLeaveAttempt({
+			accountId: "same-account",
+			startOperationId: "original-start",
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "acknowledgeTeamLeaveAttempt",
+			accountId: "same-account",
+			startOperationId: "original-start",
+		});
+		transport.answer({
+			type: "succeeded",
+			value: { type: "teamLeaveAttemptAcknowledged" },
+		});
+		await acknowledging;
+		await client.close();
+	});
+	test("Rotation facade carries closed Account-scoped selection and retained identities", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const input = {
+			accountId: "account-1",
+			intent: { type: "teamLeave" as const, teamId: "team-1" },
+		};
+		const preparing = client.prepareRotation(input);
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "prepareRotation",
+			...input,
+		});
+		const selection = {
+			accountId: input.accountId,
+			authorityGenerationId: "generation-1",
+			incarnationId: "incarnation-1",
+			intent: input.intent,
+			lockEpoch: "epoch-1",
+			plans: [],
+			candidates: [],
+			startOperationId: "start-1",
+		};
+		transport.answer({
+			type: "succeeded",
+			value: { type: "rotationPrepared", selection },
+		});
+		expect(await preparing).toEqual({ type: "rotationPrepared", selection });
+
+		const completing = client.completeRotation({
+			accountId: input.accountId,
+			selection,
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "completeRotation",
+			accountId: input.accountId,
+			selection,
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "rotationFinalizePending",
+				finalizeOperationId: "finalize-1",
+			},
+		});
+		expect(await completing).toEqual({
+			type: "rotationFinalizePending",
+			finalizeOperationId: "finalize-1",
+		});
+
+		const inspecting = client.inspectRotation({
+			accountId: input.accountId,
+			startOperationId: selection.startOperationId,
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "inspectRotation",
+			accountId: input.accountId,
+			startOperationId: "start-1",
+		});
+		transport.answer({
+			type: "succeeded",
+			value: { type: "rotationCompleted", personalTeamId: "team-2" },
+		});
+		expect(await inspecting).toEqual({
+			type: "rotationCompleted",
+			personalTeamId: "team-2",
+		});
+		await client.close();
+	});
+
+	test("current-User Invitation calls stay Account scoped and preserve ambiguous acceptance", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const listing = client.listMyTeamInvitations({ accountId: "account-1" });
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "listMyTeamInvitations",
+			accountId: "account-1",
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "myTeamInvitations",
+				invitations: [
+					{
+						id: "invitation-1",
+						teamId: "team-2",
+						teamName: "Inviting Team",
+						role: "member",
+						invitedBy: "Alex",
+						expiresAt: "2099-01-01T00:00:00Z",
+					},
+				],
+			},
+		});
+		expect((await listing)[0]?.teamId).toBe("team-2");
+
+		const accepting = client.acceptMyTeamInvitation({
+			accountId: "account-1",
+			invitationId: "invitation-1",
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "acceptMyTeamInvitation",
+			accountId: "account-1",
+			invitationId: "invitation-1",
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "myTeamInvitationUncertain",
+				action: "accept",
+				invitationId: "invitation-1",
+				pending: false,
+				currentTeamId: "team-2",
+			},
+		});
+		expect(await accepting).toMatchObject({
+			type: "myTeamInvitationUncertain",
+			currentTeamId: "team-2",
+		});
+		await client.close();
+	});
+
+	test("Invitation facade forwards only closed Account-scoped commands and preserves uncertainty", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const creating = client.createTeamInvitation({
+			accountId: "account-1",
+			teamId: "team-1",
+			email: "invitee@example.test",
+			role: "member",
+		});
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "createTeamInvitation",
+			accountId: "account-1",
+			teamId: "team-1",
+			email: "invitee@example.test",
+			role: "member",
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "teamInvitationUncertain",
+				phase: "firstSend",
+				originalInvitationId: null,
+			},
+		});
+		expect(await creating).toEqual({
+			type: "teamInvitationUncertain",
+			phase: "firstSend",
+			originalInvitationId: null,
+		});
+		expect(transport.pendingRequests()).toHaveLength(0);
+		expect(
+			decodeOutcome(
+				JSON.stringify({
+					type: "succeeded",
+					value: {
+						type: "teamInvitationCreated",
+						invitationId: "invitation-1",
+						token: "one-time-token",
+						candidate: null,
+						continuationId: null,
+					},
+				}),
+			),
+		).toMatchObject({
+			type: "teamInvitationCreated",
+			token: "one-time-token",
+		});
+		await client.close();
+	});
+
+	test("admin Invitation actions preserve confirmed and lost one-time-token results", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const input = {
+			accountId: "account-1",
+			teamId: "team-1",
+			invitationId: "invitation-1",
+		};
+		const resending = client.resendTeamInvitation(input);
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "resendTeamInvitation",
+			...input,
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "teamInvitationResent",
+				invitationId: "invitation-1",
+				token: "rotated-once-token",
+			},
+		});
+		expect(await resending).toMatchObject({ token: "rotated-once-token" });
+
+		const cancelling = client.cancelTeamInvitation(input);
+		await transport.settled();
+		expect(transport.pendingRequests()[0]?.request).toEqual({
+			type: "cancelTeamInvitation",
+			...input,
+		});
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "teamInvitationAdminUncertain",
+				action: "cancel",
+				invitationId: "invitation-1",
+				pending: null,
+			},
+		});
+		expect(await cancelling).toMatchObject({
+			type: "teamInvitationAdminUncertain",
+			pending: null,
+		});
+		await client.close();
+	});
+
+	test("Team-page read is Account scoped and preserves typed Server failures", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const pending = client.readTeamPage({ accountId: "account-2" });
+		await transport.settled();
+		expect(transport.pendingRequests().map(({ request }) => request)).toEqual([
+			{ type: "readTeamPage", accountId: "account-2" },
+		]);
+		transport.answer({
+			type: "succeeded",
+			value: {
+				type: "teamPage",
+				page: {
+					user: { id: "user-2", name: "User Two", email: "two@example.test" },
+					team: null,
+					members: [],
+					invitations: [],
+					teamManagementEnabled: false,
+				},
+			},
+		});
+		expect((await pending).user.id).toBe("user-2");
+		const problem = {
+			status: 403,
+			code: "forbidden",
+			message: "Team read refused",
+			requestId: "request-1",
+			retryable: false,
+			retryAfterSeconds: null,
+			fieldErrors: [],
+		};
+		try {
+			decodeOutcome(
+				JSON.stringify({
+					type: "failed",
+					value: {
+						code: "ACCESS_DENIED",
+						message: "Team read refused",
+						teamPageProblem: problem,
+					},
+				}),
+			);
+			throw new Error("expected failure");
+		} catch (error) {
+			expect(error).toBeInstanceOf(RuntimeRequestError);
+			expect(error).toMatchObject({
+				code: "ACCESS_DENIED",
+				teamPageProblem: problem,
+			});
+		}
+	});
 	test("Share management uses only closed Account-scoped requests and returns foreground results", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });
@@ -12,17 +326,29 @@ describe("Runtime client requests", () => {
 		});
 		const logs = client.listShareAccessLogs({
 			accountId: "account-2",
+			itemId: "item-1",
 			linkId: "link-1",
 		});
 		const revoked = client.revokeShareLink({
 			accountId: "account-2",
+			itemId: "item-1",
 			linkId: "link-1",
 		});
 		await transport.settled();
 		expect(transport.pendingRequests().map(({ request }) => request)).toEqual([
 			{ type: "listItemShareLinks", accountId: "account-2", itemId: "item-1" },
-			{ type: "listShareAccessLogs", accountId: "account-2", linkId: "link-1" },
-			{ type: "revokeShareLink", accountId: "account-2", linkId: "link-1" },
+			{
+				type: "listShareAccessLogs",
+				accountId: "account-2",
+				itemId: "item-1",
+				linkId: "link-1",
+			},
+			{
+				type: "revokeShareLink",
+				accountId: "account-2",
+				itemId: "item-1",
+				linkId: "link-1",
+			},
 		]);
 		transport.answer({
 			type: "succeeded",
@@ -120,10 +446,19 @@ describe("Runtime client requests", () => {
 	test("routes every ordinary Item mutation through its generated Runtime request", async () => {
 		const transport = createFakeRuntimeTransport();
 		const client = createRuntimeClient({ transport });
+		const guard = {
+			accountId: "account-1",
+			incarnation: "incarnation-1",
+			lockEpoch: "0",
+			itemId: "item-1",
+			vaultId: "vault-1",
+			itemVersion: 1,
+		};
 		const mutations = [
 			client.updateItem({
 				accountId: "account-1",
 				itemId: "item-1",
+				guard,
 				draft: { category: "login", data: { title: "Updated" } },
 			}),
 			client.setItemFavorite({
@@ -150,6 +485,7 @@ describe("Runtime client requests", () => {
 				type: "updateItem",
 				accountId: "account-1",
 				itemId: "item-1",
+				guard,
 				draft: { category: "login", data: { title: "Updated" } },
 			},
 			{
@@ -185,6 +521,74 @@ describe("Runtime client requests", () => {
 			});
 		}
 		await Promise.all(mutations);
+	});
+
+	test("forwards semantic credential removal and private Item duplication with selection guards", async () => {
+		const transport = createFakeRuntimeTransport();
+		const client = createRuntimeClient({ transport });
+		const editGuard = {
+			accountId: "account-1",
+			incarnation: "incarnation-1",
+			lockEpoch: "3",
+			itemId: "item-1",
+			vaultId: "vault-1",
+			itemVersion: 2,
+		};
+		const duplicateGuard = {
+			accountId: "account-1",
+			incarnationId: "incarnation-1",
+			lockEpoch: "3",
+			sourceItemId: "item-1",
+			vaultId: "vault-1",
+			replicaRevision: "8",
+			source: { type: "authoritative" as const, itemVersion: 2 },
+		};
+		const removing = client.removePasskey({
+			accountId: "account-1",
+			itemId: "item-1",
+			guard: editGuard,
+			rpId: "example.test",
+			credentialId: "credential-1",
+			publicKeyFingerprint: "a".repeat(64),
+		});
+		const duplicating = client.duplicateItem({
+			accountId: "account-1",
+			sourceItemId: "item-1",
+			sourceGuard: duplicateGuard,
+			title: "Copy",
+		});
+		await transport.settled();
+		expect(transport.pendingRequests().map(({ request }) => request)).toEqual([
+			{
+				type: "removePasskey",
+				accountId: "account-1",
+				itemId: "item-1",
+				guard: editGuard,
+				rpId: "example.test",
+				credentialId: "credential-1",
+				publicKeyFingerprint: "a".repeat(64),
+			},
+			{
+				type: "duplicateItem",
+				accountId: "account-1",
+				sourceItemId: "item-1",
+				sourceGuard: duplicateGuard,
+				title: "Copy",
+			},
+		]);
+		for (const itemId of ["item-1", "item-copy"]) {
+			transport.answer({
+				type: "succeeded",
+				value: {
+					type: "accepted",
+					operationId: `operation-${itemId}`,
+					itemId,
+					replicaRevision: "9",
+				},
+			});
+		}
+		expect((await removing).itemId).toBe("item-1");
+		expect((await duplicating).itemId).toBe("item-copy");
 	});
 
 	test("routes foreground Attachment work through the closed Runtime requests", async () => {

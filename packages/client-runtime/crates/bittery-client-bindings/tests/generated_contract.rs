@@ -19,6 +19,8 @@ fn native_generated_values_keep_plaintext_behind_opaque_objects() {
         "Address",
         "PhoneNumber",
         "LoginItemData",
+        "EditableLoginItemData",
+        "PublicLoginItemData",
         "SecureNoteItemData",
         "CreditCardItemData",
         "IdentityItemData",
@@ -31,13 +33,43 @@ fn native_generated_values_keep_plaintext_behind_opaque_objects() {
         assert!(!SWIFT.contains(&format!("public struct {name}")));
     }
     assert!(KOTLIN.contains("sealed class ItemDraft:"));
+    assert!(KOTLIN.contains("sealed class EditableItemDraft:"));
+    assert!(KOTLIN.contains("sealed class PublicItemDraft:"));
     assert!(SWIFT.contains("public enum ItemDraft"));
+    assert!(SWIFT.contains("public enum EditableItemDraft"));
+    assert!(SWIFT.contains("public enum PublicItemDraft"));
     assert!(KOTLIN.contains("val `masterPassword`: uniffi.bittery_client_bindings.SecretString"));
-    assert!(KOTLIN.contains("val `draft`: uniffi.bittery_client_bindings.ItemDraft"));
+    assert!(KOTLIN.contains("val `draft`: uniffi.bittery_client_bindings.EditableItemDraft"));
+    assert!(KOTLIN.contains("fun `data`(): PublicItemDraft"));
+    assert!(KOTLIN.contains("fun `passkeys`(): List<PublicPasskey>"));
+    assert!(KOTLIN.contains("data class ImportItemDraft (\n    var `draft`: ItemDraft"));
+    assert!(KOTLIN.contains("data class VaultExportItem ("));
+    assert!(KOTLIN.contains("var `data`: ItemDraft"));
+    let public_passkey = KOTLIN
+        .split_once("data class PublicPasskey (")
+        .expect("generated public passkey")
+        .1
+        .split_once("): Disposable")
+        .expect("generated public passkey fields")
+        .0;
+    assert!(!public_passkey.contains("privateKey"));
     assert!(KOTLIN.contains("val `name`: uniffi.bittery_client_bindings.AttachmentName"));
     assert!(!KOTLIN.contains("val `name`: kotlin.String) : RuntimeRequest()"));
     assert!(SWIFT.contains("masterPassword: SecretString, secretKey: SecretString"));
-    assert!(SWIFT.contains("draft: ItemDraft"));
+    assert!(SWIFT.contains("draft: EditableItemDraft"));
+    assert!(SWIFT.contains("func data()  -> PublicItemDraft"));
+    assert!(SWIFT.contains("func passkeys()  -> [PublicPasskey]"));
+    assert!(SWIFT.contains("public struct ImportItemDraft {\n    public var draft: ItemDraft"));
+    assert!(SWIFT.contains("public struct VaultExportItem {"));
+    assert!(SWIFT.contains("public var data: ItemDraft"));
+    let public_passkey = SWIFT
+        .split_once("public struct PublicPasskey:")
+        .expect("generated Swift public passkey")
+        .1
+        .split_once("extension PublicPasskey:")
+        .expect("generated Swift public passkey fields")
+        .0;
+    assert!(!public_passkey.contains("privateKey"));
     assert!(SWIFT.contains("name: AttachmentName"));
     assert!(!KOTLIN.contains("override fun toString"));
     assert!(!SWIFT.contains("CustomStringConvertible"));

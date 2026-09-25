@@ -1,10 +1,13 @@
+#[cfg(test)]
+use super::ExclusiveStartupBoundary;
 use super::{
-    artifact_error, ArtifactChunkWrite, ArtifactPublication, AttachmentArtifactOwner,
+    artifact_error, inventory, ArtifactChunkWrite, ArtifactPublication,
+    AttachmentArtifactInventoryPage, AttachmentArtifactOwner, AttachmentArtifactPhysicalKey,
     AttachmentArtifactStore, AttachmentArtifactStoreRequest, AttachmentArtifactStoreResponse,
-    ExclusiveStartupBoundary, ProvisionalAttachmentArtifactRecovery,
-    ProvisionalAttachmentArtifactScope, ProvisionalAttachmentArtifactStore,
-    ProvisionalAttachmentArtifactStoreRequest, ProvisionalAttachmentArtifactStoreResponse,
-    ProvisionalAttachmentArtifactWriter, PublishedArtifactChunk, ARTIFACT_CHUNK_BYTES,
+    ProvisionalAttachmentArtifactRecovery, ProvisionalAttachmentArtifactScope,
+    ProvisionalAttachmentArtifactStore, ProvisionalAttachmentArtifactStoreRequest,
+    ProvisionalAttachmentArtifactStoreResponse, ProvisionalAttachmentArtifactWriter,
+    PublishedArtifactChunk, ARTIFACT_CHUNK_BYTES,
 };
 use crate::{replica::attachment_move_artifact_ref, AccountId, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
@@ -15,7 +18,7 @@ use sha2::{Digest, Sha256};
 use std::sync::{Arc, Barrier};
 use std::{collections::HashSet, io::Read, path::Path, sync::Mutex};
 
-const SCHEMA: &str = r#"
+pub(crate) const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS attachment_move_artifacts (
     account_id TEXT NOT NULL,
     artifact_id TEXT NOT NULL,
@@ -65,6 +68,43 @@ CREATE TABLE IF NOT EXISTS attachment_move_provisional_chunks (
 );
 "#;
 
+// B1 files were published before the provisional tables, generation column and newer table
+// constraints. Their known migration only appends; it never reconstructs accepted ciphertext.
+const B1_SCHEMA: &str = r#"
+CREATE TABLE attachment_move_artifacts (
+ account_id TEXT NOT NULL, artifact_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+ attachment_id TEXT NOT NULL, ciphertext_sha256 TEXT NOT NULL, byte_length INTEGER NOT NULL,
+ chunk_count INTEGER NOT NULL, publication_state INTEGER NOT NULL,
+ PRIMARY KEY (account_id, artifact_id)
+);
+CREATE TABLE attachment_move_artifact_chunks (
+ account_id TEXT NOT NULL, artifact_id TEXT NOT NULL, chunk_index INTEGER NOT NULL,
+ ciphertext BLOB NOT NULL, ciphertext_sha256 TEXT NOT NULL,
+ PRIMARY KEY (account_id, artifact_id, chunk_index)
+);
+"#;
+
+fn evolved_b1_schema() -> String {
+    let provisional = SCHEMA
+        .split_once("CREATE TABLE IF NOT EXISTS attachment_move_provisional_artifacts")
+        .expect("fixed native schema contains provisional tables")
+        .1;
+    format!(
+        "{B1_SCHEMA}\nALTER TABLE attachment_move_artifacts ADD COLUMN physical_generation TEXT;\nCREATE TABLE IF NOT EXISTS attachment_move_provisional_artifacts{provisional}"
+    )
+}
+
+pub(crate) fn validate_recovery_schema(
+    connection: &Connection,
+) -> Result<(), crate::RecoveryUnavailableReason> {
+    match crate::sqlite_schema::validate(connection, SCHEMA) {
+        Err(crate::RecoveryUnavailableReason::UnsupportedSchema) => {
+            crate::sqlite_schema::validate(connection, &evolved_b1_schema())
+        }
+        result => result,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SqliteFailureOperation {
     WriteChunk,
@@ -97,6 +137,7 @@ struct InjectedFailure {
 /// one and never exposes the former to readers.
 pub struct SqliteAttachmentArtifactStore {
     connection: Mutex<Connection>,
+    inventory_nonce: String,
     injected_failure: Option<InjectedFailure>,
     #[cfg(test)]
     publish_barrier: Option<Arc<Barrier>>,
@@ -112,6 +153,14 @@ impl SqliteAttachmentArtifactStore {
         injected_failure: Option<InjectedFailure>,
     ) -> Result<Self, RuntimeError> {
         let connection = Connection::open(path).map_err(sqlite_error)?;
+        // Validate before CREATE/ALTER: unknown databases are retained for recovery unchanged.
+        let known_old = SCHEMA.replace("    physical_generation TEXT,\n", "");
+        crate::sqlite_schema::admit_unversioned(
+            &connection,
+            SCHEMA,
+            &[&known_old, B1_SCHEMA, &evolved_b1_schema()],
+        )
+        .map_err(|_| sqlite_error("Unsupported attachment artifact schema"))?;
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(sqlite_error)?;
@@ -119,10 +168,88 @@ impl SqliteAttachmentArtifactStore {
         ensure_physical_generation_column(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
+            inventory_nonce: bittery_crypto_core::generate_uuid(),
             injected_failure,
             #[cfg(test)]
             publish_barrier: None,
         })
+    }
+
+    fn inventory_page(
+        &self,
+        cursor: Option<&str>,
+    ) -> Result<AttachmentArtifactInventoryPage, RuntimeError> {
+        let after = inventory::decode_cursor(&self.inventory_nonce, cursor)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        let identity: i32 = transaction
+            .pragma_query_value(None, "application_id", |row| row.get(0))
+            .map_err(sqlite_error)?;
+        let version: i32 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(sqlite_error)?;
+        if identity != 0 || version != 0 {
+            return Err(inventory::invalid(
+                "Attachment artifact inventory schema is unsupported",
+            ));
+        }
+        validate_recovery_schema(&transaction).map_err(|_| {
+            inventory::invalid("Attachment artifact inventory schema is unsupported")
+        })?;
+        let mut page = inventory::PageBuilder::new(&self.inventory_nonce, after.as_ref());
+        // Scan physical keys independently: no joins or Account indexes may hide orphan rows.
+        // Validate raw types before applying the continuation so malformed rows cannot vanish.
+        for (table, query) in [
+            (
+                0,
+                "SELECT account_id, artifact_id FROM attachment_move_artifacts ORDER BY account_id COLLATE BINARY, artifact_id COLLATE BINARY",
+            ),
+            (
+                1,
+                "SELECT account_id, artifact_id, chunk_index FROM attachment_move_artifact_chunks ORDER BY account_id COLLATE BINARY, artifact_id COLLATE BINARY, chunk_index",
+            ),
+            (
+                2,
+                "SELECT account_id, operation_id, attachment_id FROM attachment_move_provisional_artifacts ORDER BY account_id COLLATE BINARY, operation_id COLLATE BINARY, attachment_id COLLATE BINARY",
+            ),
+            (
+                3,
+                "SELECT account_id, operation_id, attachment_id, generation, chunk_index FROM attachment_move_provisional_chunks ORDER BY account_id COLLATE BINARY, operation_id COLLATE BINARY, attachment_id COLLATE BINARY, generation COLLATE BINARY, chunk_index",
+            ),
+        ] {
+            let mut statement = transaction.prepare(query).map_err(sqlite_error)?;
+            let mut rows = statement.query([]).map_err(sqlite_error)?;
+            while let Some(row) = rows.next().map_err(sqlite_error)? {
+                let account_id = inventory_text(row, 0)?.into();
+                let key = match table {
+                    0 => AttachmentArtifactPhysicalKey::Artifact {
+                        account_id,
+                        artifact_id: inventory_text(row, 1)?,
+                    },
+                    1 => AttachmentArtifactPhysicalKey::ArtifactChunk {
+                        account_id,
+                        artifact_id: inventory_text(row, 1)?,
+                        chunk_index: inventory_chunk_index(row, 2)?,
+                    },
+                    2 => AttachmentArtifactPhysicalKey::ProvisionalScope {
+                        account_id,
+                        operation_id: inventory_text(row, 1)?,
+                        attachment_id: inventory_text(row, 2)?,
+                    },
+                    _ => AttachmentArtifactPhysicalKey::ProvisionalChunk {
+                        account_id,
+                        operation_id: inventory_text(row, 1)?,
+                        attachment_id: inventory_text(row, 2)?,
+                        generation: inventory_text(row, 3)?,
+                        chunk_index: inventory_chunk_index(row, 4)?,
+                    },
+                };
+                if !page.push(key)? {
+                    return page.finish(true);
+                }
+            }
+        }
+        page.finish(false)
     }
 
     #[cfg(test)]
@@ -472,26 +599,83 @@ impl SqliteAttachmentArtifactStore {
     pub(crate) fn recover_provisional(
         &self,
         scope: &ProvisionalAttachmentArtifactScope,
-    ) -> Result<ProvisionalAttachmentArtifactRecovery, RuntimeError> {
+    ) -> Result<Option<ProvisionalAttachmentArtifactRecovery>, RuntimeError> {
         let connection = self.connection()?;
-        let generation = connection
+        let query = "SELECT generation, publication_state, ciphertext_sha256, byte_length
+                     FROM attachment_move_provisional_artifacts
+                     WHERE account_id = ?1 AND operation_id = ?2 AND attachment_id = ?3";
+        let read_binding = |row: &rusqlite::Row<'_>| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+            ))
+        };
+        let binding = connection
             .query_row(
-                "SELECT generation FROM attachment_move_provisional_artifacts
-                 WHERE account_id = ?1 AND operation_id = ?2 AND attachment_id = ?3
-                   AND publication_state IN (1, 2)",
+                query,
                 params![
                     scope.account_id.as_str(),
                     scope.operation_id,
                     scope.attachment_id,
                 ],
-                |row| row.get::<_, String>(0),
+                read_binding,
             )
             .optional()
-            .map_err(sqlite_error)?
-            .ok_or_else(|| {
-                artifact_error("No authenticated provisional generation is available to recover")
-            })?;
-        ProvisionalAttachmentArtifactRecovery::new(scope.clone(), generation)
+            .map_err(sqlite_error)?;
+        let Some(binding) = binding else {
+            verify_unavailable_provisional_scope(&connection, scope, None)?;
+            return Ok(None);
+        };
+        let (generation, state, digest, length) = &binding;
+        let recovery =
+            ProvisionalAttachmentArtifactRecovery::new(scope.clone(), generation.clone())?;
+        if *state == 0 && digest.is_none() && length.is_none() {
+            verify_unavailable_provisional_scope(&connection, scope, Some(generation))?;
+            return Ok(None);
+        }
+        if !matches!(state, 1 | 2) {
+            return Err(artifact_error(
+                "Provisional recovery has an invalid publication state",
+            ));
+        }
+        let writer = ProvisionalAttachmentArtifactWriter::from_recovery(&recovery);
+        let owner = provisional_owner(
+            scope,
+            digest
+                .as_deref()
+                .ok_or_else(|| artifact_error("Provisional publication digest is missing"))?,
+            length.ok_or_else(|| artifact_error("Provisional publication length is missing"))?,
+        )?;
+        let expected = ValidatedOwner::new(&owner)?;
+        if *state == 2 || load_metadata_connection(&connection, &owner)?.is_some() {
+            verify_completed_provisional_publication(&connection, &writer, &owner, &expected)?;
+        }
+        // Recovery is a read-only integrity check, including when Finalize already committed.
+        // Reuse the bounded verifier without completing or repairing publication.
+        verify_provisional_ciphertext(&connection, &writer, &owner, &expected)?;
+        let current = connection
+            .query_row(
+                query,
+                params![
+                    scope.account_id.as_str(),
+                    scope.operation_id,
+                    scope.attachment_id,
+                ],
+                read_binding,
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        if current.as_ref() != Some(&binding) {
+            return Err(artifact_error(
+                "Provisional publication changed during recovery verification",
+            ));
+        }
+        if *state == 2 || load_metadata_connection(&connection, &owner)?.is_some() {
+            verify_completed_provisional_publication(&connection, &writer, &owner, &expected)?;
+        }
+        Ok(Some(recovery))
     }
 
     fn resume_recovered_provisional(
@@ -587,21 +771,7 @@ impl SqliteAttachmentArtifactStore {
                     )
                 })?,
         };
-        let byte_length = u64::try_from(byte_length)
-            .map_err(|_| artifact_error("Provisional byte length is invalid"))?;
-        let artifact = attachment_move_artifact_ref(
-            &writer.scope.account_id,
-            &writer.scope.operation_id,
-            &writer.scope.attachment_id,
-            &ciphertext_sha256,
-            byte_length,
-        )?;
-        let owner = AttachmentArtifactOwner::new(
-            writer.scope.account_id.clone(),
-            writer.scope.operation_id.clone(),
-            writer.scope.attachment_id.clone(),
-            artifact,
-        )?;
+        let owner = provisional_owner(&writer.scope, &ciphertext_sha256, byte_length)?;
         let expected = ValidatedOwner::new(&owner)?;
         if state == 2 {
             verify_completed_provisional_publication(&connection, writer, &owner, &expected)?;
@@ -924,12 +1094,59 @@ impl SqliteAttachmentArtifactStore {
         Ok(())
     }
 
+    pub(crate) fn sweep_operation_orphans(
+        &self,
+        account_id: &AccountId,
+        operation_ids: &[String],
+        live: &[AttachmentArtifactOwner],
+        pending: &[ProvisionalAttachmentArtifactScope],
+    ) -> Result<usize, RuntimeError> {
+        if operation_ids.iter().any(String::is_empty)
+            || operation_ids.windows(2).any(|pair| pair[0] >= pair[1])
+            || live
+                .iter()
+                .any(|owner| !operation_ids.iter().any(|id| id == owner.operation_id()))
+            || pending.iter().any(|scope| {
+                scope.account_id() != account_id
+                    || !operation_ids.iter().any(|id| id == scope.operation_id())
+            })
+        {
+            return Err(artifact_error(
+                "Selective artifact cleanup has invalid Operation scope",
+            ));
+        }
+        self.sweep_selected(account_id, Some(operation_ids), live, pending)
+    }
+
+    #[cfg(test)]
     pub(crate) fn sweep_orphans(
         &self,
         _boundary: ExclusiveStartupBoundary,
         account_id: &AccountId,
         live: &[AttachmentArtifactOwner],
     ) -> Result<usize, RuntimeError> {
+        self.sweep_selected(account_id, None, live, &[])
+    }
+
+    fn sweep_selected(
+        &self,
+        account_id: &AccountId,
+        operations: Option<&[String]>,
+        live: &[AttachmentArtifactOwner],
+        pending: &[ProvisionalAttachmentArtifactScope],
+    ) -> Result<usize, RuntimeError> {
+        if pending.iter().any(|scope| scope.account_id() != account_id) {
+            return Err(artifact_error(
+                "Attachment artifact sweep pending reference has the wrong Account scope",
+            ));
+        }
+        let selected =
+            |operation: &str| operations.is_none_or(|ids| ids.iter().any(|id| id == operation));
+        let preserved_pending = |operation: &str, attachment: &str| {
+            pending.iter().any(|scope| {
+                scope.operation_id() == operation && scope.attachment_id() == attachment
+            })
+        };
         let mut live_ids = HashSet::with_capacity(live.len());
         for owner in live {
             ValidatedOwner::new(owner)?;
@@ -945,12 +1162,18 @@ impl SqliteAttachmentArtifactStore {
         let artifact_ids = {
             let mut statement = connection
                 .prepare(
-                    "SELECT artifact_id FROM attachment_move_artifacts
+                    "SELECT artifact_id, operation_id, attachment_id FROM attachment_move_artifacts
                      WHERE account_id = ?1 ORDER BY artifact_id",
                 )
                 .map_err(sqlite_error)?;
             let rows = statement
-                .query_map(params![account_id.as_str()], |row| row.get::<_, String>(0))
+                .query_map(params![account_id.as_str()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
                 .map_err(sqlite_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(sqlite_error)?;
@@ -1010,6 +1233,9 @@ impl SqliteAttachmentArtifactStore {
             rows
         };
         for (operation_id, attachment_id, generation) in provisional {
+            if !selected(&operation_id) || preserved_pending(&operation_id, &attachment_id) {
+                continue;
+            }
             if live_physical_generations.contains(&(
                 operation_id.clone(),
                 attachment_id.clone(),
@@ -1038,8 +1264,11 @@ impl SqliteAttachmentArtifactStore {
             self.after_write(SqliteFailureOperation::SweepOrphans, &mut write_boundary)?;
             transaction.commit().map_err(sqlite_error)?;
         }
-        for artifact_id in artifact_ids {
-            if live_ids.contains(artifact_id.as_str()) {
+        for (artifact_id, operation_id, attachment_id) in artifact_ids {
+            if !selected(&operation_id)
+                || preserved_pending(&operation_id, &attachment_id)
+                || live_ids.contains(artifact_id.as_str())
+            {
                 continue;
             }
             let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -1093,6 +1322,11 @@ impl AttachmentArtifactStore for SqliteAttachmentArtifactStore {
         request: AttachmentArtifactStoreRequest,
     ) -> Result<AttachmentArtifactStoreResponse, RuntimeError> {
         Ok(match request {
+            AttachmentArtifactStoreRequest::Inventory { cursor } => {
+                AttachmentArtifactStoreResponse::InventoryPage(
+                    self.inventory_page(cursor.as_deref())?,
+                )
+            }
             AttachmentArtifactStoreRequest::WriteChunk {
                 owner,
                 chunk_index,
@@ -1116,14 +1350,45 @@ impl AttachmentArtifactStore for SqliteAttachmentArtifactStore {
                 self.wipe_device()?;
                 AttachmentArtifactStoreResponse::DeviceWiped
             }
+            AttachmentArtifactStoreRequest::SweepOperationOrphans {
+                account_id,
+                operation_ids,
+                live,
+                pending,
+            } => {
+                let deleted =
+                    self.sweep_operation_orphans(&account_id, &operation_ids, &live, &pending)?;
+                AttachmentArtifactStoreResponse::OrphansSwept { deleted }
+            }
             AttachmentArtifactStoreRequest::SweepOrphans {
-                boundary,
+                boundary: _,
                 account_id,
                 live,
+                pending,
             } => AttachmentArtifactStoreResponse::OrphansSwept {
-                deleted: self.sweep_orphans(boundary, &account_id, &live)?,
+                deleted: self.sweep_selected(&account_id, None, &live, &pending)?,
             },
         })
+    }
+}
+
+fn inventory_text(row: &rusqlite::Row<'_>, index: usize) -> Result<String, RuntimeError> {
+    match row.get_ref(index).map_err(sqlite_error)? {
+        rusqlite::types::ValueRef::Text(bytes) => Ok(inventory::validate_text(bytes)?.to_owned()),
+        _ => Err(inventory::invalid(
+            "Attachment artifact inventory key has an invalid type",
+        )),
+    }
+}
+
+fn inventory_chunk_index(row: &rusqlite::Row<'_>, index: usize) -> Result<u32, RuntimeError> {
+    match row.get_ref(index).map_err(sqlite_error)? {
+        rusqlite::types::ValueRef::Integer(value) => u32::try_from(value).map_err(|_| {
+            inventory::invalid("Attachment artifact inventory chunk index is invalid")
+        }),
+        _ => Err(inventory::invalid(
+            "Attachment artifact inventory chunk index has an invalid type",
+        )),
     }
 }
 
@@ -1158,9 +1423,12 @@ impl ProvisionalAttachmentArtifactStore for SqliteAttachmentArtifactStore {
                 self.finalize_provisional(&writer, publication_proof)?,
             ),
             ProvisionalAttachmentArtifactStoreRequest::Recover { scope } => {
-                ProvisionalAttachmentArtifactStoreResponse::RecoveryAvailable(
-                    self.recover_provisional(&scope)?,
-                )
+                match self.recover_provisional(&scope)? {
+                    Some(recovery) => {
+                        ProvisionalAttachmentArtifactStoreResponse::RecoveryAvailable(recovery)
+                    }
+                    None => ProvisionalAttachmentArtifactStoreResponse::RecoveryUnavailable,
+                }
             }
             ProvisionalAttachmentArtifactStoreRequest::ResumeRecovered { recovery } => {
                 ProvisionalAttachmentArtifactStoreResponse::Finalized(
@@ -1174,6 +1442,61 @@ impl ProvisionalAttachmentArtifactStore for SqliteAttachmentArtifactStore {
             }
         })
     }
+}
+
+fn verify_unavailable_provisional_scope(
+    connection: &Connection,
+    scope: &ProvisionalAttachmentArtifactScope,
+    current_generation: Option<&str>,
+) -> Result<(), RuntimeError> {
+    // An explicit new incomplete generation may coexist with older published ciphertext.
+    // Without any current binding, however, those publications cannot be distinguished from
+    // a lost current row. Recover must neither select an older token nor invite a fresh Begin.
+    let conflicting_publication = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM attachment_move_artifacts
+                WHERE account_id = ?1 AND operation_id = ?2 AND attachment_id = ?3
+                  AND physical_generation IS NOT NULL
+                  AND (?4 IS NULL OR physical_generation = ?4)
+             )",
+            params![
+                scope.account_id.as_str(),
+                scope.operation_id,
+                scope.attachment_id,
+                current_generation,
+            ],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(sqlite_error)?;
+    if conflicting_publication {
+        return Err(artifact_error(
+            "Provisional recovery has a publication without a matching current binding",
+        ));
+    }
+    Ok(())
+}
+
+fn provisional_owner(
+    scope: &ProvisionalAttachmentArtifactScope,
+    ciphertext_sha256: &str,
+    byte_length: i64,
+) -> Result<AttachmentArtifactOwner, RuntimeError> {
+    let byte_length = u64::try_from(byte_length)
+        .map_err(|_| artifact_error("Provisional byte length is invalid"))?;
+    let artifact = attachment_move_artifact_ref(
+        &scope.account_id,
+        &scope.operation_id,
+        &scope.attachment_id,
+        ciphertext_sha256,
+        byte_length,
+    )?;
+    AttachmentArtifactOwner::new(
+        scope.account_id.clone(),
+        scope.operation_id.clone(),
+        scope.attachment_id.clone(),
+        artifact,
+    )
 }
 
 fn require_current_provisional_writer(

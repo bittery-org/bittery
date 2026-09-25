@@ -75,8 +75,8 @@ export default function SignInForm({
 	const { m } = useI18n();
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
 	// The Runtime owns Quick Unlock now, so it decides whether this Device can offer one.
-	// The transitional session store still supplies the email to show and the Secret Key to
-	// prefill; neither is needed to unlock, only to render.
+	// The Runtime also supplies the selected Account's display identity. Transitional metadata
+	// is only a fallback before Runtime installation, and still supplies signup's Secret Key prefill.
 	const runtimeSession = useRuntimeSession();
 	const serverUrl = getDefaultServerUrl();
 	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
@@ -132,7 +132,13 @@ export default function SignInForm({
 	const signInDescription = isQuickUnlock
 		? m.auth_signin_description_quick_unlock()
 		: m.auth_signin_description_default();
-	const initialEmail = isQuickUnlock ? (sessionState?.email ?? "") : "";
+	const selectedEmail =
+		runtimeSession.accountId !== null
+			? runtimeSession.accounts.find(
+					(account) => account.accountId === runtimeSession.accountId,
+				)?.displayIdentity?.email
+			: sessionState?.email;
+	const initialEmail = isQuickUnlock ? (selectedEmail ?? "") : "";
 	const initialSecretKey = isQuickUnlock
 		? (storedSecretKeyQuery.data ?? "")
 		: "";

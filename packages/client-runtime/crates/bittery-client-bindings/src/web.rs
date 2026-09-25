@@ -1,12 +1,13 @@
 use crate::{
     account_retirement::{retirement_scope, RetirableObservation, RetirementLedger},
-    observation_buffer::BufferedSink,
+    observation_buffer::{BufferedObservation, BufferedSink},
     observation_slots::ObservationSlots,
     web_attachment_move_bridge::{configured_runtime, WebAttachmentMoveResources},
     web_vault_image_bridge::JsVaultImagePorts,
 };
 use bittery_client_core as core;
 use std::{
+    cell::Cell,
     collections::HashMap,
     rc::{Rc, Weak},
     sync::{Arc, Mutex},
@@ -15,6 +16,28 @@ use tokio::sync::Notify;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 use zeroize::Zeroizing;
+
+#[cfg(feature = "binding-test-harness")]
+fn artifact_recovery_test_scope() -> Result<core::ProvisionalAttachmentArtifactScope, JsValue> {
+    core::ProvisionalAttachmentArtifactScope::new(
+        "account-recovery".into(),
+        "operation-recovery",
+        "attachment-recovery",
+    )
+    .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[cfg(feature = "binding-test-harness")]
+fn artifact_recovery_test_token(
+    recovery: &core::ProvisionalAttachmentArtifactRecovery,
+) -> serde_json::Value {
+    serde_json::json!({
+        "accountId": recovery.account_id().as_str(),
+        "operationId": recovery.operation_id(),
+        "attachmentId": recovery.attachment_id(),
+        "generation": recovery.generation(),
+    })
+}
 
 struct JsSerializedReplicaExecutor {
     invoke: js_sys::Function,
@@ -52,7 +75,10 @@ impl core::SerializedPlatformStorageExecutor for JsSerializedPlatformStorageExec
 
 #[async_trait::async_trait(?Send)]
 impl core::SerializedHttpExecutor for JsSerializedHttpExecutor {
-    async fn invoke(&self, request_json: String) -> Result<String, core::RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, core::RuntimeError> {
         invoke_serialized(&self.invoke, &request_json, http_invoke_error).await
     }
 
@@ -91,12 +117,14 @@ fn replica_invoke_error(reason: &str, cause: Option<&JsValue>) -> core::RuntimeE
     {
         return core::RuntimeError {
             recovery_bound: None,
+            team_page_problem: None,
             code: core::RuntimeErrorCode::StorageUnavailable,
             message: "Replica storage is unavailable; close other Bittery tabs and retry".into(),
         };
     }
     core::RuntimeError {
         recovery_bound: None,
+        team_page_problem: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: format!("Replica persistence {reason}"),
     }
@@ -119,6 +147,7 @@ fn lifecycle_js_error(error: core::RuntimeError) -> JsValue {
 fn platform_storage_invoke_error(_reason: &str, _cause: Option<&JsValue>) -> core::RuntimeError {
     core::RuntimeError {
         recovery_bound: None,
+        team_page_problem: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Platform storage invocation failed".into(),
     }
@@ -127,6 +156,7 @@ fn platform_storage_invoke_error(_reason: &str, _cause: Option<&JsValue>) -> cor
 fn http_invoke_error(_reason: &str, _cause: Option<&JsValue>) -> core::RuntimeError {
     core::RuntimeError {
         recovery_bound: None,
+        team_page_problem: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "HTTP transport invocation failed".into(),
     }
@@ -148,6 +178,8 @@ struct WebObservation {
     handle: Arc<core::ObservationHandle>,
     sink: Arc<BufferedSink>,
     callback: js_sys::Function,
+    control_callback: Option<js_sys::Function>,
+    export_forwarded: Cell<bool>,
     account_id: Option<core::AccountId>,
 }
 
@@ -174,13 +206,29 @@ impl WebObservation {
     }
 
     fn deliver(&self) -> Result<(), JsValue> {
-        self.sink.drain(|projection| {
-            let json = Zeroizing::new(
-                serde_json::to_string(&projection)
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?,
-            );
-            self.callback
-                .call1(&JsValue::UNDEFINED, &JsValue::from_str(&json))?;
+        self.sink.drain_events(|event| {
+            match event {
+                BufferedObservation::Projection(projection) => {
+                    let json = Zeroizing::new(
+                        serde_json::to_string(&projection)
+                            .map_err(|error| JsValue::from_str(&error.to_string()))?,
+                    );
+                    self.callback
+                        .call1(&JsValue::UNDEFINED, &JsValue::from_str(&json))?;
+                    if matches!(projection, core::RuntimeProjection::VaultExport(_)) {
+                        // Core delivered into our buffer. This exact slot can admit output only
+                        // after its host callback also returns successfully, including reentry.
+                        self.export_forwarded.set(true);
+                    }
+                }
+                BufferedObservation::Control(control) => {
+                    if let Some(callback) = &self.control_callback {
+                        let json = serde_json::to_string(&control)
+                            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                        callback.call1(&JsValue::UNDEFINED, &JsValue::from_str(&json))?;
+                    }
+                }
+            }
             Ok(())
         })
     }
@@ -394,6 +442,18 @@ impl WebClientRuntime {
         self.inner.open().await.map_err(lifecycle_js_error)
     }
 
+    /// Trusted combined-Worker composition only; renderer requests do not route here.
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = nativeAuthorityControl)]
+    pub async fn native_authority_control(&self, request: String) -> Result<String, JsValue> {
+        self.inner
+            .native_authority()
+            .invoke(zeroize::Zeroizing::new(request))
+            .await
+            .map(|response| response.to_string())
+            .map_err(lifecycle_js_error)
+    }
+
     #[doc(hidden)]
     #[wasm_bindgen(js_name = prepareVaultImageForOperation)]
     #[allow(
@@ -466,6 +526,101 @@ impl WebClientRuntime {
 
     #[cfg(feature = "binding-test-harness")]
     #[doc(hidden)]
+    #[wasm_bindgen(js_name = sleepDeviceTimerForTest)]
+    pub async fn sleep_device_timer_for_test(
+        milliseconds: String,
+        cancellation: js_sys::Promise,
+    ) -> Result<bool, JsValue> {
+        let delay = milliseconds
+            .parse::<u64>()
+            .map_err(|_| JsValue::from_str("Invalid timer delay"))?;
+        if delay.to_string() != milliseconds {
+            return Err(JsValue::from_str("Invalid timer delay"));
+        }
+        tokio::select! {
+            () = core::sleep_device_timer_for_test(delay) => Ok(true),
+            _ = wasm_bindgen_futures::JsFuture::from(cancellation) => Ok(false),
+        }
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = seedAttachmentArtifactRecoveryTestHistory)]
+    pub async fn seed_attachment_artifact_recovery_test_history(
+        artifact_executor: JsValue,
+    ) -> Result<String, JsValue> {
+        let store = crate::web_attachment_artifact_store::JsAttachmentArtifactStore::new(
+            artifact_executor,
+        )?;
+        let (owner, recovery) = core::seed_attachment_artifact_recovery_test_history(
+            &store,
+            artifact_recovery_test_scope()?,
+        )
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        Ok(serde_json::json!({
+            "token": artifact_recovery_test_token(&recovery),
+            "artifact": {
+                "artifactId": owner.artifact_id(),
+                "ciphertextSha256": owner.ciphertext_sha256(),
+                "byteLength": owner.byte_length().to_string(),
+            },
+        })
+        .to_string())
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = sweepAttachmentArtifactRecoveryTestHistory)]
+    pub async fn sweep_attachment_artifact_recovery_test_history(
+        artifact_executor: JsValue,
+        retain_pending: bool,
+    ) -> Result<u32, JsValue> {
+        let store = crate::web_attachment_artifact_store::JsAttachmentArtifactStore::new(
+            artifact_executor,
+        )?;
+        let deleted = core::sweep_attachment_artifact_recovery_test_history(
+            &store,
+            artifact_recovery_test_scope()?,
+            retain_pending,
+        )
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        u32::try_from(deleted)
+            .map_err(|_| JsValue::from_str("Recovery fixture sweep count overflowed"))
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = recoverAttachmentArtifactTestHistory)]
+    pub async fn recover_attachment_artifact_test_history(
+        artifact_executor: JsValue,
+    ) -> Result<String, JsValue> {
+        use core::ProvisionalAttachmentArtifactStore;
+        let store = crate::web_attachment_artifact_store::JsAttachmentArtifactStore::new(
+            artifact_executor,
+        )?;
+        let response = store
+            .invoke_provisional(core::ProvisionalAttachmentArtifactStoreRequest::Recover {
+                scope: artifact_recovery_test_scope()?,
+            })
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        match response {
+            core::ProvisionalAttachmentArtifactStoreResponse::RecoveryAvailable(recovery) => {
+                Ok(artifact_recovery_test_token(&recovery).to_string())
+            }
+            core::ProvisionalAttachmentArtifactStoreResponse::RecoveryUnavailable => {
+                Ok("null".into())
+            }
+            _ => Err(JsValue::from_str(
+                "Recovery fixture returned an unexpected response",
+            )),
+        }
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
     #[wasm_bindgen(js_name = seedAttachmentUploadTestAuthority)]
     pub async fn seed_attachment_upload_test_authority(
         &self,
@@ -476,6 +631,19 @@ impl WebClientRuntime {
             .seed_attachment_upload_binding_test_authority(server_url, mode)
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = seedAttachmentSweepTestAuthority)]
+    pub async fn seed_attachment_sweep_test_authority(
+        &self,
+        server_url: String,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .seed_attachment_sweep_binding_test_authority(server_url)
+            .await
+            .map_err(lifecycle_js_error)
     }
 
     #[cfg(feature = "binding-test-harness")]
@@ -493,6 +661,28 @@ impl WebClientRuntime {
                 pause_checkpoint,
                 second_account.unwrap_or(false),
             )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = seedVaultRetirementTestHistory)]
+    pub async fn seed_vault_retirement_test_history(
+        &self,
+        server_url: String,
+        artifact_executor: JsValue,
+        ready: js_sys::Function,
+    ) -> Result<(), JsValue> {
+        let provisional = Arc::new(
+            crate::web_attachment_artifact_store::JsAttachmentArtifactStore::new(
+                artifact_executor,
+            )?,
+        );
+        self.inner
+            .seed_vault_retirement_binding_test_history(server_url, provisional, move |history| {
+                let _ = ready.call1(&JsValue::UNDEFINED, &JsValue::from_str(&history));
+            })
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))
     }
@@ -526,7 +716,15 @@ impl WebClientRuntime {
         self.flush_observations()?;
         // The declared outcome envelope, not Serde's implicit `Result` spelling, is the contract.
         let outcome = core::RuntimeOutcome::from(result);
-        serde_json::to_string(&outcome).map_err(|error| JsValue::from_str(&error.to_string()))
+        self.inner
+            .encode_outcome(outcome)
+            // A retired disclosure is still an ordinary typed command failure, not a Worker fault.
+            .or_else(|error| {
+                self.inner
+                    .encode_outcome(core::RuntimeOutcome::Failed(error))
+            })
+            .map(|encoded| encoded.to_string())
+            .map_err(lifecycle_js_error)
     }
 
     pub fn observe_json(
@@ -534,9 +732,16 @@ impl WebClientRuntime {
         observation_id: String,
         request_json: String,
         callback: js_sys::Function,
+        control_callback: Option<js_sys::Function>,
     ) -> Result<(), JsValue> {
         let request: core::ObservationRequest = serde_json::from_str(&request_json)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let is_export = matches!(&request, core::ObservationRequest::VaultExport { .. });
+        if is_export && control_callback.is_none() {
+            return Err(JsValue::from_str(
+                "Vault Export requires its terminal control callback",
+            ));
+        }
         let account_id = request.account_id().cloned();
         let sink = Arc::new(BufferedSink::new(Arc::clone(&self.wake)));
         let handle = self
@@ -547,6 +752,8 @@ impl WebClientRuntime {
             handle,
             sink,
             callback,
+            control_callback,
+            export_forwarded: Cell::new(false),
             account_id,
         });
         // Nothing awaits between this catch-up and publication, so no in-flight retirement can
@@ -560,7 +767,50 @@ impl WebClientRuntime {
                 observation.close();
                 JsValue::from_str(&error.to_string())
             })?;
-        self.flush_observation(&observation_id)
+        if let Err(error) = self.flush_observation(&observation_id) {
+            if is_export {
+                // A callback can reenter, remove this id and install another observation.
+                // Failure belongs only to this exact fixed capture.
+                if let Some(failed) = self.observations.remove_if(&observation_id, &observation) {
+                    failed.close();
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn begin_vault_export_output(&self, observation_id: &str) -> Result<String, JsValue> {
+        let observation = self
+            .observations
+            .get(observation_id)
+            .ok_or_else(export_output_unavailable)?;
+        if !observation.export_forwarded.get() {
+            return Err(export_output_unavailable());
+        }
+        observation
+            .handle
+            .begin_vault_export_output()
+            .map_err(lifecycle_js_error)
+    }
+
+    pub fn finish_vault_export_output(
+        &self,
+        observation_id: &str,
+        output_lease_id: &str,
+    ) -> Result<(), JsValue> {
+        let observation = self
+            .observations
+            .get(observation_id)
+            .ok_or_else(export_output_unavailable)?;
+        observation
+            .handle
+            .finish_vault_export_output(output_lease_id)
+            .map_err(lifecycle_js_error)?;
+        if let Some(finished) = self.observations.remove_if(observation_id, &observation) {
+            finished.close();
+        }
+        Ok(())
     }
 
     pub fn unobserve(&self, observation_id: &str) {
@@ -591,10 +841,12 @@ impl WebClientRuntime {
         for cancellation in cancellations {
             cancellation.cancel();
         }
+        // Core drains Account execution before the host releases its leases. An invoked
+        // artifact callback may still be running even if its Rust future is dropped.
+        self.inner.close().await;
         if let Some(resources) = &self.attachment_move_resources {
             resources.close();
         }
-        self.inner.close().await;
         for observation in self.observations.drain() {
             observation.close();
         }
@@ -610,6 +862,15 @@ impl Drop for WebClientRuntime {
         }
         self.wake.notify_one();
     }
+}
+
+fn export_output_unavailable() -> JsValue {
+    lifecycle_js_error(core::RuntimeError {
+        code: core::RuntimeErrorCode::AccessDenied,
+        message: "Export output is unavailable on this observation".into(),
+        recovery_bound: None,
+        team_page_problem: None,
+    })
 }
 
 fn client_platform(platform: &str) -> Result<core::ClientPlatform, JsValue> {

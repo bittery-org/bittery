@@ -95,6 +95,9 @@ pub(super) enum RecoveryFinding {
     InvalidVaultImageDependency {
         operation_id: String,
     },
+    UnavailableVaultImageKey {
+        operation_id: String,
+    },
     InvalidAuthorityRelationships,
     IdentityUnavailable,
     ReadFailure {
@@ -174,6 +177,21 @@ impl Findings {
                 .saturating_add(generation.len()),
             EntryHeader::VaultImageMetadata { operation_id, .. }
             | EntryHeader::VaultImageChunk { operation_id, .. } => operation_id.len(),
+            EntryHeader::ProtectedVaultImageMetadata {
+                operation_id,
+                publication_id,
+                ..
+            }
+            | EntryHeader::ProtectedVaultImageChunk {
+                operation_id,
+                publication_id,
+                ..
+            }
+            | EntryHeader::ProtectedVaultImageKey {
+                operation_id,
+                publication_id,
+                ..
+            } => operation_id.len().saturating_add(publication_id.len()),
             _ => 0,
         };
         if identity_bytes > MAX_REPORT_BYTES {
@@ -224,11 +242,18 @@ impl Findings {
                 generation: generation.clone(),
                 chunk_index: Some(*chunk_index),
             },
-            EntryHeader::VaultImageMetadata { operation_id, .. } => InvalidVaultImageRecord {
+            EntryHeader::VaultImageMetadata { operation_id, .. }
+            | EntryHeader::ProtectedVaultImageMetadata { operation_id, .. }
+            | EntryHeader::ProtectedVaultImageKey { operation_id, .. } => InvalidVaultImageRecord {
                 operation_id: operation_id.clone(),
                 chunk_index: None,
             },
             EntryHeader::VaultImageChunk {
+                operation_id,
+                chunk_index,
+                ..
+            }
+            | EntryHeader::ProtectedVaultImageChunk {
                 operation_id,
                 chunk_index,
                 ..

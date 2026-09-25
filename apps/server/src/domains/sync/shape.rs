@@ -11,6 +11,9 @@ macro_rules! bootstrap_vault_summary_shape {
             image_url: Option<String>,
             encrypted_vault_key: String,
             role: $crate::db::enums::VaultRole,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            @schema(minimum = 1)
+            key_version: Option<i32>,
         } }
     };
 }

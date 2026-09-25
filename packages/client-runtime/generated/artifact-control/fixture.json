@@ -2,6 +2,19 @@
   "steps": [
     {
       "request": {
+        "scope": {
+          "accountId": "account-1",
+          "attachmentId": "attachment-1",
+          "operationId": "operation-1"
+        },
+        "type": "recoverProvisional"
+      },
+      "response": {
+        "type": "provisionalRecoveryUnavailable"
+      }
+    },
+    {
+      "request": {
         "type": "beginProvisional",
         "writer": {
           "accountId": "account-1",

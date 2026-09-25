@@ -58,10 +58,10 @@ function targetItem(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function appliedCreateOutcome() {
+function appliedCreateOutcome(operationId = "move-1") {
 	return {
 		data: {
-			operationId: "move-1:create-target",
+			operationId: `${operationId}:create-target`,
 			kind: "create_item",
 			result: { status: "applied", itemId: "item-target", version: 1 },
 		},
@@ -74,6 +74,91 @@ function executor(clients: Record<string, unknown>) {
 		vaultCrypto: { getVaultKey: async () => ({ id: "target-key" }) } as never,
 		getClientForAccount: async (accountId) => clients[accountId] as never,
 	});
+}
+
+function lostSourceEffectOracle(lostAt: "trash" | "delete") {
+	const semanticId = `semantic-move-after-${lostAt}`;
+	const queuedCommand = command({
+		id: `queue-attempt-after-${lostAt}`,
+		operationId: semanticId,
+		attemptId: `transport-attempt-after-${lostAt}`,
+	});
+	const originalCommand = structuredClone(queuedCommand);
+	const effects: string[] = [];
+	let source: "live" | "trashed" | "missing" = "live";
+	let targetExists = false;
+	let loseResponse = true;
+	let deleteAttempts = 0;
+
+	const service = executor({
+		[TARGET]: {
+			items: {
+				get: async () => {
+					if (!targetExists) throw notFound();
+					return targetItem();
+				},
+				create: async (
+					_vaultId: string,
+					_itemId: string,
+					_payload: unknown,
+					options: { idempotencyKey?: string },
+				) => {
+					effects.push(`create:${options.idempotencyKey}`);
+					targetExists = true;
+					return appliedCreateOutcome(semanticId);
+				},
+			},
+			attachments: { list: async () => ({ data: [] }) },
+		},
+		[SOURCE]: {
+			items: {
+				get: async () => {
+					if (source === "missing") throw notFound();
+					return {
+						data:
+							source === "live"
+								? { version: 1, deletedAt: null }
+								: { version: 2, deletedAt: "server-trash-time" },
+					};
+				},
+				trash: async (
+					_itemId: string,
+					options: { etag?: string; idempotencyKey?: string },
+				) => {
+					expect(options.etag).toBe('"1"');
+					effects.push(`trash:${options.idempotencyKey}`);
+					source = "trashed";
+					if (lostAt === "trash" && loseResponse) {
+						loseResponse = false;
+						throw new Error("lost Trash response");
+					}
+				},
+				deletePermanently: async (
+					_itemId: string,
+					options: { etag?: string; idempotencyKey?: string },
+				) => {
+					expect(options.etag).toBe('"2"');
+					effects.push(`delete:${options.idempotencyKey}`);
+					deleteAttempts++;
+					source = "missing";
+					if (lostAt === "delete" && loseResponse) {
+						loseResponse = false;
+						throw new Error("lost delete response");
+					}
+				},
+			},
+			attachments: { list: async () => ({ data: [] }) },
+		},
+	});
+
+	return {
+		deleteAttempts: () => deleteAttempts,
+		effects,
+		originalCommand,
+		queuedCommand,
+		semanticId,
+		service,
+	};
 }
 
 describe("CrossAccountItemCommandExecutor", () => {
@@ -155,6 +240,25 @@ describe("CrossAccountItemCommandExecutor", () => {
 		);
 		await service.executeSemanticItemCommand(command());
 		expect({ creates, deleted }).toEqual({ creates: 1, deleted: true });
+	});
+
+	test("retries the original semantic children after Trash takes effect but its response is lost", async () => {
+		const oracle = lostSourceEffectOracle("trash");
+		await expect(
+			oracle.service.executeSemanticItemCommand(oracle.queuedCommand),
+		).rejects.toThrow("lost Trash response");
+		expect(oracle.queuedCommand).toEqual(oracle.originalCommand);
+
+		await expect(
+			oracle.service.executeSemanticItemCommand(oracle.queuedCommand),
+		).resolves.toEqual({ entityId: "item-source", etag: '"3"', version: 3 });
+		expect(oracle.effects).toEqual([
+			`create:${oracle.semanticId}:create-target`,
+			`trash:${oracle.semanticId}:trash-source`,
+			`delete:${oracle.semanticId}:delete-source`,
+		]);
+		expect(oracle.deleteAttempts()).toBe(1);
+		expect(oracle.queuedCommand).toEqual(oracle.originalCommand);
 	});
 
 	test("keeps the source and attachments when target create is semantically rejected", async () => {
@@ -354,32 +458,23 @@ describe("CrossAccountItemCommandExecutor", () => {
 		expect(attachmentAttemptId).toBe("move-1:attempt:second");
 	});
 
-	test("resumes finalization after trash and a lost permanent-delete response", async () => {
-		let state: "trashed" | "missing" = "trashed";
-		let attempts = 0;
-		const service = executor({
-			[TARGET]: { items: { get: async () => targetItem() } },
-			[SOURCE]: {
-				items: {
-					get: async () => {
-						if (state === "missing") throw notFound();
-						return { data: { version: 2, deletedAt: "now" } };
-					},
-					deletePermanently: async () => {
-						attempts++;
-						state = "missing";
-						throw new Error("lost delete response");
-					},
-				},
-			},
-		});
-		await expect(service.executeSemanticItemCommand(command())).rejects.toThrow(
-			"lost delete response",
-		);
+	test("retries the original command after Permanent-delete takes effect but its response is lost", async () => {
+		const oracle = lostSourceEffectOracle("delete");
 		await expect(
-			service.executeSemanticItemCommand(command()),
+			oracle.service.executeSemanticItemCommand(oracle.queuedCommand),
+		).rejects.toThrow("lost delete response");
+		expect(oracle.queuedCommand).toEqual(oracle.originalCommand);
+
+		await expect(
+			oracle.service.executeSemanticItemCommand(oracle.queuedCommand),
 		).resolves.toEqual({ entityId: "item-source", etag: '"3"', version: 3 });
-		expect(attempts).toBe(1);
+		expect(oracle.effects).toEqual([
+			`create:${oracle.semanticId}:create-target`,
+			`trash:${oracle.semanticId}:trash-source`,
+			`delete:${oracle.semanticId}:delete-source`,
+		]);
+		expect(oracle.deleteAttempts()).toBe(1);
+		expect(oracle.queuedCommand).toEqual(oracle.originalCommand);
 	});
 
 	test("does not accept a mismatched target after the source is gone", async () => {

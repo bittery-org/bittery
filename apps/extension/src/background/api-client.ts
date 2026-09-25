@@ -3,6 +3,7 @@ import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import { getDesktopSync } from "./desktop-sync";
+import { nativeMessagingClient } from "./native-messaging-client";
 
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
@@ -39,9 +40,19 @@ async function getOrCreateSyncClientId(): Promise<string> {
 async function getAuthToken(accountId: string): Promise<string | null> {
 	if (getDesktopSync().isDesktopAvailable()) {
 		try {
+			const generation =
+				await nativeMessagingClient.captureDeliveryGeneration();
 			const desktopToken = await desktopClient.getAuthToken(accountId);
 			if (desktopToken) {
-				await storage.storeAuthToken(desktopToken, accountId);
+				await nativeMessagingClient.withMaterialMutation(
+					generation,
+					accountId,
+					async (check, markMaterialWrite) => {
+						markMaterialWrite();
+						await storage.storeAuthToken(desktopToken, accountId);
+						check();
+					},
+				);
 				return desktopToken;
 			}
 		} catch {

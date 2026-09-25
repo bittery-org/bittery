@@ -37,6 +37,7 @@ export interface ItemAttachmentsProps {
 	attachmentMaxFileSizeBytes: number | bigint | null;
 	onDecryptMeta: (attachment: AttachmentItem) => Promise<{ name: string }>;
 	onUpload: (file: File & { displayName?: string }) => Promise<unknown>;
+	onPrepareUpload?: () => ItemAttachmentsProps["onUpload"];
 	onDownload: (attachment: AttachmentItem) => Promise<{
 		bytes: Uint8Array;
 		fileName: string;
@@ -274,6 +275,7 @@ export function ItemAttachments({
 	attachmentMaxFileSizeBytes,
 	onDecryptMeta,
 	onUpload,
+	onPrepareUpload,
 	onDownload,
 	onRename,
 	onDelete,
@@ -283,6 +285,7 @@ export function ItemAttachments({
 }: ItemAttachmentsProps) {
 	const { m } = useI18n();
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const selectedUpload = useRef<ItemAttachmentsProps["onUpload"] | null>(null);
 	const [isUploading, setIsUploading] = useState(false);
 	const [pendingFile, setPendingFile] = useState<File | null>(null);
 	const [pendingName, setPendingName] = useState("");
@@ -316,7 +319,7 @@ export function ItemAttachments({
 		if (!pendingFile) return;
 		setIsUploading(true);
 		try {
-			await onUpload(
+			await (selectedUpload.current ?? onUpload)(
 				Object.assign(pendingFile, {
 					displayName: pendingName.trim() || pendingFile.name,
 				}),
@@ -339,6 +342,7 @@ export function ItemAttachments({
 				toast.error(m.vaults_detail_items_attachments_toast_upload_failed());
 			}
 		} finally {
+			selectedUpload.current = null;
 			setIsUploading(false);
 			setPendingFile(null);
 			setPendingName("");
@@ -382,7 +386,10 @@ export function ItemAttachments({
 						<Button
 							size="sm"
 							variant="outline"
-							onClick={() => fileInputRef.current?.click()}
+							onClick={() => {
+								try { selectedUpload.current = onPrepareUpload?.() ?? onUpload; fileInputRef.current?.click(); }
+								catch { toast.error(m.vaults_detail_items_attachments_toast_upload_failed()); }
+							}}
 							disabled={isUploading || !!pendingFile}
 						>
 							<Upload className="mr-1 h-3 w-3" />

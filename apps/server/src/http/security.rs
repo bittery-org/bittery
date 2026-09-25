@@ -130,6 +130,8 @@ const OPERATION_SECURITY: &[(&str, OperationSecurity)] = &[
     ("cleanupVaultImageStaging", OperationSecurity::Bearer),
     ("deleteVault", OperationSecurity::Bearer),
     ("updateVault", OperationSecurity::Bearer),
+    ("updateVaultMetadata", OperationSecurity::Bearer),
+    ("deleteVaultOperation", OperationSecurity::Bearer),
     ("listAvailableTeamMembers", OperationSecurity::Bearer),
     ("createVaultImageUpload", OperationSecurity::Bearer),
     ("bulkImportItems", OperationSecurity::Bearer),

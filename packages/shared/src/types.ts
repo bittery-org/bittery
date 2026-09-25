@@ -67,6 +67,12 @@ export interface Passkey {
 	statusUpdatedAt?: string;
 }
 
+/** Credential metadata on ordinary Item reads. Signing material remains in private transfers. */
+export type PublicPasskey = Omit<Passkey, "privateKey"> & {
+	/** Core-issued stale-selection evidence when this metadata came from a Runtime projection. */
+	publicKeyFingerprint?: string;
+};
+
 /**
  * Decrypted data payload for vault items (without metadata)
  * Contains all the actual sensitive data that gets encrypted/decrypted
@@ -111,6 +117,11 @@ export interface DecryptedItemData {
 	linkedItemId?: string; // Optional link to a login item
 }
 
+/** Existing host presentation fields backed by a public Runtime Item projection. */
+export type PublicDecryptedItemData = Omit<DecryptedItemData, "passkeys"> & {
+	passkeys?: PublicPasskey[];
+};
+
 /**
  * Complete decrypted vault item with metadata and decrypted data
  * Extends DecryptedItemData with item metadata (id, timestamps, etc.)
@@ -124,6 +135,11 @@ export interface DecryptedItem extends DecryptedItemData {
 	createdAt: string;
 	updatedAt: string;
 }
+
+/** An Item used by read-only host views; private credential bytes are never required. */
+export type PublicDecryptedItem = Omit<DecryptedItem, "passkeys"> & {
+	passkeys?: PublicPasskey[];
+};
 
 // Deliberately withheld from shares: id, vaultId, favorite, createdAt, updatedAt,
 // passwordHistory, passkeys, tags and linkedItemId are local-only or leak vault structure.
@@ -183,6 +199,8 @@ export interface ItemContextMetadata {
 }
 
 export type DecryptedItemWithContext = DecryptedItem & ItemContextMetadata;
+export type PublicDecryptedItemWithContext = PublicDecryptedItem &
+	ItemContextMetadata;
 
 /**
  * Category-specific display data types for read-only item views
@@ -195,7 +213,7 @@ export interface LoginDisplayData {
 	username?: string;
 	password?: string;
 	passwordHistory?: PasswordHistoryEntry[];
-	passkeys?: Passkey[];
+	passkeys?: PublicPasskey[];
 	notes?: string;
 	customFields?: CustomField[];
 	tags?: string[];

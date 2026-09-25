@@ -66,6 +66,8 @@ pub trait ObjectStorage: Send + Sync {
         expires_in_seconds: Option<u64>,
     ) -> Result<String, StorageError>;
     async fn head(&self, key: &str) -> Result<Option<StorageObjectHead>, StorageError>;
+    /// Success proves this invocation's physical deletion completed. Accepted asynchronous work,
+    /// lost responses and cancellation are not completion; callers must conserve that uncertainty.
     async fn delete(&self, key: &str) -> Result<(), StorageError>;
     fn public_url(&self, key: &str) -> Option<String>;
 }
@@ -288,7 +290,7 @@ async fn delete_object(storage: &S3CompatibleStorage, key: &str) -> Result<(), S
         .send()
         .await
         .map_err(|error| StorageError::DeleteObject(error.to_string()))?;
-    if !response.status().is_success() {
+    if response.status() != reqwest::StatusCode::NO_CONTENT {
         return Err(StorageError::DeleteObject(format!(
             "storage returned {}",
             response.status()
@@ -1021,6 +1023,20 @@ mod tests {
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: aws4-hmac-sha256"));
+    }
+
+    #[tokio::test]
+    async fn delete_object_requires_definite_completion_instead_of_async_acceptance() {
+        let (endpoint, request) =
+            spawn_storage_response("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n");
+        let result = storage(&endpoint)
+            .delete("attachments/unfinished-delete")
+            .await;
+        request.join().expect("mock provider should finish");
+        assert!(
+            result.is_err(),
+            "202 acceptance cannot prove physical DELETE completion"
+        );
     }
 
     fn spawn_storage_response(response: &'static str) -> (String, thread::JoinHandle<String>) {

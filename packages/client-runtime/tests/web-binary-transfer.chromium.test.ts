@@ -21,13 +21,14 @@ describe("binary transfer adapter in an actual MV3 service worker", () => {
 			contentLength: string | null;
 			contentType: string | null;
 			contentSha256: string | null;
+			checksumSha256: string | null;
 		};
 		const observed = new Map<string, Observed>();
 		const arrivals = new Map<string, () => void>();
 		const arrivalPromises = new Map<string, Promise<void>>();
 		const releases = new Map<string, () => void>();
 		const releasePromises = new Map<string, Promise<void>>();
-		for (const id of ["first", "second", "foreground"]) {
+		for (const id of ["first", "second", "foreground", "durable"]) {
 			arrivalPromises.set(
 				id,
 				new Promise((resolve) => arrivals.set(id, resolve)),
@@ -46,6 +47,7 @@ describe("binary transfer adapter in an actual MV3 service worker", () => {
 					contentLength: request.headers.get("content-length"),
 					contentType: request.headers.get("content-type"),
 					contentSha256: request.headers.get("x-amz-content-sha256"),
+					checksumSha256: request.headers.get("x-amz-checksum-sha256"),
 				});
 				arrivals.get(id)?.();
 				await Promise.race([
@@ -172,6 +174,7 @@ describe("binary transfer adapter in an actual MV3 service worker", () => {
 					contentType: "application/octet-stream",
 					contentSha256:
 						"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+					checksumSha256: null,
 				});
 			}
 			expect(observed.get("foreground")).toEqual({
@@ -180,11 +183,48 @@ describe("binary transfer adapter in an actual MV3 service worker", () => {
 				contentType: "application/octet-stream",
 				contentSha256:
 					"787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472",
+				checksumSha256: null,
+			});
+			const durableHeaders = [
+				{ name: "Content-Length", value: "3" },
+				{ name: "Content-Type", value: "application/octet-stream" },
+				{
+					name: "x-amz-content-sha256",
+					value:
+						"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+				},
+				{
+					name: "x-amz-checksum-sha256",
+					value: "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=",
+				},
+			];
+			releases.get("durable")?.();
+			await worker.evaluate(
+				({ uploadUrl, durableHeaders }) =>
+					globalThis.startBinaryTransferUpload(
+						"durable",
+						uploadUrl,
+						"generation-durable",
+						durableHeaders,
+					),
+				{ uploadUrl, durableHeaders },
+			);
+			const durable = await worker.evaluate(() =>
+				globalThis.awaitBinaryTransferUpload("durable"),
+			);
+			expect(durable.finish).toEqual({ type: "uploadFinished" });
+			expect(observed.get("durable")).toEqual({
+				body: [1, 2, 3],
+				contentLength: "3",
+				contentType: "application/octet-stream",
+				contentSha256: durableHeaders[2].value,
+				checksumSha256: durableHeaders[3].value,
 			});
 		} finally {
 			releases.get("first")?.();
 			releases.get("second")?.();
 			releases.get("foreground")?.();
+			releases.get("durable")?.();
 			await context.close();
 			server.stop(true);
 		}

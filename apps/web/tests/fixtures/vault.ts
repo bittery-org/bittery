@@ -10,6 +10,7 @@ import {
 	type TestInfo,
 	test,
 } from "@playwright/test";
+import { uiText } from "./messages";
 
 /** The categories the create-item sheet offers, spelled as their testid suffix. */
 export type ItemCategory =
@@ -97,7 +98,7 @@ export async function revealValue(row: Locator): Promise<void> {
 export async function createVault(
 	page: Page,
 	name: string,
-	options: { iconLabel?: string } = {},
+	options: { iconLabel?: string; type?: "personal" | "team" } = {},
 ): Promise<string> {
 	// The sidebar that owns this button only exists under /vaults.
 	const createButton = page.getByTestId("new-vault-button");
@@ -119,6 +120,14 @@ export async function createVault(
 	await expect(dialog.locator("#name")).toHaveValue(name);
 	if (options.iconLabel) {
 		await dialog.getByRole("button", { name: options.iconLabel }).click();
+	}
+	if (options.type === "team") {
+		await dialog
+			.getByRole("button", {
+				name: uiText("vaults_create_dialog_type_team"),
+				exact: true,
+			})
+			.click();
 	}
 	await page.getByTestId("create-vault-submit-button").click();
 	await expect(dialog).toBeHidden();

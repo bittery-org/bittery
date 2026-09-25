@@ -21,6 +21,10 @@ import {
 } from "@bittery/ui";
 import { IconVault as VaultIcon } from "@bittery/ui/icons";
 import {
+	findRuntimeVault,
+	vaultNavEntries,
+} from "@bittery/ui/runtime-presentation";
+import {
 	createFileRoute,
 	Outlet,
 	useNavigate,
@@ -28,10 +32,11 @@ import {
 } from "@tanstack/react-router";
 import { useState } from "react";
 import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
-
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
-import { findRuntimeVault, vaultNavEntries } from "@/lib/runtime-items";
-import { grantRuntimeVaultImage } from "@/lib/runtime-vault-image";
+import {
+	grantRuntimeVaultImage,
+	prepareRuntimeVaultImageSelection,
+} from "@/lib/runtime-vault-image";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -208,6 +213,7 @@ function VaultsLayout() {
 					open={isCreateVaultDialogOpen}
 					onOpenChange={setIsCreateVaultDialogOpen}
 					onSubmit={handleCreateVault}
+					prepareImageSelection={prepareRuntimeVaultImageSelection}
 					accounts={accounts}
 					defaultAccountId={session.accountId ?? ""}
 				/>

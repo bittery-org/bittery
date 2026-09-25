@@ -1,5 +1,326 @@
 {
   "$defs": {
+    "AttachmentDownloadSinkAnswer": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "begun",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "written",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "committed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "discarded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "retired",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "retirementCompleted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "sinkFailure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "invariantViolation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AttachmentDownloadSinkControl": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "capabilityId": {
+              "type": "string"
+            },
+            "requestScope": {
+              "type": "string"
+            },
+            "type": {
+              "const": "begin",
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultId",
+            "attachmentId",
+            "capabilityId",
+            "requestScope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "capabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "write",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "capabilityId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "capabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "commit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "capabilityId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "capabilityId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "discard",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "capabilityId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "retireAccount",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "completeAccountRetirement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "retireVaults",
+              "type": "string"
+            },
+            "vaultIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultIds"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "completeVaultRetirement",
+              "type": "string"
+            },
+            "vaultIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultIds"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "forgetAccountVaultRetirements",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "retireRuntime",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "AttachmentUploadSourceAnswer": {
       "oneOf": [
         {
@@ -148,11 +469,15 @@
             "type": {
               "const": "claim",
               "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
             }
           },
           "required": [
             "type",
             "accountId",
+            "vaultId",
             "itemId",
             "name",
             "contentType",
@@ -227,6 +552,71 @@
             },
             "type": {
               "const": "completeAccountRetirement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "retireVaults",
+              "type": "string"
+            },
+            "vaultIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultIds"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "completeVaultRetirement",
+              "type": "string"
+            },
+            "vaultIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultIds"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "forgetAccountVaultRetirements",
               "type": "string"
             }
           },
@@ -783,6 +1173,12 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "attachmentDownloadSinkAnswer": {
+      "$ref": "#/$defs/AttachmentDownloadSinkAnswer"
+    },
+    "attachmentDownloadSinkControl": {
+      "$ref": "#/$defs/AttachmentDownloadSinkControl"
+    },
     "attachmentUploadSourceAnswer": {
       "$ref": "#/$defs/AttachmentUploadSourceAnswer"
     },
@@ -804,7 +1200,9 @@
     "response",
     "foregroundUploadOutcome",
     "attachmentUploadSourceControl",
-    "attachmentUploadSourceAnswer"
+    "attachmentUploadSourceAnswer",
+    "attachmentDownloadSinkControl",
+    "attachmentDownloadSinkAnswer"
   ],
   "title": "TransferControlContract",
   "type": "object",

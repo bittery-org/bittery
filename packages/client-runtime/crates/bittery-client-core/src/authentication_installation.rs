@@ -149,12 +149,6 @@ fn validate_authenticated_session(
             return Err(invalid_authenticated_session());
         }
     }
-    let mut hidden_vault_ids = std::collections::HashSet::new();
-    for vault_id in &verified.travel_mode.hidden_vault_ids {
-        if vault_id.is_empty() || !hidden_vault_ids.insert(vault_id.as_str()) {
-            return Err(invalid_authenticated_session());
-        }
-    }
 
     let server_expires_at_ms = parse_session_expiry_ms(&verified.expires_at)?;
     if server_expires_at_ms <= now_ms {
@@ -172,32 +166,16 @@ fn validate_authenticated_session(
             )
         })?;
 
-    if verified.travel_mode.enabled != verified.travel_mode.enabled_at.is_some() {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::AuthenticationUnavailable,
-            "Server Travel Mode activation timestamp is inconsistent",
-        ));
-    }
-    let server_enabled_at_ms = verified
-        .travel_mode
-        .enabled_at
-        .as_deref()
-        .map(parse_server_timestamp_ms)
-        .transpose()?;
-    let verified_travel_mode = VerifiedTravelModePolicy {
-        enabled: verified.travel_mode.enabled,
-        hidden_vault_ids: verified.travel_mode.hidden_vault_ids.clone(),
-        server_enabled_at_ms,
-        server_updated_at_ms: Some(parse_server_timestamp_ms(&verified.travel_mode.updated_at)?),
-        verified_at_ms: now_ms,
-    };
-    if !verified.travel_mode.enabled {
-        hidden_vault_ids.clear();
-    }
+    let verified_travel_mode = prepare_verified_travel_policy(&verified.travel_mode, now_ms)?;
     let vault_keys = verified
         .vault_keys
         .into_iter()
-        .filter(|vault_key| !hidden_vault_ids.contains(vault_key.vault_id.as_str()))
+        .filter(|vault_key| {
+            !verified_travel_mode.enabled
+                || !verified_travel_mode
+                    .hidden_vault_ids
+                    .contains(&vault_key.vault_id)
+        })
         .collect();
 
     Ok(ValidatedAuthentication {
@@ -428,6 +406,28 @@ pub(crate) fn parse_session_expiry_ms(expires_at: &str) -> Result<u64, RuntimeEr
         .unix_timestamp_nanos();
 
     timestamp_nanos_to_ms(timestamp)
+}
+
+/// Validates one authenticated Travel response for installation and local retained-Session release.
+pub(crate) fn prepare_verified_travel_policy(
+    response: &crate::server_contract::TravelModeResponse,
+    now_ms: u64,
+) -> Result<VerifiedTravelModePolicy, RuntimeError> {
+    let policy = VerifiedTravelModePolicy {
+        enabled: response.enabled,
+        hidden_vault_ids: response.hidden_vault_ids.clone(),
+        server_enabled_at_ms: response
+            .enabled_at
+            .as_deref()
+            .map(parse_server_timestamp_ms)
+            .transpose()?,
+        server_updated_at_ms: Some(parse_server_timestamp_ms(&response.updated_at)?),
+        verified_at_ms: Some(now_ms),
+    };
+    policy
+        .validate()
+        .map_err(|_| invalid_authenticated_session())?;
+    Ok(policy)
 }
 
 fn parse_server_timestamp_ms(value: &str) -> Result<u64, RuntimeError> {
@@ -697,7 +697,7 @@ mod tests {
                 hidden_vault_ids: vec!["hidden".into()],
                 server_enabled_at_ms: Some(1_861_920_000_000),
                 server_updated_at_ms: Some(1_862_006_400_000),
-                verified_at_ms: 1_700_000_000_000,
+                verified_at_ms: Some(1_700_000_000_000),
             })
         );
     }

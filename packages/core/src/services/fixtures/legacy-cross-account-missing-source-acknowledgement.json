@@ -1,0 +1,57 @@
+{
+	"accounts": [
+		{
+			"email": "source@legacy.invalid",
+			"userId": "source:user",
+			"name": "acct_legacy_α:7",
+			"serverUrl": "https://source.legacy.invalid",
+			"secretKeyHint": "ABCD••••",
+			"addedAt": 1,
+			"lastActiveAt": 1,
+			"biometricEnabled": false,
+			"accountId": "acct_legacy_α:7",
+			"insecureTransportConfirmed": false
+		},
+		{
+			"email": "target@legacy.invalid",
+			"userId": "target:user",
+			"name": "zz_second_account",
+			"serverUrl": "https://target.legacy.invalid",
+			"secretKeyHint": "ABCD••••",
+			"addedAt": 1,
+			"lastActiveAt": 1,
+			"biometricEnabled": false,
+			"accountId": "zz_second_account",
+			"insecureTransportConfirmed": false
+		}
+	],
+	"records": [
+		{
+			"collection": "acct_legacy_α:7:meta",
+			"id": "meta",
+			"value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790012611818,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://source.legacy.invalid\",\"cursorId\":\"source-bootstrap\"},\"itemCount\":1},\"activeGeneration\":\"mubjaiug-1-k9av8431svs\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:mubjaiug-1-k9av8431svs:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:mubjaiug-1-k9av8431svs:vaults:\"}}"
+		},
+		{
+			"collection": "item-cache-stage:acct_legacy_α:7:mubjaiug-1-k9av8431svs:vaults",
+			"id": "source:vault/雪",
+			"value": "{\"id\":\"source:vault/雪\",\"name\":\"acct_legacy_α:7 vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"serverUrl\":\"https://source.legacy.invalid\"}"
+		},
+		{
+			"collection": "item-cache-stage:zz_second_account:mubjaiug-2-q7gvx6il94b:vaults",
+			"id": "target:vault/目标",
+			"value": "{\"id\":\"target:vault/目标\",\"name\":\"zz_second_account vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"zz_second_account\",\"accountEmail\":\"target@legacy.invalid\",\"serverUrl\":\"https://target.legacy.invalid\"}"
+		},
+		{
+			"collection": "zz_second_account:meta",
+			"id": "meta",
+			"value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790012611817,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://target.legacy.invalid\",\"cursorId\":\"target-bootstrap\"},\"itemCount\":0},\"activeGeneration\":\"mubjaiug-2-q7gvx6il94b\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:zz_second_account:mubjaiug-2-q7gvx6il94b:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:zz_second_account:mubjaiug-2-q7gvx6il94b:vaults:\"}}"
+		}
+	],
+	"sync": {
+		"sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:lastSyncCursor": "{\"id\":\"source-bootstrap\"}",
+		"sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"source-bootstrap\"}}",
+		"sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:lastSyncCursor": "{\"id\":\"target-bootstrap\"}",
+		"sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"target-bootstrap\"}}",
+		"bittery_pending_mutation_queues_v3": "{\"acct_legacy_α:7\":[{\"type\":\"cross_account_move\",\"entityId\":\"source:item/雪\",\"vaultId\":\"source:vault/雪\",\"targetVaultId\":\"target:vault/目标\",\"targetAccountId\":\"zz_second_account\",\"targetItemId\":\"target:item/雪\",\"category\":\"login\",\"encryptedPayload\":{\"encryptedData\":\"ieHIQnPBE2e7qY9MmLr9ADwtt4tpYyJdxLOCRCONEX2CxqAr6o+za9RB+eQfb+c1ps3wZwv6qINYCS2MlZvisdJYzNlF6ZAP0fOcBX+Az7V4zIRKie1C/Ltdi9u2qMEQvZaPKAimcHqJ3aI9v1kM7dwzm2HJjvFkuo7scQj2JiAxfgKU\",\"encryptionIv\":\"mafDWTmHHFv0oNZF\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"target:user\"},\"id\":\"original-semantic-move\",\"operationId\":\"original-semantic-move\",\"timestamp\":1789000000123,\"retryCount\":0,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"baseVersion\":6,\"status\":\"pending\",\"attemptId\":\"original-semantic-move\"}]}"
+	}
+}

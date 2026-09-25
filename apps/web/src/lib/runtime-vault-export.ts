@@ -1,6 +1,11 @@
-import type { RuntimeClient } from "@bittery/client-runtime/client";
+import type {
+	RuntimeClient,
+	RuntimeVaultExportHandle,
+} from "@bittery/client-runtime/client";
+import type { VaultExportProjection } from "@bittery/client-runtime/protocol";
 import type { AttachmentDownloadSinkGrants } from "@bittery/client-runtime/web";
 import type { DecryptedItemData } from "@bittery/shared/types";
+import { observeAccountDeparture } from "@bittery/ui/runtime-presentation";
 import JSZip from "jszip";
 import { createAttachmentDownloadBuffer } from "./attachment-download-buffer";
 import type {
@@ -8,7 +13,6 @@ import type {
 	ExportedVault,
 	VaultExportPayload,
 } from "./export-types";
-import { observeAccountDeparture } from "./runtime-account-presentation";
 
 export type ExportStage =
 	| "idle"
@@ -27,13 +31,28 @@ export interface ExportProgress {
 	currentVaultName?: string;
 }
 
-/** Formats Runtime's unlocked view; authority, keys and authenticated transfers stay in Runtime. */
+export interface RuntimeVaultArchive {
+	/** Admits and performs one synchronous browser output, then consumes this private capture. */
+	download(): Promise<void>;
+	dispose(): Promise<void>;
+}
+
+const emptyProgress = (): ExportProgress => ({
+	stage: "idle",
+	totalItems: 0,
+	processedItems: 0,
+	totalAttachments: 0,
+	processedAttachments: 0,
+});
+
+/** One attempt owns the fixed Core capture, builder work and ready output until disposal. */
 export async function createRuntimeVaultArchive(
 	runtime: RuntimeClient,
 	sinks: AttachmentDownloadSinkGrants,
 	report: (progress: ExportProgress) => void,
 	signal: AbortSignal,
-): Promise<Blob> {
+): Promise<RuntimeVaultArchive> {
+	signal.throwIfAborted();
 	const session = runtime.session().getSnapshot();
 	if (session.state !== "unlocked" || !session.accountId)
 		throw new Error("Unlock an Account before exporting");
@@ -42,26 +61,175 @@ export async function createRuntimeVaultArchive(
 		(account) => account.accountId === accountId,
 	)?.displayIdentity;
 	if (!identity) throw new Error("Runtime Account identity is unavailable");
-	const snapshot = runtime.items(accountId).getSnapshot();
-	if (snapshot.state !== "ready" || snapshot.value.accountId !== accountId)
-		throw new Error("Runtime Items are not ready for export");
-	const projection = snapshot.value;
+	// Inventory chooses scopes only. Its private Item frame is not retained by this attempt.
+	const vaultIds = (() => {
+		const inventory = runtime.items(accountId).getSnapshot();
+		if (inventory.state !== "ready" || inventory.value.accountId !== accountId)
+			throw new Error("Runtime Items are not ready for export");
+		return inventory.value.vaults.map((vault) => vault.vaultId);
+	})();
 	const attempt = new AbortController();
-	const abort = () => attempt.abort(signal.reason);
+	let blob: Blob | undefined;
+	let projection: VaultExportProjection | undefined;
+	let retired = false;
+	let finished = false;
+	let release = () => {};
+	let captureTask: Promise<RuntimeVaultExportHandle> | undefined;
+	let outputTask: Promise<void> | undefined;
+	let cleanupTask: Promise<void> | undefined;
+	let finishBuilding = () => {};
+	const buildingDone = new Promise<void>((resolve) => {
+		finishBuilding = resolve;
+	});
+	let received = () => {};
+	let refuse = (_error: unknown) => {};
+	// The completion promise carries no plaintext; only this mutable attempt slot owns it.
+	const snapshotTask = new Promise<void>((resolve, reject) => {
+		received = resolve;
+		refuse = reject;
+	});
+	const receive = (snapshot: VaultExportProjection) => {
+		projection = snapshot;
+		received();
+	};
+	void snapshotTask.catch(() => undefined);
+	async function releaseCapture() {
+		release();
+		signal.removeEventListener("abort", abort);
+		const capture = await captureTask?.catch(() => undefined);
+		await capture?.close();
+	}
+	function dispose(): Promise<void> {
+		if (!retired && !finished) {
+			retired = true;
+			const reason = new DOMException(
+				"The export scope was retired",
+				"AbortError",
+			);
+			attempt.abort(reason);
+			refuse(reason);
+			blob = undefined;
+			report(emptyProgress());
+		}
+		return cleanup();
+	}
+	function cleanup(): Promise<void> {
+		if (cleanupTask === undefined) {
+			cleanupTask = (async () => {
+				await buildingDone;
+				await outputTask?.catch(() => undefined);
+				await releaseCapture();
+			})();
+			void cleanupTask.catch(() => {
+				cleanupTask = undefined;
+			});
+		}
+		return cleanupTask;
+	}
+	function abort() {
+		void dispose().catch(() => undefined);
+	}
 	signal.addEventListener("abort", abort, { once: true });
 	if (signal.aborted) abort();
-	let release = () => {};
 	try {
-		// Latch every observed departure. Returning to the same unlocked Account never revives this attempt.
-		release = observeAccountDeparture(runtime, accountId, () => {
-			attempt.abort(
-				new DOMException("The export Account changed or locked", "AbortError"),
-			);
+		attempt.signal.throwIfAborted();
+		release = observeAccountDeparture(runtime, accountId, abort);
+		attempt.signal.throwIfAborted();
+		captureTask = runtime.observeVaultExport({ accountId, vaultIds }, receive, {
+			onRetired: abort,
 		});
-		const assertActive = () => attempt.signal.throwIfAborted();
-		assertActive();
+		await captureTask;
+		await snapshotTask;
+		if (!projection) throw new Error("Runtime Export snapshot is unavailable");
+		attempt.signal.throwIfAborted();
+		blob = await buildArchive(
+			runtime,
+			sinks,
+			accountId,
+			identity.email,
+			projection,
+			report,
+			attempt.signal,
+		);
+		attempt.signal.throwIfAborted();
+		return {
+			dispose,
+			download() {
+				if (outputTask !== undefined) return outputTask;
+				if (retired || finished || blob === undefined)
+					return Promise.reject(
+						new DOMException("The export scope was retired", "AbortError"),
+					);
+				outputTask = (async () => {
+					const capture = await captureTask;
+					if (!capture)
+						throw new Error("Runtime Export capture is unavailable");
+					let lease: string | undefined;
+					let output: Blob | undefined;
+					let url: string | undefined;
+					try {
+						lease = await capture.beginOutput();
+						attempt.signal.throwIfAborted();
+						output = blob;
+						if (!output)
+							throw new DOMException(
+								"The export scope was retired",
+								"AbortError",
+							);
+						url = URL.createObjectURL(output);
+						const anchor = document.createElement("a");
+						anchor.href = url;
+						anchor.download = "bittery-export.bttrx";
+						anchor.click();
+					} finally {
+						if (url !== undefined) URL.revokeObjectURL(url);
+						output = undefined;
+						blob = undefined;
+						try {
+							if (lease !== undefined) await capture.finishOutput(lease);
+						} finally {
+							await releaseCapture();
+							finished = true;
+						}
+					}
+				})();
+				return outputTask;
+			},
+		};
+	} catch (error) {
+		projection = undefined;
+		blob = undefined;
+		finishBuilding();
+		await cleanup();
+		throw error;
+	} finally {
+		projection = undefined;
+		finishBuilding();
+	}
+}
+
+async function buildArchive(
+	runtime: RuntimeClient,
+	sinks: AttachmentDownloadSinkGrants,
+	accountId: string,
+	email: string,
+	projection: VaultExportProjection,
+	report: (progress: ExportProgress) => void,
+	signal: AbortSignal,
+): Promise<Blob> {
+	const assertActive = () => signal.throwIfAborted();
+	const zip = new JSZip();
+	const exportedItems: ExportedItem[] = [];
+	const ownedBuffers: Uint8Array[] = [];
+	try {
 		const items = projection.items.filter((item) => !item.deletedAt);
 		const vaultIds = new Set(items.map((item) => item.vaultId));
+		const scopes = new Map(
+			[...vaultIds].map((vaultId) => [
+				vaultId,
+				sinks.captureScope(accountId, vaultId),
+			]),
+		);
 		const vaults: ExportedVault[] = projection.vaults
 			.filter((vault) => vaultIds.has(vault.vaultId))
 			.map((vault) => ({
@@ -83,8 +251,6 @@ export async function createRuntimeVaultArchive(
 			processedAttachments: 0,
 		};
 		report({ ...progress });
-		const zip = new JSZip();
-		const exportedItems: ExportedItem[] = [];
 		for (const item of items) {
 			assertActive();
 			const exported: ExportedItem = {
@@ -100,9 +266,19 @@ export async function createRuntimeVaultArchive(
 			};
 			for (const attachment of item.attachments ?? []) {
 				assertActive();
+				const scope = scopes.get(item.vaultId);
+				if (
+					!scope ||
+					attachment.vaultId !== item.vaultId ||
+					attachment.itemId !== item.itemId
+				)
+					throw new Error("Runtime Attachment authority is unavailable");
 				const sink = createAttachmentDownloadBuffer(attachment.fileSize);
+				let sinkCapabilityId: string | undefined;
 				try {
-					const sinkCapabilityId = sinks.grant({
+					sinkCapabilityId = sinks.grant({
+						scope,
+						vaultId: item.vaultId,
 						accountId,
 						attachmentId: attachment.attachmentId,
 						sink,
@@ -113,10 +289,11 @@ export async function createRuntimeVaultArchive(
 							attachmentId: attachment.attachmentId,
 							sinkCapabilityId,
 						},
-						{ signal: attempt.signal },
+						{ signal: signal },
 					);
 					assertActive();
 					const bytes = sink.take();
+					ownedBuffers.push(bytes);
 					// ZIP consumes the owned authenticated bytes; its binary-string form also preserves the v1 JSON attachment field.
 					let binary = "";
 					for (let offset = 0; offset < bytes.length; offset += 8192)
@@ -130,7 +307,12 @@ export async function createRuntimeVaultArchive(
 						data: btoa(binary),
 					});
 				} finally {
-					await sink.discard();
+					try {
+						if (sinkCapabilityId !== undefined)
+							await sinks.release(sinkCapabilityId);
+					} finally {
+						await sink.discard();
+					}
 				}
 				progress.processedAttachments += 1;
 				report({ ...progress });
@@ -142,7 +324,7 @@ export async function createRuntimeVaultArchive(
 		const payload: VaultExportPayload = {
 			version: "1",
 			exportDate: new Date().toISOString(),
-			exportedBy: { email: identity.email },
+			exportedBy: { email },
 			vaults,
 			items: exportedItems,
 			metadata: {
@@ -151,12 +333,14 @@ export async function createRuntimeVaultArchive(
 			},
 		};
 		zip.file("export.json", JSON.stringify(payload, null, 2));
-		const blob = await zip.generateAsync({ type: "blob" });
+		const blob = await zip.generateAsync({ type: "blob" }, assertActive);
 		assertActive();
 		report({ ...progress, stage: "completed" });
 		return blob;
 	} finally {
-		release();
-		signal.removeEventListener("abort", abort);
+		for (const bytes of ownedBuffers) bytes.fill(0);
+		ownedBuffers.length = 0;
+		exportedItems.length = 0;
+		for (const name of Object.keys(zip.files)) zip.remove(name);
 	}
 }

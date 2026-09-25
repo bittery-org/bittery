@@ -1484,33 +1484,89 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(restarted.getPendingCount()).toBe(0);
 	});
 
-	test("treats a semantic executor rejection as terminal", async () => {
-		const queue = new OutboundQueue(new MemoryStorage(), "self_client", {
-			apply: async () => undefined,
-			executeSemanticCommand: async () => {
+	test("retains the complete stopped cross-account DTO after semantic rejection", async () => {
+		const storage = new MemoryStorage();
+		const projected: PendingMutation[] = [];
+		const executed: PendingMutation[] = [];
+		const rejected: PendingMutation[] = [];
+		const rejectionCodes: string[] = [];
+		const queue = new OutboundQueue(storage, "self_client", {
+			apply: async (command) => {
+				projected.push(structuredClone(command));
+			},
+			executeSemanticCommand: async (command) => {
+				executed.push(structuredClone(command));
 				throw new SemanticOperationRejected("vault_read_only");
+			},
+			reject: async (command, code) => {
+				rejected.push(structuredClone(command));
+				rejectionCodes.push(code);
 			},
 			acknowledge: async () => undefined,
 		});
-		await queue.enqueue(
-			buildDeleteMutation("account_a", "item_a", {
-				id: "move-mutation",
-				operationId: "move-operation",
-				type: "cross_account_move",
-				targetAccountId: "account_b",
-				targetVaultId: "vault_b",
-				targetItemId: "item_b",
-			}),
-		);
+		const source: PendingMutation = {
+			accountId: "account_a",
+			accountEmail: "source@example.test",
+			id: "source-command-id",
+			operationId: "semantic-move-id",
+			attemptId: "captured-queue-attempt-id",
+			type: "cross_account_move",
+			entityId: "source-item-id",
+			vaultId: "source-vault-id",
+			targetAccountId: "account_b",
+			targetVaultId: "target-vault-id",
+			targetItemId: "target-item-id",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "original-target-ciphertext",
+				encryptionIv: "original-target-iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "target-user-id",
+			},
+			baseVersion: 6,
+			timestamp: 1_700_000_003_000,
+			retryCount: 3,
+			status: "retrying",
+			lastError: "captured transport failure",
+			nextAttemptAt: 0,
+			conflictCopyId: "captured-conflict-copy-id",
+			projectionClaimId: "captured-projection-claim",
+			projectionClaimExpiresAt: 1_700_000_004_000,
+		};
 
+		await queue.enqueue(source);
 		await queue.drain(() => outboundApiClient());
 		await queue.drain(() => outboundApiClient());
 
-		expect(queue.getCommands("account_a")[0]).toMatchObject({
-			operationId: "move-operation",
+		// These are the production reconciler callbacks: the test observes the exact
+		// command that reaches the projection and semantic-executor boundary, without
+		// pretending the Sync package owns a Core cache implementation.
+		expect(projected).toEqual([{ ...source, status: "applying" }]);
+		expect(executed).toEqual([
+			{ ...source, status: "pending", lastError: undefined },
+		]);
+
+		const stopped = queue.getCommands("account_a")[0];
+		if (!stopped)
+			throw new Error("Semantic rejection removed the source command");
+		expect(stopped).toEqual({
+			...source,
 			status: "failed",
-			retryCount: 0,
+			lastError: "Create Item Operation was rejected: vault_read_only",
+			nextAttemptAt: undefined,
 		});
+		expect(rejected).toEqual([stopped]);
+		expect(rejectionCodes).toEqual(["vault_read_only"]);
+		expect(
+			await storage.get<Record<string, PendingMutation[]>>(
+				"bittery_pending_mutation_queues_v3",
+			),
+		).toEqual({ account_a: [stopped] });
+
+		const reopened = new OutboundQueue(storage, "fresh_client");
+		await reopened.restore();
+		expect(reopened.getCommands("account_a")).toEqual([stopped]);
 	});
 
 	test("enqueue resolves only after the command is durably persisted", async () => {
@@ -2276,6 +2332,100 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(attempts[1]).toBe(attempts[0]);
 	});
 
+	test("persists a cross-account retry before its semantic executor or any child is contacted", async () => {
+		let now = 10_000;
+		let acquisitions = 0;
+		const executed: PendingMutation[] = [];
+		const storage = new MemoryStorage();
+		const reconciler = {
+			apply: async () => undefined,
+			executeSemanticCommand: async (command: PendingMutation) => {
+				executed.push(structuredClone(command));
+				return { entityId: command.entityId, etag: '"8"', version: 8 };
+			},
+			acknowledge: async () => undefined,
+		};
+		const queue = new OutboundQueue(
+			storage,
+			"self_client",
+			reconciler,
+			() => now,
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "source-command:cross-move",
+				operationId: "semantic:cross-move",
+				attemptId: "original-attachment-attempt",
+				type: "cross_account_move",
+				accountEmail: "person@example.test",
+				targetAccountId: "account_b",
+				targetVaultId: "vault_b",
+				targetItemId: "item_b",
+				category: "login",
+				encryptedPayload: {
+					encryptedData: "original-destination-ciphertext",
+					encryptionIv: "original-destination-iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+					encryptionVersion: 1,
+					encryptedByUserId: "destination-user",
+				},
+				baseVersion: 6,
+			}),
+		);
+		const original = structuredClone(queue.getCommands("account_a")[0]);
+		if (!original)
+			throw new Error("Enqueue did not retain the cross-account command");
+		await queue.drain(async () => {
+			acquisitions += 1;
+			throw networkError();
+		});
+		const retry = queue.getCommands("account_a")[0];
+		if (!retry)
+			throw new Error(
+				"Client acquisition failure lost the cross-account command",
+			);
+		expect(acquisitions).toBe(1);
+		expect(executed).toEqual([]);
+		expect(retry.attemptId).toBeTruthy();
+		expect(retry.attemptId).not.toBe(original.attemptId);
+		expect(retry).toEqual({
+			...original,
+			attemptId: retry.attemptId,
+			retryCount: 1,
+			status: "retrying",
+			lastError: "network down",
+			nextAttemptAt: 11_000,
+		});
+		expect(
+			await storage.get<Record<string, PendingMutation[]>>(
+				"bittery_pending_mutation_queues_v3",
+			),
+		).toEqual({
+			account_a: [retry],
+		});
+		const reopened = new OutboundQueue(
+			storage,
+			"reopened_client",
+			reconciler,
+			() => now,
+		);
+		await reopened.restore();
+		expect(reopened.getCommands("account_a")).toEqual([retry]);
+		const getClient = () => {
+			acquisitions += 1;
+			return outboundApiClient();
+		};
+		now = 10_999;
+		await reopened.drain(getClient);
+		expect(acquisitions).toBe(1);
+		expect(executed).toEqual([]);
+		now = 11_000;
+		await reopened.drain(getClient);
+		expect(acquisitions).toBe(2);
+		expect(executed).toEqual([retry]);
+		expect(reopened.getPendingCount()).toBe(0);
+	});
+
 	test("rotates a cross-account move attachment attempt after a network failure", async () => {
 		let now = 10_000;
 		const attempts: string[] = [];
@@ -2468,6 +2618,170 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(preservedCopyIds[0]).toBe(
 			queue.getCommands("account_a")[0]?.conflictCopyId,
 		);
+	});
+
+	test("reconciles newer authority before persisting an immutable conflicted Update", async () => {
+		const storage = new MemoryStorage();
+		const ordering: string[] = [];
+		let reconciledItem: unknown;
+		let preservedCommand: PendingMutation | undefined;
+		const reconciliationEntered = Promise.withResolvers<void>();
+		const releaseReconciliation = Promise.withResolvers<void>();
+		let queue: OutboundQueue;
+		queue = new OutboundQueue(storage, "self_client", {
+			apply: async () => undefined,
+			acknowledge: async () => undefined,
+			reconcileAuthoritative: async (command, item) => {
+				ordering.push("reconcile-authority-started");
+				const current = queue.getCommands("account_a")[0];
+				if (!current)
+					throw new Error("pending Update disappeared before reconcile");
+				expect(command).toEqual(current);
+				expect(command.status).toBe("pending");
+				expect(command.baseVersion).toBe(6);
+				reconciledItem = structuredClone(item);
+				reconciliationEntered.resolve();
+				await releaseReconciliation.promise;
+				ordering.push("reconcile-authority-completed");
+			},
+			preserveConflict: async (command) => {
+				ordering.push("preserve-conflict");
+				preservedCommand = structuredClone(command);
+				return undefined;
+			},
+		});
+		const sourceCommand: PendingMutation = {
+			accountId: "account_a",
+			accountEmail: "Person@example.test",
+			id: "source-command:update",
+			operationId: "semantic:update",
+			attemptId: "attempt:update",
+			type: "update",
+			entityId: "item:offline",
+			vaultId: "vault:offline",
+			encryptedPayload: {
+				encryptedData: "sealed-local-ciphertext",
+				encryptionIv: "sealed-local-iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 7,
+				encryptedByUserId: "original-user",
+			},
+			baseVersion: 6,
+			timestamp: 1_700_000_002_000,
+			retryCount: 0,
+		};
+		await queue.enqueue(sourceCommand);
+		const pendingCommand = structuredClone(queue.getCommands("account_a")[0]);
+		if (!pendingCommand) throw new Error("enqueued Update was not retained");
+		expect(pendingCommand).toEqual({ ...sourceCommand, status: "pending" });
+
+		const client = outboundApiClient() as any;
+		client.items.update = async (
+			itemId: string,
+			input: unknown,
+			options: TestWriteOptions,
+		) => {
+			ordering.push("update-attempt");
+			expect(itemId).toBe("item:offline");
+			expect(input).toEqual({
+				encryptedData: "sealed-local-ciphertext",
+				encryptionIv: "sealed-local-iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+			});
+			expect(options).toEqual({
+				etag: '"6"',
+				idempotencyKey: "attempt:update",
+			});
+			throw conflictError(412);
+		};
+		client.items.get = async (itemId: string) => {
+			ordering.push("get-current-authority");
+			expect(itemId).toBe("item:offline");
+			return apiResult(
+				serverEncryptedItem({
+					id: "item:offline",
+					vaultId: "vault:offline",
+					category: "login",
+					favorite: true,
+					encryptedData: "current-server-ciphertext",
+					encryptionIv: "current-server-iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+					version: 9,
+					lastModifiedBy: "current-server-user",
+					encryptionVersion: 4,
+					encryptedByUserId: "current-server-user",
+					createdAt: "2026-09-20T00:00:00.000Z",
+					updatedAt: "2026-09-21T00:00:00.000Z",
+					deletedAt: null,
+					attachments: [],
+				}),
+			);
+		};
+
+		const drain = queue.drain(() => client);
+		await reconciliationEntered.promise;
+		let blockedAssertion: unknown;
+		try {
+			// A missing production await can cross several already-resolved persistence promises.
+			// Yield enough microtasks to make that bug observable without extending wall-clock time.
+			for (let index = 0; index < 8; index += 1) await Promise.resolve();
+			expect(ordering).toEqual([
+				"update-attempt",
+				"get-current-authority",
+				"reconcile-authority-started",
+			]);
+			expect(queue.getCommands("account_a")).toEqual([pendingCommand]);
+			expect(preservedCommand).toBeUndefined();
+		} catch (error) {
+			blockedAssertion = error;
+		} finally {
+			releaseReconciliation.resolve();
+		}
+		await drain;
+		await queue.whenPersisted();
+		if (blockedAssertion) throw blockedAssertion;
+
+		expect(ordering).toEqual([
+			"update-attempt",
+			"get-current-authority",
+			"reconcile-authority-started",
+			"reconcile-authority-completed",
+			"preserve-conflict",
+		]);
+		expect(reconciledItem).toEqual({
+			id: "item:offline",
+			vaultId: "vault:offline",
+			accountId: "account_a",
+			accountEmail: "Person@example.test",
+			category: "login",
+			favorite: true,
+			encryptedData: "current-server-ciphertext",
+			encryptionIv: "current-server-iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+			version: 9,
+			lastModifiedBy: "current-server-user",
+			encryptionVersion: 4,
+			encryptedByUserId: "current-server-user",
+			createdAt: "2026-09-20T00:00:00.000Z",
+			updatedAt: "2026-09-21T00:00:00.000Z",
+			deletedAt: null,
+			attachments: [],
+		});
+		const durable = queue.getCommands("account_a")[0];
+		if (!durable) throw new Error("conflicted Update was not retained");
+		expect(durable.conflictCopyId).toBeString();
+		expect(durable).toEqual({
+			...pendingCommand,
+			status: "conflicted",
+			lastError: "The Item changed on another device",
+			conflictCopyId: durable.conflictCopyId,
+		});
+		expect(durable.nextAttemptAt).toBeUndefined();
+		expect(preservedCommand).toEqual(durable);
+
+		const reopened = new OutboundQueue(storage, "fresh_client");
+		await reopened.restore();
+		expect(reopened.getCommands("account_a")).toEqual([durable]);
 	});
 
 	test("treats a remotely deleted encrypted base as a content conflict", async () => {

@@ -1,11 +1,10 @@
+import { useRuntimeClient } from "@bittery/client-runtime/react";
 import { useAvailableTags, useConvertVaultType } from "@bittery/core/hooks";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
 import type {
-	DecryptedItem,
 	DecryptedItemData,
 	ItemCategory,
+	PublicDecryptedItem,
 } from "@bittery/shared/types";
 import {
 	Badge,
@@ -34,6 +33,10 @@ import {
 	IconPlus as Plus,
 	IconUsers as Users,
 } from "@bittery/ui/icons";
+import {
+	creatableVaults,
+	findRuntimeVault,
+} from "@bittery/ui/runtime-presentation";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
@@ -49,7 +52,6 @@ import {
 	useUpdateItem,
 } from "@/hooks/use-runtime-item-mutations";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
-import { creatableVaults, findRuntimeVault } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/vaults/$vaultId/")({
@@ -66,7 +68,7 @@ function VaultDetailPage() {
 	const { vaultId } = Route.useParams();
 	const { itemId: selectedItemIdFromSearch } = Route.useSearch();
 	const navigate = useNavigate();
-	const api = useApiClient();
+	const runtime = useRuntimeClient();
 	const { m } = useI18n();
 
 	const [isCreateItemSheetOpen, setIsCreateItemSheetOpen] = useState(false);
@@ -103,7 +105,14 @@ function VaultDetailPage() {
 	const deleteItem = useDeleteItem();
 	const convertVaultType = useConvertVaultType();
 
-	const membersQuery = useQuery(apiQueries.vaults.members(api, vaultId));
+	const membersQuery = useQuery({
+		queryKey: ["runtime", "vaultMembers", accountId, vaultId],
+		queryFn: ({ signal }) => {
+			if (!accountId) throw new Error("No unlocked Account");
+			return runtime.listVaultMembers({ accountId, vaultId }, { signal });
+		},
+		enabled: accountId !== null,
+	});
 
 	const availableTags = useAvailableTags(decryptedItems);
 
@@ -125,7 +134,7 @@ function VaultDetailPage() {
 	const hasManageActions = canManageMembers || hasVaultConversionActions;
 	const itemCount = decryptedItems.length;
 
-	const handleItemSelect = (item: DecryptedItem) => {
+	const handleItemSelect = (item: PublicDecryptedItem) => {
 		navigate({
 			to: "/vaults/$vaultId",
 			params: { vaultId },

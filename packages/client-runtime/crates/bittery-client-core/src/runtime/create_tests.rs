@@ -7,7 +7,6 @@
 use super::*;
 use crate::{
     http_transport::{HttpHeader, HttpMethod, SerializedHttpExecutor},
-    platform_storage::SerializedPlatformStorageExecutor,
     protocol::Incarnation,
     replica::{
         attachment_move_artifact_ref, AttachmentMoveArtifactRef, AttachmentMoveProgress,
@@ -19,10 +18,7 @@ use crate::{
         SerializedReplicaExecutor,
     },
     server_contract::{CreateItemBody, ItemCategory},
-    test_fixtures::{
-        personal_vault, seed_ready_personal_vault, TEST_MASTER_UNLOCK_KEY, TEST_VAULT_ID,
-        TEST_VAULT_KEY,
-    },
+    test_fixtures::{personal_vault, TEST_MASTER_UNLOCK_KEY, TEST_VAULT_ID, TEST_VAULT_KEY},
     CreateShareDraft, CustomField, CustomFieldKind, ItemDraft, LoginItemData, ShareAccessMode,
     ShareExpiration,
 };
@@ -33,6 +29,9 @@ use create::{create_item_fingerprint, create_item_path, share_operation_fingerpr
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::AtomicBool;
+
+#[path = "private_item_commands_tests.rs"]
+mod private_item_commands_tests;
 
 const ACCOUNT: &str = "account-1";
 const USER: &str = "user-1";
@@ -49,29 +48,14 @@ struct RecordingExecutor {
     cancel_after_commit: Mutex<Option<RequestCancellation>>,
 }
 
-pub(super) struct SuccessfulDeletePlatform;
-
-#[async_trait]
-impl SerializedPlatformStorageExecutor for SuccessfulDeletePlatform {
-    async fn invoke(
-        &self,
-        request_json: Zeroizing<String>,
-    ) -> Result<Zeroizing<String>, RuntimeError> {
-        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
-        let response = match request["type"].as_str() {
-            Some("delete") | Some("set") => serde_json::json!({ "type": "done" }),
-            Some("get") => serde_json::json!({ "type": "value", "value": null }),
-            other => panic!("unexpected platform request {other:?}"),
-        };
-        Ok(Zeroizing::new(response.to_string()))
-    }
-}
-
 pub(super) struct UnusedHttp;
 
 #[async_trait]
 impl SerializedHttpExecutor for UnusedHttp {
-    async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        _request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         panic!("Share durable acceptance must not invoke HTTP")
     }
 
@@ -80,6 +64,10 @@ impl SerializedHttpExecutor for UnusedHttp {
 
 impl RecordingExecutor {
     fn seeded() -> Arc<Self> {
+        Self::seeded_vault(personal_vault(TEST_VAULT_ID, USER))
+    }
+
+    fn seeded_vault(vault: crate::replica::AuthorityVaultRecord) -> Arc<Self> {
         let state = InMemoryReplica::default();
         let account_id = AccountId::from(ACCOUNT);
         state
@@ -89,7 +77,7 @@ impl RecordingExecutor {
                 Incarnation::from(INCARNATION),
             )
             .unwrap();
-        seed_ready_personal_vault(&state, &account_id).unwrap();
+        state.seed_ready_personal_vault(&account_id, vault).unwrap();
         Arc::new(Self {
             state,
             requests: Mutex::new(Vec::new()),
@@ -447,6 +435,266 @@ fn draft() -> ItemDraft {
         totp_digits: None,
         totp_period: None,
     })
+}
+
+#[tokio::test]
+async fn ordinary_login_edit_keeps_real_es256_credential_private_and_signable() {
+    let pair = bittery_crypto_core::generate_passkey_keypair().unwrap();
+    let mut stored = draft();
+    let ItemDraft::Login(login) = &mut stored else {
+        unreachable!()
+    };
+    login.passkeys.push(crate::Passkey {
+        credential_id: BASE64.encode([42u8; 32]),
+        rp_id: "example.test".into(),
+        rp_name: "Example".into(),
+        user_handle: BASE64.encode(b"user-1"),
+        user_name: "alice".into(),
+        user_display_name: "Alice".into(),
+        private_key: BASE64.encode(pair.private_key),
+        public_key: BASE64.encode(&pair.public_key_cose),
+        algorithm: -7,
+        sign_count: 5,
+        transports: vec!["internal".into()],
+        created_at: "2026-09-22T00:00:00Z".into(),
+        last_used_at: None,
+        status: Some(crate::PasskeyStatus::Active),
+        status_reason: None,
+        status_updated_at: None,
+    });
+    let ItemDraft::Login(stored_login) = &stored else {
+        unreachable!()
+    };
+    let original = stored_login.passkeys[0].clone();
+    let executor = RecordingExecutor::seeded_share_item(
+        AuthorityItemCategory::Login,
+        serde_json::to_value(stored_login).unwrap(),
+    );
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let before = visible(&runtime, &account_id);
+    let public = serde_json::to_string(&before.items[0]).unwrap();
+    assert!(!public.contains("privateKey"));
+    assert!(!public.contains(&original.private_key));
+    let mut edited = draft();
+    let ItemDraft::Login(login) = &mut edited else {
+        unreachable!()
+    };
+    login.title = "New title".into();
+    runtime
+        .request(
+            RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
+                account_id: account_id.clone(),
+                item_id: "item-existing".into(),
+                draft: edited,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    let overlay = snapshot
+        .items
+        .iter()
+        .find(|row| row.item_id == "item-existing")
+        .unwrap();
+    let plaintext = decrypt_with_aad(
+        &EncryptedData {
+            ciphertext: overlay.encrypted_data.clone(),
+            iv: overlay.encryption_iv.clone(),
+            algorithm: overlay.encryption_algorithm.clone(),
+        },
+        &TEST_VAULT_KEY,
+        &AadContext {
+            vault_id: TEST_VAULT_ID.into(),
+            entity_id: "item-existing".into(),
+            entity_type: "item".into(),
+            version: overlay.encryption_version as u64,
+            user_id: USER.into(),
+        },
+    )
+    .unwrap();
+    let updated: LoginItemData = serde_json::from_str(&plaintext).unwrap();
+    assert_eq!(updated.title, "New title");
+    assert!(
+        updated.passkeys == vec![original.clone()],
+        "stored credential changed"
+    );
+    let key = BASE64.decode(&updated.passkeys[0].private_key).unwrap();
+    let signature = bittery_crypto_core::sign_passkey_assertion(
+        &key,
+        &updated.passkeys[0].rp_id,
+        &[23u8; 32],
+        6,
+    )
+    .unwrap();
+    assert!(!signature.signature_der.is_empty());
+    let export = runtime
+        .projection(&ObservationRequest::VaultExport {
+            account_id: account_id.clone(),
+            vault_ids: vec![TEST_VAULT_ID.into()],
+        })
+        .unwrap();
+    let RuntimeProjection::VaultExport(export) = export.projection else {
+        unreachable!()
+    };
+    let ItemDraft::Login(exported) = &export.items[0].data else {
+        unreachable!()
+    };
+    assert!(exported.passkeys == vec![original]);
+    assert!(serde_json::to_string(&export)
+        .unwrap()
+        .contains("privateKey"));
+
+    // Import is the explicit private transfer: its frozen encrypted request must carry the
+    // credential that ordinary read/edit projections could never supply.
+    let import = runtime
+        .request(
+            RuntimeRequest::ImportItems {
+                account_id: account_id.clone(),
+                vault_id: TEST_VAULT_ID.into(),
+                items: vec![crate::ImportItemDraft {
+                    draft: export.items[0].data.clone(),
+                    favorite: export.items[0].favorite,
+                }],
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let RuntimeResponse::ImportBatchAccepted {
+        operation_id,
+        item_ids,
+        ..
+    } = import
+    else {
+        unreachable!()
+    };
+    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+    let operation = snapshot
+        .operations
+        .iter()
+        .find(|candidate| candidate.operation_id == operation_id)
+        .unwrap();
+    let imported = &super::import::decode_import_request(operation)
+        .unwrap()
+        .items[0];
+    assert_eq!(imported.item_id, item_ids[0]);
+    let plaintext = decrypt_with_aad(
+        &EncryptedData {
+            ciphertext: imported.encrypted_data.clone(),
+            iv: imported.encryption_iv.clone(),
+            algorithm: imported.encryption_algorithm.clone(),
+        },
+        &TEST_VAULT_KEY,
+        &AadContext {
+            vault_id: TEST_VAULT_ID.into(),
+            entity_id: imported.item_id.clone(),
+            entity_type: "item".into(),
+            version: 1,
+            user_id: USER.into(),
+        },
+    )
+    .unwrap();
+    let reimported: LoginItemData = serde_json::from_str(&plaintext).unwrap();
+    assert!(reimported.passkeys == exported.passkeys);
+    let key = BASE64.decode(&reimported.passkeys[0].private_key).unwrap();
+    let signature = bittery_crypto_core::sign_passkey_assertion(
+        &key,
+        &reimported.passkeys[0].rp_id,
+        &[31u8; 32],
+        7,
+    )
+    .unwrap();
+    assert!(!signature.signature_der.is_empty());
+}
+
+#[test]
+fn ordinary_item_requests_reject_injected_private_credentials() {
+    for request_type in ["createItem", "updateItem"] {
+        let mut value = serde_json::json!({
+            "type": request_type, "accountId": ACCOUNT,
+            "draft": {"category":"login", "data": {"title": "Forged"}}
+        });
+        if request_type == "updateItem" {
+            value["itemId"] = serde_json::json!("item-existing");
+            value["guard"] = serde_json::to_value(crate::ItemEditGuard::test_fixture(
+                AccountId::from(ACCOUNT),
+                "item-existing",
+            ))
+            .unwrap();
+        } else {
+            value["vaultId"] = serde_json::json!(TEST_VAULT_ID);
+        }
+        assert!(serde_json::from_value::<RuntimeRequest>(value.clone()).is_ok());
+        value["draft"]["data"]["passkeys"] = serde_json::json!([{"privateKey":"forged"}]);
+        assert!(
+            serde_json::from_value::<RuntimeRequest>(value).is_err(),
+            "{request_type} accepted injected credentials"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ordinary_item_guard_rejects_stale_and_foreign_authority_before_acceptance() {
+    let executor = RecordingExecutor::seeded_attachment_free_item(false);
+    let (runtime, account_id) = unlocked_runtime(executor).await;
+    let guard = visible(&runtime, &account_id).items[0]
+        .edit_guard
+        .clone()
+        .unwrap();
+    for changed in [
+        {
+            let mut value = guard.clone();
+            value.item_version += 1;
+            value
+        },
+        {
+            let mut value = guard.clone();
+            value.account_id = "other-account".into();
+            value
+        },
+        {
+            let mut value = guard.clone();
+            value.incarnation = "other-incarnation".into();
+            value
+        },
+        {
+            let mut value = guard.clone();
+            value.item_id = "other-item".into();
+            value
+        },
+        {
+            let mut value = guard.clone();
+            value.vault_id = "other-vault".into();
+            value
+        },
+        {
+            let mut value = guard.clone();
+            value.lock_epoch += 1;
+            value
+        },
+    ] {
+        let error = runtime
+            .request(
+                RuntimeRequest::UpdateItem {
+                    account_id: account_id.clone(),
+                    item_id: "item-existing".into(),
+                    guard: changed,
+                    draft: draft(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RuntimeErrorCode::InvariantViolation);
+        assert!(runtime
+            .replica()
+            .snapshot(&account_id)
+            .unwrap()
+            .operations
+            .is_empty());
+    }
 }
 
 fn plaintext_markers() -> [&'static str; 6] {
@@ -843,7 +1091,7 @@ async fn sign_out_destroys_protected_share_capabilities_without_discarding_opera
     let executor = RecordingExecutor::seeded_attachment_free_item(false);
     let runtime = Runtime::with_serialized_executors(
         executor.clone(),
-        Arc::new(SuccessfulDeletePlatform),
+        operation_fixtures::MemoryPlatform::new(),
         Arc::new(UnusedHttp),
     );
     runtime.open().await.unwrap();
@@ -1241,9 +1489,18 @@ async fn share_guard_uses_the_tracked_account_lock_epoch() {
 
 /// Opens ciphertext exactly the way the Bootstrap read path opens authoritative Items.
 fn open_item(data: EncryptedData, vault_id: &str, item_id: &str) -> String {
+    open_item_with_key(data, vault_id, item_id, &TEST_VAULT_KEY)
+}
+
+fn open_item_with_key(
+    data: EncryptedData,
+    vault_id: &str,
+    item_id: &str,
+    key: &[u8; 32],
+) -> String {
     decrypt_with_aad(
         &data,
-        &TEST_VAULT_KEY,
+        key,
         &AadContext {
             vault_id: vault_id.to_owned(),
             entity_id: item_id.to_owned(),
@@ -1347,10 +1604,9 @@ async fn accepted_create_seals_the_draft_under_the_existing_item_aad() {
     assert_eq!(projection.items[0].data.title(), TITLE);
 }
 
-#[tokio::test]
-async fn create_acceptance_preserves_each_closed_item_category_and_server_totp_spelling() {
+pub(super) fn item_category_cases() -> Vec<(ItemDraft, ItemCategory, AuthorityItemCategory)> {
     use crate::{AuthenticatorItemData, CreditCardItemData, IdentityItemData, SecureNoteItemData};
-    let cases = vec![
+    vec![
         (draft(), ItemCategory::Login, AuthorityItemCategory::Login),
         (
             ItemDraft::SecureNote(SecureNoteItemData {
@@ -1427,51 +1683,89 @@ async fn create_acceptance_preserves_each_closed_item_category_and_server_totp_s
             ItemCategory::Totp,
             AuthorityItemCategory::Totp,
         ),
-    ];
-    for (draft, server_category, authority_category) in cases {
-        let executor = RecordingExecutor::seeded();
-        let (runtime, account_id) = unlocked_runtime(executor).await;
-        let (_, item_id, _) = accepted(
-            runtime
-                .request(
-                    RuntimeRequest::CreateItem {
-                        account_id: account_id.clone(),
-                        vault_id: TEST_VAULT_ID.into(),
-                        draft: draft.clone(),
+    ]
+}
+
+#[tokio::test]
+async fn create_acceptance_preserves_each_category_in_personal_and_writable_shared_vaults() {
+    let cases = item_category_cases();
+    for (vault_type, role, key) in [
+        (
+            AuthorityVaultType::Personal,
+            AuthorityVaultRole::Owner,
+            TEST_VAULT_KEY,
+        ),
+        (
+            AuthorityVaultType::Team,
+            AuthorityVaultRole::Owner,
+            [23; 32],
+        ),
+        (
+            AuthorityVaultType::Team,
+            AuthorityVaultRole::Admin,
+            [23; 32],
+        ),
+        (
+            AuthorityVaultType::Team,
+            AuthorityVaultRole::Member,
+            [23; 32],
+        ),
+    ] {
+        for (draft, server_category, authority_category) in cases.clone() {
+            let mut vault = personal_vault(TEST_VAULT_ID, USER);
+            vault.vault_type = vault_type.clone();
+            vault.role = role.clone();
+            vault.encrypted_vault_key = bittery_crypto_core::encrypt_vault_key_with_muk(
+                &key,
+                &TEST_MASTER_UNLOCK_KEY,
+                &bittery_crypto_core::VaultKeyWrapContext::new(TEST_VAULT_ID, USER, 2),
+            )
+            .unwrap();
+            let executor = RecordingExecutor::seeded_vault(vault);
+            let (runtime, account_id) = unlocked_runtime(executor).await;
+            let (_, item_id, _) = accepted(
+                runtime
+                    .request(
+                        RuntimeRequest::CreateItem {
+                            account_id: account_id.clone(),
+                            vault_id: TEST_VAULT_ID.into(),
+                            draft: draft.clone(),
+                        },
+                        RequestCancellation::new(),
+                    )
+                    .await
+                    .unwrap(),
+            );
+            let snapshot = runtime.replica().snapshot(&account_id).unwrap();
+            let body: CreateItemBody =
+                serde_json::from_slice(&snapshot.operations[0].request.body).unwrap();
+            assert_eq!(
+                serde_json::to_value(&body.category).unwrap(),
+                serde_json::to_value(&server_category).unwrap()
+            );
+            assert_eq!(snapshot.items[0].category, authority_category);
+            assert_eq!(
+                open_item_with_key(
+                    EncryptedData {
+                        ciphertext: body.encrypted_data,
+                        iv: body.encryption_iv,
+                        algorithm: body.encryption_algorithm
                     },
-                    RequestCancellation::new(),
-                )
-                .await
-                .unwrap(),
-        );
-        let snapshot = runtime.replica().snapshot(&account_id).unwrap();
-        let body: CreateItemBody =
-            serde_json::from_slice(&snapshot.operations[0].request.body).unwrap();
-        assert_eq!(
-            serde_json::to_value(&body.category).unwrap(),
-            serde_json::to_value(&server_category).unwrap()
-        );
-        assert_eq!(snapshot.items[0].category, authority_category);
-        assert_eq!(
-            open_item(
-                EncryptedData {
-                    ciphertext: body.encrypted_data,
-                    iv: body.encryption_iv,
-                    algorithm: body.encryption_algorithm
-                },
-                TEST_VAULT_ID,
-                &item_id
-            ),
-            create::item_plaintext(&draft).unwrap()
-        );
-        let RuntimeProjection::Items(items) = runtime
-            .projection(&ObservationRequest::Items { account_id })
-            .unwrap()
-            .projection
-        else {
-            panic!("expected Items")
-        };
-        assert_eq!(items.items[0].data, draft);
+                    TEST_VAULT_ID,
+                    &item_id,
+                    &key
+                ),
+                create::item_plaintext(&draft).unwrap()
+            );
+            let RuntimeProjection::Items(items) = runtime
+                .projection(&ObservationRequest::Items { account_id })
+                .unwrap()
+                .projection
+            else {
+                panic!("expected Items")
+            };
+            assert_eq!(items.items[0].data, crate::PublicItemDraft::from(&draft));
+        }
     }
 }
 
@@ -1590,6 +1884,7 @@ async fn category_independent_item_acceptance_has_no_login_admission_guard() {
             let (runtime, account_id) = unlocked_runtime(executor).await;
             let request = match action {
                 RemainingKindCase::Update => RuntimeRequest::UpdateItem {
+                    guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                     account_id,
                     item_id: "item-existing".into(),
                     draft: draft.clone(),
@@ -1791,7 +2086,7 @@ async fn a_failed_commit_never_answers_accepted() {
 }
 
 #[tokio::test]
-async fn create_requires_an_unlocked_account_a_ready_replica_and_a_writable_personal_vault() {
+async fn create_requires_an_unlocked_account_a_ready_replica_and_a_writable_vault() {
     let executor = RecordingExecutor::seeded();
     let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
 
@@ -1856,21 +2151,8 @@ async fn create_requires_an_unlocked_account_a_ready_replica_and_a_writable_pers
 }
 
 #[tokio::test]
-async fn a_team_vault_and_a_read_only_vault_are_refused() {
-    for (label, mutate) in [
-        (
-            "team",
-            Box::new(|vault: &mut crate::replica::AuthorityVaultRecord| {
-                vault.vault_type = AuthorityVaultType::Team;
-            }) as Box<dyn Fn(&mut crate::replica::AuthorityVaultRecord)>,
-        ),
-        (
-            "read only",
-            Box::new(|vault: &mut crate::replica::AuthorityVaultRecord| {
-                vault.role = AuthorityVaultRole::ReadOnly;
-            }),
-        ),
-    ] {
+async fn personal_and_shared_read_only_vaults_are_refused() {
+    for vault_type in [AuthorityVaultType::Personal, AuthorityVaultType::Team] {
         let state = InMemoryReplica::default();
         let account_id = AccountId::from(ACCOUNT);
         state
@@ -1881,7 +2163,8 @@ async fn a_team_vault_and_a_read_only_vault_are_refused() {
             )
             .unwrap();
         let mut vault = personal_vault(TEST_VAULT_ID, USER);
-        mutate(&mut vault);
+        vault.vault_type = vault_type;
+        vault.role = AuthorityVaultRole::ReadOnly;
         state.seed_ready_personal_vault(&account_id, vault).unwrap();
         let runtime = Runtime::with_serialized_replica_executor(Arc::new(PlainExecutor(state)));
         runtime.replica().load(&account_id).await.unwrap().unwrap();
@@ -1897,7 +2180,7 @@ async fn a_team_vault_and_a_read_only_vault_are_refused() {
         assert_eq!(
             error.code,
             RuntimeErrorCode::InvariantViolation,
-            "a {label} Vault must be refused"
+            "a read-only Vault must be refused"
         );
         assert!(runtime
             .replica()
@@ -1906,6 +2189,108 @@ async fn a_team_vault_and_a_read_only_vault_are_refused() {
             .operations
             .is_empty());
     }
+}
+
+#[tokio::test]
+async fn shared_vault_create_refuses_foreign_wrappers_and_a_stale_account_key() {
+    for (vault_id, user_id, muk, expected) in [
+        (
+            "other-vault",
+            USER,
+            TEST_MASTER_UNLOCK_KEY,
+            RuntimeErrorCode::InvariantViolation,
+        ),
+        (
+            TEST_VAULT_ID,
+            "other-user",
+            TEST_MASTER_UNLOCK_KEY,
+            RuntimeErrorCode::InvariantViolation,
+        ),
+        (
+            TEST_VAULT_ID,
+            USER,
+            [99; 32],
+            RuntimeErrorCode::AuthenticationRequired,
+        ),
+    ] {
+        let mut vault = personal_vault(TEST_VAULT_ID, USER);
+        vault.vault_type = AuthorityVaultType::Team;
+        vault.role = AuthorityVaultRole::Member;
+        vault.encrypted_vault_key = bittery_crypto_core::encrypt_vault_key_with_muk(
+            &[23; 32],
+            &muk,
+            &bittery_crypto_core::VaultKeyWrapContext::new(vault_id, user_id, 2),
+        )
+        .unwrap();
+        let executor = RecordingExecutor::seeded_vault(vault);
+        let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+        let error = runtime
+            .request(
+                create(&account_id, TEST_VAULT_ID),
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, expected);
+        let snapshot = executor.state.snapshot(&account_id).unwrap();
+        assert!(snapshot.operations.is_empty());
+        assert!(snapshot.items.is_empty());
+        assert!(visible(&runtime, &account_id).items.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn shared_vault_create_refuses_a_vault_retired_by_complete_bootstrap() {
+    let mut vault = personal_vault(TEST_VAULT_ID, USER);
+    vault.vault_type = AuthorityVaultType::Team;
+    let executor = RecordingExecutor::seeded_vault(vault);
+    let account_id = AccountId::from(ACCOUNT);
+    let old = executor.state.snapshot(&account_id).unwrap();
+    assert_eq!(old.bootstrap.vaults.len(), 1);
+    executor
+        .state
+        .mark_refresh_required(MarkRefreshRequiredPlan {
+            guard: BootstrapGuard {
+                account_id: account_id.clone(),
+                user_id: old.user_id,
+                incarnation: old.incarnation,
+                expected_replica_revision: old.revision,
+                expected_lock_epoch: old.lock_epoch,
+            },
+        })
+        .unwrap();
+    executor
+        .state
+        .seed_ready_authority(&account_id, vec![], vec![])
+        .unwrap();
+    let (runtime, account_id) = unlocked_runtime(executor.clone()).await;
+    let before = executor.state.snapshot(&account_id).unwrap();
+    assert_eq!(
+        before.bootstrap.vaults.len(),
+        0,
+        "complete Bootstrap erases the absent Vault key from every generation"
+    );
+    assert_eq!(
+        before.bootstrap.pending_vault_retirements,
+        vec![TEST_VAULT_ID.to_owned()],
+        "remaining cleanup is durable while new work stays forbidden"
+    );
+    assert!(before.bootstrap.snapshot().visible_vaults.is_empty());
+    let error = runtime
+        .request(
+            create(&account_id, TEST_VAULT_ID),
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, RuntimeErrorCode::AccessDenied);
+    assert!(executor
+        .state
+        .snapshot(&account_id)
+        .unwrap()
+        .operations
+        .is_empty());
+    assert!(visible(&runtime, &account_id).items.is_empty());
 }
 
 #[tokio::test]
@@ -2127,6 +2512,7 @@ impl RemainingKindCase {
     fn request(self, account_id: AccountId) -> RuntimeRequest {
         match self {
             Self::Update => RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                 account_id,
                 item_id: "item-existing".into(),
                 draft: draft(),
@@ -2148,6 +2534,7 @@ impl RemainingKindCase {
                 account_id,
                 item_id: "item-existing".into(),
                 target_vault_id: "vault-2".into(),
+                target_account_id: None,
             },
             Self::PermanentlyDelete => RuntimeRequest::PermanentlyDeleteItem {
                 account_id,
@@ -2287,6 +2674,7 @@ async fn login_password_update_retains_previous_password_in_encrypted_history_af
     runtime
         .request(
             RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                 account_id: account_id.clone(),
                 item_id: "item-existing".into(),
                 draft: next,
@@ -2296,7 +2684,7 @@ async fn login_password_update_retains_previous_password_in_encrypted_history_af
         .await
         .unwrap();
     let projected = visible(&runtime, &account_id);
-    let ItemDraft::Login(login) = &projected.items[0].data else {
+    let crate::PublicItemDraft::Login(login) = &projected.items[0].data else {
         unreachable!()
     };
     assert_eq!(login.password.as_deref(), Some("replacement-password"));
@@ -2349,6 +2737,7 @@ async fn login_password_history_preserves_restore_normalization_and_ten_entry_li
         runtime
             .request(
                 RuntimeRequest::UpdateItem {
+                    guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                     account_id: account_id.clone(),
                     item_id: "item-existing".into(),
                     draft,
@@ -2358,7 +2747,7 @@ async fn login_password_history_preserves_restore_normalization_and_ten_entry_li
             .await
             .unwrap();
         let projection = visible(&runtime, &account_id);
-        let ItemDraft::Login(login) = &projection.items[0].data else {
+        let crate::PublicItemDraft::Login(login) = &projection.items[0].data else {
             unreachable!()
         };
         assert_eq!(
@@ -2389,6 +2778,7 @@ async fn login_password_history_preserves_restore_normalization_and_ten_entry_li
     runtime
         .request(
             RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                 account_id: account_id.clone(),
                 item_id: "item-existing".into(),
                 draft: serde_json::from_value(
@@ -2401,7 +2791,7 @@ async fn login_password_history_preserves_restore_normalization_and_ten_entry_li
         .await
         .unwrap();
     let projection = visible(&runtime, &account_id);
-    let ItemDraft::Login(login) = &projection.items[0].data else {
+    let crate::PublicItemDraft::Login(login) = &projection.items[0].data else {
         unreachable!()
     };
     assert_eq!(
@@ -2431,6 +2821,7 @@ async fn failed_password_history_acceptance_preserves_prior_authority() {
     assert!(runtime
         .request(
             RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                 account_id: account_id.clone(),
                 item_id: "item-existing".into(),
                 draft: update,
@@ -2598,6 +2989,7 @@ async fn attachment_bearing_move_is_accepted_offline_before_final_request_exists
                 account_id: account_id.clone(),
                 item_id: "item-existing".into(),
                 target_vault_id: "vault-2".into(),
+                target_account_id: None,
             },
             RequestCancellation::new(),
         )

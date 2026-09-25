@@ -75,6 +75,8 @@ describe("Web Attachment Runtime scope composition", () => {
 		await prepareWebAttachmentUploadRuntimeIncarnation(uploads, "runtime-a");
 		await commitWebAttachmentUploadRuntimeIncarnation(uploads, "runtime-a");
 		uploads.grant({
+			scope: uploads.captureScope("account-a", "vault-one"),
+			vaultId: "vault-one",
 			accountId: "account-a",
 			itemId: "item-a",
 			name: "report.txt",
@@ -107,6 +109,8 @@ describe("Web Attachment Runtime scope composition", () => {
 		expect(uploadCleanupAttempts).toBe(3);
 		expect(() =>
 			uploads.grant({
+				scope: uploads.captureScope("account-a", "vault-one"),
+				vaultId: "vault-one",
 				accountId: "account-a",
 				itemId: "item-b",
 				name: "fresh.txt",
@@ -131,6 +135,8 @@ describe("Web Attachment Runtime scope composition", () => {
 		await transition("commit", "runtime-b");
 		expect(() =>
 			uploads.grant({
+				scope: uploads.captureScope("account-a", "vault-one"),
+				vaultId: "vault-one",
 				accountId: "account-a",
 				itemId: "item-a",
 				name: "race.txt",

@@ -320,3 +320,117 @@ test("Operations observations share identity, isolate Accounts and retain termin
 	stop();
 	stopOther();
 });
+
+test("terminal observation error during installation clears data without retrying a retained store", async () => {
+	const transport = createFakeRuntimeTransport();
+	const clock = createManualClock();
+	const observe = transport.observe.bind(transport);
+	let terminal: ((error: unknown) => void) | undefined;
+	let acknowledge!: () => void;
+	const held = new Promise<void>((resolve) => {
+		acknowledge = resolve;
+	});
+	transport.observe = async (...args) => {
+		terminal = args[3]?.onError;
+		await observe(...args);
+		await held;
+	};
+	const client = createRuntimeClient({ transport, schedule: clock.schedule });
+	const store = client.items("account-1");
+	const release = store.subscribe(() => undefined);
+	await transport.settled();
+	transport.publish(itemsProjection("account-1", "accepted snapshot"));
+	expect(store.getSnapshot().state).toBe("ready");
+	terminal?.({ code: "closed" });
+	expect(store.getSnapshot()).toEqual({
+		state: "failed",
+		code: "RUNTIME_CLOSED",
+	});
+	acknowledge();
+	await transport.settled();
+	transport.publish(itemsProjection("account-1", "late plaintext"));
+	const releaseSecond = store.subscribe(() => undefined);
+	await transport.settled();
+	expect(store.getSnapshot()).toEqual({
+		state: "failed",
+		code: "RUNTIME_CLOSED",
+	});
+	expect(
+		transport.calls.filter((call) => call.type === "observe"),
+	).toHaveLength(1);
+	releaseSecond();
+	release();
+	clock.runPending();
+	await transport.settled();
+});
+
+test("late terminal errors cannot poison released or replacement observation identities", async () => {
+	const transport = createFakeRuntimeTransport();
+	const clock = createManualClock();
+	const observe = transport.observe.bind(transport);
+	const terminals: Array<((error: unknown) => void) | undefined> = [];
+	transport.observe = async (...args) => {
+		terminals.push(args[3]?.onError);
+		await observe(...args);
+	};
+	const client = createRuntimeClient({ transport, schedule: clock.schedule });
+	const store = client.items("account-1");
+	const release = store.subscribe(() => undefined);
+	await transport.settled();
+	transport.publish(itemsProjection("account-1", "first"));
+	release();
+	clock.runPending();
+	await transport.settled();
+	terminals[0]?.({ code: "closed" });
+	expect(store.getSnapshot()).toEqual({ state: "idle" });
+	const releaseNext = store.subscribe(() => undefined);
+	await transport.settled();
+	transport.publish(itemsProjection("account-1", "replacement"));
+	const replacement = store.getSnapshot();
+	expect(replacement.state).toBe("ready");
+	terminals[0]?.({ code: "closed" });
+	expect(store.getSnapshot()).toBe(replacement);
+	expect(
+		transport.calls.filter((call) => call.type === "observe"),
+	).toHaveLength(2);
+	terminals[1]?.({ code: "cancelled" });
+	expect(store.getSnapshot()).toEqual({ state: "failed", code: "CANCELLED" });
+	releaseNext();
+	clock.runPending();
+	await transport.settled();
+});
+
+test("terminal loss after release grace preserves Idle while installation ACK is held", async () => {
+	const transport = createFakeRuntimeTransport();
+	const clock = createManualClock();
+	const observe = transport.observe.bind(transport);
+	let terminal: ((error: unknown) => void) | undefined;
+	let acknowledge!: () => void;
+	const held = new Promise<void>((resolve) => {
+		acknowledge = resolve;
+	});
+	transport.observe = async (...args) => {
+		terminal = args[3]?.onError;
+		await observe(...args);
+		await held;
+	};
+	const client = createRuntimeClient({ transport, schedule: clock.schedule });
+	const store = client.items("account-1");
+	const release = store.subscribe(() => undefined);
+	await transport.settled();
+	transport.publish(itemsProjection("account-1", "original"));
+	expect(store.getSnapshot().state).toBe("ready");
+	release();
+	clock.runPending();
+	expect(store.getSnapshot()).toEqual({ state: "idle" });
+	terminal?.({ code: "closed" });
+	const afterLoss = store.getSnapshot();
+	acknowledge();
+	await transport.settled();
+	transport.publish(itemsProjection("account-1", "late"));
+	expect(afterLoss).toEqual({ state: "idle" });
+	expect(store.getSnapshot()).toEqual({ state: "idle" });
+	expect(
+		transport.calls.filter((call) => call.type === "observe"),
+	).toHaveLength(1);
+});

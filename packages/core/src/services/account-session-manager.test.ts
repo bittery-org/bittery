@@ -315,6 +315,20 @@ describe("AccountSessionManager", () => {
 		expect(await storage.getUnlockedAccounts()).toEqual([]);
 	});
 
+	it("retires only the Account named by scoped C1 invalidation", async () => {
+		const storage = await createStore({ unlockAcc2: true });
+		const manager = createManager({
+			storage,
+			itemCache,
+			verifyUnlockPolicy: async () => {},
+		});
+		await manager.initialize();
+		expect(manager.getUnlockedAccountIds().sort()).toEqual(["acc-1", "acc-2"]);
+
+		manager.retireUnlockedProjection(["acc-1"]);
+		expect(manager.getUnlockedAccountIds()).toEqual(["acc-2"]);
+	});
+
 	it("lockAll broadcasts the reason only after storage is locked", async () => {
 		const storage = await createStore({ unlockAcc2: true });
 		const order: string[] = [];

@@ -1,4 +1,4 @@
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { PublicDecryptedItem } from "@bittery/shared/types";
 
 export type { CustomField } from "@bittery/shared/types";
 
@@ -13,7 +13,7 @@ export interface VaultOption {
 /** Data attached to draggable vault items via dnd-kit. */
 export interface DragItemData {
 	type: "vault-item";
-	item: DecryptedItem;
+	item: PublicDecryptedItem;
 	sourceVaultId: string;
 	accountId: string;
 }
@@ -29,7 +29,7 @@ export interface DropVaultData {
 export interface MoveItemDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	item: DecryptedItem;
+	item: PublicDecryptedItem;
 	currentVaultId: string;
 }
 

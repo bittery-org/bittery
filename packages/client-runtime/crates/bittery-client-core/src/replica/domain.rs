@@ -1,8 +1,34 @@
+#[path = "cross_account_move_entry.rs"]
+mod cross_account_move_entry;
+pub(crate) use cross_account_move_entry::*;
+#[path = "cross_account_move.rs"]
+mod cross_account_move;
+#[path = "legacy_cross_account_admission.rs"]
+mod legacy_cross_account_admission;
+pub(crate) use legacy_cross_account_admission::*;
+#[path = "legacy_admission.rs"]
+mod legacy_admission;
+#[path = "rotation_start.rs"]
+mod rotation_start;
+pub(crate) use rotation_start::*;
+#[path = "vault_retirement.rs"]
+mod vault_retirement;
 use crate::http_transport::{HttpHeader, HttpMethod};
 use crate::wire::decimal_u64;
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
+pub(crate) use cross_account_move::*;
+#[allow(
+    unused_imports,
+    reason = "legacy admission types are consumed by the next queued-Create slice"
+)]
+pub(crate) use legacy_admission::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+pub(super) use vault_retirement::validate_retired_vault_ids;
+
+#[cfg(test)]
+#[path = "vault_retirement_tests.rs"]
+mod vault_retirement_tests;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -78,8 +104,96 @@ impl ForegroundAttachmentCommitPlan {
     deny_unknown_fields
 )]
 pub(crate) enum PlanMutation {
+    RetireVaults {
+        vault_ids: Vec<String>,
+    },
+    CompleteVaultRetirements {
+        vault_ids: Vec<String>,
+    },
     PutOptimisticItem(ReplicaItemRecord),
     AcceptOperation(OperationRecord),
+    /// Shares the start Operation's atomic commit and freezes its proved preparation generation.
+    BindRotationStart {
+        start_operation_id: String,
+        intent: RotationIntent,
+        authority_generation_id: String,
+        team_role: crate::server_contract::TeamRole,
+    },
+    /// The start answer, compact receipt, and full non-secret plan journal move together.
+    ReconcileRotationStart {
+        outcome: ObservedOutcome,
+        intent: RotationIntent,
+        validated_plans: Vec<RotationPlanRecord>,
+    },
+    BindRotationManifest {
+        start_operation_id: String,
+        members: Vec<RotationMemberRecord>,
+    },
+    AcknowledgeRotationAttempt {
+        start_operation_id: String,
+    },
+    ConsumeRotationAttempt {
+        start_operation_id: String,
+        attempt_id: String,
+    },
+    AcceptRotationFinalize {
+        start_operation_id: String,
+        attempt_id: String,
+        operation: OperationRecord,
+    },
+    ReconcileRotationFinalize {
+        start_operation_id: String,
+        outcome: ObservedOutcome,
+    },
+    CompleteRotationRefresh {
+        start_operation_id: String,
+        finalize_operation_id: String,
+    },
+    AdmitCrossAccountMove {
+        record: Box<CrossAccountMoveRecord>,
+        source_overlay: Option<ReplicaItemRecord>,
+    },
+    AdmitLegacySourceUnavailableMove {
+        record: Box<LegacySourceUnavailableMove>,
+    },
+    AdvanceCrossAccountMove {
+        operation_id: String,
+        #[serde(with = "decimal_u64")]
+        expected_binding_revision: u64,
+        next: Box<CrossAccountMoveRecord>,
+        source_authority: CrossAccountMoveSourceAuthority,
+    },
+    RetireCrossAccountMoveDestination {
+        operation_id: String,
+        #[serde(with = "decimal_u64")]
+        expected_binding_revision: u64,
+        target_account_id: AccountId,
+        target_incarnation: Incarnation,
+    },
+    ReauthorizeCrossAccountMoveDestination {
+        operation_id: String,
+        #[serde(with = "decimal_u64")]
+        expected_binding_revision: u64,
+        destination_account_id: AccountId,
+        destination_incarnation: Incarnation,
+        verified_attachments: Vec<AuthorityAttachmentRecord>,
+    },
+    ReauthorizeLegacyCrossAccountMoveFromTrashedCache {
+        operation_id: String,
+        #[serde(with = "decimal_u64")]
+        expected_binding_revision: u64,
+        destination_account_id: AccountId,
+        destination_incarnation: Incarnation,
+        verified_source: Box<AuthorityItemRecord>,
+    },
+    ReauthorizeAndCompleteLegacyCrossAccountMove {
+        operation_id: String,
+        #[serde(with = "decimal_u64")]
+        expected_binding_revision: u64,
+        destination_account_id: AccountId,
+        destination_incarnation: Incarnation,
+        verified_outcomes: Box<LegacyCrossAccountCompletionProof>,
+    },
     PutProtectedShareCapability(ProtectedShareCapabilityRecord),
     RemoveAllProtectedShareCapabilities,
     AcceptAttachmentMovePreparation(AttachmentMovePreparationRecord),
@@ -115,6 +229,16 @@ pub(crate) enum PlanMutation {
     RescheduleOperation(OperationRecord),
     /// Advances only the closed create-Vault checkpoint while preserving its immutable intent.
     CheckpointCreateVault(OperationRecord),
+    /// Enriches only accepted local image evidence after protected publication, retaining raw
+    /// cleanup until the physical deletion finalizer has acknowledged it.
+    ProtectVaultImage {
+        operation_id: String,
+        witness: crate::vault_image::protected::ProtectedImageWitness,
+    },
+    CompleteVaultImageRawCleanup {
+        operation_id: String,
+        witness: crate::vault_image::protected::ProtectedImageWitness,
+    },
     RemoveOperation {
         operation_id: String,
     },
@@ -129,9 +253,10 @@ pub(crate) enum PlanMutation {
         item: Box<AuthorityItemRecord>,
         cursor: Option<CursorAdvance>,
     },
-    /// Reconciles an existing-Item mutation against the authority fetched after its outcome.
+    /// Reconciles an Item mutation against the authority fetched after its retained outcome.
     ///
-    /// `None` is authoritative absence (including an applied permanent deletion). The receipt,
+    /// `None` is current authoritative absence for any applied Item kind, including Create.
+    /// Present Create authority still uses `ReconcileAppliedCreate`. The receipt,
     /// authority replacement/removal, Operation removal, and overlay removal are one fact and
     /// therefore one mutation. Bootstrap page progress is a separate guarded mutation.
     ReconcileItemMutation {
@@ -159,6 +284,14 @@ pub(crate) enum PlanMutation {
     ReconcileCreateVault {
         outcome: ObservedOutcome,
         vault: Option<AuthorityVaultRecord>,
+    },
+    /// Retain the confirmed action and require current Server authority before changing metadata.
+    ReconcileVaultMutation {
+        outcome: ObservedOutcome,
+    },
+    /// Records an exact historical result without installing or deleting current authority.
+    ReconcileRetainedResult {
+        outcome: ObservedOutcome,
     },
     /// Installs one complete authoritative Import batch, its compact receipt, and removes the
     /// accepted request/progress effect in one guarded Replica commit.
@@ -236,6 +369,26 @@ pub(crate) enum OperationRejectionCode {
     deny_unknown_fields
 )]
 pub(crate) enum OperationOutcomeResult {
+    /// Transient exact Server result. This full list is never retained in a receipt.
+    RotationStartApplied {
+        plans: Vec<RotationPlanRecord>,
+    },
+    RotationStartAppliedReceipt {
+        plan_set_fingerprint: Sha256Fingerprint,
+        plan_count: u16,
+    },
+    RotationStartRejected {
+        code: RotationStartRejectionCode,
+    },
+    RotationFinalizeApplied {
+        personal_team_id: String,
+        #[serde(default)]
+        rotations: Vec<RotationResultRecord>,
+    },
+    RotationFinalizeRejected {
+        code: RotationFinalizeRejectionCode,
+        details: Option<RotationStaleDetails>,
+    },
     Applied {
         entity_id: String,
         version: i32,
@@ -250,6 +403,9 @@ pub(crate) enum OperationOutcomeResult {
     },
     VaultRejected {
         code: CreateVaultOperationRejectionCode,
+    },
+    VaultMutationRejected {
+        code: VaultMutationOperationRejectionCode,
     },
     ImportApplied {
         vault_id: String,
@@ -270,6 +426,12 @@ pub(crate) enum CreateVaultOperationRejectionCode {
     TeamMembershipRequired,
     VaultSharingEntitlementDenied,
     SharedVaultLimitReached,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum VaultMutationOperationRejectionCode {
+    VaultAccessDenied,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -311,6 +473,12 @@ pub(crate) struct OperationReceiptRecord {
     pub completed_at_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub create_vault_cleanup: Option<CreateVaultCleanupObligation>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "legacy_admission::present"
+    )]
+    pub legacy_lineage: Option<LegacyOperationReceiptLineage>,
 }
 
 /// The closed durable address of the resource an Operation owns.
@@ -328,22 +496,29 @@ pub(crate) enum ResourceRef {
     Item { item_id: String, vault_id: String },
     Vault { vault_id: String },
     ImportBatch { vault_id: String },
+    Team { team_id: String },
 }
 
 impl ResourceRef {
     pub(crate) fn item_id(&self) -> Option<&str> {
         match self {
             Self::Item { item_id, .. } => Some(item_id),
-            Self::Vault { .. } | Self::ImportBatch { .. } => None,
+            Self::Vault { .. } | Self::ImportBatch { .. } | Self::Team { .. } => None,
+        }
+    }
+
+    pub(crate) fn vault_id_opt(&self) -> Option<&str> {
+        match self {
+            Self::Item { vault_id, .. }
+            | Self::Vault { vault_id }
+            | Self::ImportBatch { vault_id } => Some(vault_id),
+            Self::Team { .. } => None,
         }
     }
 
     pub(crate) fn vault_id(&self) -> &str {
-        match self {
-            Self::Item { vault_id, .. }
-            | Self::Vault { vault_id }
-            | Self::ImportBatch { vault_id } => vault_id,
-        }
+        self.vault_id_opt()
+            .expect("Vault-only Operation path received a Team target")
     }
 }
 
@@ -360,6 +535,8 @@ pub(crate) struct CreateVaultCleanupObligation {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     CreateVault,
+    UpdateVault,
+    DeleteVault,
     CreateItem,
     UpdateItem,
     SetItemFavorite,
@@ -369,6 +546,26 @@ pub(crate) enum OperationKind {
     PermanentlyDeleteItem,
     CreateShare,
     ImportItems,
+    CreateVaultMemberRemovalRotationPlans,
+    FinalizeVaultMemberRemovalRotationPlans,
+    CreateTeamLeaveRotationPlans,
+    FinalizeTeamLeaveRotationPlans,
+    CreateTeamMemberRemovalRotationPlans,
+    FinalizeTeamMemberRemovalRotationPlans,
+}
+
+impl OperationKind {
+    pub(crate) fn is_rotation(self) -> bool {
+        matches!(
+            self,
+            Self::CreateVaultMemberRemovalRotationPlans
+                | Self::FinalizeVaultMemberRemovalRotationPlans
+                | Self::CreateTeamLeaveRotationPlans
+                | Self::FinalizeTeamLeaveRotationPlans
+                | Self::CreateTeamMemberRemovalRotationPlans
+                | Self::FinalizeTeamMemberRemovalRotationPlans
+        )
+    }
 }
 
 /// The exact bytes an accepted Operation will send, forever.
@@ -409,6 +606,8 @@ pub(crate) struct OperationRecord {
     /// Covers the request, never the Operation ID. A Server outcome that carries this Operation ID
     /// with another fingerprint is therefore a detectable identity reuse, not a replay.
     pub request_fingerprint: Sha256Fingerprint,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_item_category: Option<AuthorityItemCategory>,
     /// Opaque restart material retained by a prepared or stale-authority Attachment Move request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment_move_recovery: Option<AttachmentMoveRecovery>,
@@ -416,10 +615,48 @@ pub(crate) struct OperationRecord {
     /// it never publishes Vault or key authority by itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub create_vault: Option<CreateVaultOperationRecord>,
+    /// Image replacement shares the existing immutable image artifact and staging checkpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_vault: Option<Box<UpdateVaultImageOperationRecord>>,
     pub scheduling: OperationSchedulingState,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "legacy_admission::present"
+    )]
+    pub legacy_admission: Option<Box<LegacyOperationAdmission>>,
 }
 
 impl OperationRecord {
+    pub(crate) fn is_legacy_held(&self) -> bool {
+        self.legacy_admission
+            .as_ref()
+            .is_some_and(|admission| admission.disposition != LegacyOperationDisposition::Normal)
+    }
+
+    pub(crate) fn vault_image(&self) -> Option<&CreateVaultImageRecord> {
+        self.create_vault
+            .as_ref()
+            .and_then(|intent| intent.image.as_ref())
+            .or_else(|| self.update_vault.as_ref().map(|intent| &intent.image))
+    }
+
+    pub(crate) fn vault_image_checkpoint(&self) -> Option<CreateVaultCheckpoint> {
+        self.create_vault
+            .as_ref()
+            .map(|intent| intent.checkpoint)
+            .or_else(|| self.update_vault.as_ref().map(|intent| intent.checkpoint))
+    }
+
+    pub(crate) fn set_vault_image_checkpoint(&mut self, checkpoint: CreateVaultCheckpoint) {
+        if let Some(intent) = &mut self.create_vault {
+            intent.checkpoint = checkpoint;
+        }
+        if let Some(intent) = &mut self.update_vault {
+            intent.checkpoint = checkpoint;
+        }
+    }
+
     pub(crate) fn item_id(&self) -> &str {
         self.target
             .item_id()
@@ -459,11 +696,25 @@ pub(crate) struct CreateVaultOperationRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UpdateVaultImageOperationRecord {
+    pub account_id: AccountId,
+    pub name: Option<String>,
+    pub icon: crate::VaultIconPatch,
+    pub image: CreateVaultImageRecord,
+    pub checkpoint: CreateVaultCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateVaultImageRecord {
     pub byte_length: u64,
     pub content_type: String,
     pub sha256: String,
     pub object_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protected_witness: Option<crate::vault_image::protected::ProtectedImageWitness>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub raw_cleanup_pending: bool,
 }
 
 #[derive(Serialize)]
@@ -632,6 +883,8 @@ pub(super) fn validate_share_capability_fields(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AttachmentMovePreparationRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_item_category: Option<AuthorityItemCategory>,
     pub account_id: AccountId,
     pub operation_id: String,
     pub item_id: String,
@@ -1088,6 +1341,9 @@ pub(crate) struct AuthorityVaultRecord {
     pub image_url: Option<String>,
     pub encrypted_vault_key: String,
     pub role: AuthorityVaultRole,
+    /// Missing in old Server responses and old Replica rows; never infer it from a wrapper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_version: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1184,6 +1440,8 @@ pub(crate) struct StageBootstrapPagePlan {
     pub raw_response_fingerprint: Sha256Fingerprint,
     pub pinned_watermark: SyncCursor,
     pub continuation: BootstrapContinuation,
+    /// Authenticated page-level capability marker; absent on old Servers and synthetic sources.
+    pub vault_key_version_included: bool,
     pub vaults: Vec<AuthorityVaultRecord>,
     pub items: Vec<AuthorityItemRecord>,
 }
@@ -1194,6 +1452,8 @@ pub(crate) struct StageBootstrapPagePlan {
     reason = "the persistence wire consumes this closed model next"
 )]
 pub(crate) struct PromoteBootstrapPlan {
+    /// Key-only Vault identities absent from this complete staged authority.
+    pub additional_retired_vault_ids: Vec<String>,
     pub guard: BootstrapGuard,
     pub generation_id: BootstrapGenerationId,
 }
@@ -1256,7 +1516,119 @@ pub(crate) struct BootstrapGenerationRecord {
     pub next_page_identity: BootstrapPageIdentity,
     pub next_page_cursor: BootstrapPageCursor,
     pub final_page_staged: bool,
+    /// Aggregate proof for every Vault page in this generation, persisted with staged pages.
+    /// Old rows default to false and cannot satisfy Rotation preflight.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vault_key_version_proved: bool,
+    #[serde(
+        default,
+        deserialize_with = "present_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub legacy_admission: Option<LegacyAdmissionOrigin>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LegacyItemCacheBaseline {
+    /// Exact source spelling retained as evidence.
+    pub server_url: String,
+    /// Core's validated comparison identity for the source spelling.
+    pub normalized_server_url: String,
+    pub cursor: SyncCursor,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LegacyItemCacheMetadata {
+    pub last_full_sync_at: u64,
+    pub item_count: u64,
+    pub cache_version: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_baseline: Option<LegacyItemCacheBaseline>,
+}
+
+fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
+fn present_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum LegacyCheckpointEvidence {
+    Missing {},
+    CapturedEmpty {},
+    CapturedValue { id: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum LegacyAdmissionRefreshReason {
+    CapturedFailedCreate,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LegacyAdmissionOrigin {
+    pub manifest_entries_sha256: String,
+    pub account_id: AccountId,
+    pub user_id: String,
+    pub incarnation: Incarnation,
+    pub normalized_server_url: String,
+    #[serde(deserialize_with = "required_nullable")]
+    pub source_active_generation: Option<String>,
+    pub state_key: String,
+    pub items_key_prefix: String,
+    pub vaults_key_prefix: String,
+    pub items_primed: bool,
+    pub vaults_primed: bool,
+    #[serde(deserialize_with = "required_nullable")]
+    pub metadata: Option<LegacyItemCacheMetadata>,
+    pub source_id: String,
+    pub sync_baseline: LegacyCheckpointEvidence,
+    pub last_sync_cursor: LegacyCheckpointEvidence,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "legacy_admission::present"
+    )]
+    pub refresh_reason: Option<LegacyAdmissionRefreshReason>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LegacyAdmissionBootstrap {
+    pub origin: LegacyAdmissionOrigin,
+    pub cursor: SyncCursor,
+    pub vaults: Vec<AuthorityVaultRecord>,
+    pub items: Vec<AuthorityItemRecord>,
+}
+
+crate::wire::map_only_serde!(
+    LegacyItemCacheBaseline,
+    LegacyItemCacheMetadata,
+    LegacyCheckpointEvidence,
+    LegacyAdmissionOrigin,
+);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1298,6 +1670,8 @@ pub(crate) struct BootstrapAuthoritySnapshot {
     reason = "the persistence wire consumes this closed model next"
 )]
 pub(crate) struct BootstrapAuthority {
+    pub(crate) policy_verification_pending: bool,
+    pub(crate) pending_vault_retirements: Vec<String>,
     pub(crate) state: ReplicaState,
     pub(crate) active_generation: Option<BootstrapGenerationId>,
     pub(crate) active_cursor: SyncCursor,
@@ -1362,9 +1736,13 @@ pub(crate) struct ReplicaSnapshot {
     pub lock_epoch: u64,
     pub items: Vec<ReplicaItemRecord>,
     pub operations: Vec<OperationRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cross_account_moves: Vec<CrossAccountMoveEntry>,
     pub share_capabilities: Vec<ProtectedShareCapabilityRecord>,
     pub attachment_move_preparations: Vec<AttachmentMovePreparationRecord>,
     pub receipts: Vec<OperationReceiptRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rotation_attempts: Vec<RotationAttemptRecord>,
     pub failure: Option<RuntimeErrorCode>,
     #[serde(skip)]
     pub bootstrap: BootstrapAuthority,
@@ -1374,6 +1752,10 @@ pub(super) fn apply_plan(
     current: ReplicaSnapshot,
     plan: GuardedCommitPlan,
 ) -> Result<ReplicaSnapshot, RuntimeError> {
+    let validates_retirement = plan
+        .mutations
+        .iter()
+        .any(|mutation| matches!(mutation, PlanMutation::RetireVaults { .. }));
     let mut next = AccountReplica::from_snapshot(current);
     for mutation in plan.mutations {
         next.apply(mutation)?;
@@ -1384,19 +1766,64 @@ pub(super) fn apply_plan(
             "Replica revision overflowed",
         )
     })?;
+    if validates_retirement || !next.cross_account_moves.is_empty() {
+        next.validate_durable_work()?;
+    }
     Ok(next.snapshot())
 }
 
 impl ReplicaSnapshot {
-    pub(crate) fn item_has_optimistic_owner(&self, item_id: &str) -> bool {
-        self.operations
+    /// Pending deletion is derived from accepted work, never a second host or in-memory list.
+    pub(crate) fn require_vault_accepting_work(&self, vault_id: &str) -> Result<(), RuntimeError> {
+        if self
+            .rotation_attempts
             .iter()
-            .any(|operation| operation.target.item_id() == Some(item_id))
+            .any(|attempt| attempt.fences_vault(vault_id))
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Vault Key rotation awaits current authority",
+            ));
+        }
+        if self
+            .bootstrap
+            .pending_vault_retirements
+            .iter()
+            .any(|pending| pending == vault_id)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Vault authority retirement is pending",
+            ));
+        }
+        if self.operations.iter().any(|operation| {
+            operation.kind == OperationKind::DeleteVault && operation.vault_id() == vault_id
+        }) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccessDenied,
+                "Vault deletion is pending",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn item_has_optimistic_owner(&self, item_id: &str) -> bool {
+        self.operations.iter().any(|operation| {
+            !operation.is_legacy_held() && operation.target.item_id() == Some(item_id)
+        }) || self
+            .attachment_move_preparations
+            .iter()
+            .any(|preparation| preparation.item_id == item_id)
             || self
-                .attachment_move_preparations
+                .cross_account_moves
                 .iter()
-                .any(|preparation| preparation.item_id == item_id)
-            || self.items.iter().any(|overlay| overlay.item_id == item_id)
+                .any(|record| record.owns_source_item() && record.source_item_id() == item_id)
+            || self.items.iter().any(|overlay| {
+                overlay.item_id == item_id
+                    && !self.operations.iter().any(|operation| {
+                        operation.operation_id == overlay.operation_id && operation.is_legacy_held()
+                    })
+            })
     }
 }
 
@@ -1409,14 +1836,61 @@ pub(super) struct AccountReplica {
     pub(super) lock_epoch: u64,
     pub(super) items: HashMap<String, ReplicaItemRecord>,
     pub(super) operations: HashMap<String, OperationRecord>,
+    pub(super) cross_account_moves: HashMap<String, CrossAccountMoveEntry>,
     pub(super) share_capabilities: HashMap<String, ProtectedShareCapabilityRecord>,
     pub(super) attachment_move_preparations: HashMap<String, AttachmentMovePreparationRecord>,
     pub(super) receipts: HashMap<String, OperationReceiptRecord>,
+    pub(super) rotation_attempts: HashMap<String, RotationAttemptRecord>,
     pub(super) failure: Option<RuntimeErrorCode>,
     pub(super) bootstrap: BootstrapAuthority,
 }
 
 impl AccountReplica {
+    fn transition_image_protection(
+        &mut self,
+        operation_id: String,
+        witness: crate::vault_image::protected::ProtectedImageWitness,
+        cleanup_complete: bool,
+    ) -> Result<(), RuntimeError> {
+        let mut operation = self.operations.get(&operation_id).cloned().ok_or_else(|| {
+            replica_invariant("Cannot protect an unknown accepted image Operation")
+        })?;
+        let image = operation
+            .create_vault
+            .as_mut()
+            .and_then(|intent| intent.image.as_mut())
+            .or_else(|| {
+                operation
+                    .update_vault
+                    .as_mut()
+                    .map(|intent| &mut intent.image)
+            })
+            .ok_or_else(|| replica_invariant("Operation has no accepted image"))?;
+        crate::vault_image::protected::validate_witness(&witness, image.byte_length)?;
+        match &image.protected_witness {
+            Some(existing) if existing != &witness => {
+                return Err(replica_invariant(
+                    "Accepted protected image witness is immutable",
+                ));
+            }
+            None if cleanup_complete => {
+                return Err(replica_invariant(
+                    "Raw cleanup cannot complete before protection",
+                ));
+            }
+            None => {
+                image.protected_witness = Some(witness);
+                image.raw_cleanup_pending = true;
+            }
+            Some(_) if cleanup_complete => image.raw_cleanup_pending = false,
+            Some(_) => {} // A replay cannot resurrect an already acknowledged cleanup duty.
+        }
+        check_immutable_request(&operation)?;
+        validate_create_vault_operation_context(&operation, &self.account_id, &self.user_id)?;
+        self.operations.insert(operation_id, operation);
+        Ok(())
+    }
+
     pub(super) fn from_snapshot(snapshot: ReplicaSnapshot) -> Self {
         Self {
             account_id: snapshot.account_id,
@@ -1434,6 +1908,11 @@ impl AccountReplica {
                 .into_iter()
                 .map(|operation| (operation.operation_id.clone(), operation))
                 .collect(),
+            cross_account_moves: snapshot
+                .cross_account_moves
+                .into_iter()
+                .map(|record| (record.operation_id().to_owned(), record))
+                .collect(),
             share_capabilities: snapshot
                 .share_capabilities
                 .into_iter()
@@ -1449,17 +1928,50 @@ impl AccountReplica {
                 .into_iter()
                 .map(|receipt| (receipt.operation_id.clone(), receipt))
                 .collect(),
+            rotation_attempts: snapshot
+                .rotation_attempts
+                .into_iter()
+                .map(|attempt| (attempt.start_operation_id.clone(), attempt))
+                .collect(),
             failure: snapshot.failure,
             bootstrap: snapshot.bootstrap,
         }
     }
 
     pub(super) fn validate_durable_work(&self) -> Result<(), RuntimeError> {
+        for item in self.items.values() {
+            if let Some(record) = self.cross_account_moves.get(&item.operation_id) {
+                record.validate_source_overlay(&self.account_id, item)?;
+            }
+            let witness = self
+                .operations
+                .get(&item.operation_id)
+                .and_then(|operation| operation.accepted_item_category.as_ref())
+                .or_else(|| {
+                    self.attachment_move_preparations
+                        .get(&item.operation_id)
+                        .and_then(|preparation| preparation.accepted_item_category.as_ref())
+                })
+                .or_else(|| {
+                    self.cross_account_moves
+                        .get(&item.operation_id)
+                        .and_then(CrossAccountMoveEntry::captured)
+                        .map(|record| &record.source.category)
+                });
+            vault_retirement::validate_category(witness, &item.category)?;
+        }
         let mut operation_ids = HashSet::new();
         let mut item_ids = HashSet::new();
         for operation in self.operations.values() {
             check_immutable_request(operation)?;
             validate_create_vault_operation_context(operation, &self.account_id, &self.user_id)?;
+            if let Some(admission) = &operation.legacy_admission {
+                let overlay = self
+                    .items
+                    .values()
+                    .find(|item| item.operation_id == operation.operation_id);
+                admission.validate(&self.account_id, operation, overlay)?;
+            }
             if let Some(recovery) = &operation.attachment_move_recovery {
                 let preparation = recovery.preparation();
                 self.check_attachment_move_preparation(preparation, false)?;
@@ -1478,10 +1990,11 @@ impl AccountReplica {
                 }
             }
             if !operation_ids.insert(operation.operation_id.clone())
-                || operation
-                    .target
-                    .item_id()
-                    .is_some_and(|item_id| !item_ids.insert(item_id.to_owned()))
+                || (!operation.is_legacy_held()
+                    && operation
+                        .target
+                        .item_id()
+                        .is_some_and(|item_id| !item_ids.insert(item_id.to_owned())))
                 || self.receipts.contains_key(&operation.operation_id)
             {
                 return Err(replica_invariant(
@@ -1516,6 +2029,34 @@ impl AccountReplica {
                 ));
             }
         }
+        for record in self.cross_account_moves.values() {
+            if record.source_unavailable().is_some()
+                && record.owns_source_item()
+                && self.items.contains_key(record.source_item_id())
+            {
+                return Err(replica_invariant(
+                    "Unavailable source evidence cannot coexist with a source overlay",
+                ));
+            }
+            record.validate(&self.account_id, &self.user_id)?;
+            for child_id in record.reserved_child_operation_ids() {
+                if !operation_ids.insert(child_id.clone()) || self.receipts.contains_key(&child_id)
+                {
+                    return Err(replica_invariant(
+                        "Cross-Account Move child identity conflicts with accepted work",
+                    ));
+                }
+            }
+            if !operation_ids.insert(record.operation_id().to_owned())
+                || self.receipts.contains_key(record.operation_id())
+                || (record.owns_source_item()
+                    && !item_ids.insert(record.source_item_id().to_owned()))
+            {
+                return Err(replica_invariant(
+                    "Cross-Account Move identity conflicts with accepted work",
+                ));
+            }
+        }
         for receipt in self.receipts.values() {
             validate_operation_receipt(receipt, &self.user_id)?;
             if receipt.completed_at_revision == 0 || receipt.completed_at_revision > self.revision {
@@ -1524,6 +2065,7 @@ impl AccountReplica {
                 ));
             }
         }
+        self.validate_rotation_attempts()?;
         Ok(())
     }
 
@@ -1578,6 +2120,8 @@ impl AccountReplica {
                 next_page_identity: BootstrapPageIdentity::vaults(0),
                 next_page_cursor: BootstrapPageCursor::VaultsInitial,
                 final_page_staged: false,
+                vault_key_version_proved: true,
+                legacy_admission: None,
             },
         );
         next.state = ReplicaState::Bootstrapping;
@@ -1585,6 +2129,24 @@ impl AccountReplica {
         next.validate()?;
         self.bootstrap = next;
         self.revision = next_revision;
+        Ok(PlanResult::Applied {
+            replica_revision: self.revision,
+        })
+    }
+
+    pub(super) fn set_policy_verification_pending(
+        &mut self,
+        guard: BootstrapGuard,
+        pending: bool,
+    ) -> Result<PlanResult, RuntimeError> {
+        if let Some(result) = self.guard_result(&guard) {
+            return Ok(result);
+        }
+        self.bootstrap.validate()?;
+        if self.bootstrap.policy_verification_pending != pending {
+            self.revision = increment_revision(self.revision)?;
+            self.bootstrap.policy_verification_pending = pending;
+        }
         Ok(PlanResult::Applied {
             replica_revision: self.revision,
         })
@@ -1682,6 +2244,11 @@ impl AccountReplica {
             }
             _ => {}
         }
+        if plan.request_cursor.phase() == BootstrapPhase::Items && plan.vault_key_version_included {
+            return Err(replica_invariant(
+                "Item Bootstrap page cannot prove Vault key versions",
+            ));
+        }
         validate_authority_page(&plan.vaults, &plan.items)?;
         for item in &plan.items {
             if self
@@ -1727,6 +2294,10 @@ impl AccountReplica {
             .get_mut(&plan.generation_id)
             .expect("staging generation was checked above");
         generation.pinned_watermark = plan.pinned_watermark;
+        if plan.request_cursor.phase() == BootstrapPhase::Vaults {
+            generation.vault_key_version_proved &= plan.vault_key_version_included
+                && plan.vaults.iter().all(|vault| vault.key_version.is_some());
+        }
         match plan.continuation {
             BootstrapContinuation::Final
                 if plan.request_cursor.phase() == BootstrapPhase::Vaults =>
@@ -1785,14 +2356,55 @@ impl AccountReplica {
         validate_captured_cursor(&generation.pinned_watermark)?;
         let pinned_watermark = generation.pinned_watermark.clone();
         let next_revision = increment_revision(self.revision)?;
-        let mut next = self.bootstrap.clone();
-        next.active_generation = Some(plan.generation_id);
-        next.active_cursor = pinned_watermark;
-        next.staging_generation = None;
-        next.state = ReplicaState::Ready;
-        next.validate()?;
-        self.bootstrap = next;
-        self.revision = next_revision;
+        let visible: HashSet<_> = self
+            .bootstrap
+            .vaults
+            .iter()
+            .filter(|((generation, _), _)| generation == &plan.generation_id)
+            .map(|((_, id), _)| id.clone())
+            .collect();
+        validate_retired_vault_ids(&plan.additional_retired_vault_ids)?;
+        if plan
+            .additional_retired_vault_ids
+            .iter()
+            .any(|id| visible.contains(id))
+        {
+            return Err(replica_invariant(
+                "additional Vault retirement must be absent from complete authority",
+            ));
+        }
+        let mut retired: Vec<_> = self
+            .bootstrap
+            .vaults
+            .keys()
+            .map(|(_, id)| id.clone())
+            .filter(|id| !visible.contains(id))
+            .collect();
+        retired.extend(plan.additional_retired_vault_ids);
+        retired.sort();
+        retired.dedup();
+        let mut next = self.clone();
+        next.bootstrap.active_generation = Some(plan.generation_id);
+        next.bootstrap.active_cursor = pinned_watermark;
+        next.bootstrap.staging_generation = None;
+        next.bootstrap.state = ReplicaState::Ready;
+        next.retire_vault_authority(&retired)?;
+        next.bootstrap.validate()?;
+        let fresh_items: Vec<_> = next
+            .bootstrap
+            .items
+            .iter()
+            .filter(|((generation, _), _)| {
+                Some(generation) == next.bootstrap.active_generation.as_ref()
+            })
+            .map(|((_, id), item)| (id.clone(), item.version))
+            .collect();
+        for (item_id, version) in fresh_items {
+            next.reconcile_rejected_move_source(&item_id, version);
+        }
+        next.revision = next_revision;
+        next.validate_durable_work()?;
+        *self = next;
         Ok(PlanResult::Applied {
             replica_revision: self.revision,
         })
@@ -1893,11 +2505,13 @@ impl AccountReplica {
             }
         }
         let next_revision = increment_revision(self.revision)?;
+        let (item_id, version) = (item.id.clone(), item.version);
         self.bootstrap
             .items
             .insert((generation_id, item.id.clone()), item);
         self.bootstrap.active_cursor = next_cursor;
         self.bootstrap.validate()?;
+        self.reconcile_rejected_move_source(&item_id, version);
         self.revision = next_revision;
         Ok(PlanResult::Applied {
             replica_revision: self.revision,
@@ -1979,13 +2593,102 @@ impl AccountReplica {
             return Err(replica_invariant("the Account module has failed"));
         }
         match mutation {
+            PlanMutation::AdmitCrossAccountMove {
+                record,
+                source_overlay,
+            } => self.admit_cross_account_move(*record, source_overlay)?,
+            PlanMutation::AdmitLegacySourceUnavailableMove { record } => {
+                self.admit_legacy_source_unavailable_move(*record)?
+            }
+            PlanMutation::AdvanceCrossAccountMove {
+                operation_id,
+                expected_binding_revision,
+                next,
+                source_authority,
+            } => self.advance_cross_account_move(
+                operation_id,
+                expected_binding_revision,
+                *next,
+                source_authority,
+            )?,
+            PlanMutation::RetireCrossAccountMoveDestination {
+                operation_id,
+                expected_binding_revision,
+                target_account_id,
+                target_incarnation,
+            } => self.retire_cross_account_move_destination(
+                &operation_id,
+                expected_binding_revision,
+                &target_account_id,
+                &target_incarnation,
+            )?,
+            PlanMutation::ReauthorizeCrossAccountMoveDestination {
+                operation_id,
+                expected_binding_revision,
+                destination_account_id,
+                destination_incarnation,
+                verified_attachments,
+            } => self.reauthorize_cross_account_move_destination(
+                &operation_id,
+                expected_binding_revision,
+                destination_account_id,
+                destination_incarnation,
+                verified_attachments,
+            )?,
+            PlanMutation::ReauthorizeLegacyCrossAccountMoveFromTrashedCache {
+                operation_id,
+                expected_binding_revision,
+                destination_account_id,
+                destination_incarnation,
+                verified_source,
+            } => self.reauthorize_legacy_cross_account_move_from_trashed_cache(
+                &operation_id,
+                expected_binding_revision,
+                destination_account_id,
+                destination_incarnation,
+                verified_source,
+            )?,
+            PlanMutation::ReauthorizeAndCompleteLegacyCrossAccountMove {
+                operation_id,
+                expected_binding_revision,
+                destination_account_id,
+                destination_incarnation,
+                verified_outcomes,
+            } => self.reauthorize_and_complete_legacy_cross_account_move(
+                &operation_id,
+                expected_binding_revision,
+                destination_account_id,
+                destination_incarnation,
+                verified_outcomes,
+            )?,
+            PlanMutation::RetireVaults { vault_ids } => self.retire_vault_authority(&vault_ids)?,
+            PlanMutation::CompleteVaultRetirements { vault_ids } => {
+                validate_retired_vault_ids(&vault_ids)?;
+                if vault_ids
+                    .iter()
+                    .any(|id| !self.bootstrap.pending_vault_retirements.contains(id))
+                {
+                    return Err(replica_invariant("Vault cleanup completion is not pending"));
+                }
+                self.bootstrap
+                    .pending_vault_retirements
+                    .retain(|id| !vault_ids.contains(id));
+            }
             PlanMutation::PutOptimisticItem(item) => {
                 self.check_item_scope(&item)?;
                 self.check_overlay(&item)?;
                 self.items.insert(item.item_id.clone(), item);
             }
             PlanMutation::AcceptOperation(operation) => {
+                if operation.touches_vaults(&self.bootstrap.pending_vault_retirements)? {
+                    return Err(replica_invariant(
+                        "cannot accept work for retired Vault authority",
+                    ));
+                }
                 if self.operations.contains_key(&operation.operation_id)
+                    || self
+                        .cross_account_moves
+                        .contains_key(&operation.operation_id)
                     || self
                         .attachment_move_preparations
                         .contains_key(&operation.operation_id)
@@ -2006,12 +2709,20 @@ impl AccountReplica {
                     &self.account_id,
                     &self.user_id,
                 )?;
-                if let Some(item_id) = operation.target.item_id() {
+                if let Some(item_id) = operation
+                    .target
+                    .item_id()
+                    .filter(|_| !operation.is_legacy_held())
+                {
                     if self
                         .operations
                         .values()
+                        .filter(|active| !active.is_legacy_held())
                         .filter_map(|active| active.target.item_id())
                         .any(|active| active == item_id)
+                        || self.cross_account_moves.values().any(|record| {
+                            record.owns_source_item() && record.source_item_id() == item_id
+                        })
                         || self
                             .attachment_move_preparations
                             .values()
@@ -2025,6 +2736,56 @@ impl AccountReplica {
                 }
                 self.operations
                     .insert(operation.operation_id.clone(), operation);
+            }
+            PlanMutation::BindRotationStart {
+                start_operation_id,
+                intent,
+                authority_generation_id,
+                team_role,
+            } => self.bind_rotation_start(
+                &start_operation_id,
+                intent,
+                authority_generation_id,
+                team_role,
+            )?,
+            PlanMutation::ReconcileRotationStart {
+                outcome,
+                intent,
+                validated_plans,
+            } => self.reconcile_rotation_start(outcome, intent, validated_plans)?,
+            PlanMutation::BindRotationManifest {
+                start_operation_id,
+                members,
+            } => {
+                self.bind_rotation_manifest(&start_operation_id, members)?;
+            }
+            PlanMutation::AcknowledgeRotationAttempt { start_operation_id } => {
+                self.acknowledge_rotation_attempt(&start_operation_id)?;
+            }
+            PlanMutation::ConsumeRotationAttempt {
+                start_operation_id,
+                attempt_id,
+            } => {
+                self.consume_rotation_attempt(&start_operation_id, attempt_id)?;
+            }
+            PlanMutation::AcceptRotationFinalize {
+                start_operation_id,
+                attempt_id,
+                operation,
+            } => {
+                self.accept_rotation_finalize(&start_operation_id, &attempt_id, operation)?;
+            }
+            PlanMutation::ReconcileRotationFinalize {
+                start_operation_id,
+                outcome,
+            } => {
+                self.reconcile_rotation_finalize(&start_operation_id, outcome)?;
+            }
+            PlanMutation::CompleteRotationRefresh {
+                start_operation_id,
+                finalize_operation_id,
+            } => {
+                self.complete_rotation_refresh(&start_operation_id, &finalize_operation_id)?;
             }
             PlanMutation::PutProtectedShareCapability(capability) => {
                 let operation = self.operations.get(&capability.operation_id);
@@ -2052,6 +2813,19 @@ impl AccountReplica {
                 self.share_capabilities.clear();
             }
             PlanMutation::AcceptAttachmentMovePreparation(preparation) => {
+                if self
+                    .bootstrap
+                    .pending_vault_retirements
+                    .contains(&preparation.source_vault_id)
+                    || self
+                        .bootstrap
+                        .pending_vault_retirements
+                        .contains(&preparation.target_vault_id)
+                {
+                    return Err(replica_invariant(
+                        "cannot accept Move work for retired Vault authority",
+                    ));
+                }
                 self.check_attachment_move_preparation(&preparation, true)?;
                 if self.operations.contains_key(&preparation.operation_id)
                     || self
@@ -2066,6 +2840,7 @@ impl AccountReplica {
                 if self
                     .operations
                     .values()
+                    .filter(|active| !active.is_legacy_held())
                     .filter_map(|active| active.target.item_id())
                     .any(|active| active == preparation.item_id)
                     || self
@@ -2199,8 +2974,11 @@ impl AccountReplica {
                     || existing.target != operation.target
                     || existing.request != operation.request
                     || existing.request_fingerprint != operation.request_fingerprint
+                    || existing.accepted_item_category != operation.accepted_item_category
                     || existing.attachment_move_recovery != operation.attachment_move_recovery
                     || existing.create_vault != operation.create_vault
+                    || existing.update_vault != operation.update_vault
+                    || existing.legacy_admission != operation.legacy_admission
                 {
                     return Err(replica_invariant(
                         "rescheduling cannot change accepted Operation bytes",
@@ -2212,6 +2990,14 @@ impl AccountReplica {
                 self.operations
                     .insert(operation.operation_id.clone(), operation);
             }
+            PlanMutation::ProtectVaultImage {
+                operation_id,
+                witness,
+            } => self.transition_image_protection(operation_id, witness, false)?,
+            PlanMutation::CompleteVaultImageRawCleanup {
+                operation_id,
+                witness,
+            } => self.transition_image_protection(operation_id, witness, true)?,
             PlanMutation::CheckpointCreateVault(operation) => {
                 let existing = self
                     .operations
@@ -2229,6 +3015,15 @@ impl AccountReplica {
                     .insert(operation.operation_id.clone(), operation);
             }
             PlanMutation::RemoveOperation { operation_id } => {
+                if self
+                    .operations
+                    .get(&operation_id)
+                    .is_some_and(|operation| operation.kind.is_rotation())
+                {
+                    return Err(replica_invariant(
+                        "Rotation work requires its atomic reconciliation",
+                    ));
+                }
                 if self.operations.remove(&operation_id).is_none() {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::InvariantViolation,
@@ -2254,12 +3049,11 @@ impl AccountReplica {
                         "an applied reconciliation needs an applied outcome",
                     ));
                 };
-                // The outcome, the fetched Item, and the accepted Operation must describe one
-                // entity at one version. Anything else is not this Operation's authority.
+                // A retained action fixes the receipt's version, while current authenticated
+                // authority may already include a later edit of the same Item.
                 if entity_id != operation.item_id()
                     || item.id != operation.item_id()
-                    || item.vault_id != operation.vault_id()
-                    || item.version != *version
+                    || item.version < *version
                 {
                     return Err(replica_invariant(
                         "the authoritative Item does not match the Operation outcome",
@@ -2278,7 +3072,10 @@ impl AccountReplica {
                 cursor,
             } => {
                 let operation = self.operation_for(&outcome)?;
-                if !matches!(
+                let applied_create_absence = operation.kind == OperationKind::CreateItem
+                    && item.is_none()
+                    && matches!(outcome.result, OperationOutcomeResult::Applied { .. });
+                if (!matches!(
                     operation.kind,
                     OperationKind::UpdateItem
                         | OperationKind::SetItemFavorite
@@ -2286,10 +3083,11 @@ impl AccountReplica {
                         | OperationKind::RestoreItem
                         | OperationKind::MoveItem
                         | OperationKind::PermanentlyDeleteItem
-                ) || operation.target.item_id().is_none()
+                ) && !applied_create_absence)
+                    || operation.target.item_id().is_none()
                 {
                     return Err(replica_invariant(
-                        "an existing-Item reconciliation needs an ordinary Item Operation",
+                        "Item reconciliation needs an ordinary mutation or applied Create absence",
                     ));
                 }
                 match (&outcome.result, item.as_deref()) {
@@ -2297,18 +3095,16 @@ impl AccountReplica {
                         if operation.kind != OperationKind::PermanentlyDeleteItem
                             && entity_id == operation.item_id()
                             && authority.id == operation.item_id()
-                            && authority.vault_id == operation.vault_id()
-                            && authority.version == *version => {}
+                            && authority.version >= *version => {}
                     (OperationOutcomeResult::Applied { entity_id, .. }, None)
-                        if operation.kind == OperationKind::PermanentlyDeleteItem
-                            && entity_id == operation.item_id() => {}
+                        if entity_id == operation.item_id() => {}
                     (OperationOutcomeResult::Rejected { .. }, Some(authority))
                         if authority.id == operation.item_id() => {}
                     (OperationOutcomeResult::Rejected { .. }, None) => {}
                     _ => {
                         return Err(replica_invariant(
                             "the authoritative Item does not match the mutation outcome",
-                        ))
+                        ));
                     }
                 }
                 self.retain_receipt(&operation, &outcome)?;
@@ -2386,7 +3182,7 @@ impl AccountReplica {
                     _ => {
                         return Err(replica_invariant(
                             "a Share reconciliation needs a Share outcome",
-                        ))
+                        ));
                     }
                 };
                 self.retain_receipt(&operation, &outcome)?;
@@ -2405,6 +3201,153 @@ impl AccountReplica {
                     (None, _) => {}
                 }
                 self.advance_matching_cursor(cursor)?;
+            }
+            PlanMutation::ReconcileRetainedResult { outcome } => {
+                let operation = self.operation_for(&outcome)?;
+                if operation.kind.is_rotation() {
+                    return Err(replica_invariant(
+                        "Rotation work requires its atomic reconciliation",
+                    ));
+                }
+                let refresh = match (&operation.kind, &outcome.result) {
+                    (
+                        OperationKind::CreateItem
+                        | OperationKind::UpdateItem
+                        | OperationKind::SetItemFavorite
+                        | OperationKind::TrashItem
+                        | OperationKind::RestoreItem
+                        | OperationKind::MoveItem
+                        | OperationKind::PermanentlyDeleteItem,
+                        OperationOutcomeResult::Applied { entity_id, .. },
+                    ) if operation.target.item_id() == Some(entity_id.as_str()) => true,
+                    (
+                        OperationKind::UpdateItem
+                        | OperationKind::SetItemFavorite
+                        | OperationKind::TrashItem
+                        | OperationKind::RestoreItem
+                        | OperationKind::MoveItem
+                        | OperationKind::PermanentlyDeleteItem,
+                        OperationOutcomeResult::Rejected { .. },
+                    ) => true,
+                    (
+                        OperationKind::CreateVault,
+                        OperationOutcomeResult::VaultApplied { vault_id },
+                    ) if vault_id == operation.vault_id() => true,
+                    (OperationKind::CreateVault, OperationOutcomeResult::VaultRejected { .. }) => {
+                        false
+                    }
+                    (
+                        OperationKind::ImportItems,
+                        OperationOutcomeResult::ImportApplied {
+                            vault_id,
+                            imported_count,
+                        },
+                    ) if vault_id == operation.vault_id() => {
+                        let body: crate::wire::import::ImportRequestBody =
+                            serde_json::from_slice(&operation.request.body).map_err(|_| {
+                                replica_invariant("retained Import request is malformed")
+                            })?;
+                        if body.items.len() != usize::from(*imported_count) {
+                            return Err(replica_invariant(
+                                "retained Import result changed the accepted batch count",
+                            ));
+                        }
+                        true
+                    }
+                    (OperationKind::ImportItems, OperationOutcomeResult::ImportRejected { .. }) => {
+                        false
+                    }
+                    _ => {
+                        return Err(replica_invariant(
+                            "retained result does not match accepted work",
+                        ));
+                    }
+                };
+                if operation.kind == OperationKind::CreateVault
+                    && operation.vault_image_checkpoint()
+                        != Some(CreateVaultCheckpoint::FinalRequestFrozen)
+                {
+                    return Err(replica_invariant(
+                        "create-Vault cannot reconcile before final request freeze",
+                    ));
+                }
+                self.retain_receipt(&operation, &outcome)?;
+                if let Some(image) = operation.vault_image().cloned() {
+                    let receipt = self
+                        .receipts
+                        .get_mut(&operation.operation_id)
+                        .ok_or_else(|| replica_invariant("retained Vault receipt missing"))?;
+                    receipt.create_vault_cleanup = Some(CreateVaultCleanupObligation {
+                        image,
+                        local_artifact_pending: true,
+                        remote_staging_pending: matches!(
+                            outcome.result,
+                            OperationOutcomeResult::VaultRejected { .. }
+                        ),
+                    });
+                    validate_operation_receipt(receipt, &self.user_id)?;
+                }
+                self.operations.remove(&operation.operation_id);
+                self.items
+                    .retain(|_, overlay| overlay.operation_id != operation.operation_id);
+                if refresh {
+                    self.bootstrap.abandon_staging_authority()?;
+                    self.bootstrap.state = if self.bootstrap.active_generation.is_some() {
+                        ReplicaState::RefreshRequired
+                    } else {
+                        ReplicaState::Cold
+                    };
+                }
+                self.bootstrap.validate()?;
+            }
+            PlanMutation::ReconcileVaultMutation { outcome } => {
+                let operation = self.operation_for(&outcome)?;
+                if !matches!(
+                    operation.kind,
+                    OperationKind::UpdateVault | OperationKind::DeleteVault
+                ) || !matches!(operation.target, ResourceRef::Vault { .. })
+                    || !matches!(
+                        self.bootstrap.state,
+                        ReplicaState::Ready | ReplicaState::RefreshRequired
+                    )
+                    || !match &outcome.result {
+                        OperationOutcomeResult::VaultApplied { vault_id } => {
+                            vault_id == operation.vault_id()
+                        }
+                        OperationOutcomeResult::VaultMutationRejected { .. } => true,
+                        _ => false,
+                    }
+                {
+                    return Err(replica_invariant(
+                        "Vault mutation completion is not current or matching",
+                    ));
+                }
+                self.retain_receipt(&operation, &outcome)?;
+                if let Some(image) = operation.vault_image().cloned() {
+                    if operation.vault_image_checkpoint()
+                        != Some(CreateVaultCheckpoint::FinalRequestFrozen)
+                    {
+                        return Err(replica_invariant(
+                            "Vault image update completed before final request freeze",
+                        ));
+                    }
+                    let receipt = self
+                        .receipts
+                        .get_mut(&operation.operation_id)
+                        .ok_or_else(|| replica_invariant("Vault update receipt missing"))?;
+                    receipt.create_vault_cleanup = Some(CreateVaultCleanupObligation {
+                        image,
+                        local_artifact_pending: true,
+                        remote_staging_pending: matches!(
+                            outcome.result,
+                            OperationOutcomeResult::VaultMutationRejected { .. }
+                        ),
+                    });
+                    validate_operation_receipt(receipt, &self.user_id)?;
+                }
+                self.operations.remove(&operation.operation_id);
+                self.bootstrap.state = ReplicaState::RefreshRequired;
+                self.bootstrap.validate()?;
             }
             PlanMutation::ReconcileCreateVault { outcome, vault } => {
                 let operation = self.operation_for(&outcome)?;
@@ -2445,7 +3388,7 @@ impl AccountReplica {
                     _ => {
                         return Err(replica_invariant(
                             "authoritative Vault does not match the create-Vault outcome",
-                        ))
+                        ));
                     }
                 }
                 self.retain_receipt(&operation, &outcome)?;
@@ -2504,7 +3447,7 @@ impl AccountReplica {
                     _ => {
                         return Err(replica_invariant(
                             "authoritative Import batch does not match its outcome",
-                        ))
+                        ));
                     }
                 }
                 self.retain_receipt(&operation, &outcome)?;
@@ -2756,12 +3699,17 @@ impl AccountReplica {
             result: outcome.result.clone(),
             completed_at_revision: increment_revision(self.revision)?,
             create_vault_cleanup: None,
+            legacy_lineage: operation
+                .legacy_admission
+                .as_deref()
+                .map(LegacyOperationReceiptLineage::from),
         };
         validate_operation_receipt(&receipt, &self.user_id)?;
         if let Some(existing) = self.receipts.get(&operation.operation_id) {
             if existing.request_fingerprint != receipt.request_fingerprint
                 || existing.result != receipt.result
                 || existing.target != receipt.target
+                || existing.legacy_lineage != receipt.legacy_lineage
             {
                 return Err(replica_invariant(
                     "a matching semantic outcome is immutable",
@@ -2779,6 +3727,15 @@ impl AccountReplica {
     /// cannot overwrite newer ciphertext, and refusing the write is not a reason to leave the
     /// Operation owed forever.
     fn write_authoritative_item(&mut self, item: AuthorityItemRecord) -> Result<(), RuntimeError> {
+        if self
+            .bootstrap
+            .pending_vault_retirements
+            .contains(&item.vault_id)
+        {
+            return Err(replica_invariant(
+                "pending Vault retirement cannot regain authority",
+            ));
+        }
         if self.bootstrap.state != ReplicaState::Ready {
             return Err(replica_invariant(
                 "authority can only be written to a ready Replica",
@@ -2798,8 +3755,11 @@ impl AccountReplica {
         {
             return Ok(());
         }
-        self.bootstrap.items.insert(key, item);
-        self.bootstrap.validate()
+        let version = item.version;
+        self.bootstrap.items.insert(key.clone(), item);
+        self.bootstrap.validate()?;
+        self.reconcile_rejected_move_source(&key.1, version);
+        Ok(())
     }
 
     fn write_authoritative_vault(
@@ -2876,6 +3836,46 @@ impl AccountReplica {
 
     /// An overlay is the visible half of one accepted Operation, so it cannot outlive or precede it.
     fn check_overlay(&self, item: &ReplicaItemRecord) -> Result<(), RuntimeError> {
+        if self
+            .operations
+            .get(&item.operation_id)
+            .is_some_and(|operation| {
+                operation.is_legacy_held()
+                    && operation
+                        .legacy_admission
+                        .as_ref()
+                        .is_none_or(|admission| admission.captured_failure_code.is_none())
+            })
+        {
+            return Err(replica_invariant(
+                "Held Operation without captured failure cannot own an optimistic overlay",
+            ));
+        }
+        if self
+            .cross_account_moves
+            .get(&item.operation_id)
+            .is_some_and(|entry| entry.source_unavailable().is_some())
+        {
+            return Err(replica_invariant(
+                "Unavailable source evidence cannot own an Item overlay",
+            ));
+        }
+        let witness = self
+            .operations
+            .get(&item.operation_id)
+            .and_then(|operation| operation.accepted_item_category.as_ref())
+            .or_else(|| {
+                self.attachment_move_preparations
+                    .get(&item.operation_id)
+                    .and_then(|preparation| preparation.accepted_item_category.as_ref())
+            })
+            .or_else(|| {
+                self.cross_account_moves
+                    .get(&item.operation_id)
+                    .and_then(CrossAccountMoveEntry::captured)
+                    .map(|record| &record.source.category)
+            });
+        vault_retirement::validate_category(witness, &item.category)?;
         let identity = self
             .operations
             .get(&item.operation_id)
@@ -2894,6 +3894,13 @@ impl AccountReplica {
                             preparation.target_vault_id.as_str(),
                         )
                     })
+            })
+            .or_else(|| {
+                self.cross_account_moves
+                    .get(&item.operation_id)
+                    .and_then(CrossAccountMoveEntry::captured)
+                    .filter(|record| record.stage != CrossAccountMoveStage::Completed)
+                    .map(|record| (record.source.id.as_str(), record.source.vault_id.as_str()))
             })
             .or_else(|| {
                 self.receipts.get(&item.operation_id).and_then(|receipt| {
@@ -2929,6 +3936,8 @@ impl AccountReplica {
         items.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         let mut operations: Vec<_> = self.operations.values().cloned().collect();
         operations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
+        let mut cross_account_moves: Vec<_> = self.cross_account_moves.values().cloned().collect();
+        cross_account_moves.sort_by(|a, b| a.operation_id().cmp(b.operation_id()));
         let mut share_capabilities: Vec<_> = self.share_capabilities.values().cloned().collect();
         share_capabilities.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         let mut attachment_move_preparations: Vec<_> = self
@@ -2939,6 +3948,8 @@ impl AccountReplica {
         attachment_move_preparations.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
         let mut receipts: Vec<_> = self.receipts.values().cloned().collect();
         receipts.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
+        let mut rotation_attempts: Vec<_> = self.rotation_attempts.values().cloned().collect();
+        rotation_attempts.sort_by(|a, b| a.start_operation_id.cmp(&b.start_operation_id));
         ReplicaSnapshot {
             account_id: self.account_id.clone(),
             user_id: self.user_id.clone(),
@@ -2947,9 +3958,11 @@ impl AccountReplica {
             lock_epoch: self.lock_epoch,
             items,
             operations,
+            cross_account_moves,
             share_capabilities,
             attachment_move_preparations,
             receipts,
+            rotation_attempts,
             failure: self.failure,
             bootstrap: self.bootstrap.clone(),
         }
@@ -3192,9 +4205,12 @@ fn move_operation(
             body,
         },
         request_fingerprint,
+        accepted_item_category: preparation.accepted_item_category.clone(),
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: None,
         scheduling: preparation.scheduling,
+        legacy_admission: None,
     };
     check_immutable_request(&operation)?;
     Ok(operation)
@@ -3254,6 +4270,8 @@ pub(crate) fn item_operation_fingerprint(
     use sha2::{Digest, Sha256};
     let kind = match kind {
         OperationKind::CreateVault => "create_vault",
+        OperationKind::UpdateVault => "update_vault",
+        OperationKind::DeleteVault => "delete_vault",
         OperationKind::CreateItem => "create_item",
         OperationKind::UpdateItem => "update_item",
         OperationKind::SetItemFavorite => "set_item_favorite",
@@ -3263,6 +4281,20 @@ pub(crate) fn item_operation_fingerprint(
         OperationKind::PermanentlyDeleteItem => "permanently_delete_item",
         OperationKind::CreateShare => "create_share",
         OperationKind::ImportItems => "import_items",
+        OperationKind::CreateVaultMemberRemovalRotationPlans => {
+            "create_vault_member_removal_rotation_plans"
+        }
+        OperationKind::FinalizeVaultMemberRemovalRotationPlans => {
+            "finalize_vault_member_removal_rotation_plans"
+        }
+        OperationKind::CreateTeamLeaveRotationPlans => "create_team_leave_rotation_plans",
+        OperationKind::FinalizeTeamLeaveRotationPlans => "finalize_team_leave_rotation_plans",
+        OperationKind::CreateTeamMemberRemovalRotationPlans => {
+            "create_team_member_removal_rotation_plans"
+        }
+        OperationKind::FinalizeTeamMemberRemovalRotationPlans => {
+            "finalize_team_member_removal_rotation_plans"
+        }
     };
     let expected_version = expected_version.to_string();
     let mut hasher = Sha256::new();
@@ -3282,8 +4314,10 @@ pub(crate) fn item_operation_fingerprint(
 
 /// Durable request bytes never carry a credential, and a durable route is never ambiguous.
 fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeError> {
+    vault_retirement::validate_operation_category(operation)?;
     if operation.operation_id.is_empty()
-        || operation.vault_id().is_empty()
+        || operation.target.vault_id_opt().is_some_and(str::is_empty)
+        || matches!(&operation.target, ResourceRef::Team { team_id } if team_id.is_empty())
         || operation.target.item_id().is_some_and(str::is_empty)
     {
         return Err(replica_invariant("Operation identity is empty"));
@@ -3291,11 +4325,9 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
     if !operation.request.path.starts_with('/') {
         return Err(replica_invariant("Operation route path is not absolute"));
     }
-    let unfinished_vault = operation.kind == OperationKind::CreateVault
-        && operation
-            .create_vault
-            .as_ref()
-            .is_some_and(|record| record.checkpoint != CreateVaultCheckpoint::FinalRequestFrozen);
+    let unfinished_vault = operation
+        .vault_image_checkpoint()
+        .is_some_and(|checkpoint| checkpoint != CreateVaultCheckpoint::FinalRequestFrozen);
     if operation.request.body.is_empty()
         && !unfinished_vault
         && !matches!(
@@ -3303,11 +4335,73 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
             OperationKind::TrashItem
                 | OperationKind::RestoreItem
                 | OperationKind::PermanentlyDeleteItem
+                | OperationKind::CreateVaultMemberRemovalRotationPlans
+                | OperationKind::CreateTeamLeaveRotationPlans
+                | OperationKind::CreateTeamMemberRemovalRotationPlans
         )
     {
         return Err(replica_invariant("Operation request body is empty"));
     }
+    if operation.update_vault.is_some() && operation.kind != OperationKind::UpdateVault {
+        return Err(replica_invariant(
+            "non-update Operation carries a Vault replacement intent",
+        ));
+    }
     match (&operation.kind, &operation.create_vault) {
+        (OperationKind::CreateTeamLeaveRotationPlans, None)
+            if matches!(operation.target, ResourceRef::Team { .. }) =>
+        {
+            validate_team_leave_rotation_start(operation)?;
+        }
+        (OperationKind::CreateTeamLeaveRotationPlans, _) => {
+            return Err(replica_invariant(
+                "Team-leave Rotation start target or intent is invalid",
+            ));
+        }
+        (OperationKind::FinalizeTeamLeaveRotationPlans, None)
+            if matches!(operation.target, ResourceRef::Team { .. }) =>
+        {
+            validate_team_leave_rotation_finalize(operation)?;
+        }
+        (OperationKind::FinalizeTeamLeaveRotationPlans, _) => {
+            return Err(replica_invariant(
+                "Team-leave Rotation finalize target is invalid",
+            ));
+        }
+        (OperationKind::DeleteVault, None)
+            if matches!(operation.target, ResourceRef::Vault { .. }) =>
+        {
+            if operation.request.method != HttpMethod::Post
+                || operation.request.path
+                    != format!("/api/v1/vaults/{}/deletions", operation.vault_id())
+                || operation.request.headers
+                    != [HttpHeader {
+                        name: "Content-Type".into(),
+                        value: "application/json".into(),
+                    }]
+                || operation.request.body != b"{}"
+                || operation.request_fingerprint != vault_deletion_fingerprint(operation.vault_id())
+            {
+                return Err(replica_invariant(
+                    "Vault deletion request changed or is invalid",
+                ));
+            }
+        }
+        (OperationKind::DeleteVault, _) => {
+            return Err(replica_invariant(
+                "Vault deletion target or intent is invalid",
+            ));
+        }
+        (OperationKind::UpdateVault, None)
+            if matches!(operation.target, ResourceRef::Vault { .. }) =>
+        {
+            validate_vault_update_operation(operation)?;
+        }
+        (OperationKind::UpdateVault, _) => {
+            return Err(replica_invariant(
+                "Vault update target or intent is invalid",
+            ));
+        }
         (OperationKind::CreateVault, Some(record))
             if matches!(operation.target, ResourceRef::Vault { .. })
                 && !record.name.is_empty()
@@ -3350,6 +4444,281 @@ fn check_immutable_request(operation: &OperationRecord) -> Result<(), RuntimeErr
     Ok(())
 }
 
+fn validate_team_leave_rotation_start(operation: &OperationRecord) -> Result<(), RuntimeError> {
+    let ResourceRef::Team { team_id } = &operation.target else {
+        return Err(replica_invariant(
+            "Team-leave Rotation start has no Team target",
+        ));
+    };
+    let path = format!(
+        "/api/v1/teams/{}/leave-rotation-plans",
+        encode_component(team_id)
+    );
+    let fingerprint = rotation_start_fingerprint(
+        b"create_team_leave_rotation_plans",
+        b"POST /api/v1/teams/{teamId}/leave-rotation-plans",
+        &[team_id],
+    );
+    if operation.request.method != HttpMethod::Post
+        || operation.request.path != path
+        || !operation.request.headers.is_empty()
+        || !operation.request.body.is_empty()
+        || operation.request_fingerprint != fingerprint
+        || operation.accepted_item_category.is_some()
+        || operation.attachment_move_recovery.is_some()
+        || operation.update_vault.is_some()
+    {
+        return Err(replica_invariant(
+            "Team-leave Rotation start request changed",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_team_leave_rotation_finalize(operation: &OperationRecord) -> Result<(), RuntimeError> {
+    let ResourceRef::Team { team_id } = &operation.target else {
+        return Err(replica_invariant(
+            "Team-leave Rotation finalize has no Team target",
+        ));
+    };
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct FinalizePlanSet {
+        #[serde(rename = "planIds")]
+        plan_ids: Vec<String>,
+    }
+    let request: FinalizePlanSet = serde_json::from_slice(&operation.request.body)
+        .map_err(|_| replica_invariant("Team-leave Rotation finalize body is invalid"))?;
+    let mut seen = HashSet::new();
+    if request.plan_ids.len() > 21_000
+        || request
+            .plan_ids
+            .iter()
+            .any(|id| id.is_empty() || id.len() > 128 || !seen.insert(id))
+    {
+        return Err(replica_invariant(
+            "Team-leave Rotation finalize plan list is invalid",
+        ));
+    }
+    let body = serde_json::to_vec(&request)
+        .map_err(|_| replica_invariant("Team-leave Rotation finalize body is invalid"))?;
+    let fingerprint = rotation_request_fingerprint(
+        b"finalize_team_leave_rotation_plans",
+        b"POST /api/v1/teams/{teamId}/leave-rotation-plans/finalize",
+        &[team_id],
+        &body,
+    );
+    if operation.request.method != HttpMethod::Post
+        || operation.request.path
+            != format!(
+                "/api/v1/teams/{}/leave-rotation-plans/finalize",
+                encode_component(team_id)
+            )
+        || operation.request.headers
+            != [HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }]
+        || operation.request.body != body
+        || operation.request_fingerprint != fingerprint
+        || operation.accepted_item_category.is_some()
+        || operation.attachment_move_recovery.is_some()
+        || operation.update_vault.is_some()
+    {
+        return Err(replica_invariant(
+            "Team-leave Rotation finalize request changed",
+        ));
+    }
+    Ok(())
+}
+
+fn rotation_start_fingerprint(
+    kind: &[u8],
+    route: &[u8],
+    path_values: &[&str],
+) -> Sha256Fingerprint {
+    rotation_request_fingerprint(kind, route, path_values, b"")
+}
+
+fn rotation_request_fingerprint(
+    kind: &[u8],
+    route: &[u8],
+    path_values: &[&str],
+    body: &[u8],
+) -> Sha256Fingerprint {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [b"bittery.operation.v1".as_slice(), kind, route]
+        .into_iter()
+        .chain(path_values.iter().map(|value| value.as_bytes()))
+        .chain([body, b"".as_slice()])
+    {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    Sha256Fingerprint(hasher.finalize().into())
+}
+
+pub(crate) fn vault_update_fingerprint(vault_id: &str, body: &[u8]) -> Sha256Fingerprint {
+    vault_mutation_fingerprint(
+        b"update_vault",
+        b"POST /api/v1/vaults/{vaultId}/metadata-updates",
+        vault_id,
+        body,
+    )
+}
+
+pub(crate) fn vault_deletion_fingerprint(vault_id: &str) -> Sha256Fingerprint {
+    vault_mutation_fingerprint(
+        b"delete_vault",
+        b"POST /api/v1/vaults/{vaultId}/deletions",
+        vault_id,
+        b"{}",
+    )
+}
+
+fn vault_mutation_fingerprint(
+    kind: &[u8],
+    route: &[u8],
+    vault_id: &str,
+    body: &[u8],
+) -> Sha256Fingerprint {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [
+        b"bittery.operation.v1".as_slice(),
+        kind,
+        route,
+        vault_id.as_bytes(),
+        body,
+        b"",
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    Sha256Fingerprint(hasher.finalize().into())
+}
+
+pub(crate) fn vault_update_fields(
+    name: Option<&str>,
+    icon: &crate::VaultIconPatch,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut fields = serde_json::Map::new();
+    if let Some(name) = name {
+        fields.insert("name".into(), name.into());
+    }
+    match icon {
+        crate::VaultIconPatch::Unchanged => {}
+        crate::VaultIconPatch::Clear => {
+            fields.insert("icon".into(), serde_json::Value::Null);
+        }
+        crate::VaultIconPatch::Set { value } => {
+            fields.insert("icon".into(), value.clone().into());
+        }
+    }
+    fields
+}
+
+pub(crate) fn canonical_vault_image_update_request(
+    vault_id: &str,
+    intent: &UpdateVaultImageOperationRecord,
+) -> Result<(ImmutableHttpRequest, Sha256Fingerprint), RuntimeError> {
+    let mut fields = vault_update_fields(intent.name.as_deref(), &intent.icon);
+    validate_vault_update_fields(&fields).map_err(replica_invariant)?;
+    fields.insert("imageKey".into(), intent.image.object_key.clone().into());
+    let body = serde_json::to_vec(&fields)
+        .map_err(|_| replica_invariant("Vault update cannot be encoded"))?;
+    let fingerprint = vault_update_fingerprint(vault_id, &body);
+    Ok((
+        ImmutableHttpRequest {
+            method: HttpMethod::Post,
+            path: format!("/api/v1/vaults/{vault_id}/metadata-updates"),
+            headers: vec![HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }],
+            body,
+        },
+        fingerprint,
+    ))
+}
+
+pub(crate) fn validate_vault_update_fields(
+    fields: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), &'static str> {
+    for (key, value) in fields {
+        let valid = match key.as_str() {
+            "name" => value.as_str().is_some_and(|name| {
+                name == name.trim()
+                    && (2..=CREATE_VAULT_NAME_MAX_CHARS).contains(&name.chars().count())
+            }),
+            "icon" => {
+                value.is_null()
+                    || value
+                        .as_str()
+                        .is_some_and(|icon| icon.chars().count() <= CREATE_VAULT_ICON_MAX_CHARS)
+            }
+            "imageKey" => value.is_null(),
+            _ => false,
+        };
+        if !valid {
+            return Err("Vault metadata is outside the shared bounds");
+        }
+    }
+    Ok(())
+}
+
+fn validate_vault_update_operation(operation: &OperationRecord) -> Result<(), RuntimeError> {
+    if let Some(intent) = &operation.update_vault {
+        let (request, fingerprint) =
+            canonical_vault_image_update_request(operation.vault_id(), intent)?;
+        let expected_body: &[u8] = if intent.checkpoint == CreateVaultCheckpoint::FinalRequestFrozen
+        {
+            &request.body
+        } else {
+            &[]
+        };
+        if operation.request.method != request.method
+            || operation.request.path != request.path
+            || operation.request.headers != request.headers
+            || operation.request.body != expected_body
+            || operation.request_fingerprint != fingerprint
+        {
+            return Err(replica_invariant(
+                "Vault image update changed its accepted request",
+            ));
+        }
+        return Ok(());
+    }
+    // The generated Server body closes unknown and duplicate fields. The value pass below
+    // additionally preserves omission/null distinctions and enforces Core admission bounds.
+    let _: crate::server_contract::VaultMetadataUpdateBody =
+        serde_json::from_slice(&operation.request.body)
+            .map_err(|_| replica_invariant("Vault update body violates the Server contract"))?;
+    let body: serde_json::Value = serde_json::from_slice(&operation.request.body)
+        .map_err(|_| replica_invariant("Vault update body is malformed"))?;
+    let Some(fields) = body.as_object() else {
+        return Err(replica_invariant("Vault update body must be an object"));
+    };
+    validate_vault_update_fields(fields).map_err(replica_invariant)?;
+    if operation.request.method != HttpMethod::Post
+        || operation.request.path
+            != format!("/api/v1/vaults/{}/metadata-updates", operation.vault_id())
+        || operation.request.headers
+            != [HttpHeader {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+            }]
+        || vault_update_fingerprint(operation.vault_id(), &operation.request.body)
+            != operation.request_fingerprint
+    {
+        return Err(replica_invariant(
+            "Vault update request changed or is invalid",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_import_operation(operation: &OperationRecord) -> Result<(), RuntimeError> {
     let path = import_items_path(operation.vault_id());
     if operation.request.method != HttpMethod::Post
@@ -3387,10 +4756,21 @@ fn validate_import_operation(operation: &OperationRecord) -> Result<(), RuntimeE
     Ok(())
 }
 
-fn validate_operation_receipt(
+pub(super) fn validate_operation_receipt(
     receipt: &OperationReceiptRecord,
     user_id: &str,
 ) -> Result<(), RuntimeError> {
+    if matches!(receipt.target, ResourceRef::Team { .. })
+        && !matches!(
+            receipt.kind,
+            OperationKind::CreateTeamLeaveRotationPlans
+                | OperationKind::FinalizeTeamLeaveRotationPlans
+        )
+    {
+        return Err(replica_invariant(
+            "Operation receipt kind cannot have a Team target",
+        ));
+    }
     let item_target = match &receipt.target {
         ResourceRef::Item { item_id, vault_id } if !item_id.is_empty() && !vault_id.is_empty() => {
             Some(item_id.as_str())
@@ -3400,17 +4780,94 @@ fn validate_operation_receipt(
         {
             None
         }
+        ResourceRef::Team { team_id } if !team_id.is_empty() => None,
         _ => return Err(replica_invariant("Operation receipt target is empty")),
     };
     if receipt.operation_id.is_empty() {
         return Err(replica_invariant("Operation receipt identity is empty"));
     }
+    if let Some(lineage) = &receipt.legacy_lineage {
+        lineage.validate()?;
+        let expected_operation_id = match receipt.kind {
+            OperationKind::CreateItem => lineage.source_operation_id.as_deref(),
+            OperationKind::UpdateItem
+            | OperationKind::SetItemFavorite
+            | OperationKind::TrashItem
+            | OperationKind::RestoreItem
+            | OperationKind::MoveItem
+            | OperationKind::PermanentlyDeleteItem => lineage.source_attempt_id.as_deref(),
+            _ => return Err(replica_invariant("Legacy receipt kind is unsupported")),
+        }
+        .unwrap_or(&lineage.source_command_id);
+        if receipt.operation_id != expected_operation_id
+            || !(LegacyItemCommandStatus::is_normal(lineage.source_status)
+                || matches!(
+                    lineage.source_status,
+                    Some(LegacyItemCommandStatus::Failed | LegacyItemCommandStatus::Conflicted)
+                ))
+        {
+            return Err(replica_invariant(
+                "Legacy Operation receipt lineage changed identity",
+            ));
+        }
+    }
 
     let result_matches = match (receipt.kind, item_target, &receipt.result) {
-        (OperationKind::CreateVault, None, OperationOutcomeResult::VaultApplied { vault_id }) => {
-            vault_id == receipt.vault_id()
+        (
+            OperationKind::FinalizeTeamLeaveRotationPlans,
+            None,
+            OperationOutcomeResult::RotationFinalizeApplied {
+                personal_team_id, ..
+            },
+        ) => {
+            matches!(receipt.target, ResourceRef::Team { .. })
+                && !personal_team_id.is_empty()
+                && personal_team_id.len() <= 128
         }
+        (
+            OperationKind::FinalizeTeamLeaveRotationPlans,
+            None,
+            OperationOutcomeResult::RotationFinalizeRejected { code, details },
+        ) => {
+            matches!(receipt.target, ResourceRef::Team { .. })
+                && (details.is_none()
+                    || (*code == RotationFinalizeRejectionCode::RotationPlanStale
+                        && details
+                            .as_ref()
+                            .is_some_and(|detail| !detail.plan_id.is_empty())))
+        }
+        (
+            OperationKind::CreateTeamLeaveRotationPlans,
+            None,
+            OperationOutcomeResult::RotationStartAppliedReceipt {
+                plan_set_fingerprint: _,
+                plan_count: _,
+            },
+        ) => matches!(receipt.target, ResourceRef::Team { .. }),
+        (
+            OperationKind::CreateTeamLeaveRotationPlans,
+            None,
+            OperationOutcomeResult::RotationStartRejected { code },
+        ) => {
+            matches!(receipt.target, ResourceRef::Team { .. })
+                && matches!(
+                    code,
+                    RotationStartRejectionCode::TeamMemberNotFound
+                        | RotationStartRejectionCode::PersonalTeamDepartureForbidden
+                        | RotationStartRejectionCode::TeamOwnerLeaveForbidden
+                )
+        }
+        (
+            OperationKind::CreateVault | OperationKind::UpdateVault | OperationKind::DeleteVault,
+            None,
+            OperationOutcomeResult::VaultApplied { vault_id },
+        ) => vault_id == receipt.vault_id() && matches!(receipt.target, ResourceRef::Vault { .. }),
         (OperationKind::CreateVault, None, OperationOutcomeResult::VaultRejected { .. }) => true,
+        (
+            OperationKind::UpdateVault | OperationKind::DeleteVault,
+            None,
+            OperationOutcomeResult::VaultMutationRejected { .. },
+        ) => matches!(receipt.target, ResourceRef::Vault { .. }),
         (
             OperationKind::ImportItems,
             None,
@@ -3444,13 +4901,7 @@ fn validate_operation_receipt(
             OperationOutcomeResult::Applied { entity_id, version },
         ) => entity_id == item_id && *version >= 1,
         (OperationKind::CreateItem, Some(_), OperationOutcomeResult::Rejected { code }) => {
-            matches!(
-                code,
-                OperationRejectionCode::InvalidCiphertext
-                    | OperationRejectionCode::VaultAccessDenied
-                    | OperationRejectionCode::VaultReadOnly
-                    | OperationRejectionCode::ItemIdConflict
-            )
+            receipt_rejection_allowed(OperationKind::CreateItem, *code)
         }
         (
             OperationKind::UpdateItem
@@ -3478,11 +4929,16 @@ fn validate_operation_receipt(
             OperationOutcomeResult::VaultApplied { .. } => {
                 cleanup.local_artifact_pending && !cleanup.remote_staging_pending
             }
-            OperationOutcomeResult::VaultRejected { .. } => cleanup.remote_staging_pending,
+            OperationOutcomeResult::VaultRejected { .. }
+            | OperationOutcomeResult::VaultMutationRejected { .. } => {
+                cleanup.remote_staging_pending
+            }
             _ => false,
         };
-        if receipt.kind != OperationKind::CreateVault
-            || !valid_state
+        if !matches!(
+            receipt.kind,
+            OperationKind::CreateVault | OperationKind::UpdateVault
+        ) || !valid_state
             || validate_create_vault_image(
                 &cleanup.image,
                 user_id,
@@ -3504,6 +4960,19 @@ fn validate_create_vault_operation_context(
     account_id: &AccountId,
     user_id: &str,
 ) -> Result<(), RuntimeError> {
+    if let Some(intent) = &operation.update_vault {
+        if intent.account_id != *account_id {
+            return Err(replica_invariant(
+                "Vault replacement belongs to another Account",
+            ));
+        }
+        validate_create_vault_image(
+            &intent.image,
+            user_id,
+            operation.vault_id(),
+            &operation.operation_id,
+        )?;
+    }
     let Some(intent) = &operation.create_vault else {
         return Ok(());
     };
@@ -3649,6 +5118,15 @@ fn validate_create_vault_image(
             "create-Vault image is not canonical for its owner",
         ));
     }
+    if image.raw_cleanup_pending && image.protected_witness.is_none() {
+        return Err(replica_invariant(
+            "Raw image cleanup has no protected replacement witness",
+        ));
+    }
+    if let Some(witness) = &image.protected_witness {
+        crate::vault_image::protected::validate_witness(witness, image.byte_length)?;
+    }
+
     Ok(())
 }
 
@@ -3657,11 +5135,15 @@ fn receipt_rejection_allowed(kind: OperationKind, code: OperationRejectionCode) 
         MoveItem, PermanentlyDeleteItem, RestoreItem, SetItemFavorite, TrashItem, UpdateItem,
     };
     use OperationRejectionCode::{
-        AttachmentStateConflict, InvalidCiphertext, ItemNotFound, ItemNotTrashed, ItemTrashed,
-        ItemVersionConflict, SourceVaultMismatch, TargetVaultAccessDenied, TargetVaultReadOnly,
-        VaultAccessDenied, VaultReadOnly,
+        AttachmentStateConflict, InvalidCiphertext, ItemIdConflict, ItemNotFound, ItemNotTrashed,
+        ItemTrashed, ItemVersionConflict, SourceVaultMismatch, TargetVaultAccessDenied,
+        TargetVaultReadOnly, VaultAccessDenied, VaultReadOnly,
     };
     match kind {
+        OperationKind::CreateItem => matches!(
+            code,
+            InvalidCiphertext | VaultAccessDenied | VaultReadOnly | ItemIdConflict
+        ),
         UpdateItem => matches!(
             code,
             InvalidCiphertext
@@ -3712,29 +5194,27 @@ fn validate_create_vault_transition(
     existing: &OperationRecord,
     next: &OperationRecord,
 ) -> Result<(), RuntimeError> {
-    let (Some(existing_intent), Some(next_intent)) = (&existing.create_vault, &next.create_vault)
-    else {
-        return Err(replica_invariant(
-            "create-Vault checkpoint has no durable intent",
-        ));
+    let (Some(prior), Some(next_checkpoint)) = (
+        existing.vault_image_checkpoint(),
+        next.vault_image_checkpoint(),
+    ) else {
+        return Err(replica_invariant("Vault checkpoint has no durable intent"));
     };
-    let mut expected_intent = existing_intent.clone();
-    expected_intent.checkpoint = next_intent.checkpoint;
-    if existing.kind != OperationKind::CreateVault
-        || next.kind != OperationKind::CreateVault
-        || existing.operation_id != next.operation_id
-        || existing.target != next.target
+    let mut expected = existing.clone();
+    expected.set_vault_image_checkpoint(next_checkpoint);
+    expected.request = next.request.clone();
+    if !matches!(
+        existing.kind,
+        OperationKind::CreateVault | OperationKind::UpdateVault
+    ) || expected != *next
         || existing.attachment_move_recovery.is_some()
-        || next.attachment_move_recovery.is_some()
-        || expected_intent != *next_intent
-        || existing.scheduling != next.scheduling
     {
         return Err(replica_invariant(
-            "create-Vault checkpoint changed immutable intent",
+            "Vault checkpoint changed immutable intent",
         ));
     }
     let allowed = matches!(
-        (existing_intent.checkpoint, next_intent.checkpoint),
+        (prior, next_checkpoint),
         (
             CreateVaultCheckpoint::ArtifactReady,
             CreateVaultCheckpoint::RemoteUploadConfirmed
@@ -3748,7 +5228,7 @@ fn validate_create_vault_transition(
             "create-Vault checkpoint transition is invalid",
         ));
     }
-    if next_intent.checkpoint == CreateVaultCheckpoint::FinalRequestFrozen {
+    if next_checkpoint == CreateVaultCheckpoint::FinalRequestFrozen {
         if next.request.body.is_empty() {
             return Err(replica_invariant(
                 "frozen create-Vault request body is empty",
@@ -3766,14 +5246,126 @@ fn validate_create_vault_transition(
 
 #[allow(dead_code, reason = "the persistence wire invokes this model next")]
 impl BootstrapAuthority {
+    pub(crate) fn admit_legacy(plan: LegacyAdmissionBootstrap) -> Result<Self, RuntimeError> {
+        validate_legacy_origin(&plan.origin)?;
+        let generation_id = legacy_admission_generation_id(&plan.origin.incarnation);
+        validate_authority_page(&plan.vaults, &plan.items)?;
+        let vault_ids = plan
+            .vaults
+            .iter()
+            .map(|vault| vault.id.as_str())
+            .collect::<HashSet<_>>();
+        if plan
+            .items
+            .iter()
+            .any(|item| !vault_ids.contains(item.vault_id.as_str()))
+        {
+            return Err(replica_invariant(
+                "legacy admission Item references a missing Vault",
+            ));
+        }
+        let state = if plan.cursor == SyncCursor::Cold {
+            ReplicaState::RefreshRequired
+        } else {
+            validate_captured_cursor(&plan.cursor)?;
+            ReplicaState::Ready
+        };
+        let generation = BootstrapGenerationRecord {
+            generation_id: generation_id.clone(),
+            fallback_state: state,
+            pinned_watermark: plan.cursor.clone(),
+            next_page_identity: BootstrapPageIdentity::vaults(0),
+            next_page_cursor: BootstrapPageCursor::VaultsInitial,
+            final_page_staged: false,
+            vault_key_version_proved: false,
+            legacy_admission: Some(plan.origin),
+        };
+        let authority = Self {
+            state,
+            active_generation: Some(generation_id.clone()),
+            active_cursor: plan.cursor,
+            generations: HashMap::from([(generation_id.clone(), generation)]),
+            vaults: plan
+                .vaults
+                .into_iter()
+                .map(|vault| ((generation_id.clone(), vault.id.clone()), vault))
+                .collect(),
+            items: plan
+                .items
+                .into_iter()
+                .map(|item| ((generation_id.clone(), item.id.clone()), item))
+                .collect(),
+            ..Self::default()
+        };
+        authority.validate()?;
+        Ok(authority)
+    }
+
+    pub(crate) fn validate_legacy_binding(
+        &self,
+        account_id: &AccountId,
+        user_id: &str,
+        incarnation: &Incarnation,
+    ) -> Result<(), RuntimeError> {
+        for (generation_id, generation) in &self.generations {
+            if let Some(origin) = &generation.legacy_admission {
+                if &origin.account_id != account_id
+                    || origin.user_id != user_id
+                    || &origin.incarnation != incarnation
+                    || generation_id != &legacy_admission_generation_id(incarnation)
+                {
+                    return Err(replica_invariant(
+                        "legacy admission generation binding is inconsistent",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn has_control_state(&self) -> bool {
+        self.policy_verification_pending
+            || self.state != ReplicaState::Cold
+            || self.active_generation.is_some()
+            || self.active_cursor != SyncCursor::Cold
+            || self.staging_generation.is_some()
+            || !self.generations.is_empty()
+            || !self.pages.is_empty()
+            || !self.vaults.is_empty()
+            || !self.items.is_empty()
+    }
     pub(super) fn row_count(&self) -> usize {
-        let metadata = usize::from(self != &Self::default());
+        let metadata = usize::from(self.has_control_state())
+            + usize::from(!self.pending_vault_retirements.is_empty());
         metadata + self.generations.len() + self.pages.len() + self.vaults.len() + self.items.len()
     }
 
     pub(crate) fn validate(&self) -> Result<(), RuntimeError> {
+        validate_retired_vault_ids(&self.pending_vault_retirements)?;
+        if self
+            .vaults
+            .values()
+            .any(|vault| self.pending_vault_retirements.contains(&vault.id))
+            || self
+                .items
+                .values()
+                .any(|item| self.pending_vault_retirements.contains(&item.vault_id))
+        {
+            return Err(replica_invariant(
+                "pending Vault retirement retains authority",
+            ));
+        }
         let active_is_cold = self.active_cursor == SyncCursor::Cold;
-        if self.active_generation.is_none() != active_is_cold {
+        let cold_legacy_head = self.active_generation.as_ref().is_some_and(|active| {
+            matches!(
+                self.state,
+                ReplicaState::RefreshRequired | ReplicaState::Bootstrapping
+            ) && self
+                .generations
+                .get(active)
+                .is_some_and(|generation| generation.legacy_admission.is_some())
+        });
+        if self.active_generation.is_none() != active_is_cold && !cold_legacy_head {
             return Err(replica_invariant(
                 "active Bootstrap generation and Cursor disagree",
             ));
@@ -3807,13 +5399,38 @@ impl BootstrapAuthority {
             // receipts are evidence of exactly that. The active Cursor starts there and only
             // moves forward as changes are applied, so the two are equal at promotion and may
             // legitimately differ afterwards.
-            if !generation.final_page_staged {
+            if generation.legacy_admission.is_none() && !generation.final_page_staged {
                 return Err(replica_invariant(
                     "active Bootstrap generation is not complete",
                 ));
             }
-            validate_captured_cursor(&generation.pinned_watermark)?;
-            validate_captured_cursor(&self.active_cursor)?;
+            if let Some(origin) = &generation.legacy_admission {
+                validate_legacy_origin(origin)?;
+                let admitted_cursor = legacy_origin_cursor(origin)?;
+                if receipts_for(self, active)
+                    || generation.final_page_staged
+                    || generation.next_page_cursor != BootstrapPageCursor::VaultsInitial
+                    || generation.next_page_identity != BootstrapPageIdentity::vaults(0)
+                    || (self.active_cursor == SyncCursor::Cold
+                        && !matches!(
+                            self.state,
+                            ReplicaState::RefreshRequired | ReplicaState::Bootstrapping
+                        ))
+                    || generation.pinned_watermark != admitted_cursor
+                    || ((admitted_cursor == SyncCursor::Cold)
+                        != (self.active_cursor == SyncCursor::Cold))
+                {
+                    return Err(replica_invariant(
+                        "active legacy admission generation is inconsistent",
+                    ));
+                }
+                if self.active_cursor != SyncCursor::Cold {
+                    validate_captured_cursor(&self.active_cursor)?;
+                }
+            } else {
+                validate_captured_cursor(&generation.pinned_watermark)?;
+                validate_captured_cursor(&self.active_cursor)?;
+            }
         }
         for (generation_id, generation) in &self.generations {
             if generation_id != &generation.generation_id
@@ -3838,6 +5455,20 @@ impl BootstrapAuthority {
                     receipt.page_identity.ordinal,
                 )
             });
+            if let Some(origin) = &generation.legacy_admission {
+                validate_legacy_origin(origin)?;
+                if !receipts.is_empty()
+                    || generation.final_page_staged
+                    || generation.next_page_cursor != BootstrapPageCursor::VaultsInitial
+                    || generation.next_page_identity != BootstrapPageIdentity::vaults(0)
+                    || generation.pinned_watermark != legacy_origin_cursor(origin)?
+                {
+                    return Err(replica_invariant(
+                        "legacy admission generation control is inconsistent",
+                    ));
+                }
+                continue;
+            }
             let mut expected_cursor = BootstrapPageCursor::VaultsInitial;
             let mut expected_identity = BootstrapPageIdentity::vaults(0);
             let mut terminal = false;
@@ -4033,6 +5664,176 @@ fn validate_captured_cursor(cursor: &SyncCursor) -> Result<(), RuntimeError> {
     }
 }
 
+pub(crate) fn legacy_admission_generation_id(incarnation: &Incarnation) -> BootstrapGenerationId {
+    BootstrapGenerationId(format!("legacy-admission:{}", incarnation.as_str()))
+}
+
+fn validate_sha256(value: &str, label: &str) -> Result<(), RuntimeError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(replica_invariant(format!("{label} is invalid")));
+    }
+    Ok(())
+}
+
+fn checkpoint_cursor(
+    evidence: &LegacyCheckpointEvidence,
+) -> Result<Option<SyncCursor>, RuntimeError> {
+    match evidence {
+        LegacyCheckpointEvidence::Missing {} => Ok(None),
+        LegacyCheckpointEvidence::CapturedEmpty {} => Ok(Some(SyncCursor::CapturedEmpty)),
+        LegacyCheckpointEvidence::CapturedValue { id } => {
+            validate_identifier(id, "legacy Sync Cursor")?;
+            Ok(Some(SyncCursor::CapturedValue { id: id.clone() }))
+        }
+    }
+}
+
+fn legacy_origin_cursor(origin: &LegacyAdmissionOrigin) -> Result<SyncCursor, RuntimeError> {
+    if origin.refresh_reason.is_some() {
+        return Ok(SyncCursor::Cold);
+    }
+    let Some(metadata) = &origin.metadata else {
+        return Ok(SyncCursor::Cold);
+    };
+    let Some(cache) = &metadata.sync_baseline else {
+        return Ok(SyncCursor::Cold);
+    };
+    if cache.normalized_server_url != origin.normalized_server_url {
+        return Ok(SyncCursor::Cold);
+    }
+    let Some(sync) = checkpoint_cursor(&origin.sync_baseline)? else {
+        return Ok(SyncCursor::Cold);
+    };
+    if sync != cache.cursor {
+        return Ok(SyncCursor::Cold);
+    }
+    if let Some(legacy) = checkpoint_cursor(&origin.last_sync_cursor)? {
+        if legacy != sync {
+            return Ok(SyncCursor::Cold);
+        }
+    }
+    Ok(sync)
+}
+
+fn validate_legacy_origin(origin: &LegacyAdmissionOrigin) -> Result<(), RuntimeError> {
+    validate_sha256(
+        &origin.manifest_entries_sha256,
+        "legacy admission manifest digest",
+    )?;
+    validate_identifier(origin.account_id.as_str(), "legacy admission Account")?;
+    validate_identifier(&origin.user_id, "legacy admission User")?;
+    validate_identifier(origin.incarnation.as_str(), "legacy admission incarnation")?;
+    for (value, label) in [
+        (&origin.normalized_server_url, "legacy admission Server"),
+        (&origin.state_key, "legacy ItemCache state key"),
+        (&origin.items_key_prefix, "legacy ItemCache items prefix"),
+        (&origin.vaults_key_prefix, "legacy ItemCache Vaults prefix"),
+        (&origin.source_id, "legacy Sync source"),
+    ] {
+        validate_identifier(value, label)?;
+    }
+    if let Some(source_generation) = &origin.source_active_generation {
+        validate_identifier(source_generation, "legacy source generation")?;
+    }
+    let expected_state_key = format!("record:{}:meta:meta", origin.account_id.as_str());
+    let (expected_items_prefix, expected_vaults_prefix) = match &origin.source_active_generation {
+        Some(generation) => (
+            format!(
+                "record:item-cache-stage:{}:{generation}:items:",
+                origin.account_id.as_str()
+            ),
+            format!(
+                "record:item-cache-stage:{}:{generation}:vaults:",
+                origin.account_id.as_str()
+            ),
+        ),
+        None => (
+            format!("record:{}:items:", origin.account_id.as_str()),
+            format!("record:{}:vaults:", origin.account_id.as_str()),
+        ),
+    };
+    let expected_source_id =
+        legacy_sync_source_id(origin.account_id.as_str(), &origin.normalized_server_url);
+    if origin.state_key != expected_state_key
+        || origin.items_key_prefix != expected_items_prefix
+        || origin.vaults_key_prefix != expected_vaults_prefix
+        || origin.source_id != expected_source_id
+    {
+        return Err(replica_invariant(
+            "legacy admission source identity is inconsistent",
+        ));
+    }
+    if let Some(metadata) = &origin.metadata {
+        const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+        if metadata.last_full_sync_at > MAX_SAFE_INTEGER
+            || metadata.item_count > MAX_SAFE_INTEGER
+            || metadata.cache_version > MAX_SAFE_INTEGER
+        {
+            return Err(replica_invariant(
+                "legacy ItemCache metadata exceeds the source integer range",
+            ));
+        }
+        if let Some(baseline) = &metadata.sync_baseline {
+            validate_identifier(&baseline.server_url, "legacy ItemCache baseline Server")?;
+            validate_identifier(
+                &baseline.normalized_server_url,
+                "legacy ItemCache normalized baseline Server",
+            )?;
+            if baseline.normalized_server_url != origin.normalized_server_url {
+                return Err(replica_invariant(
+                    "legacy ItemCache baseline belongs to another Server",
+                ));
+            }
+            if baseline.cursor == SyncCursor::Cold {
+                return Err(replica_invariant(
+                    "legacy ItemCache baseline Cursor is cold",
+                ));
+            }
+            validate_captured_cursor(&baseline.cursor)?;
+        }
+    }
+    let _ = checkpoint_cursor(&origin.sync_baseline)?;
+    let _ = checkpoint_cursor(&origin.last_sync_cursor)?;
+    Ok(())
+}
+
+pub(crate) fn legacy_sync_source_id(account_id: &str, normalized_server_url: &str) -> String {
+    format!(
+        "account:{}:server:{}",
+        encode_uri_component(account_id),
+        encode_uri_component(normalized_server_url)
+    )
+}
+
+fn encode_uri_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            )
+        {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            write!(&mut encoded, "%{byte:02X}").expect("writing to String cannot fail");
+        }
+    }
+    encoded
+}
+
+fn receipts_for(authority: &BootstrapAuthority, generation: &BootstrapGenerationId) -> bool {
+    authority
+        .pages
+        .keys()
+        .any(|(receipt_generation, _)| receipt_generation == generation)
+}
+
 #[allow(dead_code, reason = "the persistence wire invokes this model next")]
 fn validate_continuation(continuation: &BootstrapContinuation) -> Result<(), RuntimeError> {
     match continuation {
@@ -4044,13 +5845,16 @@ fn validate_continuation(continuation: &BootstrapContinuation) -> Result<(), Run
 }
 
 #[allow(dead_code, reason = "the persistence wire invokes this model next")]
-pub(super) fn validate_authority_page(
+pub(crate) fn validate_authority_page(
     vaults: &[AuthorityVaultRecord],
     items: &[AuthorityItemRecord],
 ) -> Result<(), RuntimeError> {
     let mut vault_ids = HashSet::new();
     for vault in vaults {
         validate_identifier(&vault.id, "Vault")?;
+        if vault.key_version.is_some_and(|version| version <= 0) {
+            return Err(replica_invariant("Vault key version must be positive"));
+        }
         if !vault_ids.insert(&vault.id) {
             return Err(replica_invariant(
                 "Bootstrap page contains a duplicate Vault",
@@ -4093,6 +5897,403 @@ fn replica_invariant(message: impl Into<String>) -> RuntimeError {
 mod bootstrap_head_invariant_tests {
     use super::*;
 
+    #[test]
+    fn vault_authority_keeps_positive_versions_and_old_rows_remain_unknown() {
+        let old_row = serde_json::json!({
+            "id": "vault-1",
+            "name": "Team Vault",
+            "vaultType": "team",
+            "icon": null,
+            "imageUrl": null,
+            "encryptedVaultKey": "wrapped",
+            "role": "owner"
+        });
+        let old: AuthorityVaultRecord = serde_json::from_value(old_row.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&old).unwrap(), old_row);
+
+        let mut versioned_row = old_row;
+        versioned_row["keyVersion"] = 7.into();
+        let current: AuthorityVaultRecord = serde_json::from_value(versioned_row.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&current).unwrap(), versioned_row);
+        assert!(validate_authority_page(&[current], &[]).is_ok());
+
+        versioned_row["keyVersion"] = 0.into();
+        let invalid: AuthorityVaultRecord = serde_json::from_value(versioned_row).unwrap();
+        assert!(validate_authority_page(&[invalid], &[]).is_err());
+    }
+
+    fn legacy_origin(cursor: Option<&str>) -> LegacyAdmissionOrigin {
+        let checkpoint = cursor.map_or(LegacyCheckpointEvidence::CapturedEmpty {}, |id| {
+            LegacyCheckpointEvidence::CapturedValue { id: id.into() }
+        });
+        LegacyAdmissionOrigin {
+            manifest_entries_sha256: "ab".repeat(32),
+            account_id: AccountId::from("account-1"),
+            user_id: "user-1".into(),
+            incarnation: Incarnation::from("incarnation-1"),
+            normalized_server_url: "https://example.test".into(),
+            source_active_generation: None,
+            state_key: "record:account-1:meta:meta".into(),
+            items_key_prefix: "record:account-1:items:".into(),
+            vaults_key_prefix: "record:account-1:vaults:".into(),
+            items_primed: true,
+            vaults_primed: true,
+            metadata: Some(LegacyItemCacheMetadata {
+                last_full_sync_at: 1,
+                item_count: 0,
+                cache_version: 1,
+                sync_baseline: Some(LegacyItemCacheBaseline {
+                    server_url: "https://example.test".into(),
+                    normalized_server_url: "https://example.test".into(),
+                    cursor: checkpoint_cursor(&checkpoint).unwrap().unwrap(),
+                }),
+            }),
+            source_id: "account:account-1:server:https%3A%2F%2Fexample.test".into(),
+            sync_baseline: checkpoint.clone(),
+            last_sync_cursor: checkpoint,
+            refresh_reason: None,
+        }
+    }
+
+    fn legacy_replica(cursor: SyncCursor) -> AccountReplica {
+        let mut origin = legacy_origin(match &cursor {
+            SyncCursor::CapturedValue { id } => Some(id.as_str()),
+            SyncCursor::CapturedEmpty | SyncCursor::Cold => None,
+        });
+        if cursor == SyncCursor::Cold {
+            origin.metadata.as_mut().unwrap().sync_baseline = None;
+            origin.sync_baseline = LegacyCheckpointEvidence::Missing {};
+            origin.last_sync_cursor = LegacyCheckpointEvidence::Missing {};
+        }
+        let bootstrap = BootstrapAuthority::admit_legacy(LegacyAdmissionBootstrap {
+            origin,
+            cursor,
+            vaults: Vec::new(),
+            items: Vec::new(),
+        })
+        .unwrap();
+        AccountReplica {
+            account_id: AccountId::from("account-1"),
+            user_id: "user-1".into(),
+            incarnation: Incarnation::from("incarnation-1"),
+            revision: 0,
+            lock_epoch: 0,
+            items: HashMap::new(),
+            operations: HashMap::new(),
+            cross_account_moves: HashMap::new(),
+            share_capabilities: HashMap::new(),
+            attachment_move_preparations: HashMap::new(),
+            receipts: HashMap::new(),
+            rotation_attempts: HashMap::new(),
+            failure: None,
+            bootstrap,
+        }
+    }
+
+    fn guard(replica: &AccountReplica) -> BootstrapGuard {
+        BootstrapGuard {
+            account_id: replica.account_id.clone(),
+            user_id: replica.user_id.clone(),
+            incarnation: replica.incarnation.clone(),
+            expected_replica_revision: replica.revision,
+            expected_lock_epoch: replica.lock_epoch,
+        }
+    }
+
+    fn cold_origin_with_cache_baseline(
+        refresh_reason: Option<LegacyAdmissionRefreshReason>,
+    ) -> LegacyAdmissionOrigin {
+        let mut origin = legacy_origin(None);
+        origin.sync_baseline = LegacyCheckpointEvidence::Missing {};
+        origin.last_sync_cursor = LegacyCheckpointEvidence::Missing {};
+        origin.refresh_reason = refresh_reason;
+        origin
+    }
+
+    fn replica_with_legacy_origin(origin: LegacyAdmissionOrigin) -> AccountReplica {
+        let mut replica = legacy_replica(SyncCursor::Cold);
+        replica.bootstrap = BootstrapAuthority::admit_legacy(LegacyAdmissionBootstrap {
+            origin,
+            cursor: SyncCursor::Cold,
+            vaults: Vec::new(),
+            items: Vec::new(),
+        })
+        .unwrap();
+        replica
+    }
+
+    fn persisted_replica(
+        replica: &AccountReplica,
+    ) -> (
+        crate::replica::ReplicaHead,
+        Vec<crate::replica::StoredReplicaRow>,
+    ) {
+        let snapshot = replica.snapshot();
+        let head = crate::replica::ReplicaHead {
+            account_id: snapshot.account_id.clone(),
+            user_id: snapshot.user_id.clone(),
+            incarnation: snapshot.incarnation.clone(),
+            replica_revision: snapshot.revision,
+            lock_epoch: snapshot.lock_epoch,
+            failure: snapshot.failure,
+        };
+        let rows = crate::replica::snapshot_rows(snapshot).unwrap();
+        (head, rows)
+    }
+
+    #[test]
+    fn same_scope_cache_baseline_without_corroboration_stays_cold() {
+        for (refresh_reason, label) in [
+            (None, "missing corroboration"),
+            (
+                Some(LegacyAdmissionRefreshReason::CapturedFailedCreate),
+                "captured failure override",
+            ),
+        ] {
+            let origin = cold_origin_with_cache_baseline(refresh_reason);
+            assert_eq!(
+                legacy_origin_cursor(&origin).unwrap(),
+                SyncCursor::Cold,
+                "{label}"
+            );
+            let replica = replica_with_legacy_origin(origin.clone());
+            assert_eq!(replica.bootstrap.state, ReplicaState::RefreshRequired);
+            assert_eq!(replica.bootstrap.active_cursor, SyncCursor::Cold);
+
+            let (head, rows) = persisted_replica(&replica);
+            let reloaded = crate::replica::reconstruct_snapshot(
+                &AccountId::from("account-1"),
+                Some(head),
+                rows,
+            )
+            .unwrap()
+            .unwrap();
+            let reloaded_origin = reloaded
+                .bootstrap
+                .generations
+                .values()
+                .next()
+                .unwrap()
+                .legacy_admission
+                .as_ref();
+            assert_eq!(reloaded_origin, Some(&origin), "{label}");
+        }
+    }
+
+    #[test]
+    fn reload_rejects_foreign_cache_baseline_scope_while_cold() {
+        for (refresh_reason, label) in [
+            (None, "missing corroboration"),
+            (
+                Some(LegacyAdmissionRefreshReason::CapturedFailedCreate),
+                "captured failure override",
+            ),
+        ] {
+            let replica =
+                replica_with_legacy_origin(cold_origin_with_cache_baseline(refresh_reason));
+            let (head, mut rows) = persisted_replica(&replica);
+            let generation = rows
+                .iter_mut()
+                .find(|row| row.store == crate::replica::ReplicaStore::BootstrapGenerations)
+                .unwrap();
+            let mut payload: serde_json::Value =
+                serde_json::from_str(&generation.payload_json).unwrap();
+            let baseline = &mut payload["legacyAdmission"]["metadata"]["syncBaseline"];
+            baseline["serverUrl"] = "https://other.example.test".into();
+            baseline["normalizedServerUrl"] = "https://other.example.test".into();
+            generation.payload_json = serde_json::to_string(&payload).unwrap();
+
+            let error = crate::replica::reconstruct_snapshot(
+                &AccountId::from("account-1"),
+                Some(head),
+                rows,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation, "{label}");
+        }
+    }
+
+    #[test]
+    fn admission_rejects_foreign_cache_baseline_scope_while_cold() {
+        for (refresh_reason, label) in [
+            (None, "missing corroboration"),
+            (
+                Some(LegacyAdmissionRefreshReason::CapturedFailedCreate),
+                "captured failure override",
+            ),
+        ] {
+            let mut origin = cold_origin_with_cache_baseline(refresh_reason);
+            let baseline = origin
+                .metadata
+                .as_mut()
+                .unwrap()
+                .sync_baseline
+                .as_mut()
+                .unwrap();
+            baseline.server_url = "https://other.example.test".into();
+            baseline.normalized_server_url = "https://other.example.test".into();
+            let error = BootstrapAuthority::admit_legacy(LegacyAdmissionBootstrap {
+                origin,
+                cursor: SyncCursor::Cold,
+                vaults: Vec::new(),
+                items: Vec::new(),
+            })
+            .unwrap_err();
+            assert_eq!(error.code, RuntimeErrorCode::InvariantViolation, "{label}");
+        }
+    }
+
+    #[test]
+    fn captured_failed_create_refresh_reason_overrides_retained_markers_on_reload() {
+        let mut value = serde_json::to_value(legacy_origin(Some("confirmed"))).unwrap();
+        value["refreshReason"] = "capturedFailedCreate".into();
+        let origin: LegacyAdmissionOrigin = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(legacy_origin_cursor(&origin).unwrap(), SyncCursor::Cold);
+        let plan = LegacyAdmissionBootstrap {
+            origin: origin.clone(),
+            cursor: SyncCursor::Cold,
+            vaults: Vec::new(),
+            items: Vec::new(),
+        };
+        let authority = BootstrapAuthority::admit_legacy(plan.clone()).unwrap();
+        assert_eq!(authority.state, ReplicaState::RefreshRequired);
+        assert_eq!(authority.active_cursor, SyncCursor::Cold);
+        let mut replica = legacy_replica(SyncCursor::Cold);
+        replica.bootstrap = authority;
+        let snapshot = replica.snapshot();
+        let head = crate::replica::ReplicaHead {
+            account_id: snapshot.account_id.clone(),
+            user_id: snapshot.user_id.clone(),
+            incarnation: snapshot.incarnation.clone(),
+            replica_revision: snapshot.revision,
+            lock_epoch: snapshot.lock_epoch,
+            failure: snapshot.failure,
+        };
+        let rows = crate::replica::snapshot_rows(snapshot).unwrap();
+        let reloaded = crate::replica::reconstruct_snapshot(&"account-1".into(), Some(head), rows)
+            .unwrap()
+            .unwrap()
+            .bootstrap;
+        reloaded.validate().unwrap();
+        assert_eq!(
+            reloaded
+                .generations
+                .values()
+                .next()
+                .unwrap()
+                .legacy_admission
+                .as_ref(),
+            Some(&origin)
+        );
+        let mut invalid = plan;
+        invalid.cursor = SyncCursor::CapturedValue {
+            id: "confirmed".into(),
+        };
+        assert!(BootstrapAuthority::admit_legacy(invalid).is_err());
+        for reason in [
+            serde_json::Value::Null,
+            "unknown".into(),
+            serde_json::json!({}),
+        ] {
+            value["refreshReason"] = reason;
+            assert!(serde_json::from_value::<LegacyAdmissionOrigin>(value.clone()).is_err());
+        }
+    }
+
+    #[test]
+    fn cold_legacy_head_can_stage_abandon_and_promote_an_ordinary_bootstrap() {
+        let mut replica = legacy_replica(SyncCursor::Cold);
+        let generation_id = BootstrapGenerationId("server-generation".into());
+        replica
+            .begin_bootstrap(BeginBootstrapPlan {
+                guard: guard(&replica),
+                generation_id: generation_id.clone(),
+            })
+            .unwrap();
+        replica
+            .abandon_bootstrap(AbandonBootstrapPlan {
+                guard: guard(&replica),
+                generation_id: generation_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(replica.bootstrap.state, ReplicaState::RefreshRequired);
+        let generation_id = BootstrapGenerationId("server-generation-2".into());
+        replica
+            .begin_bootstrap(BeginBootstrapPlan {
+                guard: guard(&replica),
+                generation_id: generation_id.clone(),
+            })
+            .unwrap();
+        for (identity, request, continuation) in [
+            (
+                BootstrapPageIdentity::vaults(0),
+                BootstrapPageCursor::VaultsInitial,
+                BootstrapContinuation::Final,
+            ),
+            (
+                BootstrapPageIdentity::items(0),
+                BootstrapPageCursor::ItemsInitial,
+                BootstrapContinuation::Final,
+            ),
+        ] {
+            replica
+                .stage_bootstrap_page(StageBootstrapPagePlan {
+                    guard: guard(&replica),
+                    generation_id: generation_id.clone(),
+                    page_identity: identity,
+                    request_cursor: request,
+                    raw_response_fingerprint: Sha256Fingerprint([7; 32]),
+                    pinned_watermark: SyncCursor::CapturedEmpty,
+                    continuation,
+                    vault_key_version_included: false,
+                    vaults: Vec::new(),
+                    items: Vec::new(),
+                })
+                .unwrap();
+        }
+        replica
+            .promote_bootstrap(PromoteBootstrapPlan {
+                additional_retired_vault_ids: Vec::new(),
+                guard: guard(&replica),
+                generation_id: generation_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(replica.bootstrap.active_generation, Some(generation_id));
+        assert_eq!(replica.bootstrap.state, ReplicaState::Ready);
+    }
+
+    #[test]
+    fn verified_legacy_head_advances_without_rewriting_imported_baseline() {
+        let original = SyncCursor::CapturedValue { id: "evt-1".into() };
+        let mut replica = legacy_replica(original.clone());
+        replica
+            .advance_matching_cursor(Some(CursorAdvance {
+                expected: original.clone(),
+                next: SyncCursor::CapturedValue { id: "evt-2".into() },
+            }))
+            .unwrap();
+        assert_eq!(
+            replica.bootstrap.active_cursor,
+            SyncCursor::CapturedValue { id: "evt-2".into() }
+        );
+        let imported = replica.bootstrap.generations.values().next().unwrap();
+        assert_eq!(imported.pinned_watermark, original);
+        assert_eq!(
+            imported.legacy_admission.as_ref().unwrap(),
+            &legacy_origin(Some("evt-1"))
+        );
+    }
+
+    #[test]
+    fn missing_legacy_baseline_cannot_be_forged_into_incremental_readiness() {
+        let mut replica = legacy_replica(SyncCursor::Cold);
+        replica.bootstrap.active_cursor = SyncCursor::CapturedValue {
+            id: "invented-cursor".into(),
+        };
+        replica.bootstrap.state = ReplicaState::Ready;
+        assert!(replica.bootstrap.validate().is_err());
+    }
+
     fn generation_record(id: &str) -> BootstrapGenerationRecord {
         BootstrapGenerationRecord {
             generation_id: BootstrapGenerationId(id.into()),
@@ -4101,6 +6302,85 @@ mod bootstrap_head_invariant_tests {
             next_page_identity: BootstrapPageIdentity::vaults(0),
             next_page_cursor: BootstrapPageCursor::VaultsInitial,
             final_page_staged: false,
+            vault_key_version_proved: false,
+            legacy_admission: None,
+        }
+    }
+
+    #[test]
+    fn old_generation_has_no_version_proof_and_new_proof_survives_restart() {
+        let old_row = serde_json::to_value(generation_record("generation-1")).unwrap();
+        assert!(old_row.get("vaultKeyVersionProved").is_none());
+        let old: BootstrapGenerationRecord = serde_json::from_value(old_row.clone()).unwrap();
+        assert_eq!(serde_json::to_value(old).unwrap(), old_row);
+
+        let mut new_row = old_row;
+        new_row["vaultKeyVersionProved"] = true.into();
+        let current: BootstrapGenerationRecord = serde_json::from_value(new_row.clone()).unwrap();
+        assert_eq!(serde_json::to_value(current).unwrap(), new_row);
+    }
+
+    #[test]
+    fn every_vault_page_must_prove_version_capability_including_an_empty_page() {
+        for (first_version, second_marker, expected_proof) in [
+            (Some(7), true, true),
+            (Some(7), false, false),
+            (None, true, false),
+        ] {
+            let mut replica = legacy_replica(SyncCursor::Cold);
+            let generation_id = BootstrapGenerationId("versioned-generation".into());
+            replica
+                .begin_bootstrap(BeginBootstrapPlan {
+                    guard: guard(&replica),
+                    generation_id: generation_id.clone(),
+                })
+                .unwrap();
+            let vault = AuthorityVaultRecord {
+                id: "vault-1".into(),
+                name: "Team Vault".into(),
+                vault_type: AuthorityVaultType::Team,
+                icon: None,
+                image_url: None,
+                encrypted_vault_key: "wrapped".into(),
+                role: AuthorityVaultRole::Owner,
+                key_version: first_version,
+            };
+            replica
+                .stage_bootstrap_page(StageBootstrapPagePlan {
+                    guard: guard(&replica),
+                    generation_id: generation_id.clone(),
+                    page_identity: BootstrapPageIdentity::vaults(0),
+                    request_cursor: BootstrapPageCursor::VaultsInitial,
+                    raw_response_fingerprint: Sha256Fingerprint([1; 32]),
+                    pinned_watermark: SyncCursor::CapturedEmpty,
+                    continuation: BootstrapContinuation::More {
+                        next_cursor: "next".into(),
+                    },
+                    vault_key_version_included: true,
+                    vaults: vec![vault],
+                    items: Vec::new(),
+                })
+                .unwrap();
+            replica
+                .stage_bootstrap_page(StageBootstrapPagePlan {
+                    guard: guard(&replica),
+                    generation_id: generation_id.clone(),
+                    page_identity: BootstrapPageIdentity::vaults(1),
+                    request_cursor: BootstrapPageCursor::VaultsAfter {
+                        cursor: "next".into(),
+                    },
+                    raw_response_fingerprint: Sha256Fingerprint([2; 32]),
+                    pinned_watermark: SyncCursor::CapturedEmpty,
+                    continuation: BootstrapContinuation::Final,
+                    vault_key_version_included: second_marker,
+                    vaults: Vec::new(),
+                    items: Vec::new(),
+                })
+                .unwrap();
+            assert_eq!(
+                replica.bootstrap.generations[&generation_id].vault_key_version_proved,
+                expected_proof
+            );
         }
     }
 
@@ -4190,9 +6470,12 @@ mod share_capability_invariant_tests {
                 body: br#"{"tokenHash":"hash"}"#.to_vec(),
             },
             request_fingerprint: Sha256Fingerprint([1; 32]),
+            accepted_item_category: None,
             attachment_move_recovery: None,
+            update_vault: None,
             create_vault: None,
             scheduling: OperationSchedulingState::default(),
+            legacy_admission: None,
         }
     }
 
@@ -4219,9 +6502,11 @@ mod share_capability_invariant_tests {
             lock_epoch: 0,
             items: Vec::new(),
             operations: operation.into_iter().collect(),
+            cross_account_moves: Vec::new(),
             share_capabilities: vec![capability],
             attachment_move_preparations: Vec::new(),
             receipts: Vec::new(),
+            rotation_attempts: Vec::new(),
             failure: None,
             bootstrap: BootstrapAuthority::default(),
         })
@@ -4371,6 +6656,7 @@ mod attachment_move_reconciliation_tests {
         )
         .unwrap();
         let mut preparation = AttachmentMovePreparationRecord {
+            accepted_item_category: None,
             account_id: account_id.clone(),
             operation_id: "move-operation".into(),
             item_id: "item-1".into(),
@@ -4495,7 +6781,9 @@ mod attachment_move_reconciliation_tests {
                 0xd3, 0xfb, 0xe3, 0x66, 0x7c, 0xa8, 0x60, 0x6a, 0x0a, 0x58, 0xa0, 0x8e, 0xc6, 0x0e,
                 0xcb, 0x1b, 0xb1, 0xbb,
             ]),
+            accepted_item_category: None,
             attachment_move_recovery: None,
+            update_vault: None,
             create_vault: Some(CreateVaultOperationRecord {
                 account_id: account_id.clone(),
                 name: "New vault".into(),
@@ -4506,6 +6794,7 @@ mod attachment_move_reconciliation_tests {
                 checkpoint: CreateVaultCheckpoint::FinalRequestFrozen,
             }),
             scheduling: OperationSchedulingState::default(),
+            legacy_admission: None,
         }
     }
 
@@ -4517,6 +6806,8 @@ mod attachment_move_reconciliation_tests {
         let mut operation = unrelated_vault_operation(account_id);
         operation.operation_id = "operation-image-final".into();
         operation.create_vault.as_mut().unwrap().image = Some(CreateVaultImageRecord {
+            protected_witness: None,
+            raw_cleanup_pending: false,
             byte_length: 11,
             content_type: "image/png".into(),
             sha256: digest.clone(),
@@ -4537,6 +6828,90 @@ mod attachment_move_reconciliation_tests {
         }
         operation.request_fingerprint = canonical.fingerprint;
         operation
+    }
+
+    #[test]
+    fn accepted_image_protection_commits_witness_and_cleanup_duty_without_changing_http() {
+        let account = AccountId::from("image-protection-upgrade");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account.clone(),
+                "user-final-request".into(),
+                Incarnation::from("image-upgrade-incarnation"),
+            )
+            .unwrap();
+        let commit = |mutation| {
+            let current = state.snapshot(&account).unwrap();
+            state.execute(GuardedCommitPlan::new(
+                account.clone(),
+                current.incarnation,
+                current.revision,
+                current.lock_epoch,
+                vec![mutation],
+            ))
+        };
+        let operation = image_vault_operation(&account, CreateVaultCheckpoint::FinalRequestFrozen);
+        commit(PlanMutation::AcceptOperation(operation.clone())).unwrap();
+        let witness = crate::ProtectedImageWitness {
+            format_version: 1,
+            publication_id: "protected-publication".into(),
+            ciphertext_sha256: "e".repeat(64),
+            ciphertext_byte_length: 300,
+            chunk_count: 1,
+        };
+        commit(PlanMutation::ProtectVaultImage {
+            operation_id: operation.operation_id.clone(),
+            witness: witness.clone(),
+        })
+        .unwrap();
+        let protected = state.snapshot(&account).unwrap().operations[0].clone();
+        assert_eq!(protected.request, operation.request);
+        assert_eq!(protected.request_fingerprint, operation.request_fingerprint);
+        assert_eq!(
+            protected.vault_image_checkpoint(),
+            operation.vault_image_checkpoint()
+        );
+        assert_eq!(
+            protected.vault_image().unwrap().protected_witness.as_ref(),
+            Some(&witness)
+        );
+        assert!(protected.vault_image().unwrap().raw_cleanup_pending);
+        let mut wrong = witness.clone();
+        wrong.publication_id = "different-publication".into();
+        let before = state.snapshot(&account).unwrap();
+        assert!(commit(PlanMutation::CompleteVaultImageRawCleanup {
+            operation_id: operation.operation_id.clone(),
+            witness: wrong.clone()
+        })
+        .is_err());
+        assert!(commit(PlanMutation::ProtectVaultImage {
+            operation_id: operation.operation_id.clone(),
+            witness: wrong
+        })
+        .is_err());
+        assert_eq!(state.snapshot(&account).unwrap(), before);
+        commit(PlanMutation::CompleteVaultImageRawCleanup {
+            operation_id: operation.operation_id.clone(),
+            witness: witness.clone(),
+        })
+        .unwrap();
+        commit(PlanMutation::ProtectVaultImage {
+            operation_id: operation.operation_id.clone(),
+            witness: witness.clone(),
+        })
+        .unwrap();
+        let after = state.snapshot(&account).unwrap();
+        assert!(
+            !after.operations[0]
+                .vault_image()
+                .unwrap()
+                .raw_cleanup_pending
+        );
+        assert_eq!(after.operations[0].request, operation.request);
+        AccountReplica::from_snapshot(after)
+            .validate_durable_work()
+            .unwrap();
     }
 
     #[test]
@@ -4773,6 +7148,8 @@ mod attachment_move_reconciliation_tests {
         let mut valid = unrelated_vault_operation(&account_id);
         valid.operation_id = "operation-image-context".into();
         valid.create_vault.as_mut().unwrap().image = Some(CreateVaultImageRecord {
+            protected_witness: None,
+            raw_cleanup_pending: false,
             byte_length: 2_097_152,
             content_type: "image/webp".into(),
             sha256: digest.clone(),
@@ -4867,6 +7244,123 @@ mod attachment_move_reconciliation_tests {
     }
 
     #[test]
+    fn accepted_image_protection_witness_rejects_invalid_format_and_bounds() {
+        use crate::ProtectedImageWitness;
+        let account_id = AccountId::from("protected-image-context");
+        let state = InMemoryReplica::default();
+        state
+            .install(
+                account_id.clone(),
+                "user-image-context".into(),
+                Incarnation::from("protected-image-incarnation"),
+            )
+            .unwrap();
+        let initial = state.snapshot(&account_id).unwrap();
+        let mut valid = unrelated_vault_operation(&account_id);
+        let digest = "f".repeat(64);
+        let witness = ProtectedImageWitness {
+            format_version: 1,
+            publication_id: "publication-a".into(),
+            ciphertext_sha256: "e".repeat(64),
+            ciphertext_byte_length: 300_000,
+            chunk_count: 2,
+        };
+        valid.create_vault.as_mut().unwrap().image = Some(CreateVaultImageRecord {
+            byte_length: 200_000,
+            content_type: "image/png".into(),
+            sha256: digest.clone(),
+            object_key: format!(
+                "vaults/user-image-context/{}/create/{}-{digest}",
+                valid.vault_id(),
+                valid.operation_id
+            ),
+            protected_witness: Some(witness.clone()),
+            raw_cleanup_pending: false,
+        });
+        let canonical =
+            canonical_create_vault_request(valid.vault_id(), valid.create_vault.as_ref().unwrap())
+                .unwrap();
+        valid.request.path = canonical.path;
+        valid.request.body = canonical.body;
+        valid.request_fingerprint = canonical.fingerprint;
+        let mut cases = Vec::new();
+        let mut changed = witness.clone();
+        changed.format_version = 2;
+        cases.push(changed);
+        let mut changed = witness.clone();
+        changed.publication_id.clear();
+        cases.push(changed);
+        let mut changed = witness.clone();
+        changed.publication_id = "p".repeat(129);
+        cases.push(changed);
+        let mut changed = witness.clone();
+        changed.ciphertext_sha256 = "E".repeat(64);
+        cases.push(changed);
+        let mut changed = witness.clone();
+        changed.chunk_count = 1;
+        cases.push(changed);
+        let mut changed = witness.clone();
+        changed.ciphertext_byte_length = 0;
+        cases.push(changed);
+        let mut changed = witness.clone();
+        changed.ciphertext_byte_length = 524_289;
+        cases.push(changed);
+        for witness in cases {
+            let mut operation = valid.clone();
+            operation
+                .create_vault
+                .as_mut()
+                .unwrap()
+                .image
+                .as_mut()
+                .unwrap()
+                .protected_witness = Some(witness);
+            assert!(state
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    initial.incarnation.clone(),
+                    initial.revision,
+                    initial.lock_epoch,
+                    vec![PlanMutation::AcceptOperation(operation)]
+                ))
+                .is_err());
+            assert_eq!(state.snapshot(&account_id).unwrap(), initial);
+        }
+        let mut orphaned_cleanup = valid.clone();
+        let image = orphaned_cleanup
+            .create_vault
+            .as_mut()
+            .unwrap()
+            .image
+            .as_mut()
+            .unwrap();
+        image.protected_witness = None;
+        image.raw_cleanup_pending = true;
+        assert!(state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                initial.incarnation.clone(),
+                initial.revision,
+                initial.lock_epoch,
+                vec![PlanMutation::AcceptOperation(orphaned_cleanup)]
+            ))
+            .is_err());
+        assert_eq!(state.snapshot(&account_id).unwrap(), initial);
+        state
+            .execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                initial.incarnation,
+                initial.revision,
+                initial.lock_epoch,
+                vec![PlanMutation::AcceptOperation(valid)],
+            ))
+            .unwrap();
+        AccountReplica::from_snapshot(state.snapshot(&account_id).unwrap())
+            .validate_durable_work()
+            .unwrap();
+    }
+
+    #[test]
     fn sync_page_cursor_cannot_pass_a_real_active_attachment_move_preparation() {
         let (state, account_id, preparation) = active_preparation();
         let active = state.snapshot(&account_id).unwrap();
@@ -4892,89 +7386,258 @@ mod attachment_move_reconciliation_tests {
 
     #[test]
     fn promoted_move_artifact_becomes_orphanable_only_with_atomic_receipt() {
-        let (state, account_id, preparation) = active_preparation();
-        let staged = state.snapshot(&account_id).unwrap();
-        state
-            .execute(GuardedCommitPlan::new(
-                account_id.clone(),
-                staged.incarnation,
-                staged.revision,
-                staged.lock_epoch,
-                vec![PlanMutation::PromoteAttachmentMovePreparation {
-                    operation_id: "move-operation".into(),
-                    expected_intent_fingerprint: preparation.intent_fingerprint,
-                }],
-            ))
-            .unwrap();
-        let current = state.snapshot(&account_id).unwrap();
-        AccountReplica::from_snapshot(current.clone())
-            .validate_durable_work()
-            .unwrap();
-        let operation = current.operations[0].clone();
-        assert_eq!(operation.kind, OperationKind::MoveItem);
-        assert!(matches!(
-            operation.attachment_move_recovery,
-            Some(AttachmentMoveRecovery::Prepared { .. })
-        ));
-        assert_eq!(live_artifact_owners(&current).unwrap().len(), 1);
+        for present in [true, false] {
+            let (state, account_id, preparation) = active_preparation();
+            let staged = state.snapshot(&account_id).unwrap();
+            state
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    staged.incarnation,
+                    staged.revision,
+                    staged.lock_epoch,
+                    vec![PlanMutation::PromoteAttachmentMovePreparation {
+                        operation_id: "move-operation".into(),
+                        expected_intent_fingerprint: preparation.intent_fingerprint,
+                    }],
+                ))
+                .unwrap();
+            let current = state.snapshot(&account_id).unwrap();
+            AccountReplica::from_snapshot(current.clone())
+                .validate_durable_work()
+                .unwrap();
+            let operation = current.operations[0].clone();
+            assert_eq!(operation.kind, OperationKind::MoveItem);
+            assert!(matches!(
+                operation.attachment_move_recovery,
+                Some(AttachmentMoveRecovery::Prepared { .. })
+            ));
+            assert_eq!(live_artifact_owners(&current).unwrap().len(), 1);
 
-        let outcome = ObservedOutcome {
-            operation_id: operation.operation_id.clone(),
-            request_fingerprint: operation.request_fingerprint,
-            result: OperationOutcomeResult::Applied {
-                entity_id: operation.item_id().to_owned(),
-                version: 2,
-            },
-        };
-        let mismatched = state.execute(GuardedCommitPlan::new(
-            account_id.clone(),
-            current.incarnation.clone(),
-            current.revision,
-            current.lock_epoch,
-            vec![PlanMutation::ReconcileItemMutation {
-                outcome: outcome.clone(),
-                item: Some(Box::new(authority_item(3))),
-                cursor: None,
-            }],
-        ));
-        assert!(mismatched.is_err());
-        assert_eq!(state.snapshot(&account_id).unwrap(), current);
-
-        state.fail_next_commits(1);
-        let failed_commit = state.execute(GuardedCommitPlan::new(
-            account_id.clone(),
-            current.incarnation.clone(),
-            current.revision,
-            current.lock_epoch,
-            vec![PlanMutation::ReconcileItemMutation {
-                outcome: outcome.clone(),
-                item: Some(Box::new(authority_item(2))),
-                cursor: None,
-            }],
-        ));
-        assert!(failed_commit.is_err());
-        let retained = state.snapshot(&account_id).unwrap();
-        assert_eq!(retained, current);
-        assert_eq!(live_artifact_owners(&retained).unwrap().len(), 1);
-        assert!(retained.receipts.is_empty());
-
-        state
-            .execute(GuardedCommitPlan::new(
+            let outcome = ObservedOutcome {
+                operation_id: operation.operation_id.clone(),
+                request_fingerprint: operation.request_fingerprint,
+                result: OperationOutcomeResult::Applied {
+                    entity_id: operation.item_id().to_owned(),
+                    version: 2,
+                },
+            };
+            let mismatched = state.execute(GuardedCommitPlan::new(
                 account_id.clone(),
                 current.incarnation.clone(),
                 current.revision,
                 current.lock_epoch,
                 vec![PlanMutation::ReconcileItemMutation {
-                    outcome,
-                    item: Some(Box::new(authority_item(2))),
+                    outcome: outcome.clone(),
+                    item: Some(Box::new(authority_item(1))),
                     cursor: None,
                 }],
-            ))
-            .unwrap();
-        let completed = state.snapshot(&account_id).unwrap();
-        assert!(completed.operations.is_empty());
-        assert!(completed.items.is_empty());
-        assert_eq!(completed.receipts.len(), 1);
-        assert!(live_artifact_owners(&completed).unwrap().is_empty());
+            ));
+            assert!(mismatched.is_err());
+            assert_eq!(state.snapshot(&account_id).unwrap(), current);
+
+            let reconciliation_item = present.then(|| Box::new(authority_item(3)));
+            state.fail_next_commits(1);
+            let failed_commit = state.execute(GuardedCommitPlan::new(
+                account_id.clone(),
+                current.incarnation.clone(),
+                current.revision,
+                current.lock_epoch,
+                vec![PlanMutation::ReconcileItemMutation {
+                    outcome: outcome.clone(),
+                    item: reconciliation_item.clone(),
+                    cursor: None,
+                }],
+            ));
+            assert!(failed_commit.is_err());
+            let retained = state.snapshot(&account_id).unwrap();
+            assert_eq!(retained, current);
+            assert_eq!(live_artifact_owners(&retained).unwrap().len(), 1);
+            assert!(retained.receipts.is_empty());
+
+            state
+                .execute(GuardedCommitPlan::new(
+                    account_id.clone(),
+                    current.incarnation.clone(),
+                    current.revision,
+                    current.lock_epoch,
+                    vec![PlanMutation::ReconcileItemMutation {
+                        outcome,
+                        item: reconciliation_item.clone(),
+                        cursor: None,
+                    }],
+                ))
+                .unwrap();
+            let completed = state.snapshot(&account_id).unwrap();
+            assert!(completed.operations.is_empty());
+            assert!(completed.items.is_empty());
+            assert_eq!(completed.receipts.len(), 1);
+            assert!(live_artifact_owners(&completed).unwrap().is_empty());
+        }
     }
+}
+
+/// Check the same request fingerprints as acceptance without allocating rewritten body bytes.
+pub(super) fn verify_item_request(operation: &OperationRecord) -> Result<(), RuntimeError> {
+    verify_item_request_path(operation, operation.legacy_admission.is_some())
+}
+
+pub(super) fn verify_item_request_path(
+    operation: &OperationRecord,
+    component_encoded: bool,
+) -> Result<(), RuntimeError> {
+    use HttpMethod::*;
+    let (method, path, content_type, fingerprint) = match operation.kind {
+        OperationKind::CreateVault
+        | OperationKind::UpdateVault
+        | OperationKind::DeleteVault
+        | OperationKind::ImportItems
+        | OperationKind::CreateVaultMemberRemovalRotationPlans
+        | OperationKind::FinalizeVaultMemberRemovalRotationPlans
+        | OperationKind::CreateTeamLeaveRotationPlans
+        | OperationKind::FinalizeTeamLeaveRotationPlans
+        | OperationKind::CreateTeamMemberRemovalRotationPlans
+        | OperationKind::FinalizeTeamMemberRemovalRotationPlans => return Ok(()), // Closed non-Item requests have their own strict validators.
+        OperationKind::CreateItem => {
+            let item_id = operation
+                .target
+                .item_id()
+                .ok_or_else(|| replica_invariant("Create Item target is invalid"))?;
+            let path = if component_encoded {
+                format!(
+                    "/api/v1/vaults/{}/items/{}",
+                    encode_component(operation.vault_id()),
+                    encode_component(item_id)
+                )
+            } else {
+                format!("/api/v1/vaults/{}/items/{item_id}", operation.vault_id())
+            };
+            (
+                Put,
+                path,
+                Some("application/json"),
+                create_item_fingerprint(operation.vault_id(), item_id, &operation.request.body),
+            )
+        }
+        OperationKind::CreateShare => (
+            Post,
+            format!(
+                "/api/v1/items/{}/share-links",
+                operation
+                    .target
+                    .item_id()
+                    .ok_or_else(|| replica_invariant("Share target is invalid"))?
+            ),
+            Some("application/json"),
+            share_operation_fingerprint(
+                operation.target.item_id().unwrap(),
+                &operation.request.body,
+            ),
+        ),
+        kind => {
+            let item = operation
+                .target
+                .item_id()
+                .ok_or_else(|| replica_invariant("Item Operation target is invalid"))?;
+            let (method, suffix, route, content_type) = match kind {
+                OperationKind::UpdateItem => (
+                    Patch,
+                    "",
+                    "PATCH /api/v1/items/{itemId}",
+                    Some("application/merge-patch+json"),
+                ),
+                OperationKind::SetItemFavorite => (
+                    Patch,
+                    "/favorite",
+                    "PATCH /api/v1/items/{itemId}/favorite",
+                    Some("application/merge-patch+json"),
+                ),
+                OperationKind::TrashItem => (Delete, "", "DELETE /api/v1/items/{itemId}", None),
+                OperationKind::RestoreItem => (
+                    Post,
+                    "/restore",
+                    "POST /api/v1/items/{itemId}/restore",
+                    None,
+                ),
+                OperationKind::MoveItem => (
+                    Post,
+                    "/moves",
+                    "POST /api/v1/items/{itemId}/moves",
+                    Some("application/json"),
+                ),
+                OperationKind::PermanentlyDeleteItem => (
+                    Delete,
+                    "/permanent",
+                    "DELETE /api/v1/items/{itemId}/permanent",
+                    None,
+                ),
+                _ => unreachable!(),
+            };
+            let value = operation
+                .request
+                .headers
+                .iter()
+                .find(|header| header.name == "If-Match")
+                .ok_or_else(|| replica_invariant("Item concurrency precondition is missing"))?
+                .value
+                .as_str();
+            let expected = value
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .and_then(|value| value.parse::<i32>().ok())
+                .filter(|value| *value > 0)
+                .ok_or_else(|| replica_invariant("Item concurrency precondition is invalid"))?;
+            if value != format!("\"{expected}\"") {
+                return Err(replica_invariant(
+                    "Item concurrency precondition is not canonical",
+                ));
+            }
+            let mut headers = content_type
+                .map(|value| HttpHeader {
+                    name: "Content-Type".into(),
+                    value: value.into(),
+                })
+                .into_iter()
+                .collect::<Vec<_>>();
+            headers.push(HttpHeader {
+                name: "If-Match".into(),
+                value: value.into(),
+            });
+            if operation.request.headers != headers {
+                return Err(replica_invariant("Item request headers changed"));
+            }
+            (
+                method,
+                if component_encoded {
+                    format!("/api/v1/items/{}{suffix}", encode_component(item))
+                } else {
+                    format!("/api/v1/items/{item}{suffix}")
+                },
+                content_type,
+                item_operation_fingerprint(kind, route, item, &operation.request.body, expected),
+            )
+        }
+    };
+    if operation.request.method != method
+        || operation.request.path != path
+        || operation.request_fingerprint != fingerprint
+    {
+        return Err(replica_invariant(
+            "Operation immutable request fingerprint or route changed",
+        ));
+    }
+    if matches!(
+        operation.kind,
+        OperationKind::CreateItem | OperationKind::CreateShare
+    ) && operation.request.headers
+        != content_type
+            .map(|value| HttpHeader {
+                name: "Content-Type".into(),
+                value: value.into(),
+            })
+            .into_iter()
+            .collect::<Vec<_>>()
+    {
+        return Err(replica_invariant("Create request headers changed"));
+    }
+    Ok(())
 }

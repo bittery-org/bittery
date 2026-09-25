@@ -75,7 +75,19 @@ ajv.addSchema({
 	$id: uploadSourceAnswerId,
 	$ref: `${schemaId}#/$defs/AttachmentUploadSourceAnswer`,
 });
+const downloadSinkControlId = `${schemaId}:attachment-download-sink-control`;
+const downloadSinkAnswerId = `${schemaId}:attachment-download-sink-answer`;
+ajv.addSchema({
+	$id: downloadSinkControlId,
+	$ref: `${schemaId}#/$defs/AttachmentDownloadSinkControl`,
+});
+ajv.addSchema({
+	$id: downloadSinkAnswerId,
+	$ref: `${schemaId}#/$defs/AttachmentDownloadSinkAnswer`,
+});
 const standaloneValidator = generateStandaloneValidator(ajv, {
+	validateAttachmentDownloadSinkControl: downloadSinkControlId,
+	validateAttachmentDownloadSinkAnswer: downloadSinkAnswerId,
 	validateTransferControlRequest: requestId,
 	validateTransferControlResponse: responseId,
 	validateAttachmentUploadSourceControl: uploadSourceControlId,
@@ -83,7 +95,9 @@ const standaloneValidator = generateStandaloneValidator(ajv, {
 });
 const validatorText = `/* This file is generated. Do not edit. */\n${standaloneValidator}`;
 const declarationsText = `/* This file is generated. Do not edit. */
-import type { AttachmentUploadSourceAnswer, AttachmentUploadSourceControl, TransferControlRequest, TransferControlResponse } from "./contract";
+import type { AttachmentDownloadSinkControl, AttachmentDownloadSinkAnswer, AttachmentUploadSourceAnswer, AttachmentUploadSourceControl, TransferControlRequest, TransferControlResponse } from "./contract";
+export declare function validateAttachmentDownloadSinkControl(value: unknown): value is AttachmentDownloadSinkControl;
+export declare function validateAttachmentDownloadSinkAnswer(value: unknown): value is AttachmentDownloadSinkAnswer;
 export declare function validateTransferControlRequest(value: unknown): value is TransferControlRequest;
 export declare function validateTransferControlResponse(value: unknown): value is TransferControlResponse;
 export declare function validateAttachmentUploadSourceControl(value: unknown): value is AttachmentUploadSourceControl;

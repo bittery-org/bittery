@@ -11,14 +11,23 @@ describe("Web host binary capability grants", () => {
 			},
 		});
 
-		expect(Object.keys(composition.attachmentUploadSources)).toEqual(["grant"]);
+		expect(Object.keys(composition.attachmentUploadSources)).toEqual([
+			"captureScope",
+			"release",
+			"grant",
+		]);
 		expect("invoke" in composition.attachmentUploadSources).toBe(false);
 		expect("beginClose" in composition.attachmentUploadSources).toBe(false);
 		expect("drainClose" in composition.attachmentUploadSources).toBe(false);
-		expect(Object.keys(composition.attachmentDownloadSinks)).toEqual(["grant"]);
+		expect(Object.keys(composition.attachmentDownloadSinks)).toEqual([
+			"captureScope",
+			"release",
+			"grant",
+		]);
 		expect("invoke" in composition.attachmentDownloadSinks).toBe(false);
 		expect("beginClose" in composition.attachmentDownloadSinks).toBe(false);
 		expect(Object.keys(composition.vaultImageSources)).toEqual([
+			"captureScope",
 			"grant",
 			"discard",
 		]);

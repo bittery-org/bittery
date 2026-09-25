@@ -1,0 +1,57 @@
+{
+	"accounts": [
+		{
+			"email": "source@legacy.invalid",
+			"userId": "source:user",
+			"name": "acct_legacy_α:7",
+			"serverUrl": "https://source.legacy.invalid",
+			"secretKeyHint": "ABCD••••",
+			"addedAt": 1,
+			"lastActiveAt": 1,
+			"biometricEnabled": false,
+			"accountId": "acct_legacy_α:7",
+			"insecureTransportConfirmed": false
+		},
+		{
+			"email": "target@legacy.invalid",
+			"userId": "target:user",
+			"name": "zz_second_account",
+			"serverUrl": "https://target.legacy.invalid",
+			"secretKeyHint": "ABCD••••",
+			"addedAt": 1,
+			"lastActiveAt": 1,
+			"biometricEnabled": false,
+			"accountId": "zz_second_account",
+			"insecureTransportConfirmed": false
+		}
+	],
+	"records": [
+		{
+			"collection": "acct_legacy_α:7:meta",
+			"id": "meta",
+			"value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790113175671,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://source.legacy.invalid\",\"cursorId\":\"source-independent-deletion\"},\"itemCount\":0},\"activeGeneration\":\"mud75yev-3-mg9e09gqmg\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:mud75yev-3-mg9e09gqmg:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:acct_legacy_α:7:mud75yev-3-mg9e09gqmg:vaults:\"}}"
+		},
+		{
+			"collection": "item-cache-stage:acct_legacy_α:7:mud75yev-3-mg9e09gqmg:vaults",
+			"id": "source:vault/雪",
+			"value": "{\"id\":\"source:vault/雪\",\"name\":\"acct_legacy_α:7 vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"serverUrl\":\"https://source.legacy.invalid\"}"
+		},
+		{
+			"collection": "item-cache-stage:zz_second_account:mud75yeq-2-pz88zofxqsc:vaults",
+			"id": "target:vault/目标",
+			"value": "{\"id\":\"target:vault/目标\",\"name\":\"zz_second_account vault\",\"type\":\"personal\",\"icon\":null,\"imageUrl\":null,\"accountId\":\"zz_second_account\",\"accountEmail\":\"target@legacy.invalid\",\"serverUrl\":\"https://target.legacy.invalid\"}"
+		},
+		{
+			"collection": "zz_second_account:meta",
+			"id": "meta",
+			"value": "{\"v\":2,\"itemsPrimed\":true,\"vaultsPrimed\":true,\"metadata\":{\"lastFullSyncAt\":1790113175666,\"cacheVersion\":1,\"syncBaseline\":{\"serverUrl\":\"https://target.legacy.invalid\",\"cursorId\":\"target-bootstrap\"},\"itemCount\":0},\"activeGeneration\":\"mud75yeq-2-pz88zofxqsc\",\"nativeView\":{\"v\":1,\"itemsKeyPrefix\":\"record:item-cache-stage:zz_second_account:mud75yeq-2-pz88zofxqsc:items:\",\"vaultsKeyPrefix\":\"record:item-cache-stage:zz_second_account:mud75yeq-2-pz88zofxqsc:vaults:\"}}"
+		}
+	],
+	"sync": {
+		"sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:lastSyncCursor": "{\"id\":\"source-independent-deletion\"}",
+		"sync_source_account%3Aacct_legacy_%25CE%25B1%253A7%3Aserver%3Ahttps%253A%252F%252Fsource.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"source-independent-deletion\"}}",
+		"sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:lastSyncCursor": "{\"id\":\"target-bootstrap\"}",
+		"sync_source_account%3Azz_second_account%3Aserver%3Ahttps%253A%252F%252Ftarget.legacy.invalid:syncBaselineV1": "{\"initialized\":true,\"cursor\":{\"id\":\"target-bootstrap\"}}",
+		"bittery_pending_mutation_queues_v3": "{\"acct_legacy_α:7\":[{\"type\":\"cross_account_move\",\"entityId\":\"source:item/雪\",\"vaultId\":\"source:vault/雪\",\"targetVaultId\":\"target:vault/目标\",\"targetAccountId\":\"zz_second_account\",\"targetItemId\":\"target:item/雪\",\"category\":\"login\",\"encryptedPayload\":{\"encryptedData\":\"lpnsnULmb3nOMmkTh8LZ3w0Ky5Uc+MQC28ummxKqbWP3XUZ09feXtOVmhfpq9AFqubXUuDrd1J0tksvTiuPGbuN/sMcwcnZQzou42k6ns6sNV2IVlpVmI4p698XDMydPou6r9zmBDGT8RkRioCEoMu0U53+8FRc7pfbIrjnRWj5E5eTL\",\"encryptionIv\":\"ht/nhgigYEWBOzAa\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\",\"encryptionVersion\":1,\"encryptedByUserId\":\"target:user\"},\"id\":\"original-semantic-move\",\"operationId\":\"original-semantic-move\",\"timestamp\":1789000000123,\"retryCount\":4,\"accountId\":\"acct_legacy_α:7\",\"accountEmail\":\"source@legacy.invalid\",\"baseVersion\":6,\"status\":\"failed\",\"attemptId\":\"original-semantic-move:attempt:761abba9-ec3f-4d4b-be2a-25f8d889d93e\",\"lastError\":\"Target Item lookup was rejected\",\"nextAttemptAt\":15001}]}"
+	}
+}

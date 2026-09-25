@@ -29,6 +29,12 @@ pub(crate) trait DeviceTimer: TimerRequirements {
 
 pub(crate) struct SystemDeviceTimer;
 
+#[cfg(feature = "binding-test-harness")]
+#[doc(hidden)]
+pub async fn sleep_device_timer_for_test(milliseconds: u64) {
+    SystemDeviceTimer.sleep_ms(milliseconds).await;
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl DeviceTimer for SystemDeviceTimer {
@@ -72,18 +78,29 @@ impl DeviceTimer for SystemDeviceTimer {
                 let _ = self.clear.call1(&JsValue::UNDEFINED, &self.id);
             }
         }
-        let delay = JsValue::from_f64(milliseconds as f64);
-        let mut lease = None;
-        let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-            if let Ok(id) = set_timeout.call2(&JsValue::UNDEFINED, &resolve, &delay) {
-                lease = Some(TimeoutLease {
-                    id,
-                    clear: clear_timeout.clone(),
-                });
+        // Browsers convert setTimeout's delay to a signed 32-bit integer. Keep the full
+        // requested wait in this future so large durable deadlines neither overflow into
+        // immediate wakes nor complete early after only the first bounded host wait.
+        let mut remaining = milliseconds;
+        loop {
+            let chunk = remaining.min(i32::MAX as u64);
+            let delay = JsValue::from_f64(chunk as f64);
+            let mut lease = None;
+            let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+                if let Ok(id) = set_timeout.call2(&JsValue::UNDEFINED, &resolve, &delay) {
+                    lease = Some(TimeoutLease {
+                        id,
+                        clear: clear_timeout.clone(),
+                    });
+                }
+                // Leaving the Promise pending on failure is the fail-closed result.
+            });
+            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            drop(lease);
+            remaining -= chunk;
+            if remaining == 0 {
+                return;
             }
-            // Leaving the Promise pending on failure is the fail-closed result.
-        });
-        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-        drop(lease);
+        }
     }
 }

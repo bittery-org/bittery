@@ -2,9 +2,11 @@ use crate::{RequestCancellation, RuntimeError, RuntimeErrorCode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
+use zeroize::{Zeroize, Zeroizing};
 
 mod stream;
 pub(crate) use stream::{HttpByteStream, HttpStreamOpening};
+pub use stream::{HttpStreamCommand, HttpStreamResponse};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
@@ -12,7 +14,7 @@ pub(crate) use stream::{HttpByteStream, HttpStreamOpening};
     derive(schemars::JsonSchema)
 )]
 #[serde(rename_all = "UPPERCASE")]
-pub(crate) enum HttpMethod {
+pub enum HttpMethod {
     Get,
     Head,
     Post,
@@ -27,9 +29,9 @@ pub(crate) enum HttpMethod {
     derive(schemars::JsonSchema)
 )]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct HttpHeader {
-    pub(crate) name: String,
-    pub(crate) value: String,
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,14 +40,20 @@ pub(crate) struct HttpHeader {
     derive(schemars::JsonSchema)
 )]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct HttpRequest {
+pub struct HttpRequest {
     #[cfg_attr(feature = "http-transport-contract-schema", schemars(length(min = 1)))]
-    dispatch_id: String,
-    method: HttpMethod,
-    url: String,
-    headers: Vec<HttpHeader>,
-    body: Vec<u8>,
-    max_response_bytes: u32,
+    pub dispatch_id: String,
+    pub method: HttpMethod,
+    pub url: String,
+    pub headers: Vec<HttpHeader>,
+    pub body: Vec<u8>,
+    pub max_response_bytes: u32,
+}
+
+impl Drop for HttpRequest {
+    fn drop(&mut self) {
+        self.body.zeroize();
+    }
 }
 
 /// Caller-facing request intent; adapter correlation remains owned by the transport module.
@@ -53,7 +61,7 @@ pub(crate) struct HttpDispatch {
     method: HttpMethod,
     url: String,
     headers: Vec<HttpHeader>,
-    body: Vec<u8>,
+    body: Zeroizing<Vec<u8>>,
     max_response_bytes: u32,
 }
 
@@ -69,25 +77,25 @@ impl HttpDispatch {
             method,
             url,
             headers,
-            body,
+            body: Zeroizing::new(body),
             max_response_bytes,
         }
     }
 
-    fn into_request(self, dispatch_id: String) -> HttpRequest {
+    fn into_request(mut self, dispatch_id: String) -> HttpRequest {
         HttpRequest {
             dispatch_id,
             method: self.method,
             url: self.url,
             headers: self.headers,
-            body: self.body,
+            body: std::mem::take(&mut *self.body),
             max_response_bytes: self.max_response_bytes,
         }
     }
 }
 
 impl HttpRequest {
-    fn validate(&self) -> Result<(), RuntimeError> {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
         if self.dispatch_id.is_empty() {
             return Err(transport_invariant("HTTP dispatch identity is empty"));
         }
@@ -180,7 +188,7 @@ fn is_absolute_url(value: &str) -> bool {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub(crate) enum HttpResponse {
+pub enum HttpResponse {
     Completed {
         #[cfg_attr(feature = "http-transport-contract-schema", schemars(range(max = 599)))]
         status: u16,
@@ -233,14 +241,14 @@ pub fn http_transport_contract_schema() -> schemars::Schema {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 pub trait SerializedHttpExecutor: Send + Sync {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError>;
+    async fn invoke(&self, request_json: Zeroizing<String>) -> Result<String, RuntimeError>;
     fn cancel(&self, dispatch_id: &str);
 }
 
 #[cfg(target_arch = "wasm32")]
 #[async_trait(?Send)]
 pub trait SerializedHttpExecutor {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError>;
+    async fn invoke(&self, request_json: Zeroizing<String>) -> Result<String, RuntimeError>;
     fn cancel(&self, dispatch_id: &str);
 }
 
@@ -279,7 +287,10 @@ struct UnavailableHttpExecutor;
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SerializedHttpExecutor for UnavailableHttpExecutor {
-    async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        _request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         Err(transport_invariant(
             "this Runtime has no production HTTP executor",
         ))
@@ -318,10 +329,13 @@ impl HttpTransport {
             return Ok(HttpResponse::Cancelled);
         }
 
-        let request_json = serde_json::to_string(&request)
-            .map_err(|_| transport_invariant("HTTP request could not be serialized"))?;
+        let request_json = Zeroizing::new(
+            serde_json::to_string(&request)
+                .map_err(|_| transport_invariant("HTTP request could not be serialized"))?,
+        );
         let dispatch_id = request.dispatch_id.clone();
         let max_response_bytes = request.max_response_bytes;
+        drop(request);
         let executor = self.executor.clone();
         let invocation = async move {
             let mut lease = HttpDispatchLease::new(executor, dispatch_id);
@@ -380,8 +394,11 @@ mod tests {
 
     #[async_trait]
     impl SerializedHttpExecutor for StubExecutor {
-        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
-            self.requests.lock().unwrap().push(request_json);
+        async fn invoke(
+            &self,
+            request_json: zeroize::Zeroizing<String>,
+        ) -> Result<String, RuntimeError> {
+            self.requests.lock().unwrap().push(request_json.to_string());
             self.response.lock().unwrap().take().unwrap()
         }
 
@@ -634,7 +651,10 @@ mod tests {
 
     #[async_trait]
     impl SerializedHttpExecutor for BlockingExecutor {
-        async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+        async fn invoke(
+            &self,
+            _request_json: zeroize::Zeroizing<String>,
+        ) -> Result<String, RuntimeError> {
             self.invoke_count.fetch_add(1, Ordering::SeqCst);
             self.invoked.notify_one();
             let release = self.release.lock().unwrap().take().unwrap();

@@ -9,8 +9,31 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct AppliedPort {
     outcome: super::import_executor::ImportExchangeResponse,
-    pages: Mutex<Vec<super::import_executor::ImportAuthorityPage>>,
-    fetches: AtomicUsize,
+}
+
+struct FailOneCommit {
+    inner: Arc<InMemoryReplica>,
+    armed: AtomicBool,
+}
+
+#[async_trait]
+impl ReplicaPersistence for FailOneCommit {
+    async fn invoke(
+        &self,
+        request: crate::replica::ReplicaPersistenceRequest,
+    ) -> Result<crate::replica::ReplicaPersistenceResponse, RuntimeError> {
+        if matches!(
+            &request,
+            crate::replica::ReplicaPersistenceRequest::Commit { .. }
+        ) && self.armed.swap(false, Ordering::SeqCst)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::RetryableTransport,
+                "receipt commit storage failure",
+            ));
+        }
+        self.inner.invoke(request).await
+    }
 }
 
 struct LookupFaultPort {
@@ -34,17 +57,6 @@ impl super::import_executor::ImportExecutorPort for LookupFaultPort {
         _operation: &crate::replica::OperationRecord,
     ) -> Result<
         super::import_executor::ImportExchangeResponse,
-        super::import_executor::ImportExecutorError,
-    > {
-        panic!("lookup fault must stop the cycle")
-    }
-    async fn fetch_items(
-        &self,
-        _vault_id: &str,
-        _item_ids: &[String],
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::import_executor::ImportAuthorityPage,
         super::import_executor::ImportExecutorError,
     > {
         panic!("lookup fault must stop the cycle")
@@ -77,19 +89,6 @@ impl super::import_executor::ImportExecutorPort for AppliedPort {
         Ok(self.outcome.clone())
     }
 
-    async fn fetch_items(
-        &self,
-        _vault_id: &str,
-        _item_ids: &[String],
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::import_executor::ImportAuthorityPage,
-        super::import_executor::ImportExecutorError,
-    > {
-        self.fetches.fetch_add(1, Ordering::SeqCst);
-        Ok(self.pages.lock().unwrap().remove(0))
-    }
-
     async fn renew_session(&self) -> Result<(), super::import_executor::ImportExecutorError> {
         Ok(())
     }
@@ -105,11 +104,6 @@ type PostAnswer = Result<
     super::import_executor::ImportExchangeResponse,
     super::import_executor::ImportExecutorError,
 >;
-type PageAnswer = Result<
-    super::import_executor::ImportAuthorityPage,
-    super::import_executor::ImportExecutorError,
->;
-
 /// How one cycle's exact replay and its lookup hint can disagree.
 #[derive(Clone, Copy, Debug)]
 enum ChangedReplay {
@@ -124,16 +118,15 @@ enum Interference {
     None,
     /// An unlock fences the commit the way a lock does mid-flight.
     LockEpoch,
-    /// Unrelated durable work lands first, so the guarded commit must recompute.
+    /// Unrelated durable work lands first, so this replay must not rebase its proof.
     Revision,
+    ReplayRevision,
 }
 
 struct ScriptedPort {
     lookups: Mutex<Vec<LookupAnswer>>,
     posts: Mutex<Vec<PostAnswer>>,
-    pages: Mutex<Vec<PageAnswer>>,
     posted: AtomicUsize,
-    fetches: AtomicUsize,
     renewals: AtomicUsize,
     persistence: Arc<InMemoryReplica>,
     account_id: AccountId,
@@ -145,9 +138,7 @@ impl ScriptedPort {
         Self {
             lookups: Mutex::new(Vec::new()),
             posts: Mutex::new(Vec::new()),
-            pages: Mutex::new(Vec::new()),
             posted: AtomicUsize::new(0),
-            fetches: AtomicUsize::new(0),
             renewals: AtomicUsize::new(0),
             persistence: persistence.clone(),
             account_id: account_id.clone(),
@@ -162,11 +153,6 @@ impl ScriptedPort {
 
     fn script_posts(self, answers: Vec<PostAnswer>) -> Self {
         *self.posts.lock().unwrap() = answers;
-        self
-    }
-
-    fn script_pages(self, answers: Vec<PageAnswer>) -> Self {
-        *self.pages.lock().unwrap() = answers;
         self
     }
 
@@ -187,23 +173,14 @@ impl super::import_executor::ImportExecutorPort for ScriptedPort {
         lookups.remove(0)
     }
 
-    async fn post_exact(&self, _operation: &crate::replica::OperationRecord) -> PostAnswer {
+    async fn post_exact(&self, operation: &crate::replica::OperationRecord) -> PostAnswer {
+        if self.interference == Interference::ReplayRevision {
+            self.before_reconcile(operation).await;
+        }
         self.posted.fetch_add(1, Ordering::SeqCst);
         let mut posts = self.posts.lock().unwrap();
         assert!(!posts.is_empty(), "the history scripted no further send");
         posts.remove(0)
-    }
-
-    async fn fetch_items(
-        &self,
-        _vault_id: &str,
-        _item_ids: &[String],
-        _cursor: Option<&str>,
-    ) -> PageAnswer {
-        self.fetches.fetch_add(1, Ordering::SeqCst);
-        let mut pages = self.pages.lock().unwrap();
-        assert!(!pages.is_empty(), "the history scripted no further page");
-        pages.remove(0)
     }
 
     async fn renew_session(&self) -> Result<(), super::import_executor::ImportExecutorError> {
@@ -219,9 +196,8 @@ impl super::import_executor::ImportExecutorPort for ScriptedPort {
                 .persistence
                 .set_lock_epoch(&self.account_id, snapshot.lock_epoch + 1)
                 .unwrap(),
-            Interference::Revision => {
-                // Any unrelated durable write is enough: the reconciliation must recompute
-                // against it instead of committing the revision it read.
+            Interference::Revision | Interference::ReplayRevision => {
+                // A later durable write requires a fresh replay, never rebasing this proof.
                 let mut rescheduled = operation.clone();
                 rescheduled.scheduling.attempt_count += 1;
                 let result = self
@@ -301,70 +277,6 @@ fn authority_dto(
         updated_at: "2026-09-01T00:00:00Z".into(),
         vault_id: TEST_VAULT_ID.into(),
         version: 1,
-    }
-}
-
-/// One way an authoritative answer can fail to be the batch this Device accepted.
-///
-/// Each variant changes exactly one thing, so a history names the field it protects instead of
-/// proving "something differs".
-#[derive(Clone, Copy, Debug)]
-enum AuthorityDrift {
-    ChangedFavorite,
-    ChangedCiphertext,
-    ChangedIv,
-    ChangedAlgorithm,
-    ChangedCategory,
-    ChangedVault,
-    UnacceptedItemId,
-    WrongVersion,
-    WrongEncryptionVersion,
-    OmittedItem,
-    ExtraItem,
-    RepeatedItem,
-}
-
-fn drifted_authority(
-    accepted: &[super::import::ImportRequestItem],
-    drift: AuthorityDrift,
-) -> Vec<crate::server_contract::ItemResponseDto> {
-    let mut items = accepted.iter().map(authority_dto).collect::<Vec<_>>();
-    match drift {
-        AuthorityDrift::ChangedFavorite => items[0].favorite = !items[0].favorite,
-        AuthorityDrift::ChangedCiphertext => {
-            items[0].encrypted_data = format!("{}-tampered", items[0].encrypted_data);
-        }
-        AuthorityDrift::ChangedIv => items[0].encryption_iv = "AAAAAAAAAAAAAAAA".into(),
-        AuthorityDrift::ChangedAlgorithm => {
-            items[0].encryption_algorithm = "AES-GCM-SOMETHING-ELSE".into();
-        }
-        AuthorityDrift::ChangedCategory => {
-            items[0].category = crate::server_contract::ItemCategory::SecureNote;
-        }
-        AuthorityDrift::ChangedVault => items[0].vault_id = "vault-somewhere-else".into(),
-        AuthorityDrift::UnacceptedItemId => items[1].id = "item-never-accepted".into(),
-        AuthorityDrift::WrongVersion => items[0].version = 2,
-        AuthorityDrift::WrongEncryptionVersion => items[0].encryption_version = 2,
-        AuthorityDrift::OmittedItem => {
-            items.pop();
-        }
-        AuthorityDrift::ExtraItem => {
-            let mut extra = items[0].clone();
-            extra.id = "item-never-accepted".into();
-            items.push(extra);
-        }
-        AuthorityDrift::RepeatedItem => items[1] = items[0].clone(),
-    }
-    items
-}
-
-fn authority_page(
-    items: &[crate::server_contract::ItemResponseDto],
-    next_cursor: Option<&str>,
-) -> super::import_executor::ImportAuthorityPage {
-    super::import_executor::ImportAuthorityPage {
-        raw_response_body: serde_json::to_vec(items).unwrap(),
-        next_cursor: next_cursor.map(ToOwned::to_owned),
     }
 }
 
@@ -606,61 +518,11 @@ async fn import_accepts_empty_as_a_durable_zero_effect_and_rejects_an_over_bound
 }
 
 #[tokio::test]
-async fn exact_replay_installs_only_matching_authority_and_empty_applied_fetches_nothing() {
+async fn empty_applied_import_retains_zero_count_without_current_authority() {
     let (runtime, account_id) = ready_runtime().await;
-    let response = runtime
-        .accept_import_items(
-            account_id.clone(),
-            TEST_VAULT_ID.into(),
-            vec![draft(true)],
-            RequestCancellation::new(),
-            || {},
-        )
-        .await
-        .unwrap();
-    let RuntimeResponse::ImportBatchAccepted {
-        operation_id,
-        item_ids,
-        ..
-    } = response
-    else {
-        panic!()
-    };
-    let operation = runtime.replica().snapshot(&account_id).unwrap().operations[0].clone();
-    let accepted = super::import::decode_import_request(&operation).unwrap();
-    let item = &accepted.items[0];
-    let outcome = super::import_executor::ImportExchangeResponse {
-        status: 200,
-        body: serde_json::to_vec(&serde_json::json!({
-            "kind": "import_items",
-            "operationId": operation_id,
-            "result": { "status": "applied", "vaultId": TEST_VAULT_ID, "importedCount": 1 }
-        }))
-        .unwrap(),
-    };
-    let authority = crate::server_contract::ItemResponseDto {
-        category: item.category.clone(),
-        created_at: "2026-09-01T00:00:00Z".into(),
-        deleted_at: None,
-        encrypted_by_user_id: "user-import".into(),
-        encrypted_data: item.encrypted_data.clone(),
-        encryption_algorithm: item.encryption_algorithm.clone(),
-        encryption_iv: item.encryption_iv.clone(),
-        encryption_version: 1,
-        favorite: true,
-        id: item_ids[0].clone(),
-        last_modified_by: "user-import".into(),
-        updated_at: "2026-09-01T00:00:00Z".into(),
-        vault_id: TEST_VAULT_ID.into(),
-        version: 1,
-    };
+    let (operation_id, _) = accept(&runtime, &account_id, Vec::new()).await;
     let port = AppliedPort {
-        outcome,
-        pages: Mutex::new(vec![super::import_executor::ImportAuthorityPage {
-            raw_response_body: serde_json::to_vec(&vec![authority]).unwrap(),
-            next_cursor: None,
-        }]),
-        fetches: AtomicUsize::new(0),
+        outcome: applied_response(&operation_id, 0),
     };
     assert_eq!(
         runtime
@@ -669,59 +531,16 @@ async fn exact_replay_installs_only_matching_authority_and_empty_applied_fetches
             .unwrap(),
         super::import_executor::ImportExecutorPass::Completed
     );
-    let completed = runtime.replica().snapshot(&account_id).unwrap();
+    let completed = runtime.replica.snapshot(&account_id).unwrap();
     assert!(completed.operations.is_empty());
-    assert_eq!(completed.receipts.len(), 1);
-    assert_eq!(completed.bootstrap.items.len(), 1);
+    assert!(completed.bootstrap.items.is_empty());
     assert_eq!(
-        runtime
-            .unlocked_items
-            .lock()
-            .unwrap()
-            .get(&account_id)
-            .unwrap()
-            .len(),
-        1
+        completed.receipts[0].result,
+        crate::replica::OperationOutcomeResult::ImportApplied {
+            vault_id: TEST_VAULT_ID.into(),
+            imported_count: 0,
+        }
     );
-
-    let (runtime, account_id) = ready_runtime().await;
-    let response = runtime
-        .accept_import_items(
-            account_id.clone(),
-            TEST_VAULT_ID.into(),
-            Vec::new(),
-            RequestCancellation::new(),
-            || {},
-        )
-        .await
-        .unwrap();
-    let RuntimeResponse::ImportBatchAccepted { operation_id, .. } = response else {
-        panic!()
-    };
-    let zero = AppliedPort {
-        outcome: super::import_executor::ImportExchangeResponse {
-            status: 200,
-            body: serde_json::to_vec(&serde_json::json!({
-                "kind": "import_items", "operationId": operation_id,
-                "result": { "status": "applied", "vaultId": TEST_VAULT_ID, "importedCount": 0 }
-            }))
-            .unwrap(),
-        },
-        pages: Mutex::new(Vec::new()),
-        fetches: AtomicUsize::new(0),
-    };
-    runtime
-        .drive_import_executor_cycle(&account_id, &operation_id, &zero)
-        .await
-        .unwrap();
-    assert_eq!(zero.fetches.load(Ordering::SeqCst), 0);
-    assert!(runtime
-        .replica()
-        .snapshot(&account_id)
-        .unwrap()
-        .bootstrap
-        .items
-        .is_empty());
 }
 
 #[tokio::test]
@@ -877,8 +696,6 @@ async fn changed_replay_and_every_closed_rejection_never_project_imported_items(
     // terminal for the Account module, not a retryable transport answer.
     let reused = AppliedPort {
         outcome: reused_identity_response(),
-        pages: Mutex::new(Vec::new()),
-        fetches: AtomicUsize::new(0),
     };
     assert_eq!(
         runtime
@@ -926,8 +743,6 @@ async fn changed_replay_and_every_closed_rejection_never_project_imported_items(
                 }))
                 .unwrap(),
             },
-            pages: Mutex::new(Vec::new()),
-            fetches: AtomicUsize::new(0),
         };
         assert_eq!(
             runtime
@@ -940,7 +755,7 @@ async fn changed_replay_and_every_closed_rejection_never_project_imported_items(
         assert!(snapshot.operations.is_empty());
         assert!(snapshot.bootstrap.items.is_empty());
         assert_eq!(snapshot.receipts.len(), 1);
-        assert_eq!(port.fetches.load(Ordering::SeqCst), 0);
+
         let RuntimeProjection::Operations(projection) = runtime
             .projection(&ObservationRequest::Operations {
                 account_id: account_id.clone(),
@@ -1092,7 +907,6 @@ async fn a_dropped_response_completes_once_from_the_duplicate_send_and_its_looku
     let persistence = Arc::new(InMemoryReplica::default());
     let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
     let (operation_id, item_ids) = accept(&runtime, &account_id, vec![draft(true)]).await;
-    let accepted = accepted_items(&runtime, &account_id);
     let port = ScriptedPort::new(&persistence, &account_id)
         .script_lookups(vec![
             // The first send reached the Server; only its response was lost.
@@ -1102,11 +916,7 @@ async fn a_dropped_response_completes_once_from_the_duplicate_send_and_its_looku
         .script_posts(vec![
             Err(super::import_executor::ImportExecutorError::Retryable),
             Ok(applied_response(&operation_id, 1)),
-        ])
-        .script_pages(vec![Ok(authority_page(
-            &[authority_dto(&accepted[0])],
-            None,
-        ))]);
+        ]);
 
     assert_eq!(
         runtime
@@ -1131,14 +941,13 @@ async fn a_dropped_response_completes_once_from_the_duplicate_send_and_its_looku
     let completed = persistence.snapshot(&account_id).unwrap();
     assert!(completed.operations.is_empty());
     assert_eq!(completed.receipts.len(), 1);
-    assert_eq!(completed.bootstrap.items.len(), 1);
-    assert!(holds_authority_item(&completed, &item_ids[0]));
+    assert!(completed.bootstrap.items.is_empty());
+    assert!(!holds_authority_item(&completed, &item_ids[0]));
     assert_eq!(
         port.posted.load(Ordering::SeqCst),
         2,
         "the duplicate send is exact, and the Server makes the effect happen once"
     );
-    assert_eq!(port.fetches.load(Ordering::SeqCst), 1);
 
     // A third cycle has nothing left to own: the batch already reached its semantic outcome.
     assert_eq!(
@@ -1179,7 +988,7 @@ async fn a_changed_replay_never_reconciles_the_accepted_batch() {
             ChangedReplay::ChangedCount => (
                 None,
                 applied_response(&operation_id, 5),
-                RuntimeErrorCode::InvariantViolation,
+                RuntimeErrorCode::AccountFailed,
             ),
         };
         let port = ScriptedPort::new(&persistence, &account_id)
@@ -1204,7 +1013,6 @@ async fn a_changed_replay_never_reconciles_the_accepted_batch() {
         assert_eq!(retained.operations.len(), 1);
         assert!(retained.receipts.is_empty());
         assert!(retained.bootstrap.items.is_empty());
-        assert_eq!(port.fetches.load(Ordering::SeqCst), 0);
     }
 }
 
@@ -1254,159 +1062,10 @@ async fn a_422_without_the_reuse_code_retries_under_the_persisted_backoff() {
 }
 
 #[tokio::test]
-async fn paginated_authority_reassembles_one_batch_and_refuses_an_unbounded_answer() {
-    let clock = super::operation_fixtures::TestClock::new();
-    let persistence = Arc::new(InMemoryReplica::default());
-    let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
-    let (operation_id, item_ids) = accept(
-        &runtime,
-        &account_id,
-        vec![draft(true), draft(false), draft(true)],
-    )
-    .await;
-    let accepted = accepted_items(&runtime, &account_id);
-    let dtos = accepted.iter().map(authority_dto).collect::<Vec<_>>();
-    let port = ScriptedPort::new(&persistence, &account_id)
-        .script_lookups(vec![Ok(None)])
-        .script_posts(vec![Ok(applied_response(&operation_id, 3))])
-        .script_pages(vec![
-            Ok(authority_page(&dtos[..2], Some("cursor-page-2"))),
-            Ok(authority_page(&dtos[2..], None)),
-        ]);
-    assert_eq!(
-        runtime
-            .drive_import_executor_cycle(&account_id, &operation_id, &port)
-            .await
-            .unwrap(),
-        super::import_executor::ImportExecutorPass::Completed
-    );
-    assert_eq!(port.fetches.load(Ordering::SeqCst), 2);
-    let completed = persistence.snapshot(&account_id).unwrap();
-    assert_eq!(completed.bootstrap.items.len(), 3);
-    for item_id in &item_ids {
-        assert!(holds_authority_item(&completed, item_id));
-    }
-
-    // Every bounded refusal keeps the batch accepted and installs nothing.
-    for pages in [
-        // A cursor that never advances would page forever.
-        vec![
-            Ok(authority_page(&dtos[..1], Some("cursor-stuck"))),
-            Ok(authority_page(&dtos[1..2], Some("cursor-stuck"))),
-        ],
-        // More Items than a batch may contain.
-        vec![Ok(authority_page(
-            &(0..=crate::replica::MAX_IMPORT_ITEMS)
-                .map(|_| dtos[0].clone())
-                .collect::<Vec<_>>(),
-            None,
-        ))],
-        // More bytes than a batch may carry.
-        vec![Ok(super::import_executor::ImportAuthorityPage {
-            raw_response_body: vec![b'x'; 16 * 1024 * 1024 + 1],
-            next_cursor: None,
-        })],
-        // A page carrying no Items cannot make progress, whatever cursor it offers. This is the
-        // cheapest infinite feed a Server can serve: two bytes and a fresh cursor per round trip.
-        vec![
-            Ok(authority_page(&[], Some("cursor-empty-1"))),
-            Ok(authority_page(&[], Some("cursor-empty-2"))),
-        ],
-        // Cursors this Device would have to remember are bounded like every other answer.
-        vec![
-            Ok(authority_page(
-                &dtos[..1],
-                Some(&"c".repeat(16 * 1024 * 1024 + 1)),
-            )),
-            Ok(authority_page(&dtos[1..2], None)),
-        ],
-    ] {
-        let clock = super::operation_fixtures::TestClock::new();
-        let persistence = Arc::new(InMemoryReplica::default());
-        let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
-        let (operation_id, _) = accept(&runtime, &account_id, vec![draft(true)]).await;
-        let port = ScriptedPort::new(&persistence, &account_id)
-            .script_lookups(vec![Ok(None)])
-            .script_posts(vec![Ok(applied_response(&operation_id, 1))])
-            .script_pages(pages);
-        assert_eq!(
-            runtime
-                .drive_import_executor_cycle(&account_id, &operation_id, &port)
-                .await
-                .unwrap_err()
-                .code,
-            RuntimeErrorCode::InvariantViolation
-        );
-        let retained = persistence.snapshot(&account_id).unwrap();
-        assert_eq!(retained.operations.len(), 1);
-        assert_eq!(retained.operations[0].scheduling.attempt_count, 0);
-        assert!(retained.receipts.is_empty());
-        assert!(retained.bootstrap.items.is_empty());
-    }
-}
-
-#[tokio::test]
-async fn authority_that_is_not_the_accepted_batch_never_reconciles_it() {
-    for drift in [
-        AuthorityDrift::ChangedFavorite,
-        AuthorityDrift::ChangedCiphertext,
-        AuthorityDrift::ChangedIv,
-        AuthorityDrift::ChangedAlgorithm,
-        AuthorityDrift::ChangedCategory,
-        AuthorityDrift::ChangedVault,
-        AuthorityDrift::UnacceptedItemId,
-        AuthorityDrift::WrongVersion,
-        AuthorityDrift::WrongEncryptionVersion,
-        AuthorityDrift::OmittedItem,
-        AuthorityDrift::ExtraItem,
-        AuthorityDrift::RepeatedItem,
-    ] {
-        let clock = super::operation_fixtures::TestClock::new();
-        let persistence = Arc::new(InMemoryReplica::default());
-        let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
-        let (operation_id, item_ids) =
-            accept(&runtime, &account_id, vec![draft(true), draft(false)]).await;
-        let accepted = accepted_items(&runtime, &account_id);
-        let port = ScriptedPort::new(&persistence, &account_id)
-            .script_lookups(vec![Ok(None)])
-            .script_posts(vec![Ok(applied_response(&operation_id, 2))])
-            .script_pages(vec![Ok(authority_page(
-                &drifted_authority(&accepted, drift),
-                None,
-            ))]);
-
-        assert_eq!(
-            runtime
-                .drive_import_executor_cycle(&account_id, &operation_id, &port)
-                .await
-                .err()
-                .unwrap_or_else(|| panic!("{drift:?} must not reconcile"))
-                .code,
-            RuntimeErrorCode::InvariantViolation,
-            "{drift:?} is not the batch this Device accepted"
-        );
-        let retained = persistence.snapshot(&account_id).unwrap();
-        assert_eq!(
-            retained.operations.len(),
-            1,
-            "{drift:?} leaves the batch accepted"
-        );
-        assert!(retained.receipts.is_empty(), "{drift:?} writes no receipt");
-        assert!(
-            retained.bootstrap.items.is_empty(),
-            "{drift:?} installs no Item authority"
-        );
-        for item_id in &item_ids {
-            assert!(!holds_authority_item(&retained, item_id));
-        }
-    }
-}
-
-#[tokio::test]
 async fn one_renewal_is_spent_once_per_cycle_wherever_the_401_lands() {
     // The budget belongs to the cycle, not to one exchange. A renewal spent answering the lookup
-    // is gone by the time the exact replay or an authority page sees its own 401.
-    for later_position_is_the_replay in [true, false] {
+    // is gone by the time the exact replay sees its own 401.
+    {
         let clock = super::operation_fixtures::TestClock::new();
         let persistence = Arc::new(InMemoryReplica::default());
         let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
@@ -1416,12 +1075,7 @@ async fn one_renewal_is_spent_once_per_cycle_wherever_the_401_lands() {
                 Err(super::import_executor::ImportExecutorError::Unauthorized),
                 Ok(None),
             ])
-            .script_posts(vec![if later_position_is_the_replay {
-                Err(super::import_executor::ImportExecutorError::Unauthorized)
-            } else {
-                Ok(applied_response(&operation_id, 1))
-            }])
-            .script_pages(vec![Err(
+            .script_posts(vec![Err(
                 super::import_executor::ImportExecutorError::Unauthorized,
             )]);
 
@@ -1445,96 +1099,28 @@ async fn one_renewal_is_spent_once_per_cycle_wherever_the_401_lands() {
 }
 
 #[tokio::test]
-async fn an_authority_feed_that_never_ends_is_bounded_by_its_page_count() {
-    let clock = super::operation_fixtures::TestClock::new();
-    let persistence = Arc::new(InMemoryReplica::default());
-    let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
-    let drafts = (0..super::import::MAX_IMPORT_AUTHORITY_PAGES)
-        .map(|_| draft(false))
-        .collect();
-    let (operation_id, _) = accept(&runtime, &account_id, drafts).await;
-    let accepted = accepted_items(&runtime, &account_id);
-
-    // One Item per page, and the last page still offers another cursor. Nothing here repeats a
-    // cursor or exceeds the Item, byte, or empty-page rules: only the page count can stop it.
-    let pages = accepted
-        .iter()
-        .enumerate()
-        .map(|(index, item)| {
-            Ok(authority_page(
-                &[authority_dto(item)],
-                Some(&format!("cursor-page-{index}")),
-            ))
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(pages.len(), super::import::MAX_IMPORT_AUTHORITY_PAGES);
-    let port = ScriptedPort::new(&persistence, &account_id)
-        .script_lookups(vec![Ok(None)])
-        .script_posts(vec![Ok(applied_response(
-            &operation_id,
-            u16::try_from(super::import::MAX_IMPORT_AUTHORITY_PAGES).unwrap(),
-        ))])
-        .script_pages(pages);
-
-    assert_eq!(
-        runtime
-            .drive_import_executor_cycle(&account_id, &operation_id, &port)
-            .await
-            .unwrap_err()
-            .code,
-        RuntimeErrorCode::InvariantViolation
-    );
-    assert_eq!(
-        port.fetches.load(Ordering::SeqCst),
-        super::import::MAX_IMPORT_AUTHORITY_PAGES,
-        "the fetch stops at its page bound instead of holding the execution lock forever"
-    );
-    let retained = persistence.snapshot(&account_id).unwrap();
-    assert_eq!(retained.operations.len(), 1);
-    assert_eq!(retained.operations[0].scheduling.attempt_count, 0);
-    assert!(retained.receipts.is_empty());
-    assert!(retained.bootstrap.items.is_empty());
-}
-
-#[tokio::test]
-async fn a_fenced_guarded_commit_keeps_the_batch_accepted_while_a_stale_one_still_lands_once() {
+async fn a_fenced_or_stale_exact_commit_keeps_the_batch_accepted() {
     for interference in [Interference::LockEpoch, Interference::Revision] {
         let clock = super::operation_fixtures::TestClock::new();
         let persistence = Arc::new(InMemoryReplica::default());
         let (runtime, account_id) = ready_runtime_on(&persistence, clock.clone()).await;
-        let (operation_id, item_ids) = accept(&runtime, &account_id, vec![draft(true)]).await;
-        let accepted = accepted_items(&runtime, &account_id);
+        let (operation_id, _item_ids) = accept(&runtime, &account_id, vec![draft(true)]).await;
         let port = ScriptedPort::new(&persistence, &account_id)
             .script_lookups(vec![Ok(None)])
             .script_posts(vec![Ok(applied_response(&operation_id, 1))])
-            .script_pages(vec![Ok(authority_page(
-                &[authority_dto(&accepted[0])],
-                None,
-            ))])
             .interfering(interference);
         let pass = runtime
             .drive_import_executor_cycle(&account_id, &operation_id, &port)
             .await
             .unwrap();
         let durable = persistence.snapshot(&account_id).unwrap();
-        match interference {
-            Interference::LockEpoch => {
-                assert_eq!(
-                    pass,
-                    super::import_executor::ImportExecutorPass::ParkedFenced
-                );
-                assert_eq!(durable.operations.len(), 1, "a fence never loses the batch");
-                assert!(durable.receipts.is_empty());
-                assert!(durable.bootstrap.items.is_empty());
-            }
-            Interference::Revision | Interference::None => {
-                assert_eq!(pass, super::import_executor::ImportExecutorPass::Completed);
-                assert!(durable.operations.is_empty());
-                assert_eq!(durable.receipts.len(), 1);
-                assert_eq!(durable.bootstrap.items.len(), 1);
-                assert!(holds_authority_item(&durable, &item_ids[0]));
-            }
-        }
+        assert_eq!(
+            pass,
+            super::import_executor::ImportExecutorPass::ParkedFenced
+        );
+        assert_eq!(durable.operations.len(), 1, "a fence never loses the batch");
+        assert!(durable.receipts.is_empty());
+        assert!(durable.bootstrap.items.is_empty());
     }
 }
 
@@ -1548,16 +1134,26 @@ async fn an_earlier_batch_receipt_and_authority_survive_a_later_independent_batc
     let accepted = accepted_items(&runtime, &account_id);
     let first = ScriptedPort::new(&persistence, &account_id)
         .script_lookups(vec![Ok(None)])
-        .script_posts(vec![Ok(applied_response(&first_operation, 1))])
-        .script_pages(vec![Ok(authority_page(
-            &[authority_dto(&accepted[0])],
-            None,
-        ))]);
+        .script_posts(vec![Ok(applied_response(&first_operation, 1))]);
     runtime
         .drive_import_executor_cycle(&account_id, &first_operation, &first)
         .await
         .unwrap();
 
+    let current_vaults = persistence
+        .snapshot(&account_id)
+        .unwrap()
+        .bootstrap
+        .snapshot()
+        .visible_vaults;
+    persistence
+        .seed_ready_authority(
+            &account_id,
+            current_vaults,
+            vec![super::bootstrap::authority_item_from_dto(authority_dto(&accepted[0])).unwrap()],
+        )
+        .unwrap();
+    runtime.replica.load(&account_id).await.unwrap();
     let (second_operation, _) = accept(&runtime, &account_id, vec![draft(false)]).await;
     let second = ScriptedPort::new(&persistence, &account_id)
         .script_lookups(vec![Ok(None)])
@@ -1583,7 +1179,6 @@ async fn an_earlier_batch_receipt_and_authority_survive_a_later_independent_batc
         .any(|receipt| receipt.operation_id == first_operation));
     assert_eq!(durable.bootstrap.items.len(), 1);
     assert!(holds_authority_item(&durable, &first_items[0]));
-    assert_eq!(second.fetches.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -1939,99 +1534,15 @@ async fn caller_cancellation_after_acceptance_only_detaches_the_waiter() {
     assert!(snapshot.items.is_empty());
 }
 
-/// The accepted batch bound must sit under both ceilings it has to pass.
-///
-/// A change to the Server's Import body limit, to `MAX_IMPORT_AUTHORITY_BYTES`, to
-/// `MAX_IMPORT_ITEMS`, or to the measured per-Item envelope goes red here rather than silently
-/// letting Runtime accept a batch that can never reach a semantic outcome.
+/// Existing offline acceptance and Server body limits remain unchanged by reconciliation.
 #[test]
-fn import_batch_bytes_fit_the_server_and_authority_ceilings() {
-    use super::import::{
-        AUTHORITY_ITEM_ENVELOPE_BYTES, AUTHORITY_PAGE_FRAMING_BYTES,
-        DERIVED_IMPORT_REQUEST_CEILING, MAX_IMPORT_AUTHORITY_BYTES, MAX_IMPORT_REQUEST_BYTES,
-        SERVER_IMPORT_BODY_BYTES,
-    };
-
-    // The Server literal this derivation mirrors. `apps/server/src/http/limits.rs` pins the same
-    // number from the other side, so the two cannot drift apart unnoticed.
-    assert_eq!(SERVER_IMPORT_BODY_BYTES, 16 * 1024 * 1024);
+fn import_batch_bytes_fit_the_server_ceiling() {
+    assert_eq!(super::import::SERVER_IMPORT_BODY_BYTES, 16 * 1024 * 1024);
+    assert_eq!(super::import::MAX_IMPORT_REQUEST_BYTES, 15 * 1024 * 1024);
     assert_eq!(crate::replica::MAX_IMPORT_ITEMS, 200);
-
-    // Bound to locals so the comparisons carry a message. `import.rs` states the same arithmetic
-    // as `const _: () = assert!(..)`, which fails the build; this states it with an explanation.
-    let batch = MAX_IMPORT_REQUEST_BYTES;
-    let body_ceiling = SERVER_IMPORT_BODY_BYTES;
-    let authority_ceiling = MAX_IMPORT_AUTHORITY_BYTES;
-    let derived = DERIVED_IMPORT_REQUEST_CEILING;
-    let authority_cost = crate::replica::MAX_IMPORT_ITEMS * AUTHORITY_ITEM_ENVELOPE_BYTES
-        + AUTHORITY_PAGE_FRAMING_BYTES;
-
-    assert!(
-        batch <= body_ceiling,
-        "an accepted batch must fit the Server's Import body limit"
-    );
-    assert!(
-        batch + authority_cost <= authority_ceiling,
-        "an accepted batch must leave room for the authority read that reconciles it"
-    );
-    assert!(
-        batch <= derived,
-        "the published batch bound must stay under the derived ceiling"
-    );
-    assert!(
-        derived - batch >= 512 * 1024,
-        "the batch bound must keep honest slack, not be tuned to the last byte"
-    );
 }
 
-/// The per-Item authority envelope must cover the widest Item the Server can answer with.
-///
-/// The 64-character identifier is `validate_resource_id`'s ceiling in
-/// `apps/server/src/shared/mod.rs`. Unlike the Server's Import body limit and Item count, that
-/// bound is not published in `http::limits` and is not cross-pinned, so this test states the
-/// assumption rather than proving it: an identifier scheme that grew past 64 characters would
-/// need the envelope revisited.
-#[test]
-fn an_authority_item_stays_inside_its_measured_envelope() {
-    use super::import::AUTHORITY_ITEM_ENVELOPE_BYTES;
-
-    let identifier = "x".repeat(64);
-    let timestamp = "2026-09-01T12:34:56.123456789Z".to_owned();
-    let request = super::import::ImportRequestItem {
-        item_id: identifier.clone(),
-        category: crate::server_contract::ItemCategory::SecureNote,
-        favorite: true,
-        encrypted_data: "ciphertext".to_owned(),
-        encryption_iv: "AAAAAAAAAAAAAAAA".to_owned(),
-        encryption_algorithm: "AES-GCM-AAD-V1".to_owned(),
-    };
-    let authority = crate::server_contract::ItemResponseDto {
-        id: request.item_id.clone(),
-        vault_id: identifier.clone(),
-        category: request.category.clone(),
-        favorite: request.favorite,
-        encrypted_data: request.encrypted_data.clone(),
-        encryption_iv: request.encryption_iv.clone(),
-        encryption_algorithm: request.encryption_algorithm.clone(),
-        version: i32::MIN,
-        encryption_version: i32::MIN,
-        encrypted_by_user_id: identifier.clone(),
-        last_modified_by: identifier,
-        created_at: timestamp.clone(),
-        updated_at: timestamp.clone(),
-        deleted_at: Some(timestamp),
-    };
-    let request_bytes = serde_json::to_vec(&request).unwrap().len();
-    let authority_bytes = serde_json::to_vec(&authority).unwrap().len();
-    assert!(authority_bytes > request_bytes);
-    assert!(
-        authority_bytes - request_bytes <= AUTHORITY_ITEM_ENVELOPE_BYTES,
-        "one authority Item costs {} bytes over its request, past the {AUTHORITY_ITEM_ENVELOPE_BYTES} byte envelope",
-        authority_bytes - request_bytes
-    );
-}
-
-/// A batch neither ceiling could carry is refused at accept time, so it never becomes durable.
+/// A batch the accepted byte bound cannot carry is refused at accept time, so it never becomes durable.
 #[tokio::test]
 async fn a_batch_past_the_byte_bound_is_refused_before_it_becomes_durable() {
     let (runtime, account_id) = ready_runtime().await;
@@ -2177,14 +1688,9 @@ async fn operations_projection_tracks_retry_and_terminal_receipts_across_restart
     let retry = projected();
     assert_eq!(retry.operations[0].attempt_count.as_deref(), Some("1"));
     assert!(retry.replica_revision > pending.replica_revision);
-    let accepted = accepted_items(&runtime, &account_id);
     let port = ScriptedPort::new(&persistence, &account_id)
         .script_lookups(vec![Ok(None)])
-        .script_posts(vec![Ok(applied_response(&operation_id, 1))])
-        .script_pages(vec![Ok(authority_page(
-            &[authority_dto(&accepted[0])],
-            None,
-        ))]);
+        .script_posts(vec![Ok(applied_response(&operation_id, 1))]);
     runtime
         .drive_import_executor_cycle(&account_id, &operation_id, &port)
         .await
@@ -2285,5 +1791,385 @@ async fn an_import_item_over_the_server_ciphertext_limit_refuses_before_acceptan
                 .len(),
             1
         );
+    }
+}
+
+#[tokio::test]
+async fn retained_import_receipts_original_count_when_current_batch_is_partial() {
+    let persistence = Arc::new(InMemoryReplica::default());
+    let (runtime, account_id) =
+        ready_runtime_on(&persistence, super::operation_fixtures::TestClock::new()).await;
+    let (operation_id, _) = accept(&runtime, &account_id, vec![draft(true), draft(false)]).await;
+    let accepted = accepted_items(&runtime, &account_id);
+    let mut current = authority_dto(&accepted[0]);
+    current.version = 3;
+    current.favorite = false;
+    let vaults = persistence
+        .snapshot(&account_id)
+        .unwrap()
+        .bootstrap
+        .snapshot()
+        .visible_vaults;
+    persistence
+        .seed_ready_authority(
+            &account_id,
+            vaults,
+            vec![super::bootstrap::authority_item_from_dto(current).unwrap()],
+        )
+        .unwrap();
+    runtime.replica.load(&account_id).await.unwrap();
+    let before = persistence.snapshot(&account_id).unwrap().bootstrap.items;
+    let port = AppliedPort {
+        outcome: applied_response(&operation_id, 2),
+    };
+    assert_eq!(
+        runtime
+            .drive_import_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap(),
+        super::import_executor::ImportExecutorPass::Completed
+    );
+    let completed = runtime.replica.snapshot(&account_id).unwrap();
+    assert!(completed.operations.is_empty());
+    assert_eq!(completed.receipts.len(), 1);
+    assert_eq!(
+        completed.receipts[0].result,
+        crate::replica::OperationOutcomeResult::ImportApplied {
+            vault_id: TEST_VAULT_ID.into(),
+            imported_count: 2,
+        }
+    );
+    assert_eq!(
+        completed.bootstrap.items, before,
+        "receipt neither resurrects missing Items nor rolls back later edits"
+    );
+    assert_eq!(
+        completed.bootstrap.state,
+        crate::replica::ReplicaState::RefreshRequired
+    );
+}
+
+#[tokio::test]
+async fn stale_import_identity_failure_does_not_fail_newer_replica_work() {
+    for changed_count in [false, true] {
+        let persistence = Arc::new(InMemoryReplica::default());
+        let (runtime, account_id) =
+            ready_runtime_on(&persistence, super::operation_fixtures::TestClock::new()).await;
+        let (operation_id, _) = accept(&runtime, &account_id, vec![draft(true)]).await;
+        let port = ScriptedPort::new(&persistence, &account_id)
+            .script_lookups(vec![Ok(None)])
+            .script_posts(vec![Ok(if changed_count {
+                applied_response(&operation_id, 2)
+            } else {
+                reused_identity_response()
+            })])
+            .interfering(Interference::ReplayRevision);
+        assert_eq!(
+            runtime
+                .drive_import_executor_cycle(&account_id, &operation_id, &port)
+                .await
+                .unwrap(),
+            super::import_executor::ImportExecutorPass::ParkedFenced
+        );
+        let retained = persistence.snapshot(&account_id).unwrap();
+        assert!(retained.failure.is_none());
+        assert_eq!(retained.operations.len(), 1);
+        assert!(retained.receipts.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn retained_import_of_all_categories_preserves_changed_visible_data_without_live_keys() {
+    use crate::server_contract::ItemCategory;
+    let persistence = Arc::new(InMemoryReplica::default());
+    let (runtime, account_id) =
+        ready_runtime_on(&persistence, super::operation_fixtures::TestClock::new()).await;
+    let categories = [
+        ItemCategory::Login,
+        ItemCategory::SecureNote,
+        ItemCategory::CreditCard,
+        ItemCategory::Identity,
+        ItemCategory::Totp,
+    ];
+    let (operation_id, _) = accept(
+        &runtime,
+        &account_id,
+        categories.iter().map(draft_for_category).collect(),
+    )
+    .await;
+    let accepted = accepted_items(&runtime, &account_id);
+    let mut vaults = persistence
+        .snapshot(&account_id)
+        .unwrap()
+        .bootstrap
+        .snapshot()
+        .visible_vaults;
+    let mut moved_vault = vaults[0].clone();
+    moved_vault.id = "11111111-1111-4111-8111-111111111111".into();
+    let mut edited = authority_dto(&accepted[0]);
+    edited.version = 4;
+    edited.favorite = true;
+    let mut moved = authority_dto(&accepted[1]);
+    moved.version = 2;
+    moved.vault_id = moved_vault.id.clone();
+    vaults.push(moved_vault);
+    persistence
+        .seed_ready_authority(
+            &account_id,
+            vaults,
+            vec![edited, moved]
+                .into_iter()
+                .map(|item| super::bootstrap::authority_item_from_dto(item).unwrap())
+                .collect(),
+        )
+        .unwrap();
+    runtime.replica.load(&account_id).await.unwrap();
+    let before = persistence.snapshot(&account_id).unwrap().bootstrap;
+    runtime.clear_live_master_unlock_keys_for_account(&account_id);
+    let port = AppliedPort {
+        outcome: applied_response(&operation_id, 5),
+    };
+    assert_eq!(
+        runtime
+            .drive_import_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap(),
+        super::import_executor::ImportExecutorPass::Completed
+    );
+    let after = persistence.snapshot(&account_id).unwrap();
+    assert_eq!(after.bootstrap.items, before.items);
+    assert_eq!(after.bootstrap.vaults, before.vaults);
+    assert_eq!(
+        after.receipts[0].result,
+        crate::replica::OperationOutcomeResult::ImportApplied {
+            vault_id: TEST_VAULT_ID.into(),
+            imported_count: 5
+        }
+    );
+    assert!(after.operations.is_empty());
+    assert!(after.failure.is_none());
+}
+
+#[tokio::test]
+async fn failed_import_receipt_commit_retains_exact_work_until_fresh_replay() {
+    let persistence = Arc::new(InMemoryReplica::default());
+    let (runtime, account_id) =
+        ready_runtime_on(&persistence, super::operation_fixtures::TestClock::new()).await;
+    let (operation_id, _) = accept(&runtime, &account_id, vec![draft(true)]).await;
+    let before = persistence.snapshot(&account_id).unwrap();
+    let runtime = runtime_with_one_failed_commit(&persistence);
+    runtime.replica.load(&account_id).await.unwrap();
+    let port = AppliedPort {
+        outcome: applied_response(&operation_id, 1),
+    };
+    assert_eq!(
+        runtime
+            .drive_import_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap(),
+        super::import_executor::ImportExecutorPass::RetryScheduled
+    );
+    let waiting = persistence.snapshot(&account_id).unwrap();
+    assert_eq!(waiting.operations[0].request, before.operations[0].request);
+    assert_eq!(
+        waiting.operations[0].request_fingerprint,
+        before.operations[0].request_fingerprint
+    );
+    assert_eq!(waiting.operations[0].scheduling.attempt_count, 1);
+    assert!(
+        waiting.operations[0].scheduling.not_before_ms
+            > before.operations[0].scheduling.not_before_ms
+    );
+    assert_eq!(waiting.receipts, before.receipts);
+    assert_eq!(waiting.bootstrap, before.bootstrap);
+    assert_eq!(
+        runtime
+            .drive_import_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap(),
+        super::import_executor::ImportExecutorPass::Completed
+    );
+    let after = persistence.snapshot(&account_id).unwrap();
+    assert!(after.operations.is_empty());
+    assert_eq!(after.receipts.len(), 1);
+}
+
+fn runtime_with_one_failed_commit(persistence: &Arc<InMemoryReplica>) -> Arc<Runtime> {
+    Runtime::with_persistence(
+        Arc::new(FailOneCommit {
+            inner: persistence.clone(),
+            armed: AtomicBool::new(true),
+        }),
+        Arc::new(PlatformStorage::unavailable()),
+        Arc::new(HttpTransport::unavailable()),
+        None,
+        None,
+        true,
+        super::operation_fixtures::TestClock::new(),
+        Arc::new(SystemDeviceTimer),
+        Some(persistence.clone()),
+    )
+}
+
+#[tokio::test]
+async fn failed_import_account_failure_write_retries_without_losing_the_contradiction() {
+    let persistence = Arc::new(InMemoryReplica::default());
+    let (runtime, account_id) =
+        ready_runtime_on(&persistence, super::operation_fixtures::TestClock::new()).await;
+    let (operation_id, _) = accept(&runtime, &account_id, vec![draft(true)]).await;
+    let before = persistence.snapshot(&account_id).unwrap();
+    let runtime = runtime_with_one_failed_commit(&persistence);
+    runtime.replica.load(&account_id).await.unwrap();
+    let port = AppliedPort {
+        outcome: reused_identity_response(),
+    };
+    assert_eq!(
+        runtime
+            .drive_import_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap(),
+        super::import_executor::ImportExecutorPass::RetryScheduled
+    );
+    let waiting = persistence.snapshot(&account_id).unwrap();
+    assert!(waiting.failure.is_none());
+    assert_eq!(waiting.operations[0].request, before.operations[0].request);
+    assert_eq!(waiting.operations[0].scheduling.attempt_count, 1);
+    assert!(
+        waiting.operations[0].scheduling.not_before_ms
+            > before.operations[0].scheduling.not_before_ms
+    );
+    assert!(waiting.receipts.is_empty());
+    assert_eq!(
+        runtime
+            .drive_import_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::AccountFailed
+    );
+    let failed = persistence.snapshot(&account_id).unwrap();
+    assert!(failed.failure.is_some());
+    assert_eq!(failed.operations[0].request, before.operations[0].request);
+    assert!(failed.receipts.is_empty());
+}
+
+struct RetainedImportHttp {
+    operation: crate::replica::OperationRecord,
+    outcome: ImportExchangeResponse,
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl crate::http_transport::SerializedHttpExecutor for RetainedImportHttp {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
+        let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        match call {
+            0 => {
+                assert_eq!(request["method"], "GET");
+                assert!(request["url"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with(&format!("/operations/{}", self.operation.operation_id)));
+            }
+            1 => {
+                assert_eq!(request["method"], "POST");
+                assert!(request["url"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with(&self.operation.request.path));
+                assert_eq!(
+                    serde_json::from_value::<Vec<u8>>(request["body"].clone()).unwrap(),
+                    self.operation.request.body
+                );
+            }
+            _ => panic!("retained Import must not read historical Item/Vault authority"),
+        }
+        Ok(
+            super::operation_fixtures::completed(self.outcome.status, self.outcome.body.clone())
+                .to_string(),
+        )
+    }
+    fn cancel(&self, _dispatch_id: &str) {}
+}
+
+#[tokio::test]
+async fn sync_import_retained_replay_preserves_current_authority_and_rejects_changed_count() {
+    for contradictory_count in [false, true] {
+        let harness = super::operation_fixtures::seeded_with_existing_item(false, false).await;
+        let (operation_id, _) = accept(
+            &harness.runtime,
+            &harness.account_id,
+            vec![draft(true), draft(false)],
+        )
+        .await;
+        let captured = harness
+            .runtime
+            .replica
+            .snapshot(&harness.account_id)
+            .unwrap();
+        let operation = captured.operations[0].clone();
+        let executor = Arc::new(RetainedImportHttp {
+            operation,
+            outcome: applied_response(&operation_id, if contradictory_count { 1 } else { 2 }),
+            calls: AtomicUsize::new(0),
+        });
+        let transport = HttpTransport::new(executor.clone());
+        let http = AuthHttpClient::new(
+            &transport,
+            super::operation_fixtures::SERVER_URL,
+            false,
+            super::operation_fixtures::auth_config(),
+        )
+        .unwrap();
+        let mut session = harness
+            .runtime
+            .platform_storage
+            .load_current_session(&harness.account_id, &captured.incarnation)
+            .await
+            .unwrap()
+            .unwrap();
+        let result = harness
+            .runtime
+            .reconcile_resolved_operation(&harness.account_id, &operation_id, &http, &mut session)
+            .await;
+        let after = harness
+            .runtime
+            .replica
+            .snapshot(&harness.account_id)
+            .unwrap();
+        assert_eq!(
+            executor.calls.load(Ordering::SeqCst),
+            2,
+            "lookup remains a hint until exact bytes replay"
+        );
+        assert_eq!(after.bootstrap.items, captured.bootstrap.items);
+        assert_eq!(after.bootstrap.vaults, captured.bootstrap.vaults);
+        if contradictory_count {
+            assert!(matches!(result, super::outcome::CompletionResult::Failed));
+            assert!(after.failure.is_some());
+            assert_eq!(after.operations, captured.operations);
+            assert!(after.receipts.is_empty());
+        } else {
+            assert!(matches!(
+                result,
+                super::outcome::CompletionResult::Completed
+            ));
+            assert!(after.operations.is_empty());
+            assert_eq!(
+                after.receipts[0].result,
+                crate::replica::OperationOutcomeResult::ImportApplied {
+                    vault_id: TEST_VAULT_ID.into(),
+                    imported_count: 2
+                }
+            );
+            assert_eq!(
+                after.bootstrap.state,
+                crate::replica::ReplicaState::RefreshRequired
+            );
+        }
     }
 }

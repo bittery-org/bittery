@@ -13,7 +13,7 @@ import {
 import { IndexedDbReplicaExecutor } from "./indexeddb-executor.ts";
 
 const DB_NAME = "bittery_replica";
-const DB_VERSION = 8;
+const DB_VERSION = 10;
 const PRIOR_DB_VERSION = 6;
 const PRIOR_STORE_NAMES = [
 	"heads",
@@ -74,7 +74,9 @@ async function rawDatabaseContents(): Promise<unknown[]> {
 		"operations",
 		"attachment_move_preparations",
 		"share_capabilities",
+		"cross_account_moves",
 		"operation_receipts",
+		"rotation_attempts",
 		"replica_metadata",
 		"bootstrap_generations",
 		"bootstrap_pages",
@@ -211,7 +213,9 @@ describe("IndexedDbReplicaExecutor", () => {
 			"operations",
 			"attachment_move_preparations",
 			"share_capabilities",
+			"cross_account_moves",
 			"operation_receipts",
+			"rotation_attempts",
 			"replica_metadata",
 			"bootstrap_generations",
 			"bootstrap_pages",
@@ -262,6 +266,7 @@ describe("IndexedDbReplicaExecutor", () => {
 			rows: expect.arrayContaining([
 				expect.objectContaining({ store: "operations" }),
 				expect.objectContaining({ store: "shareCapabilities" }),
+				expect.objectContaining({ store: "crossAccountMoves" }),
 			]),
 		});
 		expect(await rawDatabaseContents()).toContainEqual(
@@ -278,10 +283,132 @@ describe("IndexedDbReplicaExecutor", () => {
 		).toEqual({ type: "accountDeleted" });
 	});
 
+	test("guarded Account deletion compares the complete physical Replica before deleting", async () => {
+		const head = (accountId: string): ReplicaHead => ({
+			accountId,
+			userId: `user-${accountId}`,
+			incarnation: `incarnation-${accountId}`,
+			replicaRevision: "0",
+			lockEpoch: "0",
+			failure: null,
+		});
+		const row = (accountId: string, payloadJson = "expected") => ({
+			store: "operations" as const,
+			key: { accountId, recordId: "operation" },
+			payloadJson,
+		});
+		const request = (
+			accountId: string,
+			expectedRows: ReturnType<typeof row>[],
+		) => ({
+			type: "deleteAccountIfUnchanged" as const,
+			accountId,
+			expectedHead: head(accountId),
+			expectedRows,
+		});
+
+		const database = await openRawDatabase();
+		const transaction = database.transaction(
+			["heads", "operations", "share_capabilities", "recovery_input"],
+			"readwrite",
+		);
+		for (const accountId of [
+			"exact",
+			"changed",
+			"extra",
+			"malformed",
+			"recovery",
+			"kept",
+		]) {
+			transaction.objectStore("heads").put(head(accountId));
+		}
+		for (const [accountId, payloadJson] of [
+			["exact", "expected"],
+			["changed", "changed"],
+			["extra", "expected"],
+			["orphan", "expected"],
+			["kept", "unrelated"],
+		] as const) {
+			transaction.objectStore("operations").put({
+				accountId,
+				recordId: "operation",
+				payloadJson,
+			});
+		}
+		transaction.objectStore("operations").put({
+			accountId: "malformed",
+			recordId: "operation",
+			payload: "wrong-field",
+		});
+		transaction.objectStore("share_capabilities").put({
+			accountId: "extra",
+			recordId: "unexpected",
+			payloadJson: "extra",
+		});
+		transaction.objectStore("recovery_input").put({
+			accountId: "recovery",
+			recoveryId: "recovery",
+			kind: "row",
+			store: "operations",
+			recordId: "operation",
+			chunkIndex: 0,
+			payloadJson: "pending",
+		});
+		await transactionDone(transaction);
+		database.close();
+
+		expect(await invoke(request("exact", [row("exact")]))).toEqual({
+			type: "accountDeletion",
+			result: { type: "deleted" },
+		});
+		expect(await invoke(request("exact", [row("exact")]))).toEqual({
+			type: "accountDeletion",
+			result: { type: "alreadyAbsent" },
+		});
+		for (const invalid of [
+			{
+				...request("exact", []),
+				expectedHead: head("different-account"),
+			},
+			request("exact", [row("different-account")]),
+			request("exact", [row("exact"), row("exact", "duplicate")]),
+		]) {
+			await expect(invoke(invalid)).rejects.toThrow("guarded Replica deletion");
+		}
+		for (const [accountId, expectedRows] of [
+			["changed", [row("changed")]],
+			["extra", [row("extra")]],
+			["malformed", []],
+			["orphan", [row("orphan")]],
+			["recovery", []],
+		] as const) {
+			expect(await invoke(request(accountId, [...expectedRows]))).toEqual({
+				type: "accountDeletion",
+				result: { type: "conflict" },
+			});
+		}
+		expect(await invoke({ type: "load", accountId: "kept" })).toMatchObject({
+			type: "loaded",
+			head: { accountId: "kept" },
+			rows: [{ payloadJson: "unrelated" }],
+		});
+
+		const preserved = await rawDatabaseContents();
+		for (const accountId of [
+			"changed",
+			"extra",
+			"malformed",
+			"orphan",
+			"recovery",
+		]) {
+			expect(preserved).toContainEqual(expect.objectContaining({ accountId }));
+		}
+	});
+
 	test("wipes every Replica row including an orphan without recreating the database", async () => {
 		const database = await openRawDatabase();
 		const transaction = database.transaction(
-			["heads", "operations", "share_capabilities"],
+			["heads", "operations", "share_capabilities", "cross_account_moves"],
 			"readwrite",
 		);
 		transaction.objectStore("heads").put({
@@ -301,6 +428,11 @@ describe("IndexedDbReplicaExecutor", () => {
 			accountId: "orphan-account",
 			recordId: "orphan-capability",
 			payloadJson: "opaque",
+		});
+		transaction.objectStore("cross_account_moves").put({
+			accountId: "orphan-cross-account",
+			recordId: "semantic-move",
+			payloadJson: "exact-opaque-move-evidence",
 		});
 		await transactionDone(transaction);
 		database.close();
@@ -853,6 +985,11 @@ describe("IndexedDbReplicaExecutor", () => {
 				"operation-a",
 				'{"ciphertext":"opaque-account-protected-capability"}',
 			),
+			put(
+				"rotationAttempts",
+				"start-a",
+				'{"phase":{"type":"starting"},"authorityGenerationId":"proved-a"}',
+			),
 		];
 		expect(await invoke(commit(prepared(writes)))).toEqual({
 			type: "committed",
@@ -889,7 +1026,7 @@ describe("IndexedDbReplicaExecutor", () => {
 		expect(
 			(await invoke({ type: "load", accountId: "account-a" })).rows,
 		).toEqual(
-			[writes[0], writes[2]].map((write) =>
+			[writes[0], writes[2], writes[3]].map((write) =>
 				write?.type === "put" ? write.row : write,
 			),
 		);

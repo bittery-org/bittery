@@ -97,7 +97,8 @@ async fn repair_bundle_inner(
     source_id: &str,
 ) -> Result<u64, RuntimeError> {
     let current_proof = current_proof(current, identity)?;
-    let (candidate, fingerprint) = read_bundle(port, identity, password, source_id).await?;
+    let (candidate, fingerprint) =
+        read_bundle(port, identity, current, password, source_id).await?;
     let candidate_proof = candidate.proof.as_ref().ok_or_else(invalid)?;
     if candidate_proof.head.replica_revision > current_proof.head.replica_revision {
         return Err(invalid());
@@ -108,7 +109,9 @@ async fn repair_bundle_inner(
         .map(|row| ((row.store, row.record_id.as_str()), row))
         .collect();
     // Recovery does not merge or resurrect acknowledged/cleaned-up accepted work.
-    if current_proof.accepted_rows().count() != candidate_proof.accepted_rows().count() {
+    if current_proof.pending_vault_retirements != candidate_proof.pending_vault_retirements
+        || current_proof.accepted_rows().count() != candidate_proof.accepted_rows().count()
+    {
         return Err(invalid());
     }
     for row in current_proof.accepted_rows() {
@@ -128,7 +131,7 @@ async fn repair_bundle_inner(
                     .get(&(row.store, row.record_id.as_str()))
                     .is_some_and(|candidate| candidate.payload_sha256 == row.payload_sha256)
             });
-        let identical_artifacts = selected_hashes(current)? == selected_hashes(&candidate)?;
+        let identical_artifacts = equivalent_hashes(current)? == equivalent_hashes(&candidate)?;
         if identical_rows && identical_artifacts {
             return Ok(current_proof.head.replica_revision);
         }
@@ -196,7 +199,27 @@ async fn repair_bundle_inner(
                 {
                     return Err(invalid());
                 }
-                add_artifact(port, &identity.account_id, record).await?;
+                match &record.header {
+                    EntryHeader::ProtectedVaultImageKey { .. } => {}
+                    EntryHeader::ProtectedVaultImageMetadata {
+                        operation_id,
+                        publication_id,
+                        ..
+                    } => {
+                        let metadata = candidate
+                            .artifacts
+                            .image_metadata(operation_id, publication_id)
+                            .ok_or_else(invalid)?;
+                        let installed = DecodedRecord {
+                            header: record.header,
+                            body: zeroize::Zeroizing::new(
+                                serde_json::to_vec(metadata).map_err(|_| invalid())?,
+                            ),
+                        };
+                        add_artifact(port, &identity.account_id, installed).await?;
+                    }
+                    _ => add_artifact(port, &identity.account_id, record).await?,
+                }
             }
         }
     }
@@ -214,13 +237,16 @@ async fn repair_bundle_inner(
 async fn read_bundle(
     port: &RecoveryPort,
     identity: &RecoveryIdentity,
+    current: &Snapshot,
     password: &str,
     source_id: &str,
 ) -> Result<(Snapshot, [u8; 32]), RuntimeError> {
     let mut reader = ArchiveReader::open(port, &identity.account_id, source_id, password).await?;
     let manifest = reader.next().await?.ok_or_else(invalid)?;
     validate_manifest(&manifest, identity)?;
-    let mut builder = SnapshotBuilder::new(identity.account_id.clone());
+    let protected_archive = matches!(manifest.header, EntryHeader::Manifest { version: 2, .. });
+    let mut builder = SnapshotBuilder::for_archive(identity.account_id.clone());
+    let mut device_key = None;
     let mut report = None;
     let mut records = 0u32;
     while let Some(record) = reader.next().await? {
@@ -230,7 +256,28 @@ async fn read_bundle(
         if matches!(record.header, EntryHeader::Report) {
             report = Some(super::report::RecoveryReport::decode(&record.body)?);
         } else {
+            if !protected_archive
+                && matches!(
+                    record.header,
+                    EntryHeader::ProtectedVaultImageMetadata { .. }
+                        | EntryHeader::ProtectedVaultImageChunk { .. }
+                        | EntryHeader::ProtectedVaultImageKey { .. }
+                )
+            {
+                return Err(invalid());
+            }
             builder.observe(&record)?;
+            if matches!(record.header, EntryHeader::ProtectedVaultImageKey { .. }) {
+                if device_key.is_none() {
+                    device_key = Some(port.image_device_key().await?);
+                }
+                builder.translate_image_key(
+                    &record,
+                    &current.artifacts,
+                    &identity.user_id,
+                    device_key.as_ref().ok_or_else(invalid)?.key_bytes.as_ref(),
+                )?;
+            }
             records = records.checked_add(1).ok_or_else(invalid)?;
         }
     }
@@ -262,7 +309,7 @@ fn validate_manifest(
 ) -> Result<(), RuntimeError> {
     match &record.header {
         EntryHeader::Manifest {
-            version: 1,
+            version: 1 | 2,
             account_id,
             server_url: Some(server_url),
             user_id: Some(user_id),
@@ -291,6 +338,33 @@ fn selected_hashes(snapshot: &Snapshot) -> Result<HashMap<&str, [u8; 32]>, Runti
             },
         )
         .collect()
+}
+
+/// Portable key records and source Device wrappers are transport evidence. Compare the same
+/// validated binding/ciphertext and destination wrapper after translation for a lost-commit retry.
+fn equivalent_hashes(snapshot: &Snapshot) -> Result<HashMap<String, [u8; 32]>, RuntimeError> {
+    let mut result = HashMap::new();
+    for (key, hash) in selected_hashes(snapshot)? {
+        match serde_json::from_str::<EntryHeader>(key).map_err(|_| invalid())? {
+            EntryHeader::ProtectedVaultImageKey { .. } => {}
+            EntryHeader::ProtectedVaultImageMetadata {
+                operation_id,
+                publication_id,
+                ..
+            } => {
+                let metadata = snapshot
+                    .artifacts
+                    .image_metadata(&operation_id, &publication_id)
+                    .ok_or_else(invalid)?;
+                let bytes = serde_json::to_vec(metadata).map_err(|_| invalid())?;
+                result.insert(key.to_owned(), Sha256::digest(&bytes).into());
+            }
+            _ => {
+                result.insert(key.to_owned(), hash);
+            }
+        }
+    }
+    Ok(result)
 }
 
 pub(crate) async fn rebootstrap(
@@ -574,6 +648,33 @@ async fn add_artifact(
             RecoveryRecord::VaultImageChunk {
                 account_id,
                 operation_id,
+                chunk_index,
+            },
+            Some(std::mem::take(&mut *entry.body)),
+        ),
+        EntryHeader::ProtectedVaultImageMetadata {
+            account_id,
+            operation_id,
+            publication_id,
+        } => (
+            RecoveryRecord::ProtectedVaultImageMetadata {
+                account_id,
+                operation_id,
+                publication_id,
+                metadata_json: text(&mut entry.body)?,
+            },
+            None,
+        ),
+        EntryHeader::ProtectedVaultImageChunk {
+            account_id,
+            operation_id,
+            publication_id,
+            chunk_index,
+        } => (
+            RecoveryRecord::ProtectedVaultImageChunk {
+                account_id,
+                operation_id,
+                publication_id,
                 chunk_index,
             },
             Some(std::mem::take(&mut *entry.body)),

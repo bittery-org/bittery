@@ -298,7 +298,7 @@ async fn download_rejects_noncanonical_sink_capabilities_before_host_or_network(
 }
 
 #[tokio::test]
-async fn download_claims_then_discards_the_capability_for_every_pre_authority_exit() {
+async fn download_requires_target_authority_before_claim_and_discards_every_claimed_exit() {
     for failure in [
         "cancelled",
         "account-missing",
@@ -352,6 +352,31 @@ async fn download_claims_then_discards_the_capability_for_every_pre_authority_ex
             .unwrap_err();
 
         let sink = sink.lock().unwrap();
+        if matches!(failure, "account-missing" | "attachment-missing") {
+            assert!(
+                sink.claims.is_empty(),
+                "unknown target authority must not consume a host capability"
+            );
+            assert!(sink.begins.is_empty());
+            assert_eq!(
+                sink.discards, 0,
+                "unused selections remain owned by host finally/release"
+            );
+            assert_eq!(
+                harness.server.download_grant_calls.load(Ordering::SeqCst),
+                0
+            );
+            assert_eq!(
+                error.code,
+                if failure == "account-missing" {
+                    RuntimeErrorCode::AccountMissing
+                } else {
+                    RuntimeErrorCode::AuthorityMissing
+                }
+            );
+            continue;
+        }
+
         assert_eq!(
             sink.claims,
             [(
@@ -888,7 +913,10 @@ impl AttachmentServer {
 
 #[async_trait]
 impl SerializedHttpExecutor for AttachmentServer {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         let value: Value = serde_json::from_str(&request_json).unwrap();
         let request = RecordedRequest {
             method: value["method"].as_str().unwrap().to_owned(),
@@ -912,7 +940,19 @@ impl SerializedHttpExecutor for AttachmentServer {
                 .collect(),
         };
         self.requests.lock().unwrap().push(request.clone());
-        let response = if request.url.ends_with("/api/v1/sessions/current/refresh") {
+        let response = if (request.method == "PUT"
+            && request.url.ends_with("/api/v1/travel-mode/hidden-vaults"))
+            || (request.method == "GET" && request.url.ends_with("/api/v1/travel-mode"))
+        {
+            completed(
+                200,
+                serde_json::to_vec(&json!({
+                    "enabled": false, "hiddenVaultIds": [], "enabledAt": null,
+                    "updatedAt": "2023-11-14T22:13:20Z"
+                }))
+                .unwrap(),
+            )
+        } else if request.url.ends_with("/api/v1/sessions/current/refresh") {
             self.refresh_calls.fetch_add(1, Ordering::SeqCst);
             match self.refresh_mode.load(Ordering::SeqCst) {
                 1 => {
@@ -1306,6 +1346,7 @@ impl AttachmentUploadSourcePort for HeldRetryUploadSourcePort {
     async fn claim(
         &self,
         account_id: &AccountId,
+        _vault_id: &str,
         item_id: &str,
         name: &str,
         content_type: &str,
@@ -1341,6 +1382,26 @@ impl AttachmentUploadSourcePort for HeldRetryUploadSourcePort {
         Ok(())
     }
 
+    async fn retire_vaults(
+        &self,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(&self) -> Result<(), AttachmentUploadSourceError> {
         Ok(())
     }
@@ -1350,6 +1411,7 @@ impl AttachmentUploadSourcePort for TestUploadSourcePort {
     async fn claim(
         &self,
         account_id: &AccountId,
+        _vault_id: &str,
         item_id: &str,
         name: &str,
         content_type: &str,
@@ -1376,6 +1438,26 @@ impl AttachmentUploadSourcePort for TestUploadSourcePort {
         Ok(())
     }
     async fn complete_account_retirement(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn retire_vaults(
+        &self,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
         &self,
         _account_id: &AccountId,
     ) -> Result<(), AttachmentUploadSourceError> {
@@ -1731,6 +1813,7 @@ impl AttachmentDownloadSinkPort for TestDownloadSinkPort {
     fn claim(
         &self,
         account_id: &AccountId,
+        _vault_id: &str,
         attachment_id: &str,
         capability_id: &str,
     ) -> Result<Box<dyn AttachmentDownloadSink>, AttachmentDownloadSinkError> {
@@ -1781,6 +1864,26 @@ impl AttachmentDownloadSinkPort for TestDownloadSinkPort {
         Ok(())
     }
 
+    async fn retire_vaults(
+        &self,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        Ok(())
+    }
     async fn retire_runtime(&self) -> Result<(), AttachmentDownloadSinkError> {
         self.state.lock().unwrap().runtime_retirements += 1;
         Ok(())
@@ -2010,6 +2113,19 @@ async fn seeded_attachment_for_category(
     server_category: &str,
     plaintext: Value,
 ) -> AttachmentHarness {
+    seeded_attachment_with_persistence(role, category, server_category, plaintext, |replica| {
+        replica
+    })
+    .await
+}
+
+async fn seeded_attachment_with_persistence(
+    role: AuthorityVaultRole,
+    category: AuthorityItemCategory,
+    server_category: &str,
+    plaintext: Value,
+    wrap: impl FnOnce(Arc<PlainReplica>) -> Arc<dyn crate::replica::SerializedReplicaExecutor>,
+) -> AttachmentHarness {
     let account_id = AccountId::from(ACCOUNT);
     let state = InMemoryReplica::default();
     state
@@ -2112,7 +2228,7 @@ async fn seeded_attachment_for_category(
     let clock = TestClock::new();
     let timer = TestTimer::advancing(Arc::clone(&clock));
     let runtime = Runtime::with_test_dispatch_environment(
-        replica.clone(),
+        wrap(replica.clone()),
         platform,
         server.clone(),
         auth_config(),
@@ -2153,7 +2269,7 @@ fn install_early_upload_source(
 }
 
 #[tokio::test]
-async fn upload_claims_then_closes_the_exact_source_for_every_pre_authority_exit() {
+async fn upload_requires_target_authority_before_claim_and_closes_every_claimed_exit() {
     for failure in [
         "cancelled",
         "account-missing",
@@ -2222,6 +2338,27 @@ async fn upload_claims_then_closes_the_exact_source_for_every_pre_authority_exit
             .await
             .unwrap_err();
 
+        if matches!(failure, "account-missing" | "item-missing") {
+            assert!(
+                claims.lock().unwrap().is_empty(),
+                "unknown target authority must not consume a host capability"
+            );
+            assert_eq!(
+                closed.load(Ordering::SeqCst),
+                0,
+                "unused source belongs to host finally/release"
+            );
+            assert!(harness.server.requests.lock().unwrap().is_empty());
+            assert_eq!(
+                error.code,
+                if failure == "account-missing" {
+                    RuntimeErrorCode::AccountMissing
+                } else {
+                    RuntimeErrorCode::AuthorityMissing
+                }
+            );
+            continue;
+        }
         assert_eq!(
             &*claims.lock().unwrap(),
             &[(
@@ -3135,6 +3272,186 @@ async fn download_sink_write_and_commit_failures_never_publish_partial_plaintext
     }
 }
 
+/// Hold only the acknowledgment of a real true-to-false policy marker commit. The
+/// physical Replica remains authoritative; the Runtime has not received its receipt yet.
+struct PendingClearAcknowledgement {
+    inner: Arc<PlainReplica>,
+    entered: Semaphore,
+    release: Semaphore,
+}
+
+#[async_trait]
+impl crate::replica::SerializedReplicaExecutor for PendingClearAcknowledgement {
+    async fn invoke(&self, request: String) -> Result<String, RuntimeError> {
+        let decoded: crate::replica::ReplicaPersistenceRequest =
+            serde_json::from_str(&request).unwrap();
+        let pending_account = match decoded {
+            crate::replica::ReplicaPersistenceRequest::Commit { prepared } => self
+                .inner
+                .state
+                .snapshot(&prepared.expected.account_id)
+                .filter(|snapshot| snapshot.bootstrap.policy_verification_pending)
+                .map(|snapshot| snapshot.account_id),
+            _ => None,
+        };
+        let result = self.inner.invoke(request).await?;
+        if pending_account.is_some_and(|account| {
+            self.inner
+                .state
+                .snapshot(&account)
+                .is_some_and(|snapshot| !snapshot.bootstrap.policy_verification_pending)
+        }) {
+            self.entered.add_permits(1);
+            self.release.acquire().await.unwrap().forget();
+        }
+        Ok(result)
+    }
+}
+
+#[tokio::test]
+async fn download_finalization_waits_for_acknowledged_policy_admission() {
+    let captured = Arc::new(Mutex::new(None));
+    let capture = captured.clone();
+    let harness = seeded_attachment_with_persistence(
+        AuthorityVaultRole::Owner,
+        AuthorityItemCategory::Login,
+        "login",
+        serde_json::from_str(&super::create::item_plaintext(&draft()).unwrap()).unwrap(),
+        move |inner| {
+            let gate = Arc::new(PendingClearAcknowledgement {
+                inner,
+                entered: Semaphore::new(0),
+                release: Semaphore::new(0),
+            });
+            *capture.lock().unwrap() = Some(gate.clone());
+            gate
+        },
+    )
+    .await;
+    let gate = captured.lock().unwrap().take().unwrap();
+    let metadata = harness
+        .runtime
+        .platform_storage
+        .load_account_metadata(&harness.account_id, &Incarnation::from(INCARNATION))
+        .await
+        .unwrap()
+        .unwrap();
+    harness
+        .runtime
+        .account_display_identities
+        .lock()
+        .unwrap()
+        .insert(harness.account_id.clone(), account_presentation(&metadata));
+    // Saving settings requires an existing verified policy. Obtain that unchanged policy
+    // through the same public authenticated read before admitting the held download.
+    harness
+        .runtime
+        .request(
+            RuntimeRequest::RefreshTravelMode {
+                account_id: harness.account_id.clone(),
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let plaintext = b"forty-two plaintext bytes for atomic sink!";
+    let (transfer, sink) = install_download(&harness, plaintext);
+    transfer.hold_open.store(true, Ordering::SeqCst);
+    let cancellation = RequestCancellation::new();
+    let mut download = tokio::spawn({
+        let runtime = harness.runtime.clone();
+        let account_id = harness.account_id.clone();
+        let cancellation = cancellation.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::DownloadAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        sink_capability_id: "sink-before-policy-clear-ack".into(),
+                    },
+                    cancellation,
+                )
+                .await
+        }
+    });
+    let mut refresh = None;
+    let mut stage = "initial binary admission";
+    let exercise = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        until("download admits its binary read before policy settings save", ||
+            transfer.opens.load(Ordering::SeqCst) > 0).await;
+        refresh = Some(tokio::spawn({
+            let runtime = harness.runtime.clone();
+            let account_id = harness.account_id.clone();
+            async move {
+                runtime.request(RuntimeRequest::SetTravelModeHiddenVaults {
+                    account_id, hidden_vault_ids: Vec::new(),
+                },
+                    RequestCancellation::new()).await
+            }
+        }));
+        stage = "policy clear acknowledgment";
+        gate.entered.acquire().await.unwrap().forget();
+        let status = Arc::new(AttachmentSink::default());
+        let observation = harness.runtime.observe(ObservationRequest::TravelMode {
+            account_id: harness.account_id.clone(),
+        }, status.clone()).unwrap();
+        let still_unverified = status.0.lock().unwrap().iter().any(|projection| matches!(projection,
+            RuntimeProjection::TravelMode(value) if value.enforcement == crate::TravelModeEnforcement::Unverified
+                && value.last_verified_policy.as_ref().is_some_and(|policy| !policy.enabled)));
+        observation.close();
+        // The download was admitted before Pending. It can finish its encrypted transfer,
+        // but only an acknowledged clear may admit its final plaintext output.
+        transfer.open_release.add_permits(2);
+        stage = "download finishing before policy clear acknowledgment";
+        let downloaded = (&mut download).await.unwrap();
+        let (published_before_ack, provisional_before_ack, discards_before_ack) = {
+            let sink = sink.lock().unwrap();
+            (sink.published.clone(), sink.provisional.clone(), sink.discards)
+        };
+        gate.release.add_permits(1);
+        stage = "acknowledged settings result";
+        let refreshed = refresh.as_mut().unwrap().await.unwrap();
+        transfer.hold_open.store(false, Ordering::SeqCst);
+        stage = "fresh download after acknowledgment";
+        let fresh = harness.runtime.request(RuntimeRequest::DownloadAttachment {
+            account_id: harness.account_id.clone(), attachment_id: ATTACHMENT_ID.into(),
+            sink_capability_id: "sink-after-policy-clear-ack".into(),
+        }, RequestCancellation::new()).await;
+        (still_unverified, downloaded, published_before_ack, provisional_before_ack,
+            discards_before_ack, refreshed, fresh)
+    }).await;
+    // Every failure releases the real transport/storage holds before owner teardown.
+    transfer.open_release.add_permits(2);
+    gate.release.add_permits(1);
+    cancellation.cancel();
+    download.abort();
+    if let Some(refresh) = refresh.as_mut() {
+        refresh.abort();
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(5), harness.runtime.close())
+        .await
+        .expect("download and policy holds are released before Close");
+    let (still_unverified, downloaded, published, provisional, discards, refreshed, fresh) =
+        exercise
+            .unwrap_or_else(|_| panic!("public download/policy interleaving stalled at {stage}"));
+    assert!(
+        still_unverified,
+        "held false receipt retains public Unverified status"
+    );
+    assert!(
+        downloaded.is_err(),
+        "unacknowledged policy clear cannot admit an atomic sink commit"
+    );
+    assert!(published.is_none() && provisional.is_empty());
+    assert_eq!(discards, 1);
+    assert!(refreshed.is_ok() && fresh.is_ok());
+    assert_eq!(
+        sink.lock().unwrap().published.as_deref(),
+        Some(plaintext.as_slice())
+    );
+}
+
 #[tokio::test]
 async fn lock_and_close_cancel_and_drain_a_download_while_sink_begin_is_held() {
     for lifecycle in ["lock", "close"] {
@@ -3186,43 +3503,7 @@ async fn lock_and_close_cancel_and_drain_a_download_while_sink_begin_is_held() {
 }
 
 #[tokio::test]
-async fn close_cancels_and_drains_a_held_sink_begin_for_an_uninstalled_account() {
-    let harness = seeded_attachment().await;
-    let (_, sink) = install_download(&harness, b"forty-two plaintext bytes for atomic sink!");
-    let begin_started = {
-        let mut state = sink.lock().unwrap();
-        state.hold_begin = true;
-        Arc::clone(&state.begin_started)
-    };
-    let download = {
-        let runtime = Arc::clone(&harness.runtime);
-        tokio::spawn(async move {
-            runtime
-                .request(
-                    RuntimeRequest::DownloadAttachment {
-                        account_id: AccountId::from("missing-account"),
-                        attachment_id: ATTACHMENT_ID.into(),
-                        sink_capability_id: "sink-missing-held-begin".into(),
-                    },
-                    RequestCancellation::new(),
-                )
-                .await
-        })
-    };
-    until("missing Account sink begin is held", || {
-        begin_started.load(Ordering::SeqCst)
-    })
-    .await;
-    harness.runtime.close().await;
-    assert_eq!(
-        download.await.unwrap().unwrap_err().code,
-        RuntimeErrorCode::Cancelled
-    );
-    assert_eq!(sink.lock().unwrap().discards, 1);
-}
-
-#[tokio::test]
-async fn wipe_globally_drains_a_held_missing_account_sink_before_host_retirement() {
+async fn wipe_drains_a_held_claim_before_host_retirement() {
     let harness = seeded_attachment().await;
     *harness.runtime.attachment_move_lifecycle.lock().unwrap() =
         Some(Arc::new(AttachmentMoveLifecycle::new(
@@ -3245,11 +3526,12 @@ async fn wipe_globally_drains_a_held_missing_account_sink_before_host_retirement
     };
     let download = tokio::spawn({
         let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
         async move {
             runtime
                 .request(
                     RuntimeRequest::DownloadAttachment {
-                        account_id: AccountId::from("arbitrary-missing-account"),
+                        account_id,
                         attachment_id: ATTACHMENT_ID.into(),
                         sink_capability_id: "sink-wipe-missing-held-begin".into(),
                     },
@@ -3258,7 +3540,7 @@ async fn wipe_globally_drains_a_held_missing_account_sink_before_host_retirement
                 .await
         }
     });
-    until("missing Account sink begin is held", || {
+    until("known Account sink begin is held", || {
         begin_started.load(Ordering::SeqCst)
     })
     .await;
@@ -3270,7 +3552,7 @@ async fn wipe_globally_drains_a_held_missing_account_sink_before_host_retirement
                 .await
         }
     });
-    until("Wipe cancellation reaches missing Account discard", || {
+    until("Wipe cancellation reaches claimed sink discard", || {
         discard_started.load(Ordering::SeqCst)
     })
     .await;
@@ -3288,15 +3570,20 @@ async fn wipe_globally_drains_a_held_missing_account_sink_before_host_retirement
 }
 
 #[test]
-fn idle_unresolved_foreground_scopes_are_collected_without_weakening_a_live_guard() {
+fn idle_foreground_scopes_are_collected_without_weakening_a_live_guard() {
     let registry = super::foreground_attachment_lifecycle::ForegroundAttachmentRegistry::default();
     let live = registry
-        .register_unresolved(&AccountId::from("live-account"), RequestCancellation::new())
+        .register(
+            &AccountId::from("live-account"),
+            &Incarnation::from("incarnation"),
+            RequestCancellation::new(),
+        )
         .unwrap();
     for index in 0..4_096 {
         let guard = registry
-            .register_unresolved(
+            .register(
                 &AccountId::from(format!("arbitrary-{index}")),
+                &Incarnation::from("incarnation"),
                 RequestCancellation::new(),
             )
             .unwrap();
@@ -4555,6 +4842,7 @@ async fn active_attachment_move_refuses_delete_before_transport() {
                 account_id: harness.account_id.clone(),
                 item_id: ITEM_ID.into(),
                 target_vault_id: "vault-2".into(),
+                target_account_id: None,
             },
             RequestCancellation::new(),
         )
@@ -5687,6 +5975,14 @@ async fn same_item_renames_have_one_writer() {
 #[tokio::test]
 async fn durable_item_acceptance_cannot_create_an_overlay_behind_rename_admission() {
     let harness = seeded_attachment().await;
+    let current_guard = || {
+        harness.runtime.unlocked_items.lock().unwrap()[&harness.account_id]
+            .iter()
+            .find(|item| item.item_id == ITEM_ID)
+            .and_then(|item| item.edit_guard.clone())
+            .expect("the current Item projection must carry its edit guard")
+    };
+    let selected_guard = current_guard();
     harness.server.hold_patch.store(true, Ordering::SeqCst);
     let rename_runtime = Arc::clone(&harness.runtime);
     let rename_account = harness.account_id.clone();
@@ -5709,10 +6005,12 @@ async fn durable_item_acceptance_cannot_create_an_overlay_behind_rename_admissio
 
     let acceptance_runtime = Arc::clone(&harness.runtime);
     let acceptance_account = harness.account_id.clone();
+    let stale_guard = selected_guard.clone();
     let acceptance = tokio::spawn(async move {
         acceptance_runtime
             .request(
                 RuntimeRequest::UpdateItem {
+                    guard: stale_guard,
                     account_id: acceptance_account,
                     item_id: ITEM_ID.into(),
                     draft: draft(),
@@ -5740,17 +6038,41 @@ async fn durable_item_acceptance_cannot_create_an_overlay_behind_rename_admissio
         rename.await.unwrap().unwrap(),
         RuntimeResponse::AttachmentRenamed { .. }
     ));
-    assert!(matches!(
-        acceptance.await.unwrap().unwrap(),
-        RuntimeResponse::Accepted { .. }
-    ));
+    let refusal = acceptance.await.unwrap().unwrap_err();
+    assert_eq!(refusal.code, RuntimeErrorCode::InvariantViolation);
     let after = harness
         .runtime
         .replica()
         .snapshot(&harness.account_id)
         .unwrap();
-    assert_eq!(after.operations.len(), 1);
-    assert_eq!(after.items.len(), 1);
+    assert!(after.operations.is_empty());
+    assert!(after.items.is_empty());
+
+    let fresh_guard = current_guard();
+    assert_ne!(fresh_guard.item_version, selected_guard.item_version);
+    assert!(matches!(
+        harness
+            .runtime
+            .request(
+                RuntimeRequest::UpdateItem {
+                    guard: fresh_guard,
+                    account_id: harness.account_id.clone(),
+                    item_id: ITEM_ID.into(),
+                    draft: draft(),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap(),
+        RuntimeResponse::Accepted { .. }
+    ));
+    let accepted = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    assert_eq!(accepted.operations.len(), 1);
+    assert_eq!(accepted.items.len(), 1);
 }
 
 #[tokio::test]
@@ -5855,6 +6177,7 @@ async fn active_item_operation_refuses_rename_without_patch_or_false_publication
         .runtime
         .request(
             RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(harness.account_id.clone(), ITEM_ID),
                 account_id: harness.account_id.clone(),
                 item_id: ITEM_ID.into(),
                 draft: draft(),
@@ -5906,6 +6229,7 @@ async fn active_attachment_move_overlay_refuses_rename_without_patch_or_false_pu
                 account_id: harness.account_id.clone(),
                 item_id: ITEM_ID.into(),
                 target_vault_id: "vault-2".into(),
+                target_account_id: None,
             },
             RequestCancellation::new(),
         )
@@ -6267,6 +6591,202 @@ async fn begun_rename_callback_can_complete_each_lifecycle_reentrantly_cross_thr
         assert_eq!(renamed_callbacks, 1, "lifecycle {lifecycle}");
         assert!(publications.len() > publications_before);
     }
+}
+
+async fn rename_publication_respects_pending_policy(pending_other_account: bool) {
+    let harness = seeded_attachment().await;
+    let pending_account = if pending_other_account {
+        let account = AccountId::from("account-pending-other");
+        harness
+            .replica
+            .state
+            .install(
+                account.clone(),
+                USER.into(),
+                Incarnation::from("other-incarnation"),
+            )
+            .unwrap();
+        crate::test_fixtures::seed_ready_personal_vault(&harness.replica.state, &account).unwrap();
+        harness
+            .runtime
+            .replica()
+            .load(&account)
+            .await
+            .unwrap()
+            .unwrap();
+        harness.runtime.unlock_account(&account).await.unwrap();
+        account
+    } else {
+        harness.account_id.clone()
+    };
+    let sink = Arc::new(AttachmentSink::default());
+    let _observation = harness
+        .runtime
+        .observe(ObservationRequest::WritableVaultCatalog, sink.clone())
+        .unwrap();
+    assert!(matches!(sink.0.lock().unwrap().last(),
+        Some(RuntimeProjection::WritableVaultCatalog(catalog))
+            if catalog.vaults.iter().any(|vault| vault.account_id == pending_account)));
+    let confirmed_catalog = match sink.0.lock().unwrap().last().unwrap() {
+        RuntimeProjection::WritableVaultCatalog(catalog) => catalog.clone(),
+        _ => unreachable!("catalog observer received another projection"),
+    };
+    let publications_before = sink.0.lock().unwrap().len();
+    let reached = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    struct ReleaseOnExit(Arc<AtomicBool>);
+    impl Drop for ReleaseOnExit {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let _release_on_exit = ReleaseOnExit(Arc::clone(&release));
+    harness
+        .runtime
+        .foreground_attachments
+        .set_before_publication_admission_hook(Some(Arc::new({
+            let reached = Arc::clone(&reached);
+            let release = Arc::clone(&release);
+            move || {
+                reached.store(true, Ordering::SeqCst);
+                while !release.load(Ordering::SeqCst) {
+                    std::thread::yield_now();
+                }
+            }
+        })));
+    let rename = std::thread::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        move || {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(runtime.request(
+                    RuntimeRequest::RenameAttachment {
+                        account_id,
+                        attachment_id: ATTACHMENT_ID.into(),
+                        name: "committed-before-policy-pending.txt".into(),
+                    },
+                    RequestCancellation::new(),
+                ))
+        }
+    });
+    until(
+        "Rename prepares catalog before foreground publication admission",
+        || reached.load(Ordering::SeqCst),
+    )
+    .await;
+    let revision_before_pending = harness.runtime.device_revision.load(Ordering::SeqCst);
+    {
+        let execution = harness
+            .runtime
+            .account_execution_lock(&pending_account)
+            .unwrap();
+        let _execution = execution.lock().await;
+        let snapshot = harness.runtime.require_snapshot(&pending_account).unwrap();
+        harness
+            .runtime
+            .begin_travel_policy_refresh_fenced(&snapshot)
+            .await
+            .unwrap();
+    }
+    // Establishing pending now publishes its own nonplaintext state. The refused catalog
+    // and its later retry must share this revision, not the older prepared Rename revision.
+    let catalog_revision = harness.runtime.device_revision.load(Ordering::SeqCst);
+    release.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        rename.join().unwrap().unwrap(),
+        RuntimeResponse::AttachmentRenamed { .. }
+    ));
+    harness
+        .runtime
+        .foreground_attachments
+        .set_before_publication_admission_hook(None);
+    // Pending-state publication queues behind the held Rename frame. Once delivery resumes,
+    // only its filtered catalog may begin; the stale full catalog must still be refused.
+    let publications_after_pending = {
+        let publications = sink.0.lock().unwrap();
+        assert_eq!(
+            publications.len(),
+            publications_before + 1,
+            "only the filtered pending catalog may publish; the Attachment loan must not bypass any Account's policy gate"
+        );
+        let Some(RuntimeProjection::WritableVaultCatalog(catalog)) = publications.last() else {
+            panic!("catalog observer received another projection");
+        };
+        assert_eq!(catalog.revision, catalog_revision);
+        assert_eq!(
+            catalog.vaults,
+            confirmed_catalog
+                .vaults
+                .iter()
+                .filter(|vault| vault.account_id != pending_account)
+                .cloned()
+                .collect::<Vec<_>>(),
+            "pending publication contains only the unchanged unrelated Account Vaults"
+        );
+        publications.len()
+    };
+    assert!(catalog_revision > revision_before_pending);
+
+    // Isolate temporary admission from the later verified-policy installation capability: restore
+    // this fixture's unchanged policy through the existing bit/registry owners, without advancing
+    // catalog revision or replacing delivery tokens. No HTTP verification is claimed here.
+    {
+        let execution = harness
+            .runtime
+            .account_execution_lock(&pending_account)
+            .unwrap();
+        let _execution = execution.lock().await;
+        let snapshot = harness.runtime.require_snapshot(&pending_account).unwrap();
+        assert!(matches!(
+            harness
+                .runtime
+                .replica
+                .set_policy_verification_pending(
+                    crate::replica::BootstrapGuard {
+                        account_id: snapshot.account_id.clone(),
+                        user_id: snapshot.user_id.clone(),
+                        incarnation: snapshot.incarnation.clone(),
+                        expected_replica_revision: snapshot.revision,
+                        expected_lock_epoch: snapshot.lock_epoch,
+                    },
+                    false
+                )
+                .await
+                .unwrap(),
+            PlanResult::Applied { .. }
+        ));
+        let _publication = harness.runtime.publication.lock().unwrap();
+        harness
+            .runtime
+            .foreground_attachments
+            .set_policy_verification_pending(&pending_account, &snapshot.incarnation, false);
+        harness
+            .runtime
+            .pause_travel_plaintext_delivery(&pending_account, false);
+    }
+    harness.runtime.publish_all();
+    let publications = sink.0.lock().unwrap();
+    assert_eq!(
+        publications.len(),
+        publications_after_pending + 1,
+        "a refused foreground catalog must be retryable after admission resumes at the same revision"
+    );
+    assert!(
+        matches!(publications.last(), Some(RuntimeProjection::WritableVaultCatalog(catalog))
+        if catalog.revision == catalog_revision && catalog.vaults == confirmed_catalog.vaults)
+    );
+}
+
+#[tokio::test]
+async fn foreground_catalog_cannot_bypass_another_accounts_pending_policy() {
+    rename_publication_respects_pending_policy(true).await;
+}
+
+#[tokio::test]
+async fn refused_foreground_catalog_resumes_at_the_same_revision_after_pending_policy() {
+    rename_publication_respects_pending_policy(false).await;
 }
 
 #[tokio::test]
@@ -7092,4 +7612,154 @@ fn attachment_page_response(server: &AttachmentServer, url: &str) -> Value {
         body.resize(4 * 1024 * 1024 - 16 * 1024, b' ');
     }
     completed(200, body)
+}
+
+struct RetiringClaimSourcePort {
+    inner: TestUploadSourcePort,
+    started: AtomicBool,
+    release: Semaphore,
+}
+
+#[async_trait]
+impl AttachmentUploadSourcePort for RetiringClaimSourcePort {
+    async fn claim(
+        &self,
+        account: &AccountId,
+        vault: &str,
+        item: &str,
+        name: &str,
+        content_type: &str,
+        capability: &str,
+        size: u64,
+    ) -> Result<Box<dyn AttachmentUploadSource>, AttachmentUploadSourceError> {
+        self.started.store(true, Ordering::SeqCst);
+        self.release.acquire().await.unwrap().forget();
+        self.inner
+            .claim(account, vault, item, name, content_type, capability, size)
+            .await
+    }
+    async fn retire_vaults(
+        &self,
+        _account: &AccountId,
+        _vaults: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        self.release.add_permits(1);
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        account: &AccountId,
+        vaults: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        self.inner.complete_vault_retirement(account, vaults).await
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        account: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        self.inner.forget_account_vault_retirements(account).await
+    }
+    async fn retire_account(&self, account: &AccountId) -> Result<(), AttachmentUploadSourceError> {
+        self.inner.retire_account(account).await
+    }
+    async fn complete_account_retirement(
+        &self,
+        account: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        self.inner.complete_account_retirement(account).await
+    }
+    async fn retire_runtime(&self) -> Result<(), AttachmentUploadSourceError> {
+        self.inner.retire_runtime().await
+    }
+}
+
+#[tokio::test]
+async fn selective_retirement_starts_host_cleanup_before_waiting_for_a_held_claim() {
+    let harness = seeded_attachment().await;
+    let closed = Arc::new(AtomicUsize::new(0));
+    let sources = Arc::new(RetiringClaimSourcePort {
+        inner: TestUploadSourcePort {
+            bytes: b"held plaintext".to_vec(),
+            claims: Arc::new(Mutex::new(Vec::new())),
+            closed: Arc::clone(&closed),
+        },
+        started: AtomicBool::new(false),
+        release: Semaphore::new(0),
+    });
+    harness
+        .runtime
+        .install_attachment_upload(AttachmentUploadFacade::new(
+            sources.clone(),
+            Arc::new(TestUploadTransfer {
+                bytes: Arc::new(Mutex::new(Vec::new())),
+                expected: Arc::new(AtomicUsize::new(0)),
+                finish_outcome: TestUploadFinishOutcome::Uploaded,
+            }),
+        ));
+    let upload = tokio::spawn({
+        let runtime = Arc::clone(&harness.runtime);
+        let account_id = harness.account_id.clone();
+        async move {
+            runtime
+                .request(
+                    RuntimeRequest::UploadAttachment {
+                        account_id,
+                        item_id: ITEM_ID.into(),
+                        name: "held.txt".into(),
+                        content_type: "text/plain".into(),
+                        file_size: 14,
+                        source_capability_id: "held-claim".into(),
+                    },
+                    RequestCancellation::new(),
+                )
+                .await
+        }
+    });
+    until("upload claim is held", || {
+        sources.started.load(Ordering::SeqCst)
+    })
+    .await;
+    let retirement = harness
+        .runtime
+        .foreground_attachments
+        .begin_vault_retirement(
+            &harness.account_id,
+            &harness
+                .runtime
+                .replica
+                .snapshot(&harness.account_id)
+                .unwrap()
+                .incarnation,
+            &[TEST_VAULT_ID.into()],
+            super::foreground_attachment_lifecycle::VaultRetirementProof::DurableJournal {
+                revision: harness
+                    .runtime
+                    .replica
+                    .snapshot(&harness.account_id)
+                    .unwrap()
+                    .revision,
+            },
+        )
+        .unwrap();
+    let drain = tokio::spawn(async move { retirement.drain().await });
+    tokio::task::yield_now().await;
+    assert!(
+        !drain.is_finished(),
+        "the admitted claim still owns its foreground loan"
+    );
+    // The consuming retirement driver must start both owners before waiting for either drain.
+    sources
+        .retire_vaults(&harness.account_id, &[TEST_VAULT_ID.into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        upload.await.unwrap().unwrap_err().code,
+        RuntimeErrorCode::Cancelled
+    );
+    drain.await.unwrap();
+    assert_eq!(
+        closed.load(Ordering::SeqCst),
+        1,
+        "a late claimed handle is closed before foreground cleanup completes"
+    );
 }

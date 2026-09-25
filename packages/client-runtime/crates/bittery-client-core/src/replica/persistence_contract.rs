@@ -1,11 +1,12 @@
 use super::domain::{
     apply_plan, AccountReplica, AttachmentMovePreparationRecord, AuthorityItemRecord,
     AuthorityVaultRecord, BootstrapAuthority, BootstrapGenerationId, BootstrapGenerationRecord,
-    BootstrapPageReceipt, GuardedCommitPlan, ObservedOutcome, OperationReceiptRecord,
-    OperationRecord, PlanMutation, PlanResult, ProtectedShareCapabilityRecord, ReplicaItemRecord,
-    ReplicaSnapshot, ReplicaState, SyncCursor,
+    BootstrapPageReceipt, CrossAccountMoveEntry, GuardedCommitPlan, ObservedOutcome,
+    OperationReceiptRecord, OperationRecord, PlanMutation, PlanResult,
+    ProtectedShareCapabilityRecord, ReplicaItemRecord, ReplicaSnapshot, ReplicaState,
+    RotationAttemptRecord, SyncCursor,
 };
-use crate::wire::decimal_u64;
+use crate::wire::{decimal_u64, map_only_serde};
 use crate::{protocol::Incarnation, AccountId, RuntimeError, RuntimeErrorCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -38,17 +39,154 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum ReplicaStore {
+pub enum ReplicaStore {
     OptimisticItems,
     Operations,
+    CrossAccountMoves,
     AttachmentMovePreparations,
     ShareCapabilities,
     OperationReceipts,
+    RotationAttempts,
     ReplicaMetadata,
     BootstrapGenerations,
     BootstrapPages,
     AuthorityVaults,
     AuthorityItems,
+}
+
+impl ReplicaStore {
+    pub(crate) fn physical_id(self) -> i64 {
+        match self {
+            Self::OptimisticItems => 0,
+            Self::Operations => 1,
+            Self::OperationReceipts => 2,
+            Self::ReplicaMetadata => 3,
+            Self::BootstrapGenerations => 4,
+            Self::BootstrapPages => 5,
+            Self::AuthorityVaults => 6,
+            Self::AuthorityItems => 7,
+            Self::AttachmentMovePreparations => 8,
+            Self::ShareCapabilities => 9,
+            Self::CrossAccountMoves => 10,
+            Self::RotationAttempts => 11,
+        }
+    }
+}
+
+/// Physical presence only. A row does not require a corresponding Account head.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "persistence-contract-schema",
+    schemars(rename = "ReplicaPhysicalKey")
+)]
+#[serde(remote = "Self")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum ReplicaPhysicalKey {
+    Head {
+        #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
+        account_id: AccountId,
+    },
+    Row {
+        #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
+        account_id: AccountId,
+        store: ReplicaStore,
+        record_id: String,
+    },
+}
+
+impl ReplicaPhysicalKey {
+    pub(crate) fn physical_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        super::inventory::compare(self, other)
+    }
+}
+
+/// Admission derives permitted physical tuples through the ordinary Replica row encoder. A
+/// second handwritten table mapping would miss new row owners or disagree with their exact keys.
+pub(crate) fn snapshot_physical_keys(
+    snapshot: &ReplicaSnapshot,
+) -> Result<Vec<ReplicaPhysicalKey>, RuntimeError> {
+    let mut keys = vec![ReplicaPhysicalKey::Head {
+        account_id: snapshot.account_id.clone(),
+    }];
+    keys.extend(
+        snapshot_rows(snapshot.clone())?
+            .into_iter()
+            .map(|row| ReplicaPhysicalKey::Row {
+                account_id: row.key.account_id,
+                store: row.store,
+                record_id: row.key.record_id,
+            }),
+    );
+    keys.sort_by(ReplicaPhysicalKey::physical_cmp);
+    if keys.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(replica_invariant(
+            "Replica admission plan repeats a physical key",
+        ));
+    }
+    Ok(keys)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ReplicaInventoryFamily {
+    Replica,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "persistence-contract-schema",
+    schemars(rename = "ReplicaInventoryContinuation")
+)]
+#[serde(remote = "Self")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum ReplicaInventoryContinuation {
+    More { cursor: String },
+    // Keep this a struct so Serde enforces the closed control even when it has no fields.
+    End {},
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "persistence-contract-schema",
+    schemars(rename = "ReplicaInventoryPage")
+)]
+#[serde(remote = "Self")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ReplicaInventoryPage {
+    #[cfg_attr(
+        feature = "persistence-contract-schema",
+        schemars(schema_with = "inventory_version_schema")
+    )]
+    pub version: u32,
+    pub family: ReplicaInventoryFamily,
+    #[cfg_attr(feature = "persistence-contract-schema", schemars(length(max = 128)))]
+    pub entries: Vec<ReplicaPhysicalKey>,
+    pub continuation: ReplicaInventoryContinuation,
+}
+
+map_only_serde!(
+    ReplicaPhysicalKey,
+    ReplicaInventoryContinuation,
+    ReplicaInventoryPage,
+);
+
+#[cfg(feature = "persistence-contract-schema")]
+fn inventory_version_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "integer", "const": 1 })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,7 +210,7 @@ pub(crate) struct StoredReplicaRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ReplicaHead {
+pub struct ReplicaHead {
     #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
     pub account_id: AccountId,
     pub user_id: String,
@@ -234,6 +372,10 @@ pub(crate) struct PreparedReplicaCommit {
     deny_unknown_fields
 )]
 pub(crate) enum ReplicaPersistenceRequest {
+    Inventory {
+        #[serde(deserialize_with = "required_option::deserialize")]
+        cursor: Option<String>,
+    },
     Load {
         #[cfg_attr(feature = "persistence-contract-schema", schemars(with = "String"))]
         account_id: AccountId,
@@ -246,6 +388,16 @@ pub(crate) enum ReplicaPersistenceRequest {
     },
     AdvanceLockEpoch {
         prepared: PreparedLockEpochAdvance,
+    },
+    DeleteAccountIfUnchanged {
+        #[serde(deserialize_with = "deserialize_non_empty_account_id")]
+        #[cfg_attr(
+            feature = "persistence-contract-schema",
+            schemars(with = "String", length(min = 1))
+        )]
+        account_id: AccountId,
+        expected_head: ReplicaHead,
+        expected_rows: Vec<StoredReplicaRow>,
     },
     DeleteAccount {
         #[serde(deserialize_with = "deserialize_non_empty_account_id")]
@@ -267,6 +419,10 @@ pub(crate) enum ReplicaPersistenceRequest {
     deny_unknown_fields
 )]
 pub(crate) enum ReplicaPersistenceResponse {
+    AccountDeletion {
+        result: ReplicaAccountDeletionResult,
+    },
+    InventoryPage(ReplicaInventoryPage),
     Loaded {
         #[cfg_attr(
             feature = "persistence-contract-schema",
@@ -312,7 +468,7 @@ pub(super) struct PreparedCommitOutcome {
     pub(super) next_snapshot: ReplicaSnapshot,
 }
 
-pub(super) fn prepare_install(
+pub(crate) fn prepare_install(
     current: Option<&ReplicaSnapshot>,
     account_id: AccountId,
     user_id: String,
@@ -347,10 +503,23 @@ pub(super) fn prepare_install(
             )
         }
     };
-    let writes = match current {
+    let mut writes = match current {
         Some(current) => bootstrap_clear_writes(&current.account_id, &current.bootstrap)?,
         None => Vec::new(),
     };
+    if current.is_some_and(|current| current.bootstrap.policy_verification_pending) {
+        let retained = BootstrapAuthority {
+            policy_verification_pending: true,
+            ..BootstrapAuthority::default()
+        };
+        for row in bootstrap_rows(&account_id, &retained)? {
+            // Replace the disposable authority head with a Cold control-only head, not two
+            // conflicting writes for the same physical row in one installation transaction.
+            writes.retain(|write| !matches!(write,
+                PreparedReplicaWrite::Delete { store, key } if store == &row.store && key == &row.key));
+            writes.push(PreparedReplicaWrite::Put { row });
+        }
+    }
     Ok(PreparedReplicaInstall {
         expected,
         next_head: ReplicaHead {
@@ -380,14 +549,43 @@ pub(super) fn prepare_commit(
     }
 
     let next = apply_plan(current.clone(), plan.clone())?;
-    let mut writes = Vec::with_capacity(plan.mutations.len());
-    for mutation in &plan.mutations {
+    let needs_work_diff = plan.mutations.iter().any(|mutation| {
+        matches!(
+            mutation,
+            PlanMutation::RetireVaults { .. }
+                | PlanMutation::CompleteVaultRetirements { .. }
+                | PlanMutation::AdmitCrossAccountMove { .. }
+                | PlanMutation::AdmitLegacySourceUnavailableMove { .. }
+                | PlanMutation::AdvanceCrossAccountMove { .. }
+                | PlanMutation::RetireCrossAccountMoveDestination { .. }
+                | PlanMutation::ReauthorizeCrossAccountMoveDestination { .. }
+                | PlanMutation::ReauthorizeAndCompleteLegacyCrossAccountMove { .. }
+                | PlanMutation::ReauthorizeLegacyCrossAccountMoveFromTrashedCache { .. }
+                | PlanMutation::CommitAttachmentAuthority { .. }
+                | PlanMutation::BindRotationStart { .. }
+                | PlanMutation::ReconcileRotationStart { .. }
+                | PlanMutation::BindRotationManifest { .. }
+                | PlanMutation::AcknowledgeRotationAttempt { .. }
+                | PlanMutation::ConsumeRotationAttempt { .. }
+                | PlanMutation::AcceptRotationFinalize { .. }
+                | PlanMutation::ReconcileRotationFinalize { .. }
+                | PlanMutation::CompleteRotationRefresh { .. }
+        )
+    });
+    let mut writes = if needs_work_diff {
+        accepted_work_diff(&current, &next)?
+    } else {
+        Vec::with_capacity(plan.mutations.len())
+    };
+    for mutation in plan.mutations.iter().filter(|_| !needs_work_diff) {
         // A completion touches several stores at once, so it contributes several writes.
         if let PlanMutation::ReconcileAppliedCreate { outcome, .. }
         | PlanMutation::ReconcileItemMutation { outcome, .. }
         | PlanMutation::RetainRejection { outcome, .. }
         | PlanMutation::ReconcileShareOutcome { outcome, .. }
         | PlanMutation::ReconcileCreateVault { outcome, .. }
+        | PlanMutation::ReconcileVaultMutation { outcome }
+        | PlanMutation::ReconcileRetainedResult { outcome }
         | PlanMutation::ReconcileImportItems { outcome, .. } = mutation
         {
             writes.extend(completion_writes(
@@ -404,11 +602,6 @@ pub(super) fn prepare_commit(
         }
         if matches!(mutation, PlanMutation::AdvanceSyncPageCursor { .. }) {
             // The Cursor lives in Bootstrap metadata, whose exact diff is collected below.
-            continue;
-        }
-        if matches!(mutation, PlanMutation::CommitAttachmentAuthority { .. }) {
-            // Attachment authority lives in the active Bootstrap Item row; its exact diff is
-            // collected below with the same guarded commit.
             continue;
         }
         if matches!(mutation, PlanMutation::RemoveAllProtectedShareCapabilities) {
@@ -541,18 +734,20 @@ pub(super) fn prepare_commit(
                     )?,
                 }
             }
-            PlanMutation::RescheduleOperation(operation)
-            | PlanMutation::CheckpointCreateVault(operation) => {
+            PlanMutation::RescheduleOperation(OperationRecord { operation_id, .. })
+            | PlanMutation::CheckpointCreateVault(OperationRecord { operation_id, .. })
+            | PlanMutation::ProtectVaultImage { operation_id, .. }
+            | PlanMutation::CompleteVaultImageRawCleanup { operation_id, .. } => {
                 let synchronized = next
                     .operations
                     .iter()
-                    .find(|candidate| candidate.operation_id == operation.operation_id)
+                    .find(|candidate| candidate.operation_id == *operation_id)
                     .ok_or_else(|| replica_invariant("rescheduled Operation disappeared"))?;
                 PreparedReplicaWrite::Put {
                     row: stored_row(
                         ReplicaStore::Operations,
                         &plan.account_id,
-                        &operation.operation_id,
+                        operation_id,
                         synchronized,
                     )?,
                 }
@@ -571,13 +766,32 @@ pub(super) fn prepare_commit(
                     record_id: operation_id.clone(),
                 },
             },
-            PlanMutation::ReconcileAppliedCreate { .. }
+            PlanMutation::AdmitCrossAccountMove { .. }
+            | PlanMutation::AdmitLegacySourceUnavailableMove { .. }
+            | PlanMutation::AdvanceCrossAccountMove { .. }
+            | PlanMutation::RetireCrossAccountMoveDestination { .. }
+            | PlanMutation::ReauthorizeCrossAccountMoveDestination { .. }
+            | PlanMutation::ReauthorizeAndCompleteLegacyCrossAccountMove { .. }
+            | PlanMutation::ReauthorizeLegacyCrossAccountMoveFromTrashedCache { .. }
+            | PlanMutation::RetireVaults { .. }
+            | PlanMutation::CompleteVaultRetirements { .. }
+            | PlanMutation::ReconcileAppliedCreate { .. }
             | PlanMutation::ReconcileItemMutation { .. }
             | PlanMutation::CommitAttachmentAuthority { .. }
             | PlanMutation::RetainRejection { .. }
             | PlanMutation::ReconcileShareOutcome { .. }
             | PlanMutation::ReconcileCreateVault { .. }
+            | PlanMutation::ReconcileVaultMutation { .. }
+            | PlanMutation::ReconcileRetainedResult { .. }
             | PlanMutation::ReconcileImportItems { .. }
+            | PlanMutation::BindRotationStart { .. }
+            | PlanMutation::ReconcileRotationStart { .. }
+            | PlanMutation::BindRotationManifest { .. }
+            | PlanMutation::AcknowledgeRotationAttempt { .. }
+            | PlanMutation::ConsumeRotationAttempt { .. }
+            | PlanMutation::AcceptRotationFinalize { .. }
+            | PlanMutation::ReconcileRotationFinalize { .. }
+            | PlanMutation::CompleteRotationRefresh { .. }
             | PlanMutation::AdvanceSyncPageCursor { .. }
             | PlanMutation::FailAccount { .. }
             | PlanMutation::FreezeAttachmentMoveRejection { .. }
@@ -732,15 +946,17 @@ fn stored_row<T: Serialize>(
     })
 }
 
-pub(super) fn snapshot_rows(
+pub(crate) fn snapshot_rows(
     snapshot: ReplicaSnapshot,
 ) -> Result<Vec<StoredReplicaRow>, RuntimeError> {
     let mut rows = Vec::with_capacity(
         snapshot.items.len()
             + snapshot.operations.len()
+            + snapshot.cross_account_moves.len()
             + snapshot.share_capabilities.len()
             + snapshot.attachment_move_preparations.len()
             + snapshot.receipts.len()
+            + snapshot.rotation_attempts.len()
             + snapshot.bootstrap.row_count(),
     );
     for item in snapshot.items {
@@ -757,6 +973,14 @@ pub(super) fn snapshot_rows(
             &snapshot.account_id,
             &operation.operation_id,
             &operation,
+        )?);
+    }
+    for record in snapshot.cross_account_moves {
+        rows.push(stored_row(
+            ReplicaStore::CrossAccountMoves,
+            &snapshot.account_id,
+            record.operation_id(),
+            &record,
         )?);
     }
     for capability in snapshot.share_capabilities {
@@ -783,6 +1007,14 @@ pub(super) fn snapshot_rows(
             &receipt,
         )?);
     }
+    for attempt in snapshot.rotation_attempts {
+        rows.push(stored_row(
+            ReplicaStore::RotationAttempts,
+            &snapshot.account_id,
+            &attempt.start_operation_id,
+            &attempt,
+        )?);
+    }
     rows.extend(bootstrap_rows(&snapshot.account_id, &snapshot.bootstrap)?);
     Ok(rows)
 }
@@ -804,7 +1036,7 @@ pub(super) fn apply_prepared_writes_to_rows(
     rows
 }
 
-pub(super) fn reconstruct_snapshot(
+pub(crate) fn reconstruct_snapshot(
     requested_account_id: &AccountId,
     head: Option<ReplicaHead>,
     rows: Vec<StoredReplicaRow>,
@@ -826,9 +1058,11 @@ pub(super) fn reconstruct_snapshot(
 
     let mut items = HashMap::new();
     let mut operations = HashMap::new();
+    let mut cross_account_moves = HashMap::new();
     let mut share_capabilities = HashMap::new();
     let mut attachment_move_preparations = HashMap::new();
     let mut receipts = HashMap::new();
+    let mut rotation_attempts = HashMap::new();
     let mut bootstrap = BootstrapAuthority::default();
     let mut saw_metadata = false;
     for row in rows {
@@ -863,6 +1097,21 @@ pub(super) fn reconstruct_snapshot(
                     .is_some()
                 {
                     return Err(replica_invariant("Replica operation row key is duplicated"));
+                }
+            }
+            ReplicaStore::CrossAccountMoves => {
+                let record: CrossAccountMoveEntry = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| {
+                        replica_invariant("Replica Cross-Account Move payload is invalid")
+                    })?;
+                if record.operation_id() != row.key.record_id
+                    || cross_account_moves
+                        .insert(record.operation_id().to_owned(), record)
+                        .is_some()
+                {
+                    return Err(replica_invariant(
+                        "Replica Cross-Account Move key differs or is duplicated",
+                    ));
                 }
             }
             ReplicaStore::AttachmentMovePreparations => {
@@ -922,7 +1171,32 @@ pub(super) fn reconstruct_snapshot(
                     return Err(replica_invariant("Replica receipt row key is duplicated"));
                 }
             }
+            ReplicaStore::RotationAttempts => {
+                let attempt: RotationAttemptRecord = serde_json::from_str(&row.payload_json)
+                    .map_err(|_| replica_invariant("Replica Rotation attempt row is invalid"))?;
+                if attempt.account_id != head.account_id
+                    || attempt.start_operation_id != row.key.record_id
+                    || rotation_attempts
+                        .insert(attempt.start_operation_id.clone(), attempt)
+                        .is_some()
+                {
+                    return Err(replica_invariant(
+                        "Replica Rotation attempt row key is invalid",
+                    ));
+                }
+            }
             ReplicaStore::ReplicaMetadata => {
+                if row.key.record_id == VAULT_RETIREMENTS_METADATA_ID {
+                    if !bootstrap.pending_vault_retirements.is_empty() {
+                        return Err(replica_invariant("Vault cleanup journal is duplicated"));
+                    }
+                    let journal: VaultRetirementMetadataRecord =
+                        serde_json::from_str(&row.payload_json)
+                            .map_err(|_| replica_invariant("Vault cleanup journal is invalid"))?;
+                    journal.validate()?;
+                    bootstrap.pending_vault_retirements = journal.vault_ids;
+                    continue;
+                }
                 if row.key.record_id != BOOTSTRAP_METADATA_ID {
                     return Err(replica_invariant(
                         "Replica metadata row key is not the Bootstrap head",
@@ -936,6 +1210,7 @@ pub(super) fn reconstruct_snapshot(
                     ));
                 }
                 saw_metadata = true;
+                bootstrap.policy_verification_pending = metadata.policy_verification_pending;
                 bootstrap.state = metadata.state;
                 bootstrap.active_generation = metadata.active_generation;
                 bootstrap.active_cursor = metadata.active_cursor;
@@ -1026,7 +1301,7 @@ pub(super) fn reconstruct_snapshot(
             }
         }
     }
-    if !saw_metadata && bootstrap != BootstrapAuthority::default() {
+    if !saw_metadata && bootstrap.has_control_state() {
         return Err(replica_invariant(
             "Replica Bootstrap rows exist without metadata",
         ));
@@ -1034,6 +1309,9 @@ pub(super) fn reconstruct_snapshot(
     bootstrap
         .validate()
         .map_err(|_| replica_invariant("Replica Bootstrap authority is inconsistent"))?;
+    bootstrap
+        .validate_legacy_binding(&head.account_id, &head.user_id, &head.incarnation)
+        .map_err(|_| replica_invariant("Replica legacy admission binding is inconsistent"))?;
 
     let account = AccountReplica {
         account_id: head.account_id,
@@ -1043,9 +1321,11 @@ pub(super) fn reconstruct_snapshot(
         lock_epoch: head.lock_epoch,
         items,
         operations,
+        cross_account_moves,
         share_capabilities,
         attachment_move_preparations,
         receipts,
+        rotation_attempts,
         failure: head.failure,
         bootstrap,
     };
@@ -1058,10 +1338,29 @@ pub(super) fn replica_invariant(message: impl Into<String>) -> RuntimeError {
 }
 
 pub(super) const BOOTSTRAP_METADATA_ID: &str = "bootstrap";
+pub(super) const VAULT_RETIREMENTS_METADATA_ID: &str = "vault-retirements";
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct VaultRetirementMetadataRecord {
+    pub(super) vault_ids: Vec<String>,
+}
+impl VaultRetirementMetadataRecord {
+    pub(super) fn validate(&self) -> Result<(), RuntimeError> {
+        if self.vault_ids.is_empty() {
+            return Err(replica_invariant(
+                "empty Vault cleanup journal must be absent",
+            ));
+        }
+        super::domain::validate_retired_vault_ids(&self.vault_ids)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct BootstrapMetadataRecord {
+    #[serde(default)]
+    pub(super) policy_verification_pending: bool,
     pub(super) state: ReplicaState,
     #[serde(deserialize_with = "required_option::deserialize")]
     pub(super) active_generation: Option<BootstrapGenerationId>,
@@ -1092,17 +1391,30 @@ fn bootstrap_rows(
         return Ok(Vec::new());
     }
     let mut rows = Vec::with_capacity(bootstrap.row_count());
-    rows.push(stored_row(
-        ReplicaStore::ReplicaMetadata,
-        account_id,
-        BOOTSTRAP_METADATA_ID,
-        &BootstrapMetadataRecord {
-            state: bootstrap.state,
-            active_generation: bootstrap.active_generation.clone(),
-            active_cursor: bootstrap.active_cursor.clone(),
-            staging_generation: bootstrap.staging_generation.clone(),
-        },
-    )?);
+    if !bootstrap.pending_vault_retirements.is_empty() {
+        rows.push(stored_row(
+            ReplicaStore::ReplicaMetadata,
+            account_id,
+            VAULT_RETIREMENTS_METADATA_ID,
+            &VaultRetirementMetadataRecord {
+                vault_ids: bootstrap.pending_vault_retirements.clone(),
+            },
+        )?);
+    }
+    if bootstrap.has_control_state() {
+        rows.push(stored_row(
+            ReplicaStore::ReplicaMetadata,
+            account_id,
+            BOOTSTRAP_METADATA_ID,
+            &BootstrapMetadataRecord {
+                policy_verification_pending: bootstrap.policy_verification_pending,
+                state: bootstrap.state,
+                active_generation: bootstrap.active_generation.clone(),
+                active_cursor: bootstrap.active_cursor.clone(),
+                staging_generation: bootstrap.staging_generation.clone(),
+            },
+        )?);
+    }
     for (generation_id, generation) in &bootstrap.generations {
         rows.push(stored_row(
             ReplicaStore::BootstrapGenerations,
@@ -1144,6 +1456,10 @@ fn bootstrap_clear_writes(
 ) -> Result<Vec<PreparedReplicaWrite>, RuntimeError> {
     Ok(bootstrap_rows(account_id, bootstrap)?
         .into_iter()
+        .filter(|row| {
+            row.store != ReplicaStore::ReplicaMetadata
+                || row.key.record_id != VAULT_RETIREMENTS_METADATA_ID
+        })
         .map(|row| PreparedReplicaWrite::Delete {
             store: row.store,
             key: row.key,
@@ -1189,9 +1505,8 @@ pub(super) fn prepare_bootstrap_commit(
         || current.user_id != next.user_id
         || current.incarnation != next.incarnation
         || current.lock_epoch != next.lock_epoch
-        || current.items != next.items
-        || current.operations != next.operations
         || current.receipts != next.receipts
+        || current.rotation_attempts != next.rotation_attempts
         || current.failure != next.failure
     {
         return Err(replica_invariant(
@@ -1211,7 +1526,34 @@ pub(super) fn prepare_bootstrap_commit(
             "Bootstrap commit revision does not match the prepared transition",
         ));
     }
-    let writes = bootstrap_write_diff(&current.account_id, &current.bootstrap, &next.bootstrap)?;
+    // Recompute authority-driven work changes against the captured snapshot. Rejected Move
+    // overlays can reconcile to present authority while every workflow proof remains immutable.
+    let mut expected = AccountReplica::from_snapshot(current.clone());
+    expected.retire_vault_authority(&next.bootstrap.pending_vault_retirements)?;
+    for ((generation, item_id), item) in &next.bootstrap.items {
+        if Some(generation) == next.bootstrap.active_generation.as_ref()
+            && !next.items.iter().any(|overlay| overlay.item_id == *item_id)
+        {
+            expected.reconcile_rejected_move_source(item_id, item.version);
+        }
+    }
+    let expected = expected.snapshot();
+    if expected.items != next.items
+        || expected.operations != next.operations
+        || expected.cross_account_moves != next.cross_account_moves
+        || expected.attachment_move_preparations != next.attachment_move_preparations
+        || expected.share_capabilities != next.share_capabilities
+    {
+        return Err(replica_invariant(
+            "Bootstrap changed unrelated accepted work",
+        ));
+    }
+    let mut writes = accepted_work_diff(&current, &next)?;
+    writes.extend(bootstrap_write_diff(
+        &current.account_id,
+        &current.bootstrap,
+        &next.bootstrap,
+    )?);
     Ok(PreparedCommitOutcome {
         wire: PreparedReplicaCommit {
             expected: ExpectedReplicaHead {
@@ -1233,4 +1575,102 @@ pub(super) fn prepare_bootstrap_commit(
         },
         next_snapshot: next,
     })
+}
+
+/// Exact work-row changes from the domain transition; ciphertext and the cleanup journal share
+/// one physical commit, including Bootstrap promotion through each persistence engine.
+fn accepted_work_diff(
+    current: &ReplicaSnapshot,
+    next: &ReplicaSnapshot,
+) -> Result<Vec<PreparedReplicaWrite>, RuntimeError> {
+    let work = |row: &StoredReplicaRow| {
+        matches!(
+            row.store,
+            ReplicaStore::OptimisticItems
+                | ReplicaStore::Operations
+                | ReplicaStore::CrossAccountMoves
+                | ReplicaStore::AttachmentMovePreparations
+                | ReplicaStore::ShareCapabilities
+                | ReplicaStore::OperationReceipts
+                | ReplicaStore::RotationAttempts
+        )
+    };
+    let before: Vec<_> = snapshot_rows(current.clone())?
+        .into_iter()
+        .filter(work)
+        .collect();
+    let after: Vec<_> = snapshot_rows(next.clone())?
+        .into_iter()
+        .filter(work)
+        .collect();
+    let mut writes = Vec::new();
+    for row in &before {
+        if !after
+            .iter()
+            .any(|new| new.store == row.store && new.key == row.key)
+        {
+            writes.push(PreparedReplicaWrite::Delete {
+                store: row.store,
+                key: row.key.clone(),
+            });
+        }
+    }
+    for row in after {
+        if !before.contains(&row) {
+            writes.push(PreparedReplicaWrite::Put { row });
+        }
+    }
+    Ok(writes)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "persistence-contract-schema", derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum ReplicaAccountDeletionResult {
+    Deleted {},
+    AlreadyAbsent {},
+    Conflict {},
+}
+
+pub(crate) fn admission_deletion_matches(
+    account_id: &AccountId,
+    expected_head: &ReplicaHead,
+    expected_rows: &[StoredReplicaRow],
+    actual_head: &ReplicaHead,
+    actual_rows: &[StoredReplicaRow],
+) -> Result<bool, RuntimeError> {
+    if expected_head.account_id != *account_id || account_id.as_str().is_empty() {
+        return Err(replica_invariant(
+            "Guarded Replica deletion identity disagrees",
+        ));
+    }
+    let mut keys = std::collections::HashSet::new();
+    for row in expected_rows {
+        if row.key.account_id != *account_id
+            || !keys.insert((row.store.physical_id(), row.key.record_id.as_str()))
+        {
+            return Err(replica_invariant(
+                "Guarded Replica deletion rows have invalid scope or duplicate keys",
+            ));
+        }
+    }
+    fn canonical(rows: &[StoredReplicaRow]) -> Vec<&StoredReplicaRow> {
+        let mut rows: Vec<_> = rows.iter().collect();
+        rows.sort_by(|left, right| {
+            left.key
+                .account_id
+                .as_str()
+                .as_bytes()
+                .cmp(right.key.account_id.as_str().as_bytes())
+                .then_with(|| left.store.physical_id().cmp(&right.store.physical_id()))
+                .then_with(|| {
+                    left.key
+                        .record_id
+                        .as_bytes()
+                        .cmp(right.key.record_id.as_bytes())
+                })
+        });
+        rows
+    }
+    Ok(expected_head == actual_head && canonical(expected_rows) == canonical(actual_rows))
 }

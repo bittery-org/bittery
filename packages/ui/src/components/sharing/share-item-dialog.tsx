@@ -1,5 +1,5 @@
 import { useI18n } from "@bittery/i18n/react";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { PublicDecryptedItem } from "@bittery/shared/types";
 import {
 	IconCopy,
 	IconLink,
@@ -55,7 +55,7 @@ export type ShareExpirationOption = (typeof SHARE_EXPIRATION_OPTIONS)[number];
 export type ShareAccessMode = "anyone" | "email-restricted";
 
 export interface CreateShareRequest {
-	item: DecryptedItem;
+	item: PublicDecryptedItem;
 	accessMode: ShareAccessMode;
 	expiresIn: ShareExpirationOption;
 	isOneTimeUse: boolean;
@@ -64,7 +64,7 @@ export interface CreateShareRequest {
 
 export interface ShareItemDialogProps {
 	accountId: string;
-	item: DecryptedItem;
+	item: PublicDecryptedItem;
 	onCreateShare: (request: CreateShareRequest) => Promise<DeliveredShareResult>;
 	onAcknowledgeShareResult?: (result: DeliveredShareResult) => Promise<void>;
 	resumableResult?: DeliveredShareResult | null;

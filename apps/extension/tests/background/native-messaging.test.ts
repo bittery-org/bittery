@@ -82,6 +82,35 @@ mock.module(path.join(bgDir, "desktop-unlock.ts"), () => ({
 
 mock.module(path.join(bgDir, "native-messaging-client.ts"), () => ({
 	sendNativeMessage: async () => nativeResponse,
+	nativeMessagingClient: {
+		captureDeliveryGeneration: async () => 0,
+		assertCurrentDelivery: () => {},
+		isCurrentDelivery: () => true,
+		captureMaterialFailureCleanup: () => ({
+			isCurrent: () => true,
+			run: (cleanup: () => Promise<unknown>) => cleanup(),
+		}),
+		newMaterialInvocation: () => Symbol("test invocation"),
+		completeMaterialInvocation: () => {},
+		withOwnedFailureCleanup: async (
+			_generation: number,
+			_accountId: string,
+			_invocation: symbol,
+			cleanup: () => Promise<void>,
+		) => cleanup(),
+		withMaterialMutation: async (
+			_generation: number,
+			_accountId: string,
+			mutate: (
+				check: () => void,
+				markMaterialWrite: () => void,
+			) => Promise<unknown>,
+		) =>
+			mutate(
+				() => {},
+				() => {},
+			),
+	},
 }));
 
 mock.module(path.join(bgDir, "session-manager.ts"), () => ({
@@ -96,8 +125,16 @@ mock.module("@bittery/core/services/account-resolver", () => ({
 
 mock.module("@bittery/core/services/travel-mode-enforcer", () => ({
 	getTravelModeEnforcer: () => ({
-		verifyOrClear: async (accountId: string) =>
-			verifiableAccountIds?.includes(accountId) ?? true,
+		verifyOrClear: async (
+			accountId: string,
+			_client: unknown,
+			_mirror: unknown,
+			cleanup?: { isCurrent(): boolean },
+		) => {
+			if (!cleanup?.isCurrent())
+				throw new Error("Missing Travel cleanup owner");
+			return verifiableAccountIds?.includes(accountId) ?? true;
+		},
 		filterVaultKeys: (_accountId: string, keys: unknown[]) => keys,
 	}),
 }));

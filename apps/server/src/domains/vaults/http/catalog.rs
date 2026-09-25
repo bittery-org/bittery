@@ -137,6 +137,93 @@ pub(super) async fn update_vault(
     Ok(Json(result.into()))
 }
 
+#[utoipa::path(post, path = "/vaults/{vaultId}/metadata-updates", operation_id = "updateVaultMetadata", tag = "vaults", params(("vaultId" = String, Path), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = VaultMetadataUpdateBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), (status = 409, description = "Staging incomplete or current authority changed; retry the same Operation", body = ProblemDetails, content_type = "application/problem+json"), ItemOperationErrorResponses))]
+pub(super) async fn update_vault_metadata(
+    State(state): State<AppState>,
+    auth: AuthenticatedRequest,
+    headers: HeaderMap,
+    Path(vault_id): Path<String>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<
+        VaultMetadataUpdateBody,
+        ORDINARY_API_BODY_LIMIT_BYTES,
+    >,
+) -> Result<Json<crate::domains::operations::OperationOutcome>, ApiError> {
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    let result = vault::execute_update_vault_operation(
+        &state.db_pool,
+        state.object_storage.as_ref(),
+        &auth.session.user_id,
+        vault::UpdateVaultOperationInput {
+            operation_id,
+            raw_body: bytes,
+            update: vault::UpdateVaultInput {
+                vault_id,
+                name: optional_patch_value(body.name, "/name")?,
+                icon: nullable_patch_value(body.icon),
+                image_key: nullable_patch_value(body.image_key),
+                client_id: auth.effective_client_id(),
+            },
+        },
+    )
+    .await?;
+    match result {
+        crate::domains::operations::OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
+        }
+        crate::domains::operations::OperationResolution::IdReused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
+}
+
+#[utoipa::path(post, path = "/vaults/{vaultId}/deletions", operation_id = "deleteVaultOperation", tag = "vaults", params(("vaultId" = String, Path), ("Idempotency-Key" = String, Header, description = "Required stable Operation ID")), request_body = VaultDeletionBody, responses((status = 200, description = "Retained semantic outcome", body = crate::domains::operations::OperationOutcome), (status = 409, description = "Staging incomplete or current authority changed; retry the same Operation", body = ProblemDetails, content_type = "application/problem+json"), ItemOperationErrorResponses))]
+pub(super) async fn delete_vault_operation(
+    State(state): State<AppState>,
+    auth: AuthenticatedRequest,
+    headers: HeaderMap,
+    Path(vault_id): Path<String>,
+    ApiJsonBytes { value: _, bytes }: ApiJsonBytes<
+        VaultDeletionBody,
+        ORDINARY_API_BODY_LIMIT_BYTES,
+    >,
+) -> Result<Json<crate::domains::operations::OperationOutcome>, ApiError> {
+    let operation_id = crate::domains::operations::http::required_operation_id(&headers)?;
+    let result = vault::execute_delete_vault_operation(
+        &state.db_pool,
+        state.object_storage.as_ref(),
+        &auth.session.user_id,
+        vault::DeleteVaultOperationInput {
+            operation_id,
+            raw_body: bytes,
+            vault_id,
+            client_id: auth.effective_client_id(),
+        },
+    )
+    .await?;
+    match result {
+        crate::domains::operations::OperationResolution::Outcome {
+            outcome,
+            newly_committed,
+        } => {
+            if newly_committed {
+                state.notify_sync();
+            }
+            Ok(Json(outcome))
+        }
+        crate::domains::operations::OperationResolution::IdReused => Err(ApiError::unprocessable(
+            ErrorCode::OperationIdReused,
+            "The Operation ID was already used for different immutable request bytes.",
+        )),
+    }
+}
+
 #[utoipa::path(post, path = "/vaults/{vaultId}/type-conversions", operation_id = "convertVaultType", tag = "vaults", params(("vaultId" = String, Path)), request_body = ConvertVaultBody, responses((status = 200, description = "Success", body = ConvertVaultTypeResponse), VaultErrorResponses))]
 pub(super) async fn convert_vault(
     State(state): State<AppState>,

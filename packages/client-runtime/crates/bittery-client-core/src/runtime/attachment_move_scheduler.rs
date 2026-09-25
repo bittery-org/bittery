@@ -3,6 +3,7 @@
 //! The scheduler is the only Runtime owner allowed to drive C2. Platform composition supplies
 //! primitive ports; it never receives the worker itself or chooses which accepted work to run.
 
+use super::vault_key::unwrap_vault_key;
 use super::{
     attachment_move_preparation::{
         AttachmentMovePreparationWorker, AttachmentMoveSecretProvider, AttachmentMoveSecrets,
@@ -22,17 +23,13 @@ use crate::{
         AuthenticatedOutcome,
     },
     replica::{
-        AttachmentMovePreparationRecord, AuthorityAttachmentRecord, AuthorityVaultRecord,
-        PreparedMoveAttachment, Replica,
+        AttachmentMovePreparationRecord, AuthorityAttachmentRecord, PreparedMoveAttachment, Replica,
     },
     AccountId, RuntimeError, RuntimeErrorCode,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use bittery_crypto_core::{
-    decrypt_vault_key_with_muk, decrypt_with_aad, encrypt_with_aad, AadContext, EncryptedData,
-    WrappedVaultKeyData,
-};
+use bittery_crypto_core::{decrypt_with_aad, encrypt_with_aad, AadContext, EncryptedData};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, Weak},
@@ -61,6 +58,54 @@ pub struct AttachmentMoveUploadGrant {
     pub storage_key: String,
     /// Invocation-scoped authority. Implementations must not persist or log it.
     pub upload_url: String,
+    /// Invocation-scoped signed headers. Empty for the existing same-Account Move manifest.
+    pub headers: Vec<(String, String)>,
+}
+
+impl AttachmentMoveUploadGrant {
+    /// Bind invocation headers to the already verified artifact before a host opens its upload.
+    pub fn validated_headers(
+        &self,
+        owner: &AttachmentArtifactOwner,
+    ) -> Result<Vec<(String, String)>, AttachmentMoveTransferError> {
+        let mut expected = vec![
+            ("content-type".into(), "application/octet-stream".into()),
+            (
+                "x-amz-content-sha256".into(),
+                owner.ciphertext_sha256().into(),
+            ),
+        ];
+        if self.headers.is_empty() {
+            return Ok(expected);
+        }
+        let digest = owner
+            .ciphertext_sha256()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                std::str::from_utf8(pair)
+                    .ok()
+                    .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                    .ok_or(AttachmentMoveTransferError::Invariant)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        expected.push(("content-length".into(), owner.byte_length().to_string()));
+        expected.push(("x-amz-checksum-sha256".into(), BASE64.encode(digest)));
+        if self.headers.len() != expected.len()
+            || expected.iter().any(|(name, value)| {
+                self.headers
+                    .iter()
+                    .filter(|(actual_name, actual_value)| {
+                        actual_name.eq_ignore_ascii_case(name) && actual_value == value
+                    })
+                    .count()
+                    != 1
+            })
+        {
+            return Err(AttachmentMoveTransferError::Invariant);
+        }
+        Ok(self.headers.clone())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,7 +219,9 @@ impl AttachmentMovePreparationFacade {
     }
 }
 
-fn transfer_error(error: AttachmentMoveTransferError) -> PreparationTransportError {
+pub(in crate::runtime) fn transfer_error(
+    error: AttachmentMoveTransferError,
+) -> PreparationTransportError {
     match error {
         AttachmentMoveTransferError::Transient => PreparationTransportError::Transient,
         AttachmentMoveTransferError::Busy => PreparationTransportError::Busy,
@@ -187,7 +234,9 @@ pub(crate) struct TransferAdapter {
     binary: Arc<dyn AttachmentMoveTransferPort>,
     runtime: Weak<super::Runtime>,
 }
-struct DownloadAdapter(Box<dyn AttachmentMoveDownload>);
+pub(in crate::runtime) struct DownloadAdapter(
+    pub(in crate::runtime) Box<dyn AttachmentMoveDownload>,
+);
 struct UploadAdapter(Box<dyn AttachmentMoveUpload>);
 
 impl TransferAdapter {
@@ -236,45 +285,54 @@ impl TransferAdapter {
                 return Err(PreparationTransportError::Transient);
             }
         };
-        if grant.attachment_id != source.id
-            || grant.item_id != source.item_id
-            || grant.vault_id != source.vault_id
-            || grant.storage_key != source.storage_key
-            || grant.envelope_version != source.envelope_version
-            || grant.uploaded_by != source.uploaded_by
-            || grant.encrypted_name != source.encrypted_name
-            || grant.encrypted_content_type != source.encrypted_content_type
-            || grant.encryption_iv != source.encryption_iv
-            || grant.encrypted_content_type_iv != source.encrypted_content_type_iv
-            || grant.encryption_algorithm != source.encryption_algorithm
-            || grant.file_size != source.file_size
-        {
-            return Err(PreparationTransportError::StaleAuthority);
-        }
-        let invocation_url = url::Url::parse(&grant.download_url)
-            .map_err(|_| PreparationTransportError::Invariant)?;
-        if !matches!(invocation_url.scheme(), "http" | "https") {
-            return Err(PreparationTransportError::Invariant);
-        }
-        Ok(grant)
+        validate_source_grant(grant, source)
     }
+}
 
-    fn source_response_bound(file_size: i32) -> Result<u64, PreparationTransportError> {
-        let plaintext_bytes =
-            u64::try_from(file_size).map_err(|_| PreparationTransportError::Invariant)?;
-        let encoded_plaintext_bytes = base64_encoded_length(plaintext_bytes)?;
-        let ciphertext_bytes = encoded_plaintext_bytes
-            .checked_add(16)
-            .ok_or(PreparationTransportError::Invariant)?;
-        let encoded_ciphertext_bytes = base64_encoded_length(ciphertext_bytes)?;
-        let fixed_envelope_bytes = (r#"{"ciphertext":""#.len()
-            + r#"","iv":""#.len()
-            + 16
-            + r#"","algorithm":"AES-GCM-AAD-V1"}"#.len()) as u64;
-        encoded_ciphertext_bytes
-            .checked_add(fixed_envelope_bytes)
-            .ok_or(PreparationTransportError::Invariant)
+pub(in crate::runtime) fn validate_source_grant(
+    grant: AttachmentDownloadGrant,
+    source: &AuthorityAttachmentRecord,
+) -> Result<AttachmentDownloadGrant, PreparationTransportError> {
+    if grant.attachment_id != source.id
+        || grant.item_id != source.item_id
+        || grant.vault_id != source.vault_id
+        || grant.storage_key != source.storage_key
+        || grant.envelope_version != source.envelope_version
+        || grant.uploaded_by != source.uploaded_by
+        || grant.encrypted_name != source.encrypted_name
+        || grant.encrypted_content_type != source.encrypted_content_type
+        || grant.encryption_iv != source.encryption_iv
+        || grant.encrypted_content_type_iv != source.encrypted_content_type_iv
+        || grant.encryption_algorithm != source.encryption_algorithm
+        || grant.file_size != source.file_size
+    {
+        return Err(PreparationTransportError::StaleAuthority);
     }
+    let invocation_url =
+        url::Url::parse(&grant.download_url).map_err(|_| PreparationTransportError::Invariant)?;
+    if !matches!(invocation_url.scheme(), "http" | "https") {
+        return Err(PreparationTransportError::Invariant);
+    }
+    Ok(grant)
+}
+
+pub(in crate::runtime) fn source_response_bound(
+    file_size: i32,
+) -> Result<u64, PreparationTransportError> {
+    let plaintext_bytes =
+        u64::try_from(file_size).map_err(|_| PreparationTransportError::Invariant)?;
+    let encoded_plaintext_bytes = base64_encoded_length(plaintext_bytes)?;
+    let ciphertext_bytes = encoded_plaintext_bytes
+        .checked_add(16)
+        .ok_or(PreparationTransportError::Invariant)?;
+    let encoded_ciphertext_bytes = base64_encoded_length(ciphertext_bytes)?;
+    let fixed_envelope_bytes = (r#"{"ciphertext":""#.len()
+        + r#"","iv":""#.len()
+        + 16
+        + r#"","algorithm":"AES-GCM-AAD-V1"}"#.len()) as u64;
+    encoded_ciphertext_bytes
+        .checked_add(fixed_envelope_bytes)
+        .ok_or(PreparationTransportError::Invariant)
 }
 
 fn base64_encoded_length(byte_length: u64) -> Result<u64, PreparationTransportError> {
@@ -342,7 +400,7 @@ impl AttachmentMoveTransfer for TransferAdapter {
         {
             return Err(PreparationTransportError::Invariant);
         }
-        let max_response_bytes = Self::source_response_bound(source.file_size)?;
+        let max_response_bytes = source_response_bound(source.file_size)?;
         let metadata = runtime
             .platform_storage
             .load_account_metadata(&request.account_id, &snapshot.incarnation)
@@ -353,8 +411,7 @@ impl AttachmentMoveTransfer for TransferAdapter {
             return Err(PreparationTransportError::Invariant);
         }
         let session = runtime
-            .platform_storage
-            .load_current_session(&request.account_id, &snapshot.incarnation)
+            .effective_session(&request.account_id, &snapshot.incarnation)
             .await
             .map_err(source_grant_http_error)?
             .ok_or(PreparationTransportError::Transient)?;
@@ -443,8 +500,7 @@ impl AttachmentMoveTransfer for TransferAdapter {
             return Err(PreparationTransportError::Invariant);
         }
         let session = runtime
-            .platform_storage
-            .load_current_session(&request.account_id, &snapshot.incarnation)
+            .effective_session(&request.account_id, &snapshot.incarnation)
             .await
             .map_err(|_| PreparationTransportError::Transient)?
             .ok_or(PreparationTransportError::Transient)?;
@@ -538,6 +594,7 @@ impl AttachmentMoveTransfer for TransferAdapter {
                     attachment_id: grant.attachment_id.clone(),
                     storage_key: grant.storage_key.clone(),
                     upload_url: grant.upload_url.clone(),
+                    headers: Vec::new(),
                 },
                 owner,
             )
@@ -617,7 +674,7 @@ impl RuntimeAttachmentMoveSecrets {
             .lock()
             .expect("live master unlock key lock poisoned")
             .get(&(snapshot.account_id.clone(), snapshot.incarnation.clone()))
-            .map(LiveMasterUnlockKey::copy_bytes)
+            .map(LiveMasterUnlockKey::copy_material)
             .ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::AuthenticationRequired,
@@ -758,29 +815,6 @@ impl AttachmentMoveSecretProvider for RuntimeAttachmentMoveSecrets {
     }
 }
 
-fn unwrap_vault_key(
-    vault: &AuthorityVaultRecord,
-    user_id: &str,
-    master_unlock_key: &[u8; 32],
-) -> Result<Vec<u8>, RuntimeError> {
-    let wrapped: WrappedVaultKeyData = serde_json::from_str(&vault.encrypted_vault_key)
-        .map_err(|_| invariant("wrapped Vault key is invalid"))?;
-    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != user_id {
-        return Err(invariant("wrapped Vault key context does not match"));
-    }
-    decrypt_vault_key_with_muk(
-        &vault.encrypted_vault_key,
-        master_unlock_key,
-        &wrapped.context,
-    )
-    .map_err(|_| {
-        RuntimeError::new(
-            RuntimeErrorCode::AuthenticationRequired,
-            "Vault key could not be unwrapped",
-        )
-    })
-}
-
 fn invariant(message: impl Into<String>) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
 }
@@ -840,6 +874,7 @@ pub(crate) enum SchedulerPass {
 
 pub(crate) struct AttachmentMovePreparationScheduler {
     driver: Arc<dyn AttachmentMovePreparationDriver>,
+    facade: Option<AttachmentMovePreparationFacade>,
     active_accounts: Arc<Mutex<HashSet<AccountId>>>,
 }
 
@@ -853,19 +888,20 @@ impl AttachmentMovePreparationScheduler {
         runtime: Weak<super::Runtime>,
     ) -> Self {
         let transfer: Arc<dyn AttachmentMoveTransfer> =
-            Arc::new(TransferAdapter::new(facade.transfer, runtime));
+            Arc::new(TransferAdapter::new(facade.transfer(), runtime));
         let secrets: Arc<dyn AttachmentMoveSecretProvider> = Arc::new(
             RuntimeAttachmentMoveSecrets::new(replica.clone(), live_master_unlock_keys),
         );
         let worker = Arc::new(AttachmentMovePreparationWorker::new(
             replica,
-            facade.provisional_artifacts,
-            facade.artifacts,
+            facade.provisional_artifacts(),
+            facade.artifacts(),
             transfer,
             secrets,
         ));
         Self {
             driver: worker,
+            facade: Some(facade),
             active_accounts: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -874,8 +910,13 @@ impl AttachmentMovePreparationScheduler {
     pub(crate) fn new_for_test(driver: Arc<dyn AttachmentMovePreparationDriver>) -> Self {
         Self {
             driver,
+            facade: None,
             active_accounts: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    pub(crate) fn facade(&self) -> Option<&AttachmentMovePreparationFacade> {
+        self.facade.as_ref()
     }
 
     pub(crate) async fn drive_one(

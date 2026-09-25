@@ -22,7 +22,10 @@ type Entry = { control: RecoveryControlResponse; binaryChunk?: Uint8Array };
 type Store = {
 	open: () => Promise<IDBDatabase>;
 	name: string;
-	kind: RecoveryRecord["type"];
+	kind: Exclude<
+		RecoveryRecord["type"],
+		"protectedVaultImageMetadata" | "protectedVaultImageChunk"
+	>;
 	logical?: ReplicaStore;
 };
 const STORES: Store[] = [
@@ -170,6 +173,15 @@ function mapRecord(
 	accountId: string,
 	value: Record<string, unknown>,
 ): { record: RecoveryRecord; binaryChunk?: Uint8Array } {
+	const image =
+		descriptor.kind === "vaultImageMetadata" ||
+		descriptor.kind === "vaultImageChunk";
+	const publication = image ? (value.publicationId ?? "") : "";
+	if (
+		typeof publication !== "string" ||
+		(image && publication === "" && value.protection != null)
+	)
+		throw new Error("Recovery image publication is invalid");
 	const string = (key: string) => {
 		const result = value[key];
 		if (typeof result !== "string")
@@ -183,6 +195,14 @@ function mapRecord(
 	};
 	const metadata = () => {
 		const { bytes: _bytes, ...rest } = value;
+		if (image && publication === "") {
+			const {
+				publicationId: _publication,
+				protection: _protection,
+				...raw
+			} = rest;
+			return boundedJson(raw);
+		}
 		return boundedJson(rest);
 	};
 	const bytes = () => {
@@ -268,7 +288,12 @@ function mapRecord(
 		case "vaultImageMetadata":
 			return {
 				record: {
-					type: descriptor.kind,
+					...(publication
+						? {
+								type: "protectedVaultImageMetadata" as const,
+								publicationId: publication,
+							}
+						: { type: "vaultImageMetadata" as const }),
 					accountId,
 					operationId: string("operationId"),
 					metadataJson: metadata(),
@@ -277,7 +302,12 @@ function mapRecord(
 		case "vaultImageChunk":
 			return {
 				record: {
-					type: descriptor.kind,
+					...(publication
+						? {
+								type: "protectedVaultImageChunk" as const,
+								publicationId: publication,
+							}
+						: { type: "vaultImageChunk" as const }),
 					accountId,
 					operationId: string("operationId"),
 					chunkIndex: index(),

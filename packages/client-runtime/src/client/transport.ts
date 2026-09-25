@@ -1,6 +1,7 @@
 import type {
 	RecoveryBound,
 	RuntimeErrorCode,
+	TeamPageProblem,
 } from "../../generated/runtime-protocol/contract";
 
 /**
@@ -18,9 +19,19 @@ export interface RuntimeTransport {
 		observationId: string,
 		requestJson: string,
 		listener: (projectionJson: string) => void,
-		options?: { signal?: AbortSignal },
+		options?: {
+			signal?: AbortSignal;
+			onControl?: (controlJson: string) => void;
+			onError?: (error: unknown) => void;
+		},
 	): Promise<void>;
 	unobserve(observationId: string): Promise<void>;
+	/** Fixed Export output capability supplied by a connection that owns these handles. */
+	beginVaultExportOutput?(observationId: string): Promise<string>;
+	finishVaultExportOutput?(
+		observationId: string,
+		outputLeaseId: string,
+	): Promise<void>;
 	close(): Promise<void>;
 }
 
@@ -33,17 +44,20 @@ export class RuntimeRequestError extends Error {
 	readonly code: RuntimeErrorCode;
 	readonly detail: string;
 	readonly recoveryBound?: RecoveryBound;
+	readonly teamPageProblem?: TeamPageProblem;
 
 	constructor(
 		code: RuntimeErrorCode,
 		detail: string,
 		recoveryBound?: RecoveryBound,
+		teamPageProblem?: TeamPageProblem,
 	) {
 		super(`The Runtime rejected the call: ${code}`);
 		this.name = "RuntimeRequestError";
 		this.code = code;
 		this.detail = detail;
 		if (recoveryBound !== undefined) this.recoveryBound = recoveryBound;
+		if (teamPageProblem !== undefined) this.teamPageProblem = teamPageProblem;
 	}
 }
 

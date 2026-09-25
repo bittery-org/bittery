@@ -6,7 +6,7 @@
  * in-memory vault repository, so no extra fetch is involved.
  */
 
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { PublicDecryptedItem } from "@bittery/shared/types";
 import { useMemo } from "react";
 
 export interface VaultItemCounts {
@@ -26,7 +26,7 @@ export interface VaultItemCounts {
  *          render nothing instead of flashing a misleading zero
  */
 export function useItemCounts(
-	items: DecryptedItem[] | undefined,
+	items: PublicDecryptedItem[] | undefined,
 ): VaultItemCounts | undefined {
 	return useMemo(() => {
 		if (!items) return undefined;

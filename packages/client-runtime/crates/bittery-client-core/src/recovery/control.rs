@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub(crate) enum RecoveryRecord {
+pub enum RecoveryRecord {
     RawReplicaHead {
         account_id: String,
         payload_json: String,
@@ -70,6 +70,22 @@ pub(crate) enum RecoveryRecord {
         )]
         chunk_index: u32,
     },
+    ProtectedVaultImageMetadata {
+        account_id: String,
+        operation_id: String,
+        publication_id: String,
+        metadata_json: String,
+    },
+    ProtectedVaultImageChunk {
+        account_id: String,
+        operation_id: String,
+        publication_id: String,
+        #[cfg_attr(
+            feature = "recovery-contract-schema",
+            schemars(schema_with = "plain_u32_schema")
+        )]
+        chunk_index: u32,
+    },
 }
 impl RecoveryRecord {
     pub(crate) fn account_id(&self) -> &str {
@@ -81,22 +97,26 @@ impl RecoveryRecord {
             | Self::ProvisionalMetadata { account_id, .. }
             | Self::ProvisionalChunk { account_id, .. }
             | Self::VaultImageMetadata { account_id, .. }
-            | Self::VaultImageChunk { account_id, .. } => account_id,
+            | Self::VaultImageChunk { account_id, .. }
+            | Self::ProtectedVaultImageMetadata { account_id, .. }
+            | Self::ProtectedVaultImageChunk { account_id, .. } => account_id,
         }
     }
-    pub(crate) fn has_binary(&self) -> bool {
+    /// Whether this closed physical record carries a separate bounded binary chunk.
+    pub fn has_binary(&self) -> bool {
         matches!(
             self,
             Self::ArtifactChunk { .. }
                 | Self::ProvisionalChunk { .. }
                 | Self::VaultImageChunk { .. }
+                | Self::ProtectedVaultImageChunk { .. }
         )
     }
 }
 #[cfg_attr(feature = "recovery-contract-schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct RecoveryExpectedRow {
+pub struct RecoveryExpectedRow {
     pub store: ReplicaStore,
     pub record_id: String,
     pub payload_sha256: String,
@@ -109,7 +129,7 @@ pub(crate) struct RecoveryExpectedRow {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub(crate) enum RecoveryControlRequest {
+pub enum RecoveryControlRequest {
     EnterMaintenance {
         recovery_id: String,
     },
@@ -219,7 +239,7 @@ pub(crate) enum RecoveryControlRequest {
 #[cfg_attr(feature = "recovery-contract-schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum RecoveryUnavailableReason {
+pub enum RecoveryUnavailableReason {
     UnsupportedSchema,
     Unsupported,
     Busy,
@@ -231,7 +251,7 @@ pub(crate) enum RecoveryUnavailableReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "recovery-contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct RecoveryPhysicalSchemas {
+pub struct RecoveryPhysicalSchemas {
     #[cfg_attr(
         feature = "recovery-contract-schema",
         schemars(schema_with = "plain_u32_schema")
@@ -252,7 +272,7 @@ pub(crate) struct RecoveryPhysicalSchemas {
 pub(crate) const TEST_PHYSICAL_SCHEMAS: RecoveryPhysicalSchemas = RecoveryPhysicalSchemas {
     replica_version: 8,
     attachment_artifacts_version: 3,
-    vault_images_version: 2,
+    vault_images_version: 3,
 };
 
 #[cfg_attr(feature = "recovery-contract-schema", derive(schemars::JsonSchema))]
@@ -263,7 +283,7 @@ pub(crate) const TEST_PHYSICAL_SCHEMAS: RecoveryPhysicalSchemas = RecoveryPhysic
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub(crate) enum RecoveryControlResponse {
+pub enum RecoveryControlResponse {
     MaintenanceEntered {
         physical_schemas: RecoveryPhysicalSchemas,
     },

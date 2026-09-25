@@ -139,6 +139,9 @@ pub(crate) enum ArtifactControlRequest {
         account_id: String,
     },
     WipeDevice,
+    ListArtifactOwners {
+        account_id: String,
+    },
     ListArtifactIds {
         account_id: String,
     },
@@ -212,6 +215,7 @@ pub(crate) enum ArtifactControlResponse {
     ProvisionalRecoveryAvailable {
         recovery: ProvisionalArtifactTokenControl,
     },
+    ProvisionalRecoveryUnavailable,
     ProvisionalBinding {
         owner: ArtifactOwnerControl,
         state: ProvisionalPublicationStateControl,
@@ -231,6 +235,10 @@ pub(crate) enum ArtifactControlResponse {
     },
     AccountDeleted,
     DeviceWiped,
+    ArtifactOwners {
+        owners: Vec<ArtifactOwnerControl>,
+        provisional: Vec<ProvisionalArtifactTokenControl>,
+    },
     ArtifactIds {
         artifact_ids: Vec<String>,
         provisional: Vec<ProvisionalArtifactTokenControl>,
@@ -278,6 +286,16 @@ pub fn artifact_control_contract_fixture() -> serde_json::Value {
     };
     serde_json::json!({
         "steps": [
+            {
+                "request": ArtifactControlRequest::RecoverProvisional {
+                    scope: ProvisionalArtifactScopeControl {
+                        account_id: "account-1".into(),
+                        operation_id: "operation-1".into(),
+                        attachment_id: "attachment-1".into(),
+                    },
+                },
+                "response": ArtifactControlResponse::ProvisionalRecoveryUnavailable,
+            },
             {
                 "request": ArtifactControlRequest::BeginProvisional {
                     writer: ProvisionalArtifactTokenControl {

@@ -167,7 +167,10 @@ impl SourceGrantHttp {
 
 #[async_trait]
 impl crate::http_transport::SerializedHttpExecutor for SourceGrantHttp {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
         let url = request["url"].as_str().unwrap();
         let authorization = request["headers"]
@@ -721,7 +724,10 @@ struct BootstrapHoldingHttp {
 
 #[async_trait]
 impl crate::http_transport::SerializedHttpExecutor for BootstrapHoldingHttp {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
         if request["url"]
             .as_str()
@@ -740,7 +746,10 @@ impl crate::http_transport::SerializedHttpExecutor for BootstrapHoldingHttp {
 
 #[async_trait]
 impl crate::http_transport::SerializedHttpExecutor for ManifestHttp {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         let request: serde_json::Value = serde_json::from_str(&request_json).unwrap();
         let url = request["url"].as_str().unwrap();
         let authorization = request["headers"]
@@ -1576,6 +1585,7 @@ fn seed_promotable_preparation_with_file_size(
         attachment_move_artifact_ref(&account_id, operation_id, ATTACHMENT, &artifact_digest, 1)
             .unwrap();
     let mut preparation = AttachmentMovePreparationRecord {
+        accepted_item_category: None,
         account_id: account_id.clone(),
         operation_id: operation_id.into(),
         item_id: ITEM.into(),

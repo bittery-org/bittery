@@ -8,6 +8,7 @@ declare global {
 		transferId: string,
 		uploadUrl: string,
 		generation: string,
+		headers?: { name: string; value: string }[],
 	) => Promise<void>;
 	var cancelBinaryTransferUpload: (
 		transferId: string,
@@ -47,6 +48,7 @@ globalThis.startBinaryTransferUpload = async (
 	transferId,
 	uploadUrl,
 	generation,
+	headers,
 ) => {
 	const beginFixture = generatedRequest("beginUpload");
 	if (beginFixture.type !== "beginUpload") throw new Error("fixture drift");
@@ -54,6 +56,7 @@ globalThis.startBinaryTransferUpload = async (
 		...beginFixture,
 		transferId,
 		generation,
+		headers: headers ?? beginFixture.headers,
 		url: `${uploadUrl}?transfer=${encodeURIComponent(transferId)}`,
 	};
 	scriptHeaders.set(transferId, begin.headers.map(({ name }) => name).sort());

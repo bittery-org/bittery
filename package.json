@@ -21,7 +21,7 @@
 		"check": "biome check . && pnpm --filter server check",
 		"check:fix": "biome check --write --unsafe . && pnpm --filter server format",
 		"check:ci": "pnpm run i18n:generate && pnpm run db:check && pnpm run i18n:check && pnpm run env:check && pnpm run architecture:check && pnpm run contracts:check && pnpm exec biome check . && pnpm run check-types && pnpm exec turbo run test --filter='!server' --filter='!@bittery/crypto-core' && node --test \"scripts/**/*.test.mjs\" && pnpm --filter @bittery/client-runtime run test:chromium",
-		"check:ci:rust": "pnpm --filter server check && pnpm --filter @bittery/crypto-core test && pnpm --filter @bittery/client-runtime check && cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check && cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && git diff --exit-code apps/desktop/src/generated",
+		"check:ci:rust": "pnpm --filter server check && pnpm --filter @bittery/crypto-core test && pnpm --filter @bittery/client-runtime check && cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check && cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --features native-runtime-legacy-source -- -D warnings && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --features native-runtime-legacy-source && git diff --exit-code apps/desktop/src/generated",
 		"check-types": "turbo check-types",
 		"i18n:check": "pnpm --filter @bittery/i18n run check:keys",
 		"shadcn": "pnpm --filter @bittery/ui run shadcn",
@@ -72,7 +72,8 @@
 	"devDependencies": {
 		"turbo": "^2.10.9",
 		"@biomejs/biome": "^2.5.7",
-		"@types/bun": "^1.3.14"
+		"@types/bun": "^1.3.14",
+		"@types/node": "22.19.13"
 	},
 	"packageManager": "pnpm@10.18.3"
 }

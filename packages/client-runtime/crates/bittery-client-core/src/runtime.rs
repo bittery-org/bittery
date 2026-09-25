@@ -10,6 +10,9 @@ pub use attachment::{
     AttachmentUploadFacade, AttachmentUploadSource, AttachmentUploadSourceError,
     AttachmentUploadSourcePort, AttachmentUploadTransferPort,
 };
+mod account_refresh;
+#[cfg(test)]
+mod account_refresh_tests;
 #[cfg(test)]
 mod attachment_move_lifecycle_tests;
 #[allow(
@@ -26,7 +29,26 @@ mod attachment_move_preparation_tests;
 mod attachment_move_scheduler;
 #[cfg(test)]
 mod attachment_move_scheduler_tests;
+mod attachment_transcryption;
+mod biometric;
 mod bootstrap;
+mod inactivity;
+mod local_access;
+mod my_invitations;
+mod native_authority;
+mod travel_commands;
+mod travel_policy;
+pub use biometric::{BiometricPort, BiometricPromptResult};
+#[cfg(feature = "runtime-protocol-contract-schema")]
+pub use native_authority::native_authority_contract_schema;
+pub use native_authority::{
+    NativeAccountAuthority, NativeAccountProfile, NativeAccountScope, NativeAuthorityFacade,
+    NativeAuthorityRequest, NativeAuthorityResponse, NativeAuthoritySnapshot,
+    NativeChallengePurpose, NativeImportChallenge, NativeIndependentRevalidationReply,
+    NativePolicyVerification, NativeRestrictionAcknowledgement, NativeRestrictionAdoption,
+    NativeRestrictionBatch, NativeRestrictionDisposition, NativeRestrictionEvidence,
+    NativeRestrictiveContinuity, NativeSourceAttachment, NativeTransferReply, NativeTravelEvidence,
+};
 mod create;
 #[cfg(test)]
 mod create_tests;
@@ -36,6 +58,7 @@ mod create_vault_executor;
 mod create_vault_staging;
 #[cfg(test)]
 mod create_vault_tests;
+mod cross_account_move;
 mod dispatch;
 #[cfg(test)]
 mod dispatch_tests;
@@ -49,27 +72,55 @@ mod import_executor;
 #[cfg(test)]
 mod import_tests;
 mod install;
+mod installation_commit;
+#[cfg(test)]
+mod invitation_tests;
+mod invitations;
 mod live_sync;
 #[cfg(test)]
 mod live_sync_tests;
 mod lock;
+#[cfg(test)]
+mod my_invitation_tests;
 mod open;
 #[cfg(test)]
-mod operation_fixtures;
+pub(crate) mod operation_fixtures;
 mod outcome;
 #[cfg(test)]
 mod outcome_tests;
+mod private_item_commands;
+mod profile_admission;
+mod recipient_keys;
 mod recovery;
+mod rotation;
+#[cfg(test)]
+mod rotation_start_tests;
 mod server_account_deletion;
 mod share_management;
 #[cfg(test)]
 mod share_management_tests;
 #[cfg(test)]
 mod share_outcome_tests;
+mod team_page;
+#[cfg(test)]
+mod team_page_tests;
 mod teardown;
 #[cfg(test)]
 mod teardown_tests;
+mod vault_artifact_retirement;
+mod vault_key;
+mod vault_members;
+mod vault_mutation;
+#[cfg(test)]
+mod vault_mutation_tests;
+mod vault_retirement;
+#[cfg(feature = "binding-test-harness")]
+mod vault_retirement_binding_fixture;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod vault_retirement_integration_tests;
+mod vault_visibility;
 
+use crate::AccountUnlockCapabilities;
 #[doc(hidden)]
 pub use attachment_move_lifecycle::{AttachmentMoveAccountLease, AttachmentMoveAccountLeasePort};
 use attachment_move_lifecycle::{AttachmentMoveLifecycle, LifecyclePass};
@@ -183,7 +234,26 @@ struct DeliveryGeneration {
     epoch: u64,
 }
 
-struct LiveMasterUnlockKey(Zeroizing<[u8; 32]>);
+#[derive(Clone)]
+struct AccountPresentation {
+    identity: AccountDisplayIdentity,
+    native_only: bool,
+    // Display-only copy of durable Account metadata; never consulted for authority or admission.
+    verified_travel_mode: Option<crate::platform_storage::VerifiedTravelModePolicy>,
+}
+
+#[cfg(test)]
+impl From<AccountDisplayIdentity> for AccountPresentation {
+    fn from(identity: AccountDisplayIdentity) -> Self {
+        Self {
+            identity,
+            native_only: false,
+            verified_travel_mode: None,
+        }
+    }
+}
+
+struct LiveMasterUnlockKey(Zeroizing<[u8; 32]>, Option<String>);
 
 #[derive(Clone, Copy)]
 struct RecoveryAccountStatus {
@@ -191,8 +261,20 @@ struct RecoveryAccountStatus {
 }
 
 impl LiveMasterUnlockKey {
+    #[cfg(any(test, feature = "binding-test-harness"))]
     fn new(value: Zeroizing<[u8; 32]>) -> Self {
-        Self(value)
+        Self(value, None)
+    }
+
+    fn with_private_key(value: Zeroizing<[u8; 32]>, encrypted_private_key: Option<String>) -> Self {
+        Self(value, encrypted_private_key)
+    }
+
+    fn copy_material(&self) -> vault_key::VaultKeyMaterial {
+        vault_key::VaultKeyMaterial {
+            master_unlock_key: self.copy_bytes(),
+            encrypted_private_key: self.1.clone(),
+        }
     }
 
     fn copy_bytes(&self) -> Zeroizing<[u8; 32]> {
@@ -223,10 +305,12 @@ fn take_zeroized_live_master_unlock_key_drops() -> usize {
 struct DeliveryToken {
     state: Mutex<DeliveryTokenState>,
     finished: Condvar,
+    finished_async: tokio::sync::Notify,
 }
 
 struct DeliveryTokenState {
     invalidated: bool,
+    admission_paused: bool,
     active: HashMap<ThreadId, usize>,
 }
 
@@ -235,16 +319,18 @@ impl DeliveryToken {
         Self {
             state: Mutex::new(DeliveryTokenState {
                 invalidated: false,
+                admission_paused: false,
                 active: HashMap::new(),
             }),
             finished: Condvar::new(),
+            finished_async: tokio::sync::Notify::new(),
         }
     }
 
     fn begin(self: &Arc<Self>) -> Option<DeliveryLease> {
         let thread = std::thread::current().id();
         let mut state = self.state.lock().expect("delivery token lock poisoned");
-        if state.invalidated {
+        if state.invalidated || state.admission_paused {
             return None;
         }
         *state.active.entry(thread).or_insert(0) += 1;
@@ -252,6 +338,13 @@ impl DeliveryToken {
             token: Arc::clone(self),
             thread,
         })
+    }
+
+    fn pause_admission(&self, paused: bool) {
+        let mut state = self.state.lock().expect("delivery token lock poisoned");
+        if !state.invalidated {
+            state.admission_paused = paused;
+        }
     }
 
     fn invalidate(&self) {
@@ -273,6 +366,28 @@ impl DeliveryToken {
                 .finished
                 .wait(state)
                 .expect("delivery token lock poisoned while invalidating");
+        }
+    }
+
+    async fn wait_for_other_threads_async(&self) {
+        // Keep the reentrant caller's thread identity even if the suspended future moves threads.
+        let current = std::thread::current().id();
+        loop {
+            let notified = self.finished_async.notified();
+            tokio::pin!(notified);
+            // Register before reading active leases so their final drop cannot lose our wakeup.
+            notified.as_mut().enable();
+            let has_other_threads = self
+                .state
+                .lock()
+                .expect("delivery token lock poisoned")
+                .active
+                .iter()
+                .any(|(thread, depth)| *thread != current && *depth > 0);
+            if !has_other_threads {
+                return;
+            }
+            notified.await;
         }
     }
 }
@@ -297,25 +412,38 @@ impl Drop for DeliveryLease {
         if *depth == 0 {
             state.active.remove(&self.thread);
         }
+        drop(state);
         self.token.finished.notify_all();
+        self.token.finished_async.notify_waiters();
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct DeliveryRevision {
+    // A newer dependency capture must precede comparison of the source's own revision.
+    dependency_revision: Option<u64>,
+    projection_revision: u64,
 }
 
 struct ProjectedDelivery {
     projection: RuntimeProjection,
     generation: Option<DeliveryGeneration>,
-    token: Option<Arc<DeliveryToken>>,
+    dependency_revision: Option<u64>,
+    tokens: Vec<Arc<DeliveryToken>>,
 }
 
 struct QueuedDelivery {
+    generation: Option<DeliveryGeneration>,
     projection: RuntimeProjection,
-    token: Option<Arc<DeliveryToken>>,
+    dependency_revision: Option<u64>,
+    tokens: Vec<Arc<DeliveryToken>>,
     foreground_attachment: Option<foreground_attachment_lifecycle::ForegroundAttachmentPublication>,
 }
 
 struct Subscription {
     request: ObservationRequest,
     sink: Arc<dyn ObservationSink>,
+    vault_export: Mutex<Option<vault_export::VaultExportLifetime>>,
     delivery: Mutex<DeliveryState>,
     delivery_finished: Condvar,
     runtime_identity: usize,
@@ -326,7 +454,11 @@ struct DeliveryState {
     closed: bool,
     delivering_thread: Option<ThreadId>,
     foreground_delivery: bool,
-    last_queued: Option<(Option<DeliveryGeneration>, u64)>,
+    last_queued: Option<(
+        Option<DeliveryGeneration>,
+        DeliveryRevision,
+        Vec<Arc<DeliveryToken>>,
+    )>,
     queue: VecDeque<QueuedDelivery>,
 }
 
@@ -361,6 +493,39 @@ impl Drop for DeliveryGuard<'_> {
 }
 
 impl Subscription {
+    fn forget_refused_delivery(&self, refused: QueuedDelivery) {
+        let refused_revision = DeliveryRevision {
+            dependency_revision: refused.dependency_revision,
+            projection_revision: refused.projection.revision(),
+        };
+        let mut delivery = self
+            .delivery
+            .lock()
+            .expect("observation delivery lock poisoned");
+        if delivery
+            .last_queued
+            .as_ref()
+            .is_some_and(|(generation, revision, tokens)| {
+                generation == &refused.generation
+                    && *revision == refused_revision
+                    && tokens.len() == refused.tokens.len()
+                    && tokens
+                        .iter()
+                        .zip(&refused.tokens)
+                        .all(|(left, right)| Arc::ptr_eq(left, right))
+            })
+        {
+            delivery.last_queued = None;
+        }
+        drop(delivery);
+        if matches!(&refused.projection, RuntimeProjection::VaultExport(_)) {
+            if let Some(runtime) = self.restore_export_delivery(refused) {
+                // A resume may already have published while this exact frame was in flight.
+                runtime.publish_vault_export_snapshot(self);
+            }
+        }
+    }
+
     fn new(
         request: ObservationRequest,
         sink: Arc<dyn ObservationSink>,
@@ -369,6 +534,7 @@ impl Subscription {
         Self {
             request,
             sink,
+            vault_export: Mutex::new(None),
             delivery: Mutex::new(DeliveryState::default()),
             delivery_finished: Condvar::new(),
             runtime_identity,
@@ -386,7 +552,10 @@ impl Subscription {
             foreground_attachment_lifecycle::ForegroundAttachmentPublication,
         >,
     ) {
-        let revision = projected.projection.revision();
+        let revision = DeliveryRevision {
+            dependency_revision: projected.dependency_revision,
+            projection_revision: projected.projection.revision(),
+        };
         let current_thread = std::thread::current().id();
         {
             let mut delivery = self
@@ -399,16 +568,28 @@ impl Subscription {
             if delivery
                 .last_queued
                 .as_ref()
-                .is_some_and(|(generation, last)| {
-                    generation == &projected.generation && revision <= *last
+                .is_some_and(|(generation, last, tokens)| {
+                    generation == &projected.generation
+                        && revision <= *last
+                        && tokens.len() == projected.tokens.len()
+                        && tokens
+                            .iter()
+                            .zip(&projected.tokens)
+                            .all(|(left, right)| Arc::ptr_eq(left, right))
                 })
             {
                 return;
             }
-            delivery.last_queued = Some((projected.generation.clone(), revision));
+            delivery.last_queued = Some((
+                projected.generation.clone(),
+                revision,
+                projected.tokens.clone(),
+            ));
             delivery.queue.push_back(QueuedDelivery {
+                generation: projected.generation,
                 projection: projected.projection,
-                token: projected.token,
+                dependency_revision: projected.dependency_revision,
+                tokens: projected.tokens,
                 foreground_attachment,
             });
             if delivery.delivering_thread.is_some() {
@@ -441,29 +622,36 @@ impl Subscription {
                 delivery.foreground_delivery = next.foreground_attachment.is_some();
                 next
             };
-            let foreground_started = next
-                .foreground_attachment
-                .as_ref()
-                .is_some_and(|publication| publication.begin());
-            if next.foreground_attachment.is_some() && !foreground_started {
-                continue;
+            // Test gates precede every admission loan so lifecycle can complete while a test
+            // holds the boundary. Production admission below contains no await or host callback.
+            #[cfg(test)]
+            if let Some(publication) = &next.foreground_attachment {
+                publication.before_admission();
             }
-            // Foreground Attachment delivery has already linearized against lifecycle and owns a
-            // copied projection plus this Arc-backed subscription. It must not acquire a delivery
-            // lease that lifecycle drains while host code runs.
-            let _lease = if foreground_started {
-                None
-            } else {
-                match next.token {
-                    Some(token) => match token.begin() {
-                        Some(lease) => Some(lease),
-                        None => continue,
-                    },
-                    None => None,
+            let Some(leases) = next
+                .tokens
+                .iter()
+                .map(|token| token.begin())
+                .collect::<Option<Vec<_>>>()
+            else {
+                self.forget_refused_delivery(next);
+                continue;
+            };
+            let _leases = if let Some(publication) = &next.foreground_attachment {
+                if !publication.begin() {
+                    self.forget_refused_delivery(next);
+                    continue;
                 }
+                // Every Account represented in this projection has admitted delivery. The
+                // foreground callback then owns copied data; lifecycle never drains host code.
+                drop(leases);
+                Vec::new()
+            } else {
+                leases
             };
             let _active_delivery = ActiveRuntimeDelivery::enter(self.runtime_identity);
             self.sink.publish(next.projection);
+            self.mark_export_snapshot_delivered();
         }
     }
 
@@ -530,12 +718,14 @@ pub struct Runtime {
     close_state_cleaned: AtomicBool,
     close_finished: tokio::sync::Notify,
     catalog_transition: tokio::sync::Mutex<()>,
+    profile_admission: Mutex<crate::profile_admission::ProfileAdmissionStartup>,
+    profile_admission_cleanup_status: Mutex<Option<crate::protocol::ProfileAdmissionCleanupStatus>>,
     publication: Mutex<()>,
     unlocked_items: Mutex<HashMap<AccountId, Vec<ItemProjection>>>,
     live_master_unlock_keys:
         Arc<Mutex<HashMap<(AccountId, crate::protocol::Incarnation), LiveMasterUnlockKey>>>,
     account_access: Mutex<HashMap<AccountId, AccountAccessState>>,
-    account_display_identities: Mutex<HashMap<AccountId, AccountDisplayIdentity>>,
+    account_display_identities: Mutex<HashMap<AccountId, AccountPresentation>>,
     recovery_accounts: Mutex<HashMap<AccountId, RecoveryAccountStatus>>,
     account_lock_epochs: Mutex<HashMap<AccountId, u64>>,
     lock_epoch_pending: Mutex<HashMap<AccountId, u64>>,
@@ -556,6 +746,10 @@ pub struct Runtime {
     create_vault_cleanup_retry_deadlines: Mutex<HashMap<(AccountId, String), u64>>,
     #[cfg(feature = "binding-test-harness")]
     create_vault_binding_pause_checkpoint: Mutex<Option<crate::replica::CreateVaultCheckpoint>>,
+    biometric: biometric::BiometricState,
+    native_authority: native_authority::NativeAuthorityState,
+    inactivity: inactivity::InactivityState,
+    account_refresh_active: AtomicBool,
     clock: Arc<dyn Clock>,
     device_timer: Arc<dyn DeviceTimer>,
     /// Wakes the dispatcher when something that can change eligibility happened: work was
@@ -681,9 +875,15 @@ impl Runtime {
     ) -> Arc<Self> {
         let persistence: Arc<dyn ReplicaPersistence> =
             Arc::new(SerializedReplicaPersistence::new(replica));
+        let platform_storage = PlatformStorage::for_platform(
+            platform,
+            auth_config
+                .as_ref()
+                .map_or(crate::ClientPlatform::Web, |config| config.platform),
+        );
         Self::with_persistence(
             persistence,
-            Arc::new(PlatformStorage::new(platform)),
+            Arc::new(platform_storage),
             Arc::new(HttpTransport::new(http)),
             auth_config,
             None,
@@ -708,7 +908,10 @@ impl Runtime {
     ) -> Arc<Self> {
         Self::with_persistence(
             Arc::new(SerializedReplicaPersistence::new(replica)),
-            Arc::new(PlatformStorage::new(platform)),
+            Arc::new(PlatformStorage::for_platform(
+                platform,
+                auth_config.platform,
+            )),
             Arc::new(HttpTransport::new(http)),
             Some(auth_config),
             None,
@@ -877,7 +1080,10 @@ impl Runtime {
             Arc::new(SerializedReplicaPersistence::new(replica));
         Self::with_persistence(
             persistence,
-            Arc::new(PlatformStorage::new(platform)),
+            Arc::new(PlatformStorage::for_platform(
+                platform,
+                auth_config.platform,
+            )),
             Arc::new(HttpTransport::new(http)),
             Some(auth_config),
             Some((preparation, lease_port)),
@@ -933,6 +1139,8 @@ impl Runtime {
             close_state_cleaned: AtomicBool::new(false),
             close_finished: tokio::sync::Notify::new(),
             catalog_transition: tokio::sync::Mutex::new(()),
+            profile_admission: Mutex::new(Default::default()),
+            profile_admission_cleanup_status: Mutex::new(None),
             publication: Mutex::new(()),
             unlocked_items: Mutex::new(HashMap::new()),
             live_master_unlock_keys,
@@ -966,6 +1174,10 @@ impl Runtime {
             live_sync_active: AtomicBool::new(false),
             dispatch_leases: Arc::new(DispatchLeases::default()),
             attachment_move_scheduler: Mutex::new(None),
+            biometric: biometric::BiometricState::default(),
+            native_authority: native_authority::NativeAuthorityState::default(),
+            inactivity: inactivity::InactivityState::default(),
+            account_refresh_active: AtomicBool::new(false),
             attachment_move_lifecycle: Mutex::new(None),
             attachment_move_lifecycle_active: AtomicBool::new(false),
             attachment_move_account_cursor: AtomicU64::new(0),
@@ -1151,12 +1363,11 @@ impl Runtime {
             .expect("Vault image ingress lock poisoned")
             .clone();
         let Some(facade) = facade else { return Ok(()) };
-        for operation in snapshot.operations.iter().filter(|operation| {
-            operation
-                .create_vault
-                .as_ref()
-                .is_some_and(|intent| intent.image.is_some())
-        }) {
+        for operation in snapshot
+            .operations
+            .iter()
+            .filter(|operation| operation.vault_image().is_some())
+        {
             // Acceptance release belongs to this Runtime's source grant. A restored durable
             // Operation has no handshake in the new owner, even though its image stays live.
             let pending = self
@@ -1446,13 +1657,14 @@ impl Runtime {
             .contains_key(&(account_id.clone(), incarnation.clone()))
     }
 
-    pub async fn request(
+    pub fn request(
         &self,
         request: RuntimeRequest,
         cancellation: RequestCancellation,
-    ) -> Result<RuntimeResponse, RuntimeError> {
-        self.request_with_hooks(request, cancellation, || {}, || {})
-            .await
+    ) -> impl std::future::Future<Output = Result<RuntimeResponse, RuntimeError>> + '_ {
+        // Hosts compose many requests in one async task. Keep the dispatcher's largest command
+        // future out of every caller's frame while preserving caller-owned polling and cancellation.
+        Box::pin(self.request_with_hooks(request, cancellation, || {}, || {}))
     }
 
     #[cfg(test)]
@@ -1473,6 +1685,49 @@ impl Runtime {
         before_acceptance: impl FnOnce(),
         accepted: impl FnOnce(),
     ) -> Result<RuntimeResponse, RuntimeError> {
+        if let RuntimeRequest::QuickUnlockAccounts {
+            account_ids,
+            master_password,
+        } = request
+        {
+            // Each target polls the single-Account ceremony. Keep batch orchestration
+            // outside the ordinary dispatcher's frame.
+            return self
+                .quick_unlock_accounts(account_ids, Zeroizing::new(master_password), cancellation)
+                .await;
+        }
+        if let RuntimeRequest::QuickUnlock {
+            account_id,
+            master_password,
+        } = request
+        {
+            // A single-Account ceremony must not poll inside the large ordinary dispatcher.
+            return Box::pin(self.quick_unlock_account(
+                account_id,
+                master_password,
+                cancellation,
+                None,
+                before_acceptance,
+                accepted,
+            ))
+            .await;
+        }
+        if matches!(&request, RuntimeRequest::SignIn { .. }) {
+            // Installation polls outside the large ordinary dispatcher.
+            return Box::pin(self.sign_in(request, cancellation, before_acceptance, accepted))
+                .await;
+        }
+        self.request_in_local_scope(request, cancellation, before_acceptance, accepted)
+            .await
+    }
+
+    async fn request_in_local_scope(
+        &self,
+        request: RuntimeRequest,
+        cancellation: RequestCancellation,
+        _before_acceptance: impl FnOnce(),
+        accepted: impl FnOnce(),
+    ) -> Result<RuntimeResponse, RuntimeError> {
         if matches!(
             &request,
             RuntimeRequest::RebootstrapAccountRecovery { .. }
@@ -1482,7 +1737,33 @@ impl Runtime {
         ) {
             return self.request_storage_recovery(request, cancellation).await;
         }
+        if matches!(
+            &request,
+            RuntimeRequest::LocalSecuritySettings { .. }
+                | RuntimeRequest::SetInactivityTimeout { .. }
+                | RuntimeRequest::RecordActivity { .. }
+        ) {
+            return self.request_local_security(request, cancellation).await;
+        }
+        if matches!(
+            &request,
+            RuntimeRequest::BiometricAvailability { .. }
+                | RuntimeRequest::SetBiometricEnabled { .. }
+                | RuntimeRequest::BiometricUnlock { .. }
+                | RuntimeRequest::BiometricUnlockAccounts { .. }
+                | RuntimeRequest::SetMasterPasswordReentryPeriod { .. }
+        ) {
+            return self.request_biometric(request, cancellation).await;
+        }
         match &request {
+            RuntimeRequest::AbortProfileAdmission { admission_id } => {
+                return self
+                    .abort_profile_admission(admission_id, &cancellation)
+                    .await;
+            }
+            RuntimeRequest::InspectProfileAdmission {} => {
+                return self.inspect_profile_admission().await;
+            }
             RuntimeRequest::RemoveAccount { account_id } => {
                 return self.remove_account(account_id.clone()).await;
             }
@@ -1603,6 +1884,40 @@ impl Runtime {
         let _admission = self.teardown_admission.read().await;
         self.reject_request_during_pending_teardown(&request)?;
         match request {
+            request @ (RuntimeRequest::PrepareRotation { .. }
+            | RuntimeRequest::CompleteRotation { .. }
+            | RuntimeRequest::InspectRotation { .. }
+            | RuntimeRequest::ListTeamLeaveAttempts { .. }
+            | RuntimeRequest::AcknowledgeTeamLeaveAttempt { .. }) => {
+                Box::pin(self.request_rotation(request, cancellation)).await
+            }
+            request @ (RuntimeRequest::ListMyTeamInvitations { .. }
+            | RuntimeRequest::AcceptMyTeamInvitation { .. }
+            | RuntimeRequest::DeclineMyTeamInvitation { .. }) => {
+                self.request_my_team_invitation(request, cancellation).await
+            }
+            request @ (RuntimeRequest::ReadInvitationComposer { .. }
+            | RuntimeRequest::CreateTeamInvitation { .. }
+            | RuntimeRequest::ProvisionTeamInvitation { .. }
+            | RuntimeRequest::ReleaseInvitationContinuation { .. }
+            | RuntimeRequest::CancelTeamInvitation { .. }
+            | RuntimeRequest::ResendTeamInvitation { .. }) => {
+                self.request_team_invitation(request, cancellation).await
+            }
+            request @ (RuntimeRequest::ListAvailableVaultMembers { .. }
+            | RuntimeRequest::ListVaultMembers { .. }
+            | RuntimeRequest::AddVaultMember { .. }) => {
+                self.request_vault_membership(request, cancellation).await
+            }
+            RuntimeRequest::ReadTeamPage { account_id } => {
+                self.read_team_page(account_id, cancellation).await
+            }
+            request @ (RuntimeRequest::RecipientKeyScope { .. }
+            | RuntimeRequest::OwnKeyFingerprint { .. }
+            | RuntimeRequest::VerifyRecipientKey { .. }
+            | RuntimeRequest::VerifiedRecipientKey { .. }) => {
+                self.request_recipient_key(request, cancellation).await
+            }
             RuntimeRequest::RebootstrapAccountRecovery { .. }
             | RuntimeRequest::InspectRecovery { .. }
             | RuntimeRequest::ExportAccountRecovery { .. }
@@ -1610,199 +1925,61 @@ impl Runtime {
                 RuntimeErrorCode::StorageUnavailable,
                 "Recovery executor is not installed",
             )),
-            RuntimeRequest::SignIn {
-                server_url,
-                email,
-                master_password,
-                secret_key,
-                insecure_transport_confirmed,
-            } => {
-                let master_password = Zeroizing::new(master_password);
-                let mut secret_key = Zeroizing::new(secret_key);
-                self.ensure_open()?;
-                if cancellation.is_cancelled() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::Cancelled,
-                        "caller cancelled before durable acceptance",
-                    ));
-                }
-                let auth_config = self.auth_client_config.clone().ok_or_else(|| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::AuthenticationUnavailable,
-                        "authentication is implemented by a later vertical slice",
-                    )
-                })?;
-                let normalized_email = bittery_crypto_core::normalize_email(&email);
-                let http = AuthHttpClient::new(
-                    &self.http_transport,
-                    &server_url,
-                    insecure_transport_confirmed,
-                    auth_config,
-                )?;
-                if !bittery_crypto_core::validate_secret_key(&secret_key) {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::AuthenticationUnavailable,
-                        "Secret Key is invalid",
-                    ));
-                }
-                let pinned_kdf_profile = self
-                    .resolve_sign_in_kdf_pin(&http.normalized_server_url(), &normalized_email)
-                    .await?;
-                let verified = authenticate(
-                    &http,
-                    AuthenticationInput {
-                        email: &normalized_email,
-                        master_password: &master_password,
-                        secret_key: &secret_key,
-                        pinned_kdf_profile: pinned_kdf_profile.as_ref(),
-                    },
-                    cancellation.clone(),
-                )
-                .await?;
-                drop(master_password);
-                before_acceptance();
-                if cancellation.is_cancelled() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::Cancelled,
-                        "caller cancelled before durable Account acceptance",
-                    ));
-                }
-
-                // Remote verification is complete. From this point the installer owns the accepted
-                // generation and must either publish it or fence it despite later caller cancellation.
-                accepted();
-                let evidence = AuthenticationInstallationEvidence::new(
-                    std::mem::take(&mut *secret_key),
-                    insecure_transport_confirmed,
-                );
-                self.install_verified_authentication(verified, evidence)
-                    .await
+            RuntimeRequest::SignIn { .. } => {
+                unreachable!("Sign-in is handled before ordinary admission")
             }
-            RuntimeRequest::QuickUnlock {
+            RuntimeRequest::LocalSecuritySettings { .. }
+            | RuntimeRequest::SetInactivityTimeout { .. }
+            | RuntimeRequest::RecordActivity { .. } => {
+                unreachable!("Local security is handled before ordinary admission")
+            }
+            RuntimeRequest::SetTravelModeHiddenVaults {
+                account_id,
+                hidden_vault_ids,
+            } => {
+                self.change_travel_mode_selection(
+                    account_id,
+                    hidden_vault_ids,
+                    travel_commands::TravelSelectionAction::Save,
+                    cancellation,
+                )
+                .await
+            }
+            RuntimeRequest::EnableTravelMode {
+                account_id,
+                hidden_vault_ids,
+            } => {
+                self.change_travel_mode_selection(
+                    account_id,
+                    hidden_vault_ids,
+                    travel_commands::TravelSelectionAction::Enable,
+                    cancellation,
+                )
+                .await
+            }
+            RuntimeRequest::DisableTravelMode {
                 account_id,
                 master_password,
             } => {
-                let master_password = Zeroizing::new(master_password);
-                self.ensure_open()?;
-                if cancellation.is_cancelled() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::Cancelled,
-                        "caller cancelled before durable acceptance",
-                    ));
-                }
-                let auth_config = self.auth_client_config.clone().ok_or_else(|| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::AuthenticationUnavailable,
-                        "authentication is not configured for this Runtime",
-                    )
-                })?;
-                let execution_lock = self.account_execution_lock(&account_id)?;
-                let execution_guard = execution_lock.lock().await;
-                self.ensure_open()?;
-                if cancellation.is_cancelled() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::Cancelled,
-                        "caller cancelled before Quick Unlock preparation",
-                    ));
-                }
-                if self
-                    .lock_epoch_pending
-                    .lock()
-                    .expect("pending lock epoch lock poisoned")
-                    .contains_key(&account_id)
-                {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::InvariantViolation,
-                        "Account lock epoch persistence is pending",
-                    ));
-                }
-                let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
-                    RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
-                })?;
-                if snapshot.failure.is_some() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::AccountFailed,
-                        "the selected Account module has failed",
-                    ));
-                }
-                let catalog = self
-                    .platform_storage
-                    .load_device_catalog()
-                    .await?
-                    .ok_or_else(quick_unlock_material_required)?;
-                let catalog_account = catalog
-                    .accounts
-                    .iter()
-                    .find(|candidate| candidate.account_id == account_id)
-                    .ok_or_else(quick_unlock_material_required)?;
-                if catalog_account.pending_install.is_some()
-                    || catalog_account.active_incarnation.as_ref() != Some(&snapshot.incarnation)
-                {
-                    return Err(quick_unlock_material_required());
-                }
-                let metadata = self
-                    .platform_storage
-                    .load_account_metadata_for_authentication(&account_id, &snapshot.incarnation)
-                    .await?
-                    .ok_or_else(quick_unlock_material_required)?;
-                if metadata.user_id != snapshot.user_id {
-                    return Err(quick_unlock_material_required());
-                }
-                let quick_unlock = self
-                    .platform_storage
-                    .load_quick_unlock_for_authentication(&account_id, &snapshot.incarnation)
-                    .await?
-                    .ok_or_else(quick_unlock_material_required)?;
-                let device_key = self
-                    .platform_storage
-                    .load_device_key_for_authentication()
-                    .await?
-                    .ok_or_else(quick_unlock_material_required)?;
-                let stored_master_unlock_key = unwrap_master_unlock_key(
-                    &quick_unlock.encrypted_master_unlock_key,
-                    &device_key.key_bytes,
-                )?;
-                let normalized_email = bittery_crypto_core::normalize_email(&metadata.email);
-                let http = AuthHttpClient::new(
-                    &self.http_transport,
-                    &metadata.normalized_server_url,
-                    metadata.insecure_transport_confirmed,
-                    auth_config,
-                )?;
-                let verified = authenticate(
-                    &http,
-                    AuthenticationInput {
-                        email: &normalized_email,
-                        master_password: &master_password,
-                        secret_key: &quick_unlock.secret_key,
-                        pinned_kdf_profile: Some(&metadata.pinned_kdf_profile),
-                    },
-                    cancellation.clone(),
-                )
-                .await?;
-                drop(master_password);
-                let prepared = prepare_quick_unlock(
-                    verified,
-                    metadata,
-                    quick_unlock,
-                    &stored_master_unlock_key,
-                    &SystemClock,
-                )?;
-                drop(stored_master_unlock_key);
-                before_acceptance();
-                self.ensure_not_closed()?;
-                if cancellation.is_cancelled() {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::Cancelled,
-                        "caller cancelled before durable Quick Unlock acceptance",
-                    ));
-                }
-
-                // Every remote and local equality check is complete. Cancellation no longer owns
-                // the accepted session installation; it must finish or fence this exact generation.
-                accepted();
-                self.commit_quick_unlock(snapshot, prepared, execution_guard)
+                self.disable_travel_mode(account_id, master_password, cancellation)
                     .await
+            }
+            RuntimeRequest::RefreshTravelMode { account_id } => {
+                self.refresh_travel_mode(account_id, cancellation).await
+            }
+            RuntimeRequest::DeviceSetup { account_id } => {
+                self.device_setup(account_id, cancellation).await
+            }
+            RuntimeRequest::QuickUnlockAccounts { .. }
+            | RuntimeRequest::BiometricAvailability { .. }
+            | RuntimeRequest::SetBiometricEnabled { .. }
+            | RuntimeRequest::BiometricUnlock { .. }
+            | RuntimeRequest::BiometricUnlockAccounts { .. }
+            | RuntimeRequest::SetMasterPasswordReentryPeriod { .. } => {
+                unreachable!("Local biometric commands are handled before ordinary admission")
+            }
+            RuntimeRequest::QuickUnlock { .. } => {
+                unreachable!("Quick Unlock is handled before ordinary admission")
             }
             // Retiring access is the one request a caller cannot take back. Cancellation is
             // never consulted, and the accepted Operations this Account already owes stay
@@ -1817,6 +1994,31 @@ impl Runtime {
             } => {
                 self.delete_server_account(account_id, confirm_email, request_id, cancellation)
                     .await
+            }
+            RuntimeRequest::DeleteVault {
+                account_id,
+                vault_id,
+            } => {
+                self.accept_vault_deletion(account_id, vault_id, cancellation, accepted)
+                    .await
+            }
+            RuntimeRequest::UpdateVault {
+                account_id,
+                vault_id,
+                name,
+                icon,
+                image,
+            } => {
+                self.accept_vault_update(
+                    account_id,
+                    vault_id,
+                    name,
+                    icon,
+                    image,
+                    cancellation,
+                    accepted,
+                )
+                .await
             }
             RuntimeRequest::CreateVault {
                 account_id,
@@ -1855,12 +2057,54 @@ impl Runtime {
             RuntimeRequest::UpdateItem {
                 account_id,
                 item_id,
+                guard,
                 draft,
             } => {
                 self.accept_existing_item_operation(
                     account_id,
                     item_id,
-                    create::ExistingItemIntent::Update(Box::new(draft)),
+                    create::ExistingItemIntent::Update {
+                        draft: Box::new(draft),
+                        guard,
+                    },
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
+            RuntimeRequest::RemovePasskey {
+                account_id,
+                item_id,
+                guard,
+                rp_id,
+                credential_id,
+                public_key_fingerprint,
+            } => {
+                self.accept_remove_passkey(
+                    account_id,
+                    item_id,
+                    guard,
+                    private_item_commands::PasskeyRemovalSelection {
+                        rp_id,
+                        credential_id,
+                        public_key_fingerprint,
+                    },
+                    cancellation,
+                    accepted,
+                )
+                .await
+            }
+            RuntimeRequest::DuplicateItem {
+                account_id,
+                source_item_id,
+                source_guard,
+                title,
+            } => {
+                self.accept_duplicate_item(
+                    account_id,
+                    source_item_id,
+                    source_guard,
+                    title,
                     cancellation,
                     accepted,
                 )
@@ -1906,11 +2150,29 @@ impl Runtime {
                 )
                 .await
             }
+            request @ (RuntimeRequest::PrepareCrossAccountMoveResume { .. }
+            | RuntimeRequest::ResumeCrossAccountMove { .. }) => {
+                self.request_cross_account_move_resume(request, cancellation, accepted)
+                    .await
+            }
             RuntimeRequest::MoveItem {
                 account_id,
                 item_id,
                 target_vault_id,
+                target_account_id,
             } => {
+                if let Some(target_account_id) = target_account_id.filter(|id| id != &account_id) {
+                    return self
+                        .accept_cross_account_move(
+                            account_id,
+                            item_id,
+                            target_account_id,
+                            target_vault_id,
+                            cancellation,
+                            accepted,
+                        )
+                        .await;
+                }
                 self.accept_existing_item_operation(
                     account_id,
                     item_id,
@@ -1968,7 +2230,10 @@ impl Runtime {
             ),
             // Teardown returns before ordinary admission. A Runtime bug must not abort the host,
             // so this reports an error rather than panicking on the request path.
-            RuntimeRequest::RemoveAccount { .. } | RuntimeRequest::Wipe => Err(RuntimeError::new(
+            RuntimeRequest::AbortProfileAdmission { .. }
+            | RuntimeRequest::InspectProfileAdmission {}
+            | RuntimeRequest::RemoveAccount { .. }
+            | RuntimeRequest::Wipe => Err(RuntimeError::new(
                 RuntimeErrorCode::InvariantViolation,
                 "teardown requests are handled before ordinary admission",
             )),
@@ -2024,6 +2289,7 @@ impl Runtime {
         request: ObservationRequest,
         sink: Arc<dyn ObservationSink>,
     ) -> Result<Arc<ObservationHandle>, RuntimeError> {
+        let native = self.native_observation_guard();
         let publication = self.publication.lock().expect("publication lock poisoned");
         self.ensure_open()?;
         if self.observation_teardown_is_pending(&request) {
@@ -2038,8 +2304,24 @@ impl Runtime {
             .lock()
             .expect("observer lock poisoned")
             .insert(id, Arc::clone(&subscription));
-        let initial = match self.projection_locked(&subscription.request) {
+        let (initial, _foreground_publication) = match self
+            .projection_locked(&subscription.request, &native)
+            .and_then(|initial| self.install_vault_export_lifetime(&subscription, initial))
+        {
             Ok(initial) => initial,
+            Err(error)
+                if error.code == RuntimeErrorCode::AuthorityMissing
+                    && matches!(&subscription.request, ObservationRequest::Items { account_id }
+                        if self.replica.snapshot(account_id).is_some_and(|snapshot|
+                            self.travel_policy_verification_pending(&snapshot))
+                            && self.account_access.lock().expect("Account access lock poisoned")
+                                .get(account_id) == Some(&AccountAccessState::Unlocked)) =>
+            {
+                // Keep only this ordinary subscription while its current policy is unknown.
+                // The projection path above refused before constructing Item plaintext; the
+                // existing publication owner supplies its first frame after verification.
+                (None, None)
+            }
             Err(error) => {
                 self.observers
                     .lock()
@@ -2050,13 +2332,25 @@ impl Runtime {
             }
         };
         drop(publication);
-        subscription.publish(initial);
-        Ok(Arc::new(ObservationHandle {
+        drop(native);
+        // A panicking initial host callback must still release a registered Export loan.
+        let handle = Arc::new(ObservationHandle {
             id,
             runtime: Arc::downgrade(self),
-            subscription,
+            subscription: Arc::clone(&subscription),
             closed: AtomicBool::new(false),
-        }))
+        });
+        // The existing admission hook also exposes capture-before-initial-queue races for Export.
+        #[cfg(test)]
+        if let Some(publication) = &_foreground_publication {
+            publication.before_admission();
+        }
+        if let Some(initial) = initial {
+            subscription.publish(initial);
+        } else if matches!(subscription.request, ObservationRequest::VaultExport { .. }) {
+            self.publish_vault_export_snapshot(&subscription);
+        }
+        Ok(handle)
     }
 
     pub(crate) fn publish_all(&self) {
@@ -2069,6 +2363,13 @@ impl Runtime {
             .cloned()
             .collect();
         for subscription in subscriptions {
+            if matches!(
+                &subscription.request,
+                ObservationRequest::VaultExport { .. }
+            ) {
+                self.publish_vault_export_snapshot(&subscription);
+                continue;
+            }
             if let Ok(projection) = self.projection(&subscription.request) {
                 subscription.publish(projection);
             }
@@ -2086,6 +2387,12 @@ impl Runtime {
         let deliveries = subscriptions
             .into_iter()
             .filter_map(|subscription| {
+                if matches!(
+                    &subscription.request,
+                    ObservationRequest::VaultExport { .. }
+                ) {
+                    return None;
+                }
                 self.projection(&subscription.request)
                     .ok()
                     .map(|projection| (subscription, projection))
@@ -2105,7 +2412,10 @@ impl Runtime {
     }
 
     async fn close_normal_owner(&self) {
-        if self.closed.swap(true, Ordering::SeqCst) {
+        let already_closed = self.closed.swap(true, Ordering::SeqCst);
+        self.biometric.retire_all();
+        self.native_authority.retire_all();
+        if already_closed {
             self.wake_dispatch();
             let reentrant_delivery = ActiveRuntimeDelivery::is_active(self.identity());
             loop {
@@ -2124,6 +2434,7 @@ impl Runtime {
             self.retire_all_attachment_uploads().await;
             self.retire_all_vault_images().await;
             let _catalog_guard = self.catalog_transition.lock().await;
+            self.close_profile_admission_source().await;
             let mut execution_locks: Vec<_> = self
                 .account_execution_locks
                 .lock()
@@ -2234,11 +2545,20 @@ impl Runtime {
         &self,
         account_id: &AccountId,
     ) -> Result<Arc<tokio::sync::Mutex<()>>, RuntimeError> {
+        self.ensure_open()?;
+        self.account_execution_lock_internal(account_id)
+    }
+
+    /// Startup uses the same execution fence while public work is still refused.
+    fn account_execution_lock_internal(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Arc<tokio::sync::Mutex<()>>, RuntimeError> {
         let mut locks = self
             .account_execution_locks
             .lock()
             .expect("Account execution lock map poisoned");
-        self.ensure_open()?;
+        self.ensure_not_closed()?;
         Ok(locks
             .entry(account_id.clone())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
@@ -2273,6 +2593,11 @@ impl Runtime {
     }
 
     fn generation_is_preparation_eligible(&self, snapshot: &ReplicaSnapshot) -> bool {
+        self.generation_has_current_unlocked_authority(snapshot)
+            && !self.travel_policy_verification_pending(snapshot)
+    }
+
+    fn generation_has_current_unlocked_authority(&self, snapshot: &ReplicaSnapshot) -> bool {
         !self.is_closed()
             && self.ready.load(Ordering::SeqCst)
             && !self.account_teardown_is_pending(&snapshot.account_id)
@@ -2292,6 +2617,34 @@ impl Runtime {
                         && current.incarnation == snapshot.incarnation
                         && current.lock_epoch == snapshot.lock_epoch
                 })
+    }
+
+    /// Publication is held and the caller has committed metadata for this exact Account scope.
+    fn update_travel_policy_presentation(
+        &self,
+        expected: &ReplicaSnapshot,
+        policy: &crate::platform_storage::VerifiedTravelModePolicy,
+    ) {
+        if let Some(presentation) = self
+            .account_display_identities
+            .lock()
+            .expect("Account display identity lock poisoned")
+            .get_mut(&expected.account_id)
+        {
+            presentation.verified_travel_mode = Some(policy.clone());
+        }
+    }
+
+    /// Publication is held. Existing admitted callbacks remain live; only new leases pause.
+    pub(super) fn pause_travel_plaintext_delivery(&self, account_id: &AccountId, paused: bool) {
+        if let Some((_, token)) = self
+            .delivery_tokens
+            .lock()
+            .expect("delivery token map poisoned")
+            .get(account_id)
+        {
+            token.pause_admission(paused);
+        }
     }
 
     fn invalidate_delivery(&self, account_id: &AccountId) -> Option<Arc<DeliveryToken>> {
@@ -2317,6 +2670,18 @@ impl Runtime {
             .expect("live master unlock key lock poisoned")
             .get(&(account_id.clone(), incarnation.clone()))
             .map(LiveMasterUnlockKey::copy_bytes)
+    }
+
+    fn copy_live_vault_key_material(
+        &self,
+        account_id: &AccountId,
+        incarnation: &crate::protocol::Incarnation,
+    ) -> Option<vault_key::VaultKeyMaterial> {
+        self.live_master_unlock_keys
+            .lock()
+            .expect("live master unlock key lock poisoned")
+            .get(&(account_id.clone(), incarnation.clone()))
+            .map(LiveMasterUnlockKey::copy_material)
     }
 
     /// Puts the fixture master unlock key in memory, the way a real Sign-in or unlock leaves one.
@@ -2369,6 +2734,19 @@ impl Runtime {
     ) -> Result<String, RuntimeError> {
         self.seed_attachment_upload_binding_test_account(server_url, mode, false)
             .await
+    }
+
+    /// Exercises the ordinary startup sweep with installed test authority and no accepted work.
+    #[cfg(feature = "binding-test-harness")]
+    #[doc(hidden)]
+    pub async fn seed_attachment_sweep_binding_test_authority(
+        &self,
+        server_url: String,
+    ) -> Result<(), RuntimeError> {
+        self.seed_attachment_upload_binding_test_authority(server_url, "writable".into())
+            .await?;
+        self.wake_dispatch();
+        Ok(())
     }
 
     #[cfg(feature = "binding-test-harness")]
@@ -2696,6 +3074,48 @@ impl Runtime {
             )
             .await?;
         }
+        // The joined fixture represents installed Accounts. Persist their catalog identities and
+        // use the same Device-key initialization owner before exercising locked recovery/restart.
+        let _catalog = self.catalog_transition.lock().await;
+        let catalog = self
+            .platform_storage
+            .load_device_catalog()
+            .await?
+            .unwrap_or(DeviceCatalogDocument::new(Vec::new())?);
+        let mut catalog_accounts = catalog.accounts.clone();
+        for id in [Some("account-1"), second_account.then_some("account-2")]
+            .into_iter()
+            .flatten()
+        {
+            let account = AccountId::from(id);
+            let snapshot = self.require_snapshot(&account)?;
+            let metadata = self
+                .platform_storage
+                .load_account_metadata(&account, &snapshot.incarnation)
+                .await?
+                .ok_or_else(|| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::InvariantViolation,
+                        "joined fixture Account metadata is missing",
+                    )
+                })?;
+            self.account_display_identities
+                .lock()
+                .expect("Account display identity lock poisoned")
+                .insert(account.clone(), account_presentation(&metadata));
+            catalog_accounts.retain(|entry| entry.account_id != account);
+            catalog_accounts.push(DeviceCatalogAccount {
+                account_id: account,
+                active_incarnation: Some(snapshot.incarnation),
+                pending_retirement: None,
+                pending_install: None,
+            });
+        }
+        self.platform_storage
+            .store_device_catalog(&catalog.with_accounts(catalog_accounts)?)
+            .await?;
+        self.ensure_image_device_key_under_catalog(&SystemInstallationEntropy)
+            .await?;
         Ok(())
     }
 
@@ -2711,15 +3131,69 @@ impl Runtime {
     }
 
     fn projection(&self, request: &ObservationRequest) -> Result<ProjectedDelivery, RuntimeError> {
+        let native = self.native_observation_guard();
         let _publication = self.publication.lock().expect("publication lock poisoned");
-        self.projection_locked(request)
+        self.projection_locked(request, &native)
     }
 
     fn projection_locked(
         &self,
         request: &ObservationRequest,
+        native: &native_authority::NativeObservationGuard<'_>,
     ) -> Result<ProjectedDelivery, RuntimeError> {
         match request {
+            ObservationRequest::VaultExport {
+                account_id,
+                vault_ids,
+            } => {
+                let mut delivery = self.projection_locked(
+                    &ObservationRequest::Items {
+                        account_id: account_id.clone(),
+                    },
+                    native,
+                )?;
+                let RuntimeProjection::Items(mut items) = delivery.projection else {
+                    unreachable!("Items observation returned another projection");
+                };
+                items
+                    .items
+                    .retain(|item| item.deleted_at.is_none() && vault_ids.contains(&item.vault_id));
+                items
+                    .vaults
+                    .retain(|vault| vault_ids.contains(&vault.vault_id));
+                let snapshot = self.require_snapshot(account_id)?;
+                let private_items = self.private_vault_export_items(&snapshot, &items)?;
+                delivery.projection =
+                    RuntimeProjection::VaultExport(crate::VaultExportProjection {
+                        account_id: items.account_id,
+                        replica_revision: items.replica_revision,
+                        items: private_items,
+                        vaults: items.vaults,
+                    });
+                Ok(delivery)
+            }
+            ObservationRequest::TravelMode { account_id } => {
+                let snapshot = self.require_snapshot(account_id)?;
+                let policy = self
+                    .account_display_identities
+                    .lock()
+                    .expect("Account display identity lock poisoned")
+                    .get(account_id)
+                    .and_then(|presentation| presentation.verified_travel_mode.clone());
+                Ok(ProjectedDelivery {
+                    dependency_revision: None,
+                    projection: RuntimeProjection::TravelMode(crate::TravelModeProjection {
+                        account_id: account_id.clone(),
+                        revision: self.device_revision.load(Ordering::SeqCst),
+                        enforcement: self.travel_enforcement(&snapshot, policy.as_ref()),
+                        last_verified_policy: policy
+                            .as_ref()
+                            .map(travel_commands::policy_projection),
+                    }),
+                    generation: None,
+                    tokens: vec![],
+                })
+            }
             ObservationRequest::WritableVaultCatalog => {
                 let access = self
                     .account_access
@@ -2727,22 +3201,36 @@ impl Runtime {
                     .expect("Account access lock poisoned")
                     .clone();
                 let mut vaults = Vec::new();
-                for snapshot in self.replica.snapshots() {
-                    if access.get(&snapshot.account_id) != Some(&AccountAccessState::Unlocked) {
+                let mut tokens = Vec::new();
+                let mut snapshots = self.replica.snapshots();
+                snapshots
+                    .sort_by(|left, right| left.account_id.as_str().cmp(right.account_id.as_str()));
+                for snapshot in snapshots {
+                    if access.get(&snapshot.account_id) != Some(&AccountAccessState::Unlocked)
+                        || self.account_teardown_is_pending(&snapshot.account_id)
+                        || self.travel_policy_verification_pending(&snapshot)
+                    {
                         continue;
                     }
+                    tokens.push(self.delivery_token(
+                        &snapshot,
+                        &DeliveryGeneration {
+                            incarnation: snapshot.incarnation.clone(),
+                            epoch: snapshot.lock_epoch,
+                        },
+                    ));
                     vaults.extend(visible_vaults(&snapshot).into_iter().filter_map(|vault| {
-                        (vault.role != VaultProjectionRole::ReadOnly).then_some(
-                            WritableVaultProjection {
-                                account_id: snapshot.account_id.clone(),
-                                vault_id: vault.vault_id,
-                                name: vault.name,
-                                vault_type: vault.vault_type,
-                                icon: vault.icon,
-                                image_url: vault.image_url,
-                                role: vault.role,
-                            },
-                        )
+                        (vault.role != VaultProjectionRole::ReadOnly
+                            && !self.vault_is_fenced(&snapshot, &vault.vault_id))
+                        .then_some(WritableVaultProjection {
+                            account_id: snapshot.account_id.clone(),
+                            vault_id: vault.vault_id,
+                            name: vault.name,
+                            vault_type: vault.vault_type,
+                            icon: vault.icon,
+                            image_url: vault.image_url,
+                            role: vault.role,
+                        })
                     }));
                 }
                 vaults.sort_by(|left, right| {
@@ -2752,6 +3240,7 @@ impl Runtime {
                         .then_with(|| left.vault_id.cmp(&right.vault_id))
                 });
                 Ok(ProjectedDelivery {
+                    dependency_revision: None,
                     projection: RuntimeProjection::WritableVaultCatalog(
                         WritableVaultCatalogProjection {
                             revision: self.device_revision.load(Ordering::SeqCst),
@@ -2759,7 +3248,7 @@ impl Runtime {
                         },
                     ),
                     generation: None,
-                    token: None,
+                    tokens,
                 })
             }
             ObservationRequest::Operations { account_id } => {
@@ -2769,14 +3258,34 @@ impl Runtime {
                 let mut operations = snapshot
                     .operations
                     .iter()
-                    .map(|operation| crate::OperationProjection {
-                        operation_id: operation.operation_id.clone(),
-                        kind: operation.kind.into(),
-                        attempt_count: Some(operation.scheduling.attempt_count.to_string()),
-                        next_attempt_at_ms: Some(operation.scheduling.not_before_ms.to_string()),
-                        resolution: crate::OperationResolution::Pending,
-                        imported_count: None,
-                        rejection_code: None,
+                    .map(|operation| {
+                        use crate::replica::LegacyOperationDisposition;
+                        let resolution = match operation
+                            .legacy_admission
+                            .as_ref()
+                            .map(|admission| admission.disposition)
+                        {
+                            Some(LegacyOperationDisposition::LegacyFailed) => {
+                                crate::OperationResolution::LegacyFailed
+                            }
+                            Some(LegacyOperationDisposition::LegacyConflicted) => {
+                                crate::OperationResolution::LegacyConflicted
+                            }
+                            None | Some(LegacyOperationDisposition::Normal) => {
+                                crate::OperationResolution::Pending
+                            }
+                        };
+                        crate::OperationProjection {
+                            operation_id: operation.operation_id.clone(),
+                            kind: operation.kind.into(),
+                            attempt_count: Some(operation.scheduling.attempt_count.to_string()),
+                            next_attempt_at_ms: (resolution == crate::OperationResolution::Pending)
+                                .then(|| operation.scheduling.not_before_ms.to_string()),
+                            resolution,
+                            imported_count: None,
+                            rejection_code: None,
+                            cross_account_move: None,
+                        }
                     })
                     .collect::<Vec<_>>();
                 operations.extend(snapshot.receipts.iter().map(|receipt| {
@@ -2801,6 +3310,13 @@ impl Runtime {
                                 .ok()
                                 .and_then(|v| v.as_str().map(str::to_owned)),
                         ),
+                        OperationOutcomeResult::VaultMutationRejected { code } => (
+                            crate::OperationResolution::Rejected,
+                            None,
+                            serde_json::to_value(code)
+                                .ok()
+                                .and_then(|v| v.as_str().map(str::to_owned)),
+                        ),
                         OperationOutcomeResult::ImportRejected { code } => (
                             crate::OperationResolution::Rejected,
                             None,
@@ -2808,7 +3324,24 @@ impl Runtime {
                                 .ok()
                                 .and_then(|v| v.as_str().map(str::to_owned)),
                         ),
+                        OperationOutcomeResult::RotationStartRejected { code } => (
+                            crate::OperationResolution::Rejected,
+                            None,
+                            serde_json::to_value(code)
+                                .ok()
+                                .and_then(|v| v.as_str().map(str::to_owned)),
+                        ),
+                        OperationOutcomeResult::RotationFinalizeRejected { code, .. } => (
+                            crate::OperationResolution::Rejected,
+                            None,
+                            serde_json::to_value(code)
+                                .ok()
+                                .and_then(|v| v.as_str().map(str::to_owned)),
+                        ),
                         OperationOutcomeResult::Applied { .. }
+                        | OperationOutcomeResult::RotationStartApplied { .. }
+                        | OperationOutcomeResult::RotationStartAppliedReceipt { .. }
+                        | OperationOutcomeResult::RotationFinalizeApplied { .. }
                         | OperationOutcomeResult::ShareApplied { .. }
                         | OperationOutcomeResult::VaultApplied { .. } => {
                             (crate::OperationResolution::Applied, None, None)
@@ -2822,23 +3355,30 @@ impl Runtime {
                         resolution,
                         imported_count,
                         rejection_code,
+                        cross_account_move: None,
                     }
                 }));
+                operations.extend(self.cross_account_move_projections(&snapshot));
                 operations.sort_by(|left, right| left.operation_id.cmp(&right.operation_id));
                 Ok(ProjectedDelivery {
+                    // Destination availability is captured under the same publication lock.
+                    dependency_revision: Some(self.device_revision.load(Ordering::SeqCst)),
                     projection: RuntimeProjection::Operations(crate::OperationsProjection {
                         account_id: account_id.clone(),
                         replica_revision: snapshot.revision,
                         operations,
                     }),
                     generation: None,
-                    token: None,
+                    tokens: vec![],
                 })
             }
             ObservationRequest::Items { account_id } => {
                 let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
                     RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
                 })?;
+                if self.travel_policy_verification_pending(&snapshot) {
+                    return Err(travel_policy::pending_policy());
+                }
                 if self
                     .account_access
                     .lock()
@@ -2861,40 +3401,37 @@ impl Runtime {
                     incarnation: snapshot.incarnation.clone(),
                     epoch,
                 };
-                let token = {
-                    let mut tokens = self
-                        .delivery_tokens
-                        .lock()
-                        .expect("delivery token map poisoned");
-                    let entry = tokens
-                        .entry(account_id.clone())
-                        .or_insert_with(|| (generation.clone(), Arc::new(DeliveryToken::new())));
-                    if entry.0 != generation {
-                        *entry = (generation.clone(), Arc::new(DeliveryToken::new()));
-                    }
-                    Arc::clone(&entry.1)
-                };
+                let token = self.delivery_token(&snapshot, &generation);
+                let mut items = self
+                    .unlocked_items
+                    .lock()
+                    .expect("unlocked projection lock poisoned")
+                    .get(account_id)
+                    .cloned()
+                    .unwrap_or_default();
+                self.filter_vault_item_projections(&snapshot, &mut items)?;
                 Ok(ProjectedDelivery {
+                    dependency_revision: None,
                     projection: RuntimeProjection::Items(ItemsProjection {
                         account_id: account_id.clone(),
                         replica_revision: snapshot.revision,
-                        items: self
-                            .unlocked_items
-                            .lock()
-                            .expect("unlocked projection lock poisoned")
-                            .get(account_id)
-                            .cloned()
-                            .unwrap_or_default(),
-                        vaults: visible_vaults(&snapshot),
+                        items,
+                        vaults: visible_vaults(&snapshot)
+                            .into_iter()
+                            .filter(|vault| !self.vault_is_fenced(&snapshot, &vault.vault_id))
+                            .collect(),
                     }),
                     generation: Some(generation),
-                    token: Some(token),
+                    tokens: vec![token],
                 })
             }
             ObservationRequest::PendingShareResults { account_id } => {
                 let snapshot = self.replica.snapshot(account_id).ok_or_else(|| {
                     RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
                 })?;
+                if self.travel_policy_verification_pending(&snapshot) {
+                    return Err(travel_policy::pending_policy());
+                }
                 if self
                     .account_access
                     .lock()
@@ -2917,19 +3454,7 @@ impl Runtime {
                     incarnation: snapshot.incarnation.clone(),
                     epoch,
                 };
-                let token = {
-                    let mut tokens = self
-                        .delivery_tokens
-                        .lock()
-                        .expect("delivery token map poisoned");
-                    let entry = tokens
-                        .entry(account_id.clone())
-                        .or_insert_with(|| (generation.clone(), Arc::new(DeliveryToken::new())));
-                    if entry.0 != generation {
-                        *entry = (generation.clone(), Arc::new(DeliveryToken::new()));
-                    }
-                    Arc::clone(&entry.1)
-                };
+                let token = self.delivery_token(&snapshot, &generation);
                 let master_unlock_key = self
                     .copy_live_master_unlock_key(account_id, &snapshot.incarnation)
                     .ok_or_else(|| {
@@ -2944,6 +3469,19 @@ impl Runtime {
                     .iter()
                     .filter(|capability| capability.result.is_some())
                 {
+                    let receipt = snapshot
+                        .receipts
+                        .iter()
+                        .find(|receipt| receipt.operation_id == capability.operation_id)
+                        .ok_or_else(|| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::InvariantViolation,
+                                "the pending Share result has no Operation receipt",
+                            )
+                        })?;
+                    if self.vault_is_fenced(&snapshot, receipt.vault_id()) {
+                        continue;
+                    }
                     let context = bittery_crypto_core::ShareCapabilityAadContext::new(
                         account_id.as_str().to_owned(),
                         capability.operation_id.clone(),
@@ -2985,16 +3523,6 @@ impl Runtime {
                         .result
                         .as_ref()
                         .expect("filtered pending Share result must exist");
-                    let receipt = snapshot
-                        .receipts
-                        .iter()
-                        .find(|receipt| receipt.operation_id == capability.operation_id)
-                        .ok_or_else(|| {
-                            RuntimeError::new(
-                                RuntimeErrorCode::InvariantViolation,
-                                "the pending Share result has no Operation receipt",
-                            )
-                        })?;
                     match &receipt.result {
                         OperationOutcomeResult::ShareApplied {
                             share_link_id,
@@ -3029,6 +3557,7 @@ impl Runtime {
                     });
                 }
                 Ok(ProjectedDelivery {
+                    dependency_revision: None,
                     projection: RuntimeProjection::PendingShareResults(
                         PendingShareResultsProjection {
                             account_id: account_id.clone(),
@@ -3037,7 +3566,7 @@ impl Runtime {
                         },
                     ),
                     generation: Some(generation),
-                    token: Some(token),
+                    tokens: vec![token],
                 })
             }
             ObservationRequest::RuntimeStatus { account_id } => {
@@ -3052,29 +3581,39 @@ impl Runtime {
                 };
                 let mut accounts: Vec<_> = snapshots
                     .into_iter()
-                    .map(|value| AccountStatus {
-                        access: self
+                    .map(|value| {
+                        let access = self
                             .account_access
                             .lock()
                             .expect("Account access lock poisoned")
                             .get(&value.account_id)
                             .copied()
-                            .unwrap_or(AccountAccessState::SignedOut),
-                        display_identity: self
+                            .unwrap_or(AccountAccessState::SignedOut);
+                        let presentation = self
                             .account_display_identities
                             .lock()
                             .expect("Account display identity lock poisoned")
                             .get(&value.account_id)
-                            .cloned(),
-                        waiting_reason: self
-                            .waiting_reasons
-                            .lock()
-                            .expect("waiting reason lock poisoned")
-                            .get(&value.account_id)
-                            .copied(),
-                        account_id: value.account_id,
-                        replica_revision: value.revision,
-                        failure: value.failure,
+                            .cloned();
+                        AccountStatus {
+                            unlock_capabilities: native.unlock_capabilities(
+                                presentation.as_ref(),
+                                &value.user_id,
+                                access,
+                            ),
+                            access,
+                            display_identity: presentation
+                                .map(|presentation| presentation.identity),
+                            waiting_reason: self
+                                .waiting_reasons
+                                .lock()
+                                .expect("waiting reason lock poisoned")
+                                .get(&value.account_id)
+                                .copied(),
+                            account_id: value.account_id,
+                            replica_revision: value.revision,
+                            failure: value.failure,
+                        }
                     })
                     .collect();
                 let visible: HashSet<_> = accounts
@@ -3094,6 +3633,7 @@ impl Runtime {
                             account_id,
                             replica_revision: recovery.replica_revision,
                             access: AccountAccessState::SignedOut,
+                            unlock_capabilities: AccountUnlockCapabilities::default(),
                             display_identity: None,
                             waiting_reason: None,
                             failure: None,
@@ -3113,15 +3653,45 @@ impl Runtime {
                 accounts.sort_by(|a, b| a.account_id.as_str().cmp(b.account_id.as_str()));
                 let revision = self.device_revision.load(Ordering::SeqCst);
                 Ok(ProjectedDelivery {
+                    dependency_revision: None,
                     projection: RuntimeProjection::RuntimeStatus(RuntimeStatusProjection {
+                        profile_admission_cleanup: self
+                            .profile_admission_cleanup_status
+                            .lock()
+                            .expect("admission cleanup status lock poisoned")
+                            .clone(),
                         account_id: account_id.clone(),
                         revision,
                         accounts,
                         closed: self.is_closed(),
                     }),
                     generation: None,
-                    token: None,
+                    tokens: vec![],
                 })
+            }
+        }
+    }
+
+    fn update_profile_admission_cleanup_status(&self, catalog: Option<&DeviceCatalogDocument>) {
+        let next = catalog.and_then(DeviceCatalogDocument::admission_record)
+            .and_then(crate::platform_storage::profile_admission::ProfileAdmissionRecord::pending_cleanup_obligations)
+            .map(|pending_obligations| crate::protocol::ProfileAdmissionCleanupStatus::Pending { pending_obligations });
+        let changed = {
+            let mut status = self
+                .profile_admission_cleanup_status
+                .lock()
+                .expect("admission cleanup status lock poisoned");
+            if *status == next {
+                false
+            } else {
+                *status = next;
+                true
+            }
+        };
+        if changed {
+            self.device_revision.fetch_add(1, Ordering::SeqCst);
+            if self.ready.load(Ordering::SeqCst) {
+                self.publish_all();
             }
         }
     }
@@ -3213,20 +3783,38 @@ fn stage_catalog_install(
         .find(|account| account.account_id == account_id)
     {
         Some(account) => {
-            if account.active_incarnation != expected_active_incarnation {
+            if account.active_incarnation != expected_active_incarnation
+                || account.pending_install.is_some()
+            {
                 return Err(startup_invariant(
                     "catalog Account changed while staging installation",
                 ));
             }
+            if let Some(expected) = &expected_active_incarnation {
+                let retirement = account.pending_retirement.as_ref().ok_or_else(|| {
+                    startup_invariant("Account replacement requires its retirement intent")
+                })?;
+                if &retirement.incarnation != expected
+                    || retirement.purpose
+                        != crate::platform_storage::AccountRetirementPurpose::Replace
+                {
+                    return Err(startup_invariant(
+                        "Account replacement has another retirement intent",
+                    ));
+                }
+            }
+            // One catalog write consumes Replace into the next durable lifecycle state.
+            account.pending_retirement = None;
             account.pending_install = Some(pending);
         }
         None => accounts.push(DeviceCatalogAccount {
             account_id,
             active_incarnation: None,
+            pending_retirement: None,
             pending_install: Some(pending),
         }),
     }
-    DeviceCatalogDocument::new(accounts)
+    catalog.with_accounts(accounts)
 }
 
 fn promote_catalog_install(
@@ -3250,7 +3838,7 @@ fn promote_catalog_install(
     }
     account.active_incarnation = Some(incarnation.clone());
     account.pending_install = None;
-    DeviceCatalogDocument::new(accounts)
+    staged.with_accounts(accounts)
 }
 
 fn durable_installation_is_unchanged(
@@ -3258,6 +3846,23 @@ fn durable_installation_is_unchanged(
     previous: Option<&crate::replica::ReplicaSnapshot>,
 ) -> bool {
     durable == previous
+}
+
+fn account_presentation(
+    metadata: &crate::platform_storage::AccountMetadataDocument,
+) -> AccountPresentation {
+    AccountPresentation {
+        identity: AccountDisplayIdentity {
+            email: metadata.email.clone(),
+            name: metadata.name.clone(),
+            team_name: metadata.team_name.clone(),
+            team_avatar_url: metadata.team_avatar_url.clone(),
+            server_url: metadata.normalized_server_url.clone(),
+            secret_key_hint: metadata.secret_key_hint.clone(),
+        },
+        native_only: metadata.native_only,
+        verified_travel_mode: metadata.verified_travel_mode.clone(),
+    }
 }
 
 fn finish_generation_fence(token: Option<Arc<DeliveryToken>>) {
@@ -3331,6 +3936,7 @@ impl ObservationHandle {
                 .remove(&self.id);
         }
         self.subscription.close();
+        self.subscription.close_vault_export();
     }
 }
 
@@ -3342,6 +3948,8 @@ impl Drop for ObservationHandle {
 
 #[cfg(test)]
 mod startup_tests;
+
+mod vault_export;
 
 #[cfg(test)]
 mod authenticated_installation_tests;

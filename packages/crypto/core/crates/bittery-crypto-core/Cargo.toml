@@ -6,6 +6,7 @@ license.workspace = true
 description = "Core cryptographic primitives for Bittery password manager"
 
 [features]
+contract-schema = ["dep:schemars"]
 attachment-move-test-vectors = []
 
 [dependencies]
@@ -36,6 +37,7 @@ ciborium.workspace = true
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
+schemars = { version = "=1.2.2", optional = true }
 
 # Error handling
 thiserror.workspace = true

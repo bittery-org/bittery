@@ -1,4 +1,5 @@
 use super::outcome::{CompletionResult, OutcomeResolutionAuthBudget};
+use super::vault_key::{unwrap_vault_key, VaultKeyMaterial};
 use crate::{
     auth_http::{AuthHttpClient, AuthenticatedOutcome},
     authentication_installation::parse_session_expiry_ms,
@@ -9,8 +10,8 @@ use crate::{
         AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole, AuthorityVaultType,
         BeginBootstrapPlan, BootstrapContinuation, BootstrapGenerationId, BootstrapGuard,
         BootstrapPageCursor, BootstrapPhase, CursorAdvance, MarkRefreshRequiredPlan, PlanResult,
-        PromoteBootstrapPlan, ReplicaSnapshot, ReplicaState, Sha256Fingerprint,
-        StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
+        ReplicaSnapshot, ReplicaState, Sha256Fingerprint, StageBootstrapPagePlan,
+        StageBootstrapPageResult, SyncCursor,
     },
     server_contract::{
         BootstrapAttachmentResponse, BootstrapItemResponse, BootstrapItemsResponse,
@@ -21,9 +22,7 @@ use crate::{
     Runtime, RuntimeError, RuntimeErrorCode,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use bittery_crypto_core::{
-    decrypt_vault_key_with_muk, decrypt_with_aad, AadContext, EncryptedData, WrappedVaultKeyData,
-};
+use bittery_crypto_core::{decrypt_with_aad, AadContext, EncryptedData};
 use serde::Deserialize;
 use std::sync::atomic::Ordering;
 use zeroize::{Zeroize, Zeroizing};
@@ -69,8 +68,7 @@ impl Runtime {
                 )
             })?;
         let session = self
-            .platform_storage
-            .load_current_session(account_id, &snapshot.incarnation)
+            .effective_session(account_id, &snapshot.incarnation)
             .await?
             .ok_or_else(|| {
                 RuntimeError::new(
@@ -104,15 +102,220 @@ impl Runtime {
         session: CurrentSessionDocument,
         cancellation: RequestCancellation,
     ) -> Result<bool, RuntimeError> {
+        let mut last_owned_generation = None;
+        let (caught_up, _) = self
+            .run_bootstrap_tracked(
+                account_id,
+                http,
+                session,
+                cancellation,
+                &mut last_owned_generation,
+            )
+            .await?;
+        Ok(caught_up)
+    }
+
+    async fn run_bootstrap_tracked(
+        &self,
+        account_id: &AccountId,
+        http: &AuthHttpClient<'_>,
+        session: CurrentSessionDocument,
+        cancellation: RequestCancellation,
+        last_owned_generation: &mut Option<BootstrapGenerationId>,
+    ) -> Result<(bool, Option<BootstrapGenerationId>), RuntimeError> {
+        let mut auth_budget = OutcomeResolutionAuthBudget::default();
+        let snapshot = self.require_snapshot(account_id)?;
+        let mut session = session;
+        if self.travel_policy_sync_work_due(&snapshot) {
+            self.persist_travel_policy_pending_fenced(&snapshot).await?;
+        }
+        let snapshot = self.require_travel_policy_scope(&snapshot)?;
+        if self.travel_policy_server_verification_due(&snapshot) {
+            let current = self.begin_travel_policy_refresh_fenced(&snapshot).await?;
+            let verified = self
+                .read_current_travel_policy_fenced(
+                    &current,
+                    http,
+                    &mut session,
+                    cancellation.clone(),
+                    Some(&mut auth_budget),
+                )
+                .await?;
+            // The GET snapshot must not retain hidden wrappers while selective cleanup drains.
+            drop(session);
+            let current = self
+                .apply_verified_travel_policy_fenced(&current, verified)
+                .await?;
+            session = self
+                .effective_session(account_id, &current.incarnation)
+                .await?
+                .ok_or_else(replica_busy)?;
+        }
+        // A newer episode must be verified before ordinary authority publication. Keep the
+        // existing stream/control owner available for that duty.
+        if self.travel_policy_verification_pending(&self.require_snapshot(account_id)?) {
+            return Ok((true, None));
+        }
         let session = self
-            .hydrate_bootstrap_generation(account_id, http, session, cancellation.clone())
+            .hydrate_bootstrap_generation(
+                account_id,
+                http,
+                session,
+                cancellation.clone(),
+                &mut auth_budget,
+                last_owned_generation,
+            )
             .await?;
         let (_, caught_up) = self
-            .catch_up_changes(account_id, http, session, cancellation)
+            .catch_up_changes(
+                account_id,
+                http,
+                session,
+                cancellation,
+                &mut auth_budget,
+                last_owned_generation,
+            )
             .await?;
         // The live runner owns connection lifetime; this bounded pass only installs authority.
         self.decrypt_visible_items(account_id)?;
-        Ok(caught_up)
+        let completed_generation = if caught_up {
+            self.require_snapshot(account_id)?
+                .bootstrap
+                .active_generation
+        } else {
+            None
+        };
+        Ok((caught_up, completed_generation))
+    }
+
+    pub(super) async fn preflight_rotation_authority(
+        &self,
+        account_id: &AccountId,
+        http: &AuthHttpClient<'_>,
+        session: CurrentSessionDocument,
+        cancellation: RequestCancellation,
+    ) -> Result<ReplicaSnapshot, RuntimeError> {
+        let initial = self.require_snapshot(account_id)?;
+        let mut session = session;
+        if initial.bootstrap.staging_generation.is_some() {
+            // A generation begun by ordinary Sync cannot be reused as this preflight's proof.
+            if !self
+                .run_bootstrap(account_id, http, session, cancellation.clone())
+                .await?
+            {
+                return Err(version_evidence_unavailable());
+            }
+            session = self
+                .effective_session(account_id, &initial.incarnation)
+                .await?
+                .ok_or_else(replica_busy)?;
+        }
+        let snapshot = self.require_snapshot(account_id)?;
+        if snapshot.incarnation != initial.incarnation
+            || snapshot.lock_epoch != initial.lock_epoch
+            || snapshot.user_id != initial.user_id
+            || snapshot.bootstrap.staging_generation.is_some()
+        {
+            return Err(replica_busy());
+        }
+        let mut last_owned_generation = None;
+        if snapshot.bootstrap.state == ReplicaState::Ready {
+            let generation_id = BootstrapGenerationId(bittery_crypto_core::generate_uuid());
+            match self
+                .replica
+                .begin_bootstrap(BeginBootstrapPlan {
+                    guard: guard_from(&snapshot),
+                    generation_id: generation_id.clone(),
+                })
+                .await?
+            {
+                PlanResult::Applied { .. } => last_owned_generation = Some(generation_id),
+                PlanResult::Stale { .. } => return Err(replica_busy()),
+                PlanResult::Missing => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AccountMissing,
+                        "account is not installed",
+                    ));
+                }
+            }
+        }
+        let result = async {
+            let (caught_up, completed_generation) = self
+                .run_bootstrap_tracked(
+                    account_id,
+                    http,
+                    session,
+                    cancellation,
+                    &mut last_owned_generation,
+                )
+                .await?;
+            if !caught_up {
+                return Err(version_evidence_unavailable());
+            }
+            let snapshot = self.require_snapshot(account_id)?;
+            if snapshot.incarnation != initial.incarnation
+                || snapshot.lock_epoch != initial.lock_epoch
+                || snapshot.user_id != initial.user_id
+                || completed_generation != last_owned_generation
+                || snapshot.bootstrap.active_generation != completed_generation
+            {
+                return Err(replica_busy());
+            }
+            let version_proved = snapshot
+                .bootstrap
+                .active_generation
+                .as_ref()
+                .is_some_and(|id| {
+                    snapshot
+                        .bootstrap
+                        .generations
+                        .get(id)
+                        .is_some_and(|generation| {
+                            generation.vault_key_version_proved && generation.final_page_staged
+                        })
+                });
+            if !version_proved
+                || snapshot
+                    .bootstrap
+                    .snapshot()
+                    .visible_vaults
+                    .iter()
+                    .any(|vault| vault.key_version.is_none_or(|version| version <= 0))
+            {
+                return Err(version_evidence_unavailable());
+            }
+            Ok(snapshot)
+        }
+        .await;
+        if result.is_err() {
+            self.abandon_owned_rotation_stage(&initial, last_owned_generation.as_ref())
+                .await?;
+        }
+        result
+    }
+
+    async fn abandon_owned_rotation_stage(
+        &self,
+        expected: &ReplicaSnapshot,
+        owned: Option<&BootstrapGenerationId>,
+    ) -> Result<(), RuntimeError> {
+        let Some(owned) = owned else { return Ok(()) };
+        let snapshot = self.require_snapshot(&expected.account_id)?;
+        if snapshot.incarnation != expected.incarnation
+            || snapshot.user_id != expected.user_id
+            || snapshot.lock_epoch != expected.lock_epoch
+            || snapshot.bootstrap.staging_generation.as_ref() != Some(owned)
+        {
+            return Ok(());
+        }
+        let _ = self
+            .replica
+            .abandon_bootstrap(AbandonBootstrapPlan {
+                guard: guard_from(&snapshot),
+                generation_id: owned.clone(),
+            })
+            .await?;
+        Ok(())
     }
 
     async fn hydrate_bootstrap_generation(
@@ -121,8 +324,27 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         mut session: CurrentSessionDocument,
         cancellation: RequestCancellation,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
+        last_owned_generation: &mut Option<BootstrapGenerationId>,
     ) -> Result<CurrentSessionDocument, RuntimeError> {
-        let snapshot = self.require_snapshot(account_id)?;
+        let mut snapshot = self.require_snapshot(account_id)?;
+        if snapshot.bootstrap.state != ReplicaState::Ready
+            || snapshot.bootstrap.staging_generation.is_some()
+        {
+            // Preserve this duty through staged-page/restart retries. A retirement retry cannot
+            // promote a complete generation before its post-watermark policy verification.
+            snapshot = self.begin_travel_policy_refresh_fenced(&snapshot).await?;
+        }
+        if self.has_vault_retirement_work(&snapshot) {
+            drop(session);
+            self.resume_vault_retirements(&snapshot).await?;
+            snapshot = self.require_snapshot(account_id)?;
+            session = self
+                .effective_session(account_id, &snapshot.incarnation)
+                .await?
+                .ok_or_else(replica_busy)?;
+        }
+        let hidden_vault_ids = self.verified_hidden_vault_ids(&snapshot).await?;
         if snapshot.bootstrap.state == ReplicaState::Ready
             && snapshot.bootstrap.staging_generation.is_none()
         {
@@ -134,11 +356,11 @@ impl Runtime {
                 .replica
                 .begin_bootstrap(BeginBootstrapPlan {
                     guard: guard_from(&snapshot),
-                    generation_id,
+                    generation_id: generation_id.clone(),
                 })
                 .await?
             {
-                PlanResult::Applied { .. } => {}
+                PlanResult::Applied { .. } => *last_owned_generation = Some(generation_id),
                 PlanResult::Stale { .. } => {
                     return Err(replica_busy());
                 }
@@ -191,6 +413,12 @@ impl Runtime {
                 )
                 .await?;
             if matches!(page, AuthenticatedOutcome::ReauthenticationRequired) {
+                if !auth_budget.consume_renewal() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AuthenticationRequired,
+                        "Sync renewal allowance is exhausted",
+                    ));
+                }
                 session = self
                     .renew_session(account_id, &session, http, cancellation.clone())
                     .await?;
@@ -209,7 +437,8 @@ impl Runtime {
             let page = match page {
                 AuthenticatedOutcome::Ok(page) => page,
                 AuthenticatedOutcome::Transient => {
-                    self.abandon_staging(account_id).await?;
+                    self.abandon_owned_rotation_stage(&snapshot, Some(&staging))
+                        .await?;
                     return Err(sync_failure("Sync Server request failed"));
                 }
                 AuthenticatedOutcome::ReauthenticationRequired => {
@@ -224,15 +453,18 @@ impl Runtime {
                 has_more,
                 next_cursor,
                 watermark,
-                vaults,
-                items,
+                vault_key_version_included,
+                mut vaults,
+                mut items,
             } = authority_from_bootstrap_page(&page.value)?;
             if response_phase != phase {
-                self.abandon_staging(account_id).await?;
+                self.abandon_owned_rotation_stage(&snapshot, Some(&staging))
+                    .await?;
                 return Err(sync_failure("Bootstrap Server returned the wrong phase"));
             }
             if captured && watermark != generation.pinned_watermark {
-                self.abandon_staging(account_id).await?;
+                self.abandon_owned_rotation_stage(&snapshot, Some(&staging))
+                    .await?;
                 return Err(sync_failure("Bootstrap watermark changed between pages"));
             }
             let continuation = if has_more {
@@ -243,29 +475,35 @@ impl Runtime {
                 BootstrapContinuation::Final
             };
             let snapshot = self.require_snapshot(account_id)?;
-            let staging = snapshot
+            let current_staging = snapshot
                 .bootstrap
                 .staging_generation
                 .clone()
                 .ok_or_else(replica_busy)?;
+            if current_staging != staging {
+                return Err(replica_busy());
+            }
             let generation = snapshot
                 .bootstrap
                 .generations
-                .get(&staging)
+                .get(&current_staging)
                 .ok_or_else(replica_busy)?
                 .clone();
             let response_fingerprint =
                 bootstrap_page_fingerprint(&generation.next_page_cursor, &page.raw_body);
+            vaults.retain(|vault| !hidden_vault_ids.contains(&vault.id));
+            items.retain(|item| !hidden_vault_ids.contains(&item.vault_id));
             match self
                 .replica
                 .stage_bootstrap_page(StageBootstrapPagePlan {
                     guard: guard_from(&snapshot),
-                    generation_id: staging,
+                    generation_id: current_staging.clone(),
                     page_identity: generation.next_page_identity,
                     request_cursor: generation.next_page_cursor,
                     raw_response_fingerprint: response_fingerprint,
                     pinned_watermark: watermark,
                     continuation,
+                    vault_key_version_included,
                     vaults,
                     items,
                 })
@@ -273,7 +511,8 @@ impl Runtime {
             {
                 StageBootstrapPageResult::Applied | StageBootstrapPageResult::Replayed => {}
                 StageBootstrapPageResult::ReplayMismatch => {
-                    self.abandon_staging(account_id).await?;
+                    self.abandon_owned_rotation_stage(&snapshot, Some(&current_staging))
+                        .await?;
                     return Err(sync_failure("Bootstrap page fingerprint did not match"));
                 }
                 StageBootstrapPageResult::Stale { .. } => return Err(replica_busy()),
@@ -286,27 +525,47 @@ impl Runtime {
             }
         }
 
+        // A pre-Bootstrap policy read cannot cover an event lost before this watermark. Verify
+        // after the captured Server boundary and before publishing the complete authority stage.
         let snapshot = self.require_snapshot(account_id)?;
-        let staging = snapshot
-            .bootstrap
-            .staging_generation
-            .clone()
-            .ok_or_else(replica_busy)?;
-        match self
-            .replica
-            .promote_bootstrap(PromoteBootstrapPlan {
-                guard: guard_from(&snapshot),
-                generation_id: staging,
-            })
-            .await?
-        {
-            PlanResult::Applied { .. } => Ok(session),
-            PlanResult::Stale { .. } => Err(replica_busy()),
-            PlanResult::Missing => Err(RuntimeError::new(
-                RuntimeErrorCode::AccountMissing,
-                "account is not installed",
-            )),
+        let staged = snapshot.bootstrap.staging_generation.clone();
+        let current = self.begin_travel_policy_refresh_fenced(&snapshot).await?;
+        let verified = self
+            .read_current_travel_policy_fenced(
+                &current,
+                http,
+                &mut session,
+                cancellation,
+                Some(auth_budget),
+            )
+            .await?;
+        let mut filtered_hidden = hidden_vault_ids;
+        filtered_hidden.sort();
+        drop(session);
+        let current = self
+            .apply_verified_travel_policy_fenced(&current, verified)
+            .await?;
+        let verified_hidden = self.verified_hidden_vault_ids(&current).await?;
+        if verified_hidden != filtered_hidden || current.bootstrap.staging_generation != staged {
+            // The raw page fingerprints remain Server fingerprints. Rebuild under the verified
+            // selection instead of rewriting accepted page contents or promoting an old filter.
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::RetryableTransport,
+                "Bootstrap requires fresh authority after verified Travel policy changed",
+            ));
         }
+        if self.travel_policy_verification_pending(&self.require_snapshot(account_id)?) {
+            return Err(super::travel_policy::pending_policy());
+        }
+        let retired = self.promote_bootstrap_with_retirement(account_id).await?;
+        let mut session = self
+            .effective_session(account_id, &current.incarnation)
+            .await?
+            .ok_or_else(replica_busy)?;
+        session
+            .vault_keys
+            .retain(|key| !retired.contains(&key.vault_id));
+        Ok(session)
     }
 
     async fn catch_up_changes(
@@ -315,9 +574,15 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         mut session: CurrentSessionDocument,
         cancellation: RequestCancellation,
+        auth_budget: &mut OutcomeResolutionAuthBudget,
+        last_owned_generation: &mut Option<BootstrapGenerationId>,
     ) -> Result<(CurrentSessionDocument, bool), RuntimeError> {
-        let mut auth_budget = OutcomeResolutionAuthBudget::default();
-        loop {
+        let mut passes = 0usize;
+        'catch_up: loop {
+            passes += 1;
+            if passes > MAX_BOOTSTRAP_PAGES {
+                return Ok((session, false));
+            }
             let snapshot = self.require_snapshot(account_id)?;
             if snapshot.bootstrap.state != ReplicaState::Ready {
                 return Ok((session, false));
@@ -361,6 +626,35 @@ impl Runtime {
             if self.require_snapshot(account_id)?.bootstrap.active_cursor != page_cursor {
                 return Ok((session, false));
             }
+            if changes.events.iter().any(|event| {
+                event.r#type == crate::server_contract::SyncEventType::TravelModeUpdated
+            }) {
+                self.begin_travel_policy_invalidation_fenced(&snapshot)
+                    .await?;
+                let current = self.require_travel_policy_scope(&snapshot)?;
+                let verified = self
+                    .read_current_travel_policy_fenced(
+                        &current,
+                        http,
+                        &mut session,
+                        cancellation.clone(),
+                        Some(auth_budget),
+                    )
+                    .await?;
+                // Release the captured wrappers before any selected cleanup can await a loan.
+                drop(session);
+                let current = self
+                    .apply_verified_travel_policy_fenced(&current, verified)
+                    .await?;
+                // Reload only the effective wrappers left by the completed selective duty.
+                session = self
+                    .effective_session(account_id, &current.incarnation)
+                    .await?
+                    .ok_or_else(replica_busy)?;
+            }
+            if self.travel_policy_verification_pending(&self.require_snapshot(account_id)?) {
+                return Ok((session, false));
+            }
             let structural_refresh = changes.events.iter().any(|event| {
                 !matches!(
                     event.entity_type,
@@ -381,18 +675,19 @@ impl Runtime {
                             &event.entity_id,
                             http,
                             &mut session,
+                            auth_budget,
                         )
                         .await
                     {
                         CompletionResult::Completed => {}
                         CompletionResult::Retry | CompletionResult::Failed => {
-                            return Ok((session, false))
+                            return Ok((session, false));
                         }
                         CompletionResult::Reauthenticate => {
                             return Err(RuntimeError::new(
                                 RuntimeErrorCode::AuthenticationRequired,
                                 "Sync requires a current Session",
-                            ))
+                            ));
                         }
                     }
                 }
@@ -418,7 +713,14 @@ impl Runtime {
                     }
                 }
                 session = self
-                    .hydrate_bootstrap_generation(account_id, http, session, cancellation.clone())
+                    .hydrate_bootstrap_generation(
+                        account_id,
+                        http,
+                        session,
+                        cancellation.clone(),
+                        auth_budget,
+                        last_owned_generation,
+                    )
                     .await?;
                 continue;
             }
@@ -451,12 +753,30 @@ impl Runtime {
                             &event.entity_id,
                             http,
                             &mut session,
+                            auth_budget,
                         )
                         .await
                     {
-                        CompletionResult::Completed => continue,
+                        CompletionResult::Completed => {
+                            if self.require_snapshot(account_id)?.bootstrap.state
+                                != ReplicaState::Ready
+                            {
+                                session = self
+                                    .hydrate_bootstrap_generation(
+                                        account_id,
+                                        http,
+                                        session,
+                                        cancellation.clone(),
+                                        auth_budget,
+                                        last_owned_generation,
+                                    )
+                                    .await?;
+                                continue 'catch_up;
+                            }
+                            continue;
+                        }
                         CompletionResult::Retry | CompletionResult::Failed => {
-                            return Ok((session, false))
+                            return Ok((session, false));
                         }
                         CompletionResult::Reauthenticate => {
                             return Err(RuntimeError::new(
@@ -480,7 +800,7 @@ impl Runtime {
                         &event.entity_id,
                         http,
                         &mut session,
-                        &mut auth_budget,
+                        auth_budget,
                         cancellation.clone(),
                     )
                     .await?;
@@ -560,7 +880,16 @@ impl Runtime {
                 .await?;
         }
         match answer {
-            AuthenticatedOutcome::Ok(item) => Ok(item.as_ref().map(authority_item_from_bootstrap)),
+            AuthenticatedOutcome::Ok(item) => {
+                let snapshot = self.require_snapshot(account_id)?;
+                let hidden = self.verified_hidden_vault_ids(&snapshot).await?;
+                // The Server returns membership authority even for a locally hidden Vault. Use
+                // the fetched record's current Vault, since the event can precede a later Move.
+                Ok(item
+                    .as_ref()
+                    .filter(|item| !hidden.contains(&item.vault_id))
+                    .map(authority_item_from_bootstrap))
+            }
             AuthenticatedOutcome::Transient => Err(RuntimeError::new(
                 RuntimeErrorCode::RetryableTransport,
                 "Sync Item authority is unavailable",
@@ -579,34 +908,109 @@ impl Runtime {
         http: &AuthHttpClient<'_>,
         cancellation: RequestCancellation,
     ) -> Result<CurrentSessionDocument, RuntimeError> {
+        let refreshed = self
+            .request_session_refresh(session, http, cancellation)
+            .await?;
+        self.publish_session_refresh(account_id, session, refreshed)
+            .await
+    }
+
+    pub(super) async fn request_session_refresh(
+        &self,
+        session: &CurrentSessionDocument,
+        http: &AuthHttpClient<'_>,
+        cancellation: RequestCancellation,
+    ) -> Result<crate::server_contract::RefreshSessionResponse, RuntimeError> {
         match http
             .refresh_session(session.token.as_ref(), cancellation)
             .await?
         {
-            AuthenticatedOutcome::Ok(refreshed) => {
-                let expires_at_ms = parse_session_expiry_ms(&refreshed.expires_at)?;
-                let renewed = CurrentSessionDocument::new(
-                    session.account_id.clone(),
-                    session.incarnation.clone(),
-                    refreshed.token.clone(),
-                    Some(refreshed.session_id.clone()),
-                    expires_at_ms,
-                    Some(expires_at_ms),
-                    session.vault_keys.clone(),
-                    session.encrypted_private_key.clone(),
-                )?;
-                self.platform_storage
-                    .store_current_session(&renewed)
-                    .await?;
-                self.note_session_available(account_id);
-                Ok(renewed)
-            }
+            AuthenticatedOutcome::Ok(refreshed) => Ok(refreshed),
             AuthenticatedOutcome::ReauthenticationRequired => Err(RuntimeError::new(
                 RuntimeErrorCode::AuthenticationRequired,
                 "Session is missing or expired",
             )),
             AuthenticatedOutcome::Transient => Err(sync_failure("Session refresh failed")),
         }
+    }
+
+    /// Caller holds Account execution and has checked its original source scope.
+    pub(super) async fn publish_session_refresh(
+        &self,
+        account_id: &AccountId,
+        session: &CurrentSessionDocument,
+        refreshed: crate::server_contract::RefreshSessionResponse,
+    ) -> Result<CurrentSessionDocument, RuntimeError> {
+        let renewed = self
+            .store_renewed_effective_session(session, refreshed)
+            .await?;
+        self.note_session_available(account_id);
+        Ok(renewed)
+    }
+
+    pub(super) async fn store_renewed_session(
+        &self,
+        session: &CurrentSessionDocument,
+        refreshed: crate::server_contract::RefreshSessionResponse,
+    ) -> Result<CurrentSessionDocument, RuntimeError> {
+        let renewed = Self::prepare_renewed_session(session, refreshed)?;
+        self.replace_independent_session(session, renewed).await
+    }
+
+    /// Replace an exact independent Session while the caller holds Account execution.
+    /// A refresh response prepared before Vault-key pruning cannot restore the older document.
+    pub(super) async fn replace_independent_session(
+        &self,
+        expected: &CurrentSessionDocument,
+        replacement: CurrentSessionDocument,
+    ) -> Result<CurrentSessionDocument, RuntimeError> {
+        self.ensure_not_closed()?;
+        if expected.provenance != crate::platform_storage::SessionProvenance::Independent
+            || replacement.provenance != expected.provenance
+            || replacement.account_id != expected.account_id
+            || replacement.incarnation != expected.incarnation
+            || !self
+                .replica
+                .snapshot(&expected.account_id)
+                .is_some_and(|snapshot| snapshot.incarnation == expected.incarnation)
+            || self
+                .platform_storage
+                .load_current_session(&expected.account_id, &expected.incarnation)
+                .await?
+                .as_ref()
+                != Some(expected)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "Session changed before guarded replacement",
+            ));
+        }
+        // Owner close registers intent before waiting for Account execution. A primitive read
+        // may have been held across that intent even though this caller still owns execution.
+        self.ensure_not_closed()?;
+        self.platform_storage
+            .store_current_session(&replacement)
+            .await?;
+        Ok(replacement)
+    }
+
+    pub(super) fn prepare_renewed_session(
+        session: &CurrentSessionDocument,
+        refreshed: crate::server_contract::RefreshSessionResponse,
+    ) -> Result<CurrentSessionDocument, RuntimeError> {
+        let expires_at_ms = parse_session_expiry_ms(&refreshed.expires_at)?;
+        let mut renewed = CurrentSessionDocument::new(
+            session.account_id.clone(),
+            session.incarnation.clone(),
+            refreshed.token,
+            Some(refreshed.session_id),
+            expires_at_ms,
+            Some(expires_at_ms),
+            session.vault_keys.clone(),
+            session.encrypted_private_key.clone(),
+        )?;
+        renewed.provenance = session.provenance.clone();
+        Ok(renewed)
     }
 
     pub(super) fn decrypt_visible_items(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
@@ -627,7 +1031,9 @@ impl Runtime {
         foreground_attachment: bool,
     ) -> Result<Option<super::PreparedForegroundAttachmentPublications>, RuntimeError> {
         let snapshot = self.require_snapshot(account_id)?;
-        if self.account_access_retirement_is_pending(account_id) {
+        if self.travel_policy_verification_pending(&snapshot)
+            || self.account_access_retirement_is_pending(account_id)
+        {
             return Ok(None);
         }
         let access = self
@@ -648,7 +1054,7 @@ impl Runtime {
         if epoch != snapshot.lock_epoch {
             return Ok(None);
         }
-        let Some(muk) = self.copy_live_master_unlock_key(account_id, &snapshot.incarnation) else {
+        let Some(muk) = self.copy_live_vault_key_material(account_id, &snapshot.incarnation) else {
             return Ok(None);
         };
         let Some(generation_id) = snapshot.bootstrap.active_generation.clone() else {
@@ -677,7 +1083,7 @@ impl Runtime {
                     account_id: account_id.clone(),
                     item_id: item.id.clone(),
                     vault_id: item.vault_id.clone(),
-                    data,
+                    data: crate::protocol::PublicItemDraft::from(&data),
                     favorite: item.favorite,
                     deleted_at: item.deleted_at.clone(),
                     attachments: decrypt_attachment_projections(
@@ -690,12 +1096,32 @@ impl Runtime {
                     created_at: item.created_at.clone(),
                     updated_at: item.updated_at.clone(),
                     status: ItemProjectionStatus::Authoritative,
+                    edit_guard: Some(crate::protocol::ItemEditGuard {
+                        account_id: account_id.clone(),
+                        incarnation: snapshot.incarnation.clone(),
+                        lock_epoch: snapshot.lock_epoch,
+                        item_id: item.id.clone(),
+                        vault_id: item.vault_id.clone(),
+                        item_version: item.version,
+                    }),
+                    duplicate_source_guard: Some(crate::protocol::ItemDuplicateGuard {
+                        account_id: account_id.clone(),
+                        incarnation_id: snapshot.incarnation.clone(),
+                        lock_epoch: snapshot.lock_epoch,
+                        source_item_id: item.id.clone(),
+                        vault_id: item.vault_id.clone(),
+                        replica_revision: snapshot.revision,
+                        source: crate::protocol::DuplicateSourceGuard::Authoritative {
+                            item_version: item.version,
+                        },
+                    }),
                 }),
                 Err(_) => continue,
             }
         }
         // The encrypted optimistic overlays are Items too. A create the Server has not answered
         // yet is Pending, and one it terminally rejected is Failed with its ciphertext intact.
+        // Captured legacy failure is also Failed while its held Operation awaits retained proof.
         for overlay in &snapshot.items {
             if overlay.permanently_deleted {
                 projections.retain(|existing| existing.item_id != overlay.item_id);
@@ -708,15 +1134,24 @@ impl Runtime {
             else {
                 continue;
             };
-            let status = if snapshot
-                .operations
+            let status = if snapshot.operations.iter().any(|operation| {
+                operation.operation_id == overlay.operation_id && !operation.is_legacy_held()
+            }) || snapshot
+                .attachment_move_preparations
                 .iter()
-                .any(|operation| operation.operation_id == overlay.operation_id)
+                .any(|preparation| preparation.operation_id == overlay.operation_id)
                 || snapshot
-                    .attachment_move_preparations
+                    .cross_account_moves
                     .iter()
-                    .any(|preparation| preparation.operation_id == overlay.operation_id)
-            {
+                    .filter_map(|entry| entry.captured())
+                    .any(|workflow| {
+                        workflow.operation_id == overlay.operation_id
+                            && !matches!(
+                                workflow.stage,
+                                crate::replica::CrossAccountMoveStage::Completed
+                                    | crate::replica::CrossAccountMoveStage::Rejected
+                            )
+                    }) {
                 ItemProjectionStatus::Pending
             } else {
                 ItemProjectionStatus::Failed
@@ -737,7 +1172,7 @@ impl Runtime {
                 account_id: account_id.clone(),
                 item_id: overlay.item_id.clone(),
                 vault_id: overlay.vault_id.clone(),
-                data,
+                data: crate::protocol::PublicItemDraft::from(&data),
                 favorite: overlay.favorite,
                 deleted_at: overlay.deleted_at.clone(),
                 attachments: decrypt_attachment_projections_by_authority(
@@ -753,6 +1188,18 @@ impl Runtime {
                 created_at: overlay.created_at.clone(),
                 updated_at: overlay.updated_at.clone(),
                 status,
+                edit_guard: None,
+                duplicate_source_guard: Some(crate::protocol::ItemDuplicateGuard {
+                    account_id: account_id.clone(),
+                    incarnation_id: snapshot.incarnation.clone(),
+                    lock_epoch: snapshot.lock_epoch,
+                    source_item_id: overlay.item_id.clone(),
+                    vault_id: overlay.vault_id.clone(),
+                    replica_revision: snapshot.revision,
+                    source: crate::protocol::DuplicateSourceGuard::AcceptedOverlay {
+                        operation_id: overlay.operation_id.clone(),
+                    },
+                }),
             });
         }
         projections.sort_by(|left, right| left.item_id.cmp(&right.item_id));
@@ -765,6 +1212,16 @@ impl Runtime {
         {
             hook();
         }
+        let publication = self.publication.lock().expect("publication lock poisoned");
+        let current = self.replica.snapshot(account_id);
+        if !current.as_ref().is_some_and(|current| {
+            current.incarnation == snapshot.incarnation
+                && current.revision == snapshot.revision
+                && current.lock_epoch == snapshot.lock_epoch
+        }) {
+            return Ok(None);
+        }
+        self.filter_vault_item_projections(&snapshot, &mut projections)?;
         let retirement_intent = self.account_access_retirement_intent(account_id);
         let pending_retirements = retirement_intent
             .lock()
@@ -793,6 +1250,8 @@ impl Runtime {
             .expect("unlocked projection lock poisoned")
             .insert(account_id.clone(), projections);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
+        drop(pending_retirements);
+        drop(publication);
         let prepared = if foreground_attachment && !self.is_closed() {
             Some(self.prepare_all_for_foreground_attachment())
         } else {
@@ -801,7 +1260,6 @@ impl Runtime {
             }
             None
         };
-        drop(pending_retirements);
         Ok(prepared)
     }
 
@@ -816,7 +1274,7 @@ impl Runtime {
             .expect("before plaintext commit hook lock poisoned") = hook;
     }
 
-    async fn abandon_staging(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
+    pub(super) async fn abandon_staging(&self, account_id: &AccountId) -> Result<(), RuntimeError> {
         let snapshot = self.require_snapshot(account_id)?;
         let Some(staging) = snapshot.bootstrap.staging_generation.clone() else {
             return Ok(());
@@ -857,8 +1315,13 @@ impl Runtime {
             .get(&(generation.clone(), item.vault_id.clone()))
             .ok_or_else(|| sync_failure("authoritative Item Vault is not visible"))?;
         let muk = self
-            .copy_live_master_unlock_key(account_id, &snapshot.incarnation)
-            .ok_or_else(|| sync_failure("authoritative Item cannot be validated while locked"))?;
+            .copy_live_vault_key_material(account_id, &snapshot.incarnation)
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::AuthenticationRequired,
+                    "authoritative Item cannot be validated while locked",
+                )
+            })?;
         decrypt_item(
             &muk,
             &snapshot.user_id,
@@ -955,6 +1418,8 @@ struct BootstrapAuthorityPage {
     has_more: bool,
     next_cursor: Option<String>,
     watermark: SyncCursor,
+    /// Complete raw Vault-page version proof, before Travel visibility removes hidden rows.
+    vault_key_version_included: bool,
     vaults: Vec<AuthorityVaultRecord>,
     items: Vec<AuthorityItemRecord>,
 }
@@ -993,17 +1458,26 @@ fn authority_from_bootstrap_page(
             next_cursor,
             sync_cursor,
             vaults,
-        } => Ok(BootstrapAuthorityPage {
-            phase: BootstrapPhase::Vaults,
-            has_more: *has_more,
-            next_cursor: next_cursor.clone(),
-            watermark: captured_watermark(sync_cursor.as_ref()),
-            vaults: vaults
+            vault_key_version_included,
+        } => {
+            let vaults = vaults
                 .iter()
                 .map(authority_vault)
-                .collect::<Result<Vec<_>, _>>()?,
-            items: Vec::new(),
-        }),
+                .collect::<Result<Vec<_>, _>>()?;
+            let version_proved = *vault_key_version_included == Some(true)
+                && vaults
+                    .iter()
+                    .all(|vault: &AuthorityVaultRecord| vault.key_version.is_some_and(|v| v > 0));
+            Ok(BootstrapAuthorityPage {
+                phase: BootstrapPhase::Vaults,
+                has_more: *has_more,
+                next_cursor: next_cursor.clone(),
+                watermark: captured_watermark(sync_cursor.as_ref()),
+                vault_key_version_included: version_proved,
+                vaults,
+                items: Vec::new(),
+            })
+        }
         BootstrapItemsResponse::Items {
             has_more,
             items,
@@ -1014,13 +1488,44 @@ fn authority_from_bootstrap_page(
             has_more: *has_more,
             next_cursor: next_cursor.clone(),
             watermark: captured_watermark(sync_cursor.as_ref()),
+            vault_key_version_included: false,
             vaults: Vec::new(),
             items: items.iter().map(authority_item_from_bootstrap).collect(),
         }),
     }
 }
 
+#[cfg(test)]
+#[test]
+fn raw_vault_page_version_proof_cannot_ignore_a_hidden_unversioned_row() {
+    let page: BootstrapItemsResponse = serde_json::from_value(serde_json::json!({
+        "phase": "vaults", "hasMore": false, "nextCursor": null, "syncCursor": null,
+        "vaultKeyVersionIncluded": true,
+        "vaults": [
+            {"id":"visible", "name":"Visible", "vaultType":"personal", "role":"owner",
+             "icon":null, "imageUrl":null, "encryptedVaultKey":"wrapped", "keyVersion":2},
+            {"id":"hidden", "name":"Hidden", "vaultType":"team", "role":"member",
+             "icon":null, "imageUrl":null, "encryptedVaultKey":"wrapped"}
+        ]
+    }))
+    .unwrap();
+    let mut parsed = authority_from_bootstrap_page(&page).unwrap();
+    assert_eq!(parsed.vaults.len(), 2);
+    parsed.vaults.retain(|vault| vault.id != "hidden");
+    assert!(parsed
+        .vaults
+        .iter()
+        .all(|vault| vault.key_version.is_some()));
+    assert!(
+        !parsed.vault_key_version_included,
+        "a filtered hidden row cannot turn the marked raw page into complete version proof"
+    );
+}
+
 fn authority_vault(vault: &BootstrapVaultSummary) -> Result<AuthorityVaultRecord, RuntimeError> {
+    if vault.key_version.is_some_and(|version| version <= 0) {
+        return Err(version_evidence_unavailable());
+    }
     Ok(AuthorityVaultRecord {
         id: vault.id.clone(),
         name: vault.name.clone(),
@@ -1031,6 +1536,7 @@ fn authority_vault(vault: &BootstrapVaultSummary) -> Result<AuthorityVaultRecord
         icon: vault.icon.clone(),
         image_url: vault.image_url.clone(),
         encrypted_vault_key: vault.encrypted_vault_key.clone(),
+        key_version: vault.key_version,
         role: match vault.role {
             VaultRole::Owner => AuthorityVaultRole::Owner,
             VaultRole::Admin => AuthorityVaultRole::Admin,
@@ -1115,7 +1621,7 @@ pub(super) fn authority_item_from_dto(
 ///
 /// Authority rows and encrypted optimistic overlays are both this, which is why one reader opens
 /// both without either of them pretending to be the other.
-struct SealedItem<'a> {
+pub(super) struct SealedItem<'a> {
     item_id: &'a str,
     vault_id: &'a str,
     encryption_version: i32,
@@ -1124,7 +1630,7 @@ struct SealedItem<'a> {
 }
 
 impl<'a> SealedItem<'a> {
-    fn from_authority(item: &'a AuthorityItemRecord) -> Self {
+    pub(super) fn from_authority(item: &'a AuthorityItemRecord) -> Self {
         Self {
             item_id: &item.id,
             vault_id: &item.vault_id,
@@ -1138,7 +1644,7 @@ impl<'a> SealedItem<'a> {
         }
     }
 
-    fn from_overlay(overlay: &'a crate::replica::ReplicaItemRecord) -> Self {
+    pub(super) fn from_overlay(overlay: &'a crate::replica::ReplicaItemRecord) -> Self {
         Self {
             item_id: &overlay.item_id,
             vault_id: &overlay.vault_id,
@@ -1153,20 +1659,17 @@ impl<'a> SealedItem<'a> {
     }
 }
 
-fn decrypt_item(
-    muk: &[u8; 32],
+pub(super) fn decrypt_item(
+    muk: &VaultKeyMaterial,
     user_id: &str,
     vault: &AuthorityVaultRecord,
     item: &SealedItem<'_>,
     category: &AuthorityItemCategory,
 ) -> Result<ItemDraft, RuntimeError> {
-    let wrapped: WrappedVaultKeyData = serde_json::from_str(&vault.encrypted_vault_key)
-        .map_err(|_| sync_failure("wrapped Vault key is invalid"))?;
-    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != user_id {
-        return Err(sync_failure("wrapped Vault key context does not match"));
-    }
-    let vault_key = decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk, &wrapped.context)
-        .map_err(|_| sync_failure("Vault key could not be unwrapped"))?;
+    let vault_key =
+        Zeroizing::new(unwrap_vault_key(vault, user_id, muk).map_err(|error| {
+            RuntimeError::new(RuntimeErrorCode::InvariantViolation, error.message)
+        })?);
     let plaintext = decrypt_with_aad(
         &item.data,
         &vault_key,
@@ -1209,21 +1712,12 @@ pub(super) fn decode_item_plaintext(
 
 fn decrypt_attachment_projections(
     account_id: &AccountId,
-    muk: &[u8; 32],
+    muk: &VaultKeyMaterial,
     user_id: &str,
     vault: &AuthorityVaultRecord,
     attachments: &[AuthorityAttachmentRecord],
 ) -> Vec<AttachmentProjection> {
-    let Ok(wrapped) = serde_json::from_str::<WrappedVaultKeyData>(&vault.encrypted_vault_key)
-    else {
-        return Vec::new();
-    };
-    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != user_id {
-        return Vec::new();
-    }
-    let Ok(vault_key) =
-        decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk, &wrapped.context)
-    else {
+    let Ok(vault_key) = unwrap_vault_key(vault, user_id, muk) else {
         return Vec::new();
     };
     let vault_key = Zeroizing::new(vault_key);
@@ -1293,7 +1787,7 @@ fn decrypt_attachment_projections(
 
 fn decrypt_attachment_projections_by_authority(
     account_id: &AccountId,
-    muk: &[u8; 32],
+    muk: &VaultKeyMaterial,
     user_id: &str,
     snapshot: &ReplicaSnapshot,
     generation_id: &BootstrapGenerationId,
@@ -1329,6 +1823,91 @@ fn replica_busy() -> RuntimeError {
 
 fn sync_failure(message: &'static str) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
+}
+
+fn version_evidence_unavailable() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::VersionEvidenceUnavailable,
+        "Complete Vault key-version authority is unavailable",
+    )
+}
+
+/// Read a fresh Vault phase without publishing authority or installing wrappers. Native independent
+/// revalidation uses this same closed bootstrap parser and key validation before clearing exclusions.
+pub(super) async fn fresh_readable_vault_ids(
+    http: &AuthHttpClient<'_>,
+    session: &CurrentSessionDocument,
+    user_id: &str,
+    key: &VaultKeyMaterial,
+    requested: &[String],
+    cancellation: RequestCancellation,
+) -> Result<Vec<String>, RuntimeError> {
+    let mut cursor = None;
+    let mut watermark = SyncCursor::Cold;
+    let mut seen_cursors = std::collections::HashSet::new();
+    let mut seen_requested = std::collections::HashSet::new();
+    let mut visible = Vec::new();
+    for _ in 0..MAX_BOOTSTRAP_PAGES {
+        if cancellation.is_cancelled() {
+            return Err(sync_failure("Vault authority verification was cancelled"));
+        }
+        let pinned = match &watermark {
+            SyncCursor::CapturedValue { id } => Some(id.as_str()),
+            _ => None,
+        };
+        let page = http
+            .bootstrap_page(
+                &session.token,
+                "vaults",
+                cursor.as_deref(),
+                pinned,
+                watermark != SyncCursor::Cold,
+                cancellation.clone(),
+            )
+            .await?;
+        let AuthenticatedOutcome::Ok(page) = page else {
+            return Err(sync_failure(
+                "Fresh readable Vault authority is unavailable",
+            ));
+        };
+        let page = authority_from_bootstrap_page(&page.value)?;
+        if page.phase != BootstrapPhase::Vaults
+            || (watermark != SyncCursor::Cold && page.watermark != watermark)
+        {
+            return Err(sync_failure(
+                "Fresh Vault authority changed its captured phase or watermark",
+            ));
+        }
+        watermark = page.watermark;
+        for vault in page.vaults {
+            if requested.contains(&vault.id) {
+                if !seen_requested.insert(vault.id.clone()) {
+                    return Err(sync_failure(
+                        "Fresh Vault authority repeated a requested Vault",
+                    ));
+                }
+                if let Ok(opened) = unwrap_vault_key(&vault, user_id, key) {
+                    let _opened = Zeroizing::new(opened);
+                    visible.push(vault.id);
+                }
+            }
+        }
+        if !page.has_more {
+            visible.sort();
+            return Ok(visible);
+        }
+        let next = page
+            .next_cursor
+            .filter(|next| !next.is_empty())
+            .ok_or_else(|| sync_failure("Fresh Vault authority omitted its next Cursor"))?;
+        if !seen_cursors.insert(next.clone()) {
+            return Err(sync_failure("Fresh Vault authority repeated its Cursor"));
+        }
+        cursor = Some(next);
+    }
+    Err(sync_failure(
+        "Fresh Vault authority exceeded the bootstrap page bound",
+    ))
 }
 
 #[cfg(test)]
@@ -1462,7 +2041,10 @@ mod item_category_tests {
             };
             assert_eq!(
                 decrypt_item(
-                    &TEST_MASTER_UNLOCK_KEY,
+                    &VaultKeyMaterial {
+                        master_unlock_key: Zeroizing::new(TEST_MASTER_UNLOCK_KEY),
+                        encrypted_private_key: None
+                    },
                     "user-1",
                     &vault,
                     &sealed,
@@ -1498,7 +2080,10 @@ mod item_category_tests {
         };
         assert_eq!(
             decrypt_item(
-                &TEST_MASTER_UNLOCK_KEY,
+                &VaultKeyMaterial {
+                    master_unlock_key: Zeroizing::new(TEST_MASTER_UNLOCK_KEY),
+                    encrypted_private_key: None
+                },
                 "user-1",
                 &vault,
                 &sealed,

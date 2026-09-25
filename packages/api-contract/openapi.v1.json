@@ -11819,6 +11819,130 @@
         ]
       }
     },
+    "/api/v1/vaults/{vaultId}/deletions": {
+      "post": {
+        "tags": [
+          "vaults"
+        ],
+        "operationId": "deleteVaultOperation",
+        "parameters": [
+          {
+            "name": "vaultId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required stable Operation ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultDeletionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Retained semantic outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request or Operation ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Staging incomplete or current authority changed; retry the same Operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation ID was reused with different immutable request bytes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/vaults/{vaultId}/image-uploads": {
       "post": {
         "tags": [
@@ -13675,6 +13799,130 @@
         ]
       }
     },
+    "/api/v1/vaults/{vaultId}/metadata-updates": {
+      "post": {
+        "tags": [
+          "vaults"
+        ],
+        "operationId": "updateVaultMetadata",
+        "parameters": [
+          {
+            "name": "vaultId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required stable Operation ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VaultMetadataUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Retained semantic outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request or Operation ID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Staging incomplete or current authority changed; retry the same Operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation ID was reused with different immutable request bytes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/vaults/{vaultId}/type-conversions": {
       "post": {
         "tags": [
@@ -14257,6 +14505,16 @@
           "contentType": {
             "type": "string"
           },
+          "durableUpload": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DurableAttachmentUploadBody"
+              }
+            ]
+          },
           "fileName": {
             "type": "string"
           },
@@ -14266,6 +14524,21 @@
           }
         },
         "additionalProperties": false
+      },
+      "AttachmentUploadHeader": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
       },
       "AttachmentUploadResponse": {
         "type": "object",
@@ -14280,6 +14553,12 @@
           },
           "key": {
             "type": "string"
+          },
+          "uploadHeaders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentUploadHeader"
+            }
           },
           "uploadUrl": {
             "type": "string"
@@ -14787,6 +15066,12 @@
                   }
                 ]
               },
+              "vaultKeyVersionIncluded": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
               "vaults": {
                 "type": "array",
                 "items": {
@@ -14865,6 +15150,14 @@
               "string",
               "null"
             ]
+          },
+          "keyVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 1
           },
           "name": {
             "type": "string"
@@ -16617,6 +16910,22 @@
         },
         "additionalProperties": false
       },
+      "DurableAttachmentUploadBody": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "ciphertextSha256"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string"
+          },
+          "ciphertextSha256": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "EmailAccessRequest": {
         "type": "object",
         "required": [
@@ -18210,6 +18519,50 @@
               "kind": {
                 "type": "string",
                 "enum": [
+                  "update_vault"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/VaultMutationOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "delete_vault"
+                ]
+              },
+              "operationId": {
+                "type": "string"
+              },
+              "result": {
+                "$ref": "#/components/schemas/VaultMutationOperationResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operationId",
+              "result",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
                   "import_items"
                 ]
               },
@@ -19098,6 +19451,12 @@
           "token"
         ],
         "properties": {
+          "existingUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "existingUserPublicKey": {
             "type": [
               "string",
@@ -20252,6 +20611,10 @@
           }
         }
       },
+      "VaultDeletionBody": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "VaultDetailsResponseDto": {
         "type": "object",
         "required": [
@@ -20706,6 +21069,78 @@
             "type": "string"
           }
         }
+      },
+      "VaultMetadataUpdateBody": {
+        "type": "object",
+        "properties": {
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "VaultMutationOperationRejectionCode": {
+        "type": "string",
+        "enum": [
+          "vault_access_denied"
+        ]
+      },
+      "VaultMutationOperationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "vaultId",
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "applied"
+                ]
+              },
+              "vaultId": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/VaultMutationOperationRejectionCode"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "rejected"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Vault mutations retain identity, never a stale metadata snapshot."
       },
       "VaultRole": {
         "type": "string",

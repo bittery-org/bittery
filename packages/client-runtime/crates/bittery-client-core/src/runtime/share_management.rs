@@ -36,18 +36,28 @@ impl Runtime {
                 "Account is unavailable",
             ));
         }
-        // The existing foreground registry is shared with lifecycle: Lock/Sign-out/Remove/Wipe
-        // cancel these HTTP requests and drain them before retiring the Account's live authority.
-        let foreground = self.foreground_attachments.register(
+        let item_id = match &request {
+            RuntimeRequest::ListItemShareLinks { item_id, .. }
+            | RuntimeRequest::ListShareAccessLogs { item_id, .. }
+            | RuntimeRequest::RevokeShareLink { item_id, .. } => item_id.clone(),
+            _ => unreachable!("only closed Share requests enter this service"),
+        };
+        let (_, vault) = super::attachment::item_and_vault(&snapshot, &item_id)?;
+        self.require_vault_accepting_work(&snapshot, &vault.id)?;
+        let foreground = self.foreground_attachments.register_target(
             &account_id,
             &snapshot.incarnation,
+            super::foreground_attachment_lifecycle::ForegroundAttachmentTarget::Item {
+                vault_id: vault.id.clone(),
+                item_id: item_id.clone(),
+            },
             cancellation.clone(),
         )?;
         drop(guard);
         let result = tokio::select! {
             biased;
             () = cancellation.cancelled() => return Err(cancelled()),
-            result = self.execute_share_management(&account_id, &snapshot.incarnation, request, cancellation.clone()) => result,
+            result = self.execute_share_management(&account_id, &snapshot.incarnation, &vault.id, request, cancellation.clone()) => result,
         }?;
         let _guard = tokio::select! {
             biased;
@@ -58,6 +68,11 @@ impl Runtime {
         let current = self.require_snapshot(&account_id)?;
         if current.incarnation != snapshot.incarnation || current.lock_epoch != snapshot.lock_epoch
         {
+            return Err(cancelled());
+        }
+        let (_, current_vault) = super::attachment::item_and_vault(&current, &item_id)?;
+        self.require_vault_accepting_work(&current, &current_vault.id)?;
+        if current_vault.id != vault.id {
             return Err(cancelled());
         }
         // Linearize result delivery against a retirement that has announced its intent but is
@@ -93,6 +108,7 @@ impl Runtime {
         &self,
         account_id: &AccountId,
         incarnation: &crate::Incarnation,
+        expected_vault_id: &str,
         request: RuntimeRequest,
         cancellation: RequestCancellation,
     ) -> Result<RuntimeResponse, RuntimeError> {
@@ -102,8 +118,7 @@ impl Runtime {
             .await?
             .ok_or_else(authentication_required)?;
         let mut session = self
-            .platform_storage
-            .load_current_session(account_id, incarnation)
+            .effective_session(account_id, incarnation)
             .await?
             .ok_or_else(authentication_required)?;
         let config = self
@@ -116,38 +131,80 @@ impl Runtime {
             metadata.insecure_transport_confirmed,
             config,
         )?;
+        let required_parent = match &request {
+            RuntimeRequest::ListShareAccessLogs {
+                item_id, link_id, ..
+            }
+            | RuntimeRequest::RevokeShareLink {
+                item_id, link_id, ..
+            } => Some((item_id.clone(), link_id.clone())),
+            _ => None,
+        };
+        let mut membership_proven = required_parent.is_none();
         let mut renewed = false;
         let mut logs = Vec::new();
         let mut cursor = None::<String>;
         let mut seen_cursors = HashSet::new();
         loop {
             self.ensure_share_admission(account_id, &cancellation)?;
-            let response = match &request {
-                RuntimeRequest::ListItemShareLinks { item_id, .. } => map_answer(
+            let current = self.require_snapshot(account_id)?;
+            let item_id = match &request {
+                RuntimeRequest::ListItemShareLinks { item_id, .. }
+                | RuntimeRequest::ListShareAccessLogs { item_id, .. }
+                | RuntimeRequest::RevokeShareLink { item_id, .. } => item_id,
+                _ => unreachable!("only closed Share requests enter this service"),
+            };
+            let (_, current_vault) = super::attachment::item_and_vault(&current, item_id)?;
+            self.require_vault_accepting_work(&current, &current_vault.id)?;
+            if &current.incarnation != incarnation || current_vault.id != expected_vault_id {
+                return Err(cancelled());
+            }
+            let response = if let Some((item_id, link_id)) =
+                required_parent.as_ref().filter(|_| !membership_proven)
+            {
+                map_answer(
                     http.list_item_share_links(
                         session.token.as_ref(),
                         item_id,
                         cancellation.clone(),
                     )
                     .await?,
-                    ShareAnswer::Links,
-                ),
-                RuntimeRequest::ListShareAccessLogs { link_id, .. } => map_answer(
-                    http.share_access_log_page(
-                        session.token.as_ref(),
-                        link_id,
-                        cursor.as_deref(),
-                        cancellation.clone(),
-                    )
-                    .await?,
-                    ShareAnswer::Page,
-                ),
-                RuntimeRequest::RevokeShareLink { link_id, .. } => map_answer(
-                    http.revoke_share_link(session.token.as_ref(), link_id, cancellation.clone())
+                    |answer| {
+                        ShareAnswer::Membership(answer.links.iter().any(|link| &link.id == link_id))
+                    },
+                )
+            } else {
+                match &request {
+                    RuntimeRequest::ListItemShareLinks { item_id, .. } => map_answer(
+                        http.list_item_share_links(
+                            session.token.as_ref(),
+                            item_id,
+                            cancellation.clone(),
+                        )
                         .await?,
-                    ShareAnswer::Revoked,
-                ),
-                _ => unreachable!("only closed Share requests enter this service"),
+                        ShareAnswer::Links,
+                    ),
+                    RuntimeRequest::ListShareAccessLogs { link_id, .. } => map_answer(
+                        http.share_access_log_page(
+                            session.token.as_ref(),
+                            link_id,
+                            cursor.as_deref(),
+                            cancellation.clone(),
+                        )
+                        .await?,
+                        ShareAnswer::Page,
+                    ),
+                    RuntimeRequest::RevokeShareLink { link_id, .. } => map_answer(
+                        http.revoke_share_link(
+                            session.token.as_ref(),
+                            link_id,
+                            cancellation.clone(),
+                        )
+                        .await?,
+                        ShareAnswer::Revoked,
+                    ),
+                    _ => unreachable!("only closed Share requests enter this service"),
+                }
             };
             let answer = match response {
                 AuthenticatedOutcome::Ok(answer) => answer,
@@ -155,7 +212,7 @@ impl Runtime {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::RetryableTransport,
                         "Share management could not be confirmed",
-                    ))
+                    ));
                 }
                 AuthenticatedOutcome::ReauthenticationRequired => {
                     if renewed {
@@ -187,6 +244,16 @@ impl Runtime {
                 }
             };
             match answer {
+                ShareAnswer::Membership(false) => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::AccessDenied,
+                        "Share link does not belong to the verified Item",
+                    ));
+                }
+                ShareAnswer::Membership(true) => {
+                    membership_proven = true;
+                    continue;
+                }
                 ShareAnswer::Links(answer) => {
                     let RuntimeRequest::ListItemShareLinks { item_id, .. } = request else {
                         unreachable!()
@@ -246,6 +313,7 @@ impl Runtime {
 }
 
 enum ShareAnswer {
+    Membership(bool),
     Links(server_contract::ShareLinkListResponse),
     Page(server_contract::CursorPageShareAccessLogResponse),
     Revoked(server_contract::SuccessResponse),

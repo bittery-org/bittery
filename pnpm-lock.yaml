@@ -43,6 +43,9 @@ importers:
       '@types/bun':
         specifier: ^1.3.14
         version: 1.3.14
+      '@types/node':
+        specifier: 22.19.13
+        version: 22.19.13
       turbo:
         specifier: ^2.10.9
         version: 2.10.9
@@ -52,6 +55,9 @@ importers:
       '@bittery/api-contract':
         specifier: workspace:*
         version: link:../../packages/api-contract
+      '@bittery/client-runtime':
+        specifier: workspace:*
+        version: link:../../packages/client-runtime
       '@bittery/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -745,6 +751,9 @@ importers:
       '@bittery/config':
         specifier: workspace:*
         version: link:../config
+      '@bittery/crypto-wasm':
+        specifier: workspace:*
+        version: link:../crypto/wasm
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.18
@@ -921,6 +930,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@bittery/client-runtime':
+        specifier: workspace:*
+        version: link:../client-runtime
       '@bittery/i18n':
         specifier: workspace:*
         version: link:../i18n

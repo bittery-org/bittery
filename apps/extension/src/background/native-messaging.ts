@@ -21,7 +21,10 @@ import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { getDesktopSync } from "./desktop-sync";
 import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
-import { sendNativeMessage } from "./native-messaging-client";
+import {
+	nativeMessagingClient,
+	sendNativeMessage,
+} from "./native-messaging-client";
 import type {
 	Acknowledgement,
 	BiometricUnlockAllResponse,
@@ -93,8 +96,13 @@ async function decryptTransferredMasterUnlockKey(
 export async function handleNativeBiometricUnlock(): Promise<
 	Acknowledgement & { message?: string }
 > {
+	let materialAccount: string | null = null;
+	let materialInvocation: symbol | null = null;
+	let generation: number | null = null;
 	try {
+		generation = await nativeMessagingClient.captureDeliveryGeneration();
 		const activeAccount = await storage.getActiveAccount();
+		nativeMessagingClient.assertCurrentDelivery(generation);
 		if (!activeAccount) {
 			throw new Error("No active account. Please log in again.");
 		}
@@ -106,19 +114,31 @@ export async function handleNativeBiometricUnlock(): Promise<
 		if (!transfer.ok) {
 			throw new Error(transfer.code);
 		}
+		nativeMessagingClient.assertCurrentDelivery(generation);
 
 		const { material } = transfer;
-		await storage.setBiometricEnabled(activeAccount, true);
+		await nativeMessagingClient.withMaterialMutation(
+			generation,
+			activeAccount,
+			async (check) => {
+				await storage.setBiometricEnabled(activeAccount, true);
+				check();
+			},
+			undefined,
+			() => false,
+		);
 
 		let muk: KeyRef | null = await decryptTransferredMasterUnlockKey(material);
 		try {
-			if (material.authToken) {
-				await storage.storeAuthToken(material.authToken, activeAccount);
-			} else if (!(await storage.getAuthToken(activeAccount))) {
+			if (!material.authToken && !(await storage.getAuthToken(activeAccount))) {
 				throw new Error("Missing auth token in response and storage");
 			}
 
 			const enforcer = getTravelModeEnforcer(storage, itemCache);
+			const travelCleanup = nativeMessagingClient.captureMaterialFailureCleanup(
+				generation,
+				activeAccount,
+			);
 			const client = await createStoredAccountApiClient(
 				storage,
 				activeAccount,
@@ -128,25 +148,45 @@ export async function handleNativeBiometricUnlock(): Promise<
 					activeAccount,
 					client,
 					lifecycleDeps.credentialMirror,
+					travelCleanup,
 				))
 			) {
 				throw new Error(TRAVEL_MODE_UNVERIFIED);
 			}
 
-			if (material.vaultKeys) {
-				await storage.storeVaultKeys(
-					enforcer.filterVaultKeys(activeAccount, material.vaultKeys),
-					activeAccount,
-				);
-			} else {
+			if (!material.vaultKeys) {
 				const storedVaultKeys = await storage.getVaultKeys(activeAccount);
 				if (!storedVaultKeys || storedVaultKeys.length === 0) {
 					throw new Error("Missing vault keys in response and storage");
 				}
 			}
-
-			await storage.setMasterUnlockKey(muk, activeAccount);
-			setMasterUnlockKey(muk);
+			const keys = material.vaultKeys
+				? enforcer.filterVaultKeys(activeAccount, material.vaultKeys)
+				: null;
+			const installationKey = muk;
+			materialAccount = activeAccount;
+			materialInvocation = nativeMessagingClient.newMaterialInvocation();
+			await nativeMessagingClient.withMaterialMutation(
+				generation,
+				activeAccount,
+				async (check, markMaterialWrite) => {
+					if (material.authToken) {
+						markMaterialWrite();
+						await storage.storeAuthToken(material.authToken, activeAccount);
+						check();
+					}
+					if (keys) {
+						markMaterialWrite();
+						await storage.storeVaultKeys(keys, activeAccount);
+						check();
+					}
+					markMaterialWrite();
+					await storage.setMasterUnlockKey(installationKey, activeAccount);
+					check();
+					setMasterUnlockKey(installationKey);
+				},
+				materialInvocation,
+			);
 			muk = null;
 		} finally {
 			if (muk) {
@@ -154,16 +194,32 @@ export async function handleNativeBiometricUnlock(): Promise<
 			}
 		}
 		await updateActivity();
+		if (materialInvocation)
+			nativeMessagingClient.completeMaterialInvocation(materialInvocation);
 
 		return {
 			success: true,
 			message: "Biometric unlock successful",
 		};
 	} catch (error) {
-		console.error("[NATIVE_BIOMETRIC_UNLOCK] Error:", error);
+		let failure = error;
+		if (generation !== null && materialAccount && materialInvocation) {
+			const cleanupAccount = materialAccount;
+			try {
+				await nativeMessagingClient.withOwnedFailureCleanup(
+					generation,
+					cleanupAccount,
+					materialInvocation,
+					() => lockAccount(cleanupAccount, lifecycleDeps),
+				);
+			} catch (cleanupError) {
+				failure = cleanupError;
+			}
+		}
+		console.error("[NATIVE_BIOMETRIC_UNLOCK] Error:", failure);
 		return {
 			success: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: failure instanceof Error ? failure.message : String(failure),
 		};
 	}
 }
@@ -213,7 +269,9 @@ export async function handleNativeBiometricUnlockAll(options?: {
 	preserveActiveAccount?: boolean;
 }): Promise<BiometricUnlockAllResponse> {
 	try {
+		const generation = await nativeMessagingClient.captureDeliveryGeneration();
 		const accounts = await storage.getAccountsList();
+		nativeMessagingClient.assertCurrentDelivery(generation);
 
 		if (accounts.length === 0) {
 			throw new Error("No accounts found");
@@ -270,6 +328,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		if (!transfer.ok) {
 			throw new Error(transfer.code);
 		}
+		nativeMessagingClient.assertCurrentDelivery(generation);
 
 		const unlocked: string[] = [];
 		const failed: BiometricUnlockFailure[] = [];
@@ -279,17 +338,19 @@ export async function handleNativeBiometricUnlockAll(options?: {
 
 		for (const material of transfer.materials) {
 			const { accountId, email } = material;
+			const invocation = nativeMessagingClient.newMaterialInvocation();
 
 			try {
 				let muk: KeyRef | null =
 					await decryptTransferredMasterUnlockKey(material);
 
 				try {
-					if (material.authToken) {
-						await storage.storeAuthToken(material.authToken, accountId);
-					}
-
 					const enforcer = getTravelModeEnforcer(storage, itemCache);
+					const travelCleanup =
+						nativeMessagingClient.captureMaterialFailureCleanup(
+							generation,
+							accountId,
+						);
 					const client = await createStoredAccountApiClient(
 						storage,
 						accountId,
@@ -299,6 +360,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 							accountId,
 							client,
 							lifecycleDeps.credentialMirror,
+							travelCleanup,
 						))
 					) {
 						failed.push({
@@ -309,14 +371,30 @@ export async function handleNativeBiometricUnlockAll(options?: {
 						continue;
 					}
 
-					if (material.vaultKeys) {
-						await storage.storeVaultKeys(
-							enforcer.filterVaultKeys(accountId, material.vaultKeys),
-							accountId,
-						);
-					}
-
-					await storage.setMasterUnlockKey(muk, accountId);
+					const keys = material.vaultKeys
+						? enforcer.filterVaultKeys(accountId, material.vaultKeys)
+						: null;
+					const installationKey = muk;
+					await nativeMessagingClient.withMaterialMutation(
+						generation,
+						accountId,
+						async (check, markMaterialWrite) => {
+							if (material.authToken) {
+								markMaterialWrite();
+								await storage.storeAuthToken(material.authToken, accountId);
+								check();
+							}
+							if (keys) {
+								markMaterialWrite();
+								await storage.storeVaultKeys(keys, accountId);
+								check();
+							}
+							markMaterialWrite();
+							await storage.setMasterUnlockKey(installationKey, accountId);
+							check();
+						},
+						invocation,
+					);
 					muk = null;
 				} finally {
 					if (muk) {
@@ -325,16 +403,29 @@ export async function handleNativeBiometricUnlockAll(options?: {
 				}
 
 				unlocked.push(accountId);
+				nativeMessagingClient.completeMaterialInvocation(invocation);
 			} catch (error) {
-				if (accountId) await lockAccount(accountId, lifecycleDeps);
+				let failure = error;
+				if (accountId) {
+					try {
+						await nativeMessagingClient.withOwnedFailureCleanup(
+							generation,
+							accountId,
+							invocation,
+							() => lockAccount(accountId, lifecycleDeps),
+						);
+					} catch (cleanupError) {
+						failure = cleanupError;
+					}
+				}
 				failed.push({
 					accountId,
 					email,
-					error: error instanceof Error ? error.message : "Unknown error",
+					error: failure instanceof Error ? failure.message : "Unknown error",
 				});
 				console.error(
 					`[NATIVE_BIOMETRIC_UNLOCK_ALL] Failed to process ${email}:`,
-					error,
+					failure,
 				);
 			}
 		}
@@ -355,11 +446,13 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		if (!options?.preserveActiveAccount) {
+			nativeMessagingClient.assertCurrentDelivery(generation);
 			await storage.setActiveAccount(activeAccountId);
 		}
 
 		const activeMuk = await storage.getMasterUnlockKey(activeAccountId);
 		if (activeMuk) {
+			nativeMessagingClient.assertCurrentDelivery(generation);
 			setMasterUnlockKey(activeMuk);
 		}
 

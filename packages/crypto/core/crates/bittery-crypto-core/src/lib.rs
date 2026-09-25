@@ -37,9 +37,10 @@ pub use key_derivation::{
     derive_keys, derive_keys_from_master_key, derive_master_key, DerivedKeys, PBKDF2_ITERATIONS,
 };
 pub use key_rotation::{
-    decrypt_vault_key_with_muk, encrypt_vault_key_for_member, encrypt_vault_key_with_muk,
-    re_encrypt_item, rewrap_attachment_key, ItemData, MemberKeyData, ReEncryptedItem,
-    VaultKeyWrapContext, WrappedVaultKeyData, VAULT_KEY_WRAP_ENTITY_TYPE, VAULT_KEY_WRAP_PURPOSE,
+    decrypt_rsa_wrapped_key, decrypt_vault_key_with_muk, encrypt_vault_key_for_member,
+    encrypt_vault_key_with_muk, re_encrypt_item, rewrap_attachment_key, ItemData, MemberKeyData,
+    ReEncryptedItem, VaultKeyWrapContext, WrappedVaultKeyData, VAULT_KEY_WRAP_ENTITY_TYPE,
+    VAULT_KEY_WRAP_PURPOSE,
 };
 pub use passkey::{
     build_attestation_object, build_authenticator_data, build_passkey_attestation_object,

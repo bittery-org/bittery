@@ -1,6 +1,13 @@
 use super::sqlite::SqliteVaultImageFailure;
 use super::*;
-use crate::{Runtime, RuntimeRequest};
+use crate::{
+    platform_storage::{
+        PlatformStorageRequest, PlatformStorageResponse, SerializedPlatformStorageExecutor,
+    },
+    replica::InMemoryReplica,
+    Runtime, RuntimeRequest, RuntimeResponse, SqliteAttachmentArtifactStore, TeardownHostCleanup,
+    TeardownHostCleanupRequest, TeardownHostCleanupResponse, TeardownStatus,
+};
 use async_trait::async_trait;
 use std::{
     collections::{HashSet, VecDeque},
@@ -35,6 +42,209 @@ impl MemorySourcePort {
         self.requests.lock().unwrap().clone()
     }
 }
+
+#[tokio::test]
+async fn protected_facade_ingress_persists_no_raw_generation_and_reopens_exact_image() {
+    let mut bytes = b"fresh private image content/".repeat(80_000);
+    bytes.truncate(VAULT_IMAGE_MAX_BYTES as usize);
+    let path = std::env::temp_dir().join(format!(
+        "bittery-image-ingress-{}.sqlite",
+        bittery_crypto_core::generate_uuid()
+    ));
+    let store = Arc::new(SqliteVaultImageArtifactStore::open(&path).unwrap());
+    let source = MemorySourcePort::new(
+        bytes
+            .chunks(protected::PROTECTED_IMAGE_PLAINTEXT_CHUNK_BYTES)
+            .flat_map(|chunk| chunk.chunks(17_000).map(<[u8]>::to_vec))
+            .collect(),
+    );
+    let facade =
+        VaultImageIngressFacade::new("runtime-a", Arc::new(source.clone()), store.clone()).unwrap();
+    let expected = grant("image/png", bytes.len() as u64);
+    let prepared = facade
+        .prepare_bound_protected(
+            expected.account_id.clone(),
+            expected.operation_id.clone(),
+            expected.vault_id.clone(),
+            expected.capability_id.clone(),
+            expected.content_type.clone(),
+            expected.byte_length,
+            &RequestCancellation::new(),
+            VaultImageProtection {
+                user_id: "user-a",
+                device_key: &[7; 32],
+            },
+        )
+        .await
+        .unwrap();
+    let metadata = prepared.metadata().clone();
+    assert!(source
+        .requests()
+        .iter()
+        .all(|size| *size <= protected::PROTECTED_IMAGE_PLAINTEXT_CHUNK_BYTES));
+    assert_eq!(source.requests().last(), Some(&1));
+    assert!(
+        metadata.protection().is_some(),
+        "fresh image admission must publish only protected bytes"
+    );
+    let family =
+        VaultImageArtifactScope::new(expected.account_id.clone(), expected.operation_id.clone())
+            .unwrap();
+    assert!(store
+        .read_generation(&family, None)
+        .await
+        .unwrap()
+        .unwrap()
+        .scope
+        .publication_id()
+        .is_some());
+    drop(facade);
+    drop(store);
+    assert!(!std::fs::read(&path)
+        .unwrap()
+        .windows(28)
+        .any(|window| window == b"fresh private image content/"));
+    let reopened = Arc::new(SqliteVaultImageArtifactStore::open(&path).unwrap());
+    let protection = metadata.protection().unwrap();
+    let original = VaultImageArtifactMetadata::new(
+        family,
+        expected.vault_id,
+        expected.byte_length,
+        expected.content_type,
+        metadata.sha256(),
+    )
+    .unwrap();
+    let facade = VaultImageIngressFacade::new(
+        "runtime-reopened",
+        Arc::new(MemorySourcePort::new(vec![])),
+        reopened.clone(),
+    )
+    .unwrap();
+    let recovered = facade
+        .read_protected_bound(
+            &original,
+            &protection.witness,
+            VaultImageProtection {
+                user_id: "user-a",
+                device_key: &[7; 32],
+            },
+            &RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*recovered, bytes);
+    let cancellation = RequestCancellation::new();
+    cancellation.cancel();
+    assert_eq!(
+        facade
+            .read_protected_bound(
+                &original,
+                &protection.witness,
+                VaultImageProtection {
+                    user_id: "user-a",
+                    device_key: &[7; 32]
+                },
+                &cancellation
+            )
+            .await
+            .unwrap_err()
+            .code,
+        RuntimeErrorCode::Cancelled
+    );
+    assert!(facade
+        .read_protected_bound(
+            &original,
+            &protection.witness,
+            VaultImageProtection {
+                user_id: "other-user",
+                device_key: &[7; 32]
+            },
+            &RequestCancellation::new()
+        )
+        .await
+        .is_err());
+    drop(facade);
+    drop(reopened);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn legacy_facade_conversion_reuses_publication_and_keeps_raw_until_explicit_generation_cleanup(
+) {
+    let bytes = b"legacy private image content/".repeat(9000);
+    let path = std::env::temp_dir().join(format!(
+        "bittery-legacy-image-{}.sqlite",
+        bittery_crypto_core::generate_uuid()
+    ));
+    let store = Arc::new(SqliteVaultImageArtifactStore::open(&path).unwrap());
+    let source = MemorySourcePort::new(
+        bytes
+            .chunks(VAULT_IMAGE_CHUNK_BYTES)
+            .map(<[u8]>::to_vec)
+            .collect(),
+    );
+    let facade =
+        VaultImageIngressFacade::new("runtime-a", Arc::new(source), store.clone()).unwrap();
+    let original = facade
+        .prepare(
+            grant("image/png", bytes.len() as u64),
+            &RequestCancellation::new(),
+        )
+        .await
+        .unwrap()
+        .metadata()
+        .clone();
+    let protected = facade
+        .protect_legacy_bound(
+            &original,
+            VaultImageProtection {
+                user_id: "user-a",
+                device_key: &[7; 32],
+            },
+            &RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(store.read_chunk(&original, 0).await.unwrap().is_some());
+    let retry = facade
+        .protect_legacy_bound(
+            &original,
+            VaultImageProtection {
+                user_id: "user-a",
+                device_key: &[7; 32],
+            },
+            &RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry, protected);
+    let witness = &protected.protection().unwrap().witness;
+    assert!(store
+        .read_generation(original.scope(), Some(&witness.publication_id))
+        .await
+        .unwrap()
+        .is_none());
+    let read = facade
+        .read_protected_bound(
+            &original,
+            witness,
+            VaultImageProtection {
+                user_id: "user-a",
+                device_key: &[7; 32],
+            },
+            &RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*read, bytes);
+    store.delete_generation(original.scope()).await.unwrap();
+    assert!(store.read_chunk(&original, 0).await.unwrap().is_none());
+    assert!(store.read_chunk(&protected, 0).await.unwrap().is_some());
+    drop(facade);
+    drop(store);
+    std::fs::remove_file(path).unwrap();
+}
+
 struct MemorySource {
     chunks: Arc<Mutex<VecDeque<Vec<u8>>>>,
     requests: Arc<Mutex<Vec<usize>>>,
@@ -94,6 +304,29 @@ impl VaultImageSourcePort for MemorySourcePort {
         _runtime_incarnation: &str,
         _account_id: &AccountId,
         _operation_id: &str,
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn retire_vaults(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
     ) -> Result<(), VaultImageSourceError> {
         Ok(())
     }
@@ -526,6 +759,29 @@ impl VaultImageSourcePort for HeldRetirementSourcePort {
     ) -> Result<(), VaultImageSourceError> {
         Ok(())
     }
+    async fn retire_vaults(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(
         &self,
         _runtime_incarnation: &str,
@@ -536,12 +792,63 @@ impl VaultImageSourcePort for HeldRetirementSourcePort {
     }
 }
 
+struct EmptyRetirementHost;
+
+#[async_trait]
+impl SerializedPlatformStorageExecutor for EmptyRetirementHost {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<zeroize::Zeroizing<String>, RuntimeError> {
+        let response = match serde_json::from_str::<PlatformStorageRequest>(&request_json).unwrap()
+        {
+            PlatformStorageRequest::Get { .. } => PlatformStorageResponse::Value { value: None },
+            PlatformStorageRequest::Delete { .. } | PlatformStorageRequest::DeletePrefix { .. } => {
+                PlatformStorageResponse::Done
+            }
+            PlatformStorageRequest::Set { .. } => {
+                panic!("empty retirement fixture must not install Account state")
+            }
+            PlatformStorageRequest::ListKeys { .. } => {
+                panic!("empty retirement fixture does not provide profile inventory")
+            }
+            PlatformStorageRequest::DeleteIfUnchanged { .. } => {
+                panic!("empty retirement fixture does not abort profile admission")
+            }
+        };
+        Ok(zeroize::Zeroizing::new(
+            serde_json::to_string(&response).unwrap(),
+        ))
+    }
+}
+
+#[async_trait]
+impl TeardownHostCleanup for EmptyRetirementHost {
+    async fn invoke(
+        &self,
+        request: TeardownHostCleanupRequest,
+    ) -> Result<TeardownHostCleanupResponse, RuntimeError> {
+        Ok(match request {
+            TeardownHostCleanupRequest::DeleteAccount { account_id } => {
+                assert_eq!(account_id, AccountId::from("account-lifecycle"));
+                TeardownHostCleanupResponse::AccountDeleted
+            }
+            TeardownHostCleanupRequest::WipeDevice => TeardownHostCleanupResponse::DeviceWiped,
+        })
+    }
+}
+
 #[tokio::test]
 async fn runtime_lock_signout_remove_wipe_and_close_wait_for_vault_image_retirement() {
     for authority in ["lock", "signOut", "remove", "wipe", "close"] {
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Notify::new());
-        let runtime = Runtime::new();
+        let runtime = Runtime::with_test_teardown_environment(
+            Arc::new(InMemoryReplica::default()),
+            Arc::new(EmptyRetirementHost),
+            Arc::new(SqliteAttachmentArtifactStore::open(":memory:").unwrap()),
+            Arc::new(EmptyRetirementHost),
+        );
         runtime.install_vault_image_ingress(
             VaultImageIngressFacade::new(
                 "runtime-a",
@@ -579,11 +886,29 @@ async fn runtime_lock_signout_remove_wipe_and_close_wait_for_vault_image_retirem
                             RequestCancellation::new(),
                         )
                         .await
-                        .map(|_| ()),
+                        .map(|response| {
+                            assert!(matches!(
+                                response,
+                                RuntimeResponse::Teardown {
+                                    status: TeardownStatus::Complete,
+                                    failures,
+                                    ..
+                                } if failures.is_empty()
+                            ));
+                        }),
                     "wipe" => runtime
                         .request(RuntimeRequest::Wipe, RequestCancellation::new())
                         .await
-                        .map(|_| ()),
+                        .map(|response| {
+                            assert!(matches!(
+                                response,
+                                RuntimeResponse::Teardown {
+                                    status: TeardownStatus::Complete,
+                                    failures,
+                                    ..
+                                } if failures.is_empty()
+                            ));
+                        }),
                     "close" => {
                         runtime.close().await;
                         Ok(())
@@ -592,12 +917,23 @@ async fn runtime_lock_signout_remove_wipe_and_close_wait_for_vault_image_retirem
                 }
             })
         };
-        entered.notified().await;
+        tokio::time::timeout(std::time::Duration::from_secs(3), entered.notified())
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "{authority} never reached image retirement; request finished: {}",
+                    running.is_finished()
+                )
+            });
         assert!(
             !running.is_finished(),
             "{authority} did not wait for retirement"
         );
         release.notify_waiters();
-        running.await.unwrap().unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(3), running)
+            .await
+            .unwrap_or_else(|_| panic!("{authority} did not finish after image retirement"))
+            .unwrap()
+            .unwrap();
     }
 }

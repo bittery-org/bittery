@@ -80,10 +80,7 @@ export class WebRecoveryExecutor {
 		const hasBytes =
 			request.type === "stageRowChunk" ||
 			request.type === "sinkWrite" ||
-			(request.type === "addArtifactEntry" &&
-				["artifactChunk", "provisionalChunk", "vaultImageChunk"].includes(
-					request.record.type,
-				));
+			(request.type === "addArtifactEntry" && "chunkIndex" in request.record);
 		if (binaryChunk !== undefined && binaryChunk.byteLength > 262144)
 			return answer({ type: "limitExceeded", bound: "chunkBytes" });
 		if (

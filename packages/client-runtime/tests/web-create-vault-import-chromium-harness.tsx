@@ -166,7 +166,16 @@ async function readProjection<T>(
 				return false;
 			value = snapshot.value;
 			return true;
-		}, "Runtime projection did not reach the expected authority");
+		}, "Runtime projection did not reach the expected authority").catch(
+			async (error: unknown) => {
+				const observation = await fetch("/create-vault-observation").then(
+					(response) => response.json(),
+				);
+				throw new Error(
+					`${String(error)}: ${JSON.stringify({ projection: store.getSnapshot(), hook: hookView(), routes: observation.routes })}`,
+				);
+			},
+		);
 		if (value === undefined) throw new Error("Runtime projection was empty");
 		return value;
 	} finally {
@@ -252,6 +261,10 @@ Object.assign(globalThis, {
 			await paint();
 			const afterRemount = hookView();
 			const expectedCount = scenario === "later-rejection" ? 200 : 5;
+			if (beforeRemount.summary?.importedCount !== expectedCount)
+				throw new Error(
+					`Import presentation did not complete the expected batch: ${JSON.stringify(beforeRemount)}`,
+				);
 			const itemProjection = await readProjection(
 				webRuntimeClient.items(targetAccountId),
 				(value) =>

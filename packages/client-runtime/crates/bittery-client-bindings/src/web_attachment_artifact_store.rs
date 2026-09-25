@@ -136,7 +136,32 @@ impl JsAttachmentArtifactStore {
         if state == ProvisionalPublicationStateControl::Published {
             return Ok(owner);
         }
-        let owner_control = owner_control(&owner, shape.chunk_count);
+        self.verify_provisional_ciphertext(&token, &owner).await?;
+        let response = control(
+            &self.executor,
+            ArtifactControlRequest::FinishProvisional {
+                token,
+                owner: owner_control(&owner, shape.chunk_count),
+            },
+            None,
+        )
+        .await?;
+        match response.response {
+            ArtifactControlResponse::ProvisionalFinished => Ok(owner),
+            _ => Err(error(
+                "IndexedDB provisional publication returned an invalid result",
+            )),
+        }
+    }
+
+    async fn verify_provisional_ciphertext(
+        &self,
+        token: &ProvisionalArtifactTokenControl,
+        owner: &AttachmentArtifactOwner,
+    ) -> Result<(), JsValue> {
+        ensure_token_owner(token, owner)?;
+        let shape = shape(owner)?;
+        let owner_control = owner_control(owner, shape.chunk_count);
         let mut hasher = Sha256::new();
         let mut total = 0_u64;
         for chunk_index in 0..shape.chunk_count {
@@ -162,29 +187,14 @@ impl JsAttachmentArtifactStore {
             &format!("{:x}", hasher.finalize()),
             owner.ciphertext_sha256(),
         )
-        .map_err(error)?;
-        let response = control(
-            &self.executor,
-            ArtifactControlRequest::FinishProvisional {
-                token,
-                owner: owner_control,
-            },
-            None,
-        )
-        .await?;
-        match response.response {
-            ArtifactControlResponse::ProvisionalFinished => Ok(owner),
-            _ => Err(error(
-                "IndexedDB provisional publication returned an invalid result",
-            )),
-        }
+        .map_err(error)
     }
 
-    async fn resume_provisional(
+    async fn read_provisional_binding(
         &self,
         request: ArtifactControlRequest,
-        expected_token: ProvisionalArtifactTokenControl,
-    ) -> Result<AttachmentArtifactOwner, JsValue> {
+        expected_token: &ProvisionalArtifactTokenControl,
+    ) -> Result<(AttachmentArtifactOwner, ProvisionalPublicationStateControl), JsValue> {
         let response = control(&self.executor, request, None).await?;
         let ArtifactControlResponse::ProvisionalBinding { owner, state } = response.response else {
             return Err(error(
@@ -192,13 +202,83 @@ impl JsAttachmentArtifactStore {
             ));
         };
         let owner = owner_from_control(&owner)?;
-        if expected_token != token_for_owner(&expected_token.generation, &owner) {
+        if *expected_token != token_for_owner(&expected_token.generation, &owner) {
             return Err(error(
                 "IndexedDB provisional recovery returned the wrong scope",
             ));
         }
+        Ok((owner, state))
+    }
+
+    async fn resume_provisional(
+        &self,
+        request: ArtifactControlRequest,
+        expected_token: ProvisionalArtifactTokenControl,
+    ) -> Result<AttachmentArtifactOwner, JsValue> {
+        let (owner, state) = self
+            .read_provisional_binding(request, &expected_token)
+            .await?;
         self.verify_and_finish_provisional(expected_token, owner, state)
             .await
+    }
+
+    async fn read_provisional_recovery(
+        &self,
+        scope: &ProvisionalAttachmentArtifactScope,
+    ) -> Result<Option<ProvisionalAttachmentArtifactRecovery>, JsValue> {
+        let response = control(
+            &self.executor,
+            ArtifactControlRequest::RecoverProvisional {
+                scope: scope_control(scope),
+            },
+            None,
+        )
+        .await?;
+        let recovery = match response.response {
+            ArtifactControlResponse::ProvisionalRecoveryAvailable { recovery } => recovery,
+            ArtifactControlResponse::ProvisionalRecoveryUnavailable => return Ok(None),
+            _ => {
+                return Err(error(
+                    "IndexedDB provisional Recover returned an invalid result",
+                ))
+            }
+        };
+        let recovery = recovery_from_control(recovery)?;
+        if recovery.account_id() != scope.account_id()
+            || recovery.operation_id() != scope.operation_id()
+            || recovery.attachment_id() != scope.attachment_id()
+        {
+            return Err(error(
+                "IndexedDB provisional Recover returned the wrong scope",
+            ));
+        }
+        Ok(Some(recovery))
+    }
+
+    async fn recover_provisional(
+        &self,
+        scope: &ProvisionalAttachmentArtifactScope,
+    ) -> Result<Option<ProvisionalAttachmentArtifactRecovery>, JsValue> {
+        let Some(recovery) = self.read_provisional_recovery(scope).await? else {
+            return Ok(None);
+        };
+        let token = recovery_control(&recovery);
+        let request = || ArtifactControlRequest::ResumeRecoveredProvisional {
+            recovery: token.clone(),
+        };
+        let (owner, state) = self.read_provisional_binding(request(), &token).await?;
+        // The existing control inspects metadata only. Recover hashes both sealed and already
+        // published generations without invoking either publication mutation.
+        self.verify_provisional_ciphertext(&token, &owner).await?;
+        let current_binding = self.read_provisional_binding(request(), &token).await?;
+        if current_binding != (owner, state)
+            || self.read_provisional_recovery(scope).await?.as_ref() != Some(&recovery)
+        {
+            return Err(error(
+                "IndexedDB provisional publication changed during recovery verification",
+            ));
+        }
+        Ok(Some(recovery))
     }
 
     async fn publish(
@@ -322,34 +402,110 @@ impl JsAttachmentArtifactStore {
         &self,
         account_id: &AccountId,
         live_owners: &[AttachmentArtifactOwner],
+        pending: &[ProvisionalAttachmentArtifactScope],
     ) -> Result<u32, JsValue> {
+        self.sweep_selected(account_id, live_owners, None, pending)
+            .await
+    }
+
+    async fn sweep_selected(
+        &self,
+        account_id: &AccountId,
+        live_owners: &[AttachmentArtifactOwner],
+        operations: Option<&[String]>,
+        pending: &[ProvisionalAttachmentArtifactScope],
+    ) -> Result<u32, JsValue> {
+        let selected =
+            |operation: &str| operations.is_none_or(|ids| ids.iter().any(|id| id == operation));
+        let retained_pending = |operation: &str, attachment: &str| {
+            pending.iter().any(|scope| {
+                scope.operation_id() == operation && scope.attachment_id() == attachment
+            })
+        };
+        if operations.is_some_and(|ids| {
+            ids.iter().any(String::is_empty) || ids.windows(2).any(|pair| pair[0] >= pair[1])
+        }) || pending
+            .iter()
+            .any(|scope| scope.account_id() != account_id || !selected(scope.operation_id()))
+        {
+            return Err(error(
+                "Selective artifact cleanup has invalid Operation scope",
+            ));
+        }
         let mut live = std::collections::HashSet::new();
         for owner in live_owners {
             shape(owner)?;
-            if owner.account_id() != account_id {
+            if owner.account_id() != account_id || !selected(owner.operation_id()) {
                 return Err(error(
                     "Attachment artifact sweep reference has the wrong Account scope",
                 ));
             }
             live.insert(owner.artifact_id().to_owned());
         }
+        let needs_owners = operations.is_some() || !pending.is_empty();
         let listed = control(
             &self.executor,
-            ArtifactControlRequest::ListArtifactIds {
-                account_id: account_id.as_str().to_owned(),
+            if needs_owners {
+                ArtifactControlRequest::ListArtifactOwners {
+                    account_id: account_id.as_str().to_owned(),
+                }
+            } else {
+                ArtifactControlRequest::ListArtifactIds {
+                    account_id: account_id.as_str().to_owned(),
+                }
             },
             None,
         )
         .await?;
-        let ArtifactControlResponse::ArtifactIds {
-            artifact_ids: listed,
-            provisional,
-        } = listed.response
-        else {
-            return Err(error(
-                "IndexedDB artifact listing returned an invalid result",
-            ));
+        let (listed, mut provisional) = match listed.response {
+            ArtifactControlResponse::ArtifactIds {
+                artifact_ids,
+                provisional,
+            } if !needs_owners => (artifact_ids, provisional),
+            ArtifactControlResponse::ArtifactOwners {
+                owners,
+                provisional,
+            } if needs_owners => {
+                if owners
+                    .iter()
+                    .any(|owner| owner.account_id != account_id.as_str())
+                {
+                    return Err(error("IndexedDB artifact listing crossed Account scope"));
+                }
+                let listed = owners
+                    .into_iter()
+                    .filter(|owner| {
+                        selected(&owner.operation_id)
+                            && !retained_pending(&owner.operation_id, &owner.attachment_id)
+                    })
+                    .map(|owner| owner.artifact_id)
+                    .collect();
+                let provisional = provisional
+                    .into_iter()
+                    .filter(|token| {
+                        selected(&token.scope.operation_id)
+                            && !retained_pending(
+                                &token.scope.operation_id,
+                                &token.scope.attachment_id,
+                            )
+                    })
+                    .collect();
+                (listed, provisional)
+            }
+            _ => {
+                return Err(error(
+                    "IndexedDB artifact listing returned an invalid result",
+                ))
+            }
         };
+        if provisional
+            .iter()
+            .any(|token| token.scope.account_id != account_id.as_str())
+        {
+            return Err(error(
+                "IndexedDB provisional artifact listing crossed Account scope",
+            ));
+        }
         let mut deleted = 0_u32;
         for artifact_id in listed {
             if live.contains(&artifact_id) {
@@ -378,6 +534,42 @@ impl JsAttachmentArtifactStore {
             deleted = deleted
                 .checked_add(1)
                 .ok_or_else(|| error("Attachment artifact sweep count overflowed"))?;
+        }
+        if deleted != 0 {
+            // Published generations are excluded from the initial orphan listing. Removing
+            // their mappings makes their backing rows reclaimable in this same bounded pass.
+            let response = control(
+                &self.executor,
+                ArtifactControlRequest::ListArtifactIds {
+                    account_id: account_id.as_str().to_owned(),
+                },
+                None,
+            )
+            .await?;
+            let ArtifactControlResponse::ArtifactIds {
+                provisional: current,
+                ..
+            } = response.response
+            else {
+                return Err(error(
+                    "IndexedDB artifact relisting returned an invalid result",
+                ));
+            };
+            if current
+                .iter()
+                .any(|token| token.scope.account_id != account_id.as_str())
+            {
+                return Err(error(
+                    "IndexedDB provisional artifact relisting crossed Account scope",
+                ));
+            }
+            provisional = current
+                .into_iter()
+                .filter(|token| {
+                    selected(&token.scope.operation_id)
+                        && !retained_pending(&token.scope.operation_id, &token.scope.attachment_id)
+                })
+                .collect();
         }
         for token in provisional {
             loop {
@@ -425,6 +617,12 @@ impl bittery_client_core::AttachmentArtifactStore for JsAttachmentArtifactStore 
             AttachmentArtifactStoreResponse as Response, PublishedArtifactChunk,
         };
         match request {
+            Request::Inventory { .. } => Err(bittery_client_core::RuntimeError {
+                code: bittery_client_core::RuntimeErrorCode::StorageUnavailable,
+                message: "Web Attachment artifact physical inventory is unavailable".into(),
+                recovery_bound: None,
+                team_page_problem: None,
+            }),
             Request::WriteChunk {
                 owner,
                 chunk_index,
@@ -469,13 +667,28 @@ impl bittery_client_core::AttachmentArtifactStore for JsAttachmentArtifactStore 
                 self.wipe_device().await.map_err(js_error)?;
                 Ok(Response::DeviceWiped)
             }
+            Request::SweepOperationOrphans {
+                account_id,
+                operation_ids,
+                live,
+                pending,
+            } => {
+                let deleted = self
+                    .sweep_selected(&account_id, &live, Some(&operation_ids), &pending)
+                    .await
+                    .map_err(js_error)?;
+                Ok(Response::OrphansSwept {
+                    deleted: deleted as usize,
+                })
+            }
             Request::SweepOrphans {
                 boundary: _,
                 account_id,
                 live,
+                pending,
             } => {
                 let deleted = self
-                    .sweep_orphans_at_exclusive_startup(&account_id, &live)
+                    .sweep_orphans_at_exclusive_startup(&account_id, &live, &pending)
                     .await
                     .map_err(js_error)?;
                 Ok(Response::OrphansSwept {
@@ -570,32 +783,10 @@ impl bittery_client_core::ProvisionalAttachmentArtifactStore for JsAttachmentArt
                 ))
             }
             Request::Recover { scope } => {
-                let response = control(
-                    &self.executor,
-                    ArtifactControlRequest::RecoverProvisional {
-                        scope: scope_control(&scope),
-                    },
-                    None,
-                )
-                .await
-                .map_err(js_error)?;
-                let ArtifactControlResponse::ProvisionalRecoveryAvailable { recovery } =
-                    response.response
-                else {
-                    return Err(runtime_error(
-                        "IndexedDB provisional Recover returned an invalid result",
-                    ));
-                };
-                let recovery = recovery_from_control(recovery).map_err(js_error)?;
-                if recovery.account_id() != scope.account_id()
-                    || recovery.operation_id() != scope.operation_id()
-                    || recovery.attachment_id() != scope.attachment_id()
-                {
-                    return Err(runtime_error(
-                        "IndexedDB provisional Recover returned the wrong scope",
-                    ));
+                match self.recover_provisional(&scope).await.map_err(js_error)? {
+                    Some(recovery) => Ok(Response::RecoveryAvailable(recovery)),
+                    None => Ok(Response::RecoveryUnavailable),
                 }
-                Ok(Response::RecoveryAvailable(recovery))
             }
             Request::ResumeRecovered { recovery } => {
                 let token = recovery_control(&recovery);
@@ -866,6 +1057,7 @@ fn js_error(value: JsValue) -> bittery_client_core::RuntimeError {
 fn runtime_error(message: &str) -> bittery_client_core::RuntimeError {
     bittery_client_core::RuntimeError {
         recovery_bound: None,
+        team_page_problem: None,
         code: bittery_client_core::RuntimeErrorCode::InvariantViolation,
         message: message.into(),
     }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { WebHttpTransportExecutor } from "./web-http-transport-executor";
 
 type FetchCall = {
@@ -51,26 +51,103 @@ function deferredFetch() {
 	return { calls, fetch };
 }
 
+function signedPutHeaders() {
+	return [
+		{ name: "Content-Length", value: "3" },
+		{ name: "Content-Type", value: "image/png" },
+		{
+			name: "x-amz-content-sha256",
+			value: "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+		},
+		{
+			name: "x-amz-checksum-sha256",
+			value: "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=",
+		},
+	];
+}
+
 describe("WebHttpTransportExecutor", () => {
+	test("cancellation wipes parsed and digest upload buffers while hashing is held", async () => {
+		let parsedBody: number[] | undefined;
+		let digestBody: Uint8Array | undefined;
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const originalParse = JSON.parse;
+		const parse = spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+			const value = originalParse(text, reviver);
+			if (value?.dispatchId === "hash-held") parsedBody = value.body;
+			return value;
+		});
+		const digest = spyOn(globalThis.crypto.subtle, "digest").mockImplementation(
+			async (_algorithm, data) => {
+				digestBody = data as Uint8Array;
+				await held;
+				return new ArrayBuffer(32);
+			},
+		);
+		try {
+			const f = deferredFetch();
+			const executor = new WebHttpTransportExecutor(f.fetch);
+			const pending = executor.invoke(
+				request({
+					dispatchId: "hash-held",
+					method: "PUT",
+					body: [1, 2, 3],
+					headers: signedPutHeaders(),
+				}),
+			);
+			await Promise.resolve();
+			expect(digestBody).toEqual(new Uint8Array([1, 2, 3]));
+			executor.cancel("hash-held");
+			expect(parsedBody).toEqual([0, 0, 0]);
+			expect(digestBody).toEqual(new Uint8Array(3));
+			release();
+			expect(result(await pending)).toEqual({ type: "cancelled" });
+			expect(f.calls).toHaveLength(0);
+		} finally {
+			release();
+			digest.mockRestore();
+			parse.mockRestore();
+		}
+	});
+
+	test("wipes the mutable upload handoff while Fetch retains its exact bytes", async () => {
+		const OriginalRequest = globalThis.Request;
+		let handoff: Uint8Array | undefined;
+		globalThis.Request = class extends OriginalRequest {
+			constructor(input: RequestInfo | URL, init?: RequestInit) {
+				if (init?.body instanceof Uint8Array) handoff = init.body;
+				super(input, init);
+			}
+		} as typeof Request;
+		try {
+			const f = deferredFetch();
+			const executor = new WebHttpTransportExecutor(f.fetch);
+			const pending = executor.invoke(request({ body: [1, 2, 3] }));
+			await Promise.resolve();
+			expect(f.calls).toHaveLength(1);
+			const call = f.calls[0];
+			if (!call) throw new Error("Fetch did not receive the upload");
+			expect(handoff).toEqual(new Uint8Array(3));
+			expect(new Uint8Array(await call.request.clone().arrayBuffer())).toEqual(
+				new Uint8Array([1, 2, 3]),
+			);
+			executor.cancel("dispatch-1");
+			expect(result(await pending)).toEqual({ type: "cancelled" });
+		} finally {
+			globalThis.Request = OriginalRequest;
+		}
+	});
+
 	test("validates signed binary PUT authority and leaves Content-Length to the user agent", async () => {
 		let captured: Request | undefined;
 		const executor = new WebHttpTransportExecutor(async (input) => {
 			captured = input as Request;
 			return new Response(null, { status: 200 });
 		});
-		const signedHeaders = [
-			{ name: "Content-Length", value: "3" },
-			{ name: "Content-Type", value: "image/png" },
-			{
-				name: "x-amz-content-sha256",
-				value:
-					"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
-			},
-			{
-				name: "x-amz-checksum-sha256",
-				value: "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=",
-			},
-		];
+		const signedHeaders = signedPutHeaders();
 
 		await executor.invoke(
 			request({ method: "PUT", body: [1, 2, 3], headers: signedHeaders }),
@@ -93,19 +170,7 @@ describe("WebHttpTransportExecutor", () => {
 			calls += 1;
 			return new Response(null);
 		});
-		const exact = [
-			{ name: "Content-Length", value: "3" },
-			{ name: "Content-Type", value: "image/png" },
-			{
-				name: "x-amz-content-sha256",
-				value:
-					"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
-			},
-			{
-				name: "x-amz-checksum-sha256",
-				value: "A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=",
-			},
-		];
+		const exact = signedPutHeaders();
 		for (const headers of [
 			exact.filter(({ name }) => name !== "Content-Length"),
 			exact.map((header) =>

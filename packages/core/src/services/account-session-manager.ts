@@ -27,6 +27,12 @@ import {
 	NO_CREDENTIAL_MIRROR,
 } from "./account-lifecycle";
 import { createStoredAccountApiClient } from "./api-client";
+import type {
+	MaterialFailureCleanup,
+	MaterialPublication,
+	MaterialPublicationSource,
+} from "./material-publication";
+import { MaterialPublicationSupersededError } from "./material-publication";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export interface AccountSessionManagerOptions {
@@ -52,6 +58,8 @@ export interface AccountSessionManagerOptions {
 	onLockBroadcast?: (reason: string) => void | Promise<void>;
 	invalidateQueries?: (keys: string[][]) => void | Promise<void>;
 	verifyUnlockPolicy?: (accountId: string) => void | Promise<void>;
+	/** Platform lifetime for local restore and state publication. */
+	materialPublication?: MaterialPublicationSource;
 }
 
 export interface LoginSessionInput {
@@ -120,10 +128,17 @@ export class AccountSessionManager {
 		return result;
 	}
 
-	private async verifyUnlockPolicy(accountId: string): Promise<boolean> {
+	private async verifyUnlockPolicy(
+		accountId: string,
+		publication?: MaterialPublication,
+		ownedCleanup?: MaterialFailureCleanup,
+	): Promise<boolean> {
+		const cleanup = ownedCleanup ?? publication?.captureCleanup?.(accountId);
 		try {
 			if (this.options.verifyUnlockPolicy) {
 				await this.options.verifyUnlockPolicy(accountId);
+				if (cleanup && !cleanup.isCurrent())
+					throw new MaterialPublicationSupersededError();
 				return true;
 			}
 
@@ -135,9 +150,18 @@ export class AccountSessionManager {
 				).catch(() => null);
 				await enforcer.verifyForUnlock(accountId, client);
 			}
+			if (cleanup && !cleanup.isCurrent())
+				throw new MaterialPublicationSupersededError();
 			return true;
 		} catch (error) {
-			const outcome = await lifecycleLockAccount(accountId, this.lifecycle);
+			if (error instanceof MaterialPublicationSupersededError) throw error;
+			publication?.check();
+			const outcome = cleanup
+				? await cleanup.run(() =>
+						lifecycleLockAccount(accountId, this.lifecycle),
+					)
+				: await lifecycleLockAccount(accountId, this.lifecycle);
+			if (!outcome) throw new MaterialPublicationSupersededError();
 			console.error(
 				"[AccountSessionManager] Unlock policy verification failed:",
 				accountId,
@@ -150,9 +174,11 @@ export class AccountSessionManager {
 
 	async initialize(): Promise<void> {
 		if (this.initialized) return;
+		const publication = await this.options.materialPublication?.capture();
 		this.initialization ??= (async () => {
-			await this.initializeLocalVaultState();
-			if (!this.initialized) await this.refresh();
+			await this.initializeLocalVaultStateWithPublication(publication);
+			if (!this.initialized)
+				await this.runStateTransition(() => this.readRefreshState(publication));
 		})().finally(() => {
 			this.initialization = null;
 		});
@@ -166,11 +192,20 @@ export class AccountSessionManager {
 	 * performs remote-first verification.
 	 */
 	async initializeLocalVaultState(): Promise<void> {
+		const publication = await this.options.materialPublication?.capture();
+		await this.initializeLocalVaultStateWithPublication(publication);
+	}
+
+	private async initializeLocalVaultStateWithPublication(
+		publication?: MaterialPublication,
+	): Promise<void> {
 		if (this.localInitialization) {
 			await this.localInitialization;
 			return;
 		}
-		const attempt = this.runStateTransition(() => this.loadLocalVaultState());
+		const attempt = this.runStateTransition(() =>
+			this.loadLocalVaultState(publication),
+		);
 		this.localInitialization = attempt;
 		try {
 			await attempt;
@@ -182,17 +217,40 @@ export class AccountSessionManager {
 		}
 	}
 
-	private async loadLocalVaultState(): Promise<void> {
+	private async loadLocalVaultState(
+		publication?: MaterialPublication,
+	): Promise<void> {
 		const accounts = await this.storage.getAccountsList();
 		await Promise.all(
-			accounts.map((account) =>
-				this.storage.tryRestoreSessionWithoutPrompt(account.accountId),
-			),
+			accounts.map(async (account) => {
+				if (!publication) {
+					await this.storage.tryRestoreSessionWithoutPrompt(account.accountId);
+					return;
+				}
+				publication.check();
+				await publication.run(
+					account.accountId,
+					async (check) => {
+						check();
+						const alreadyPresent =
+							(await this.storage.getMasterUnlockKey(account.accountId)) !==
+							null;
+						check();
+						const restored = await this.storage.tryRestoreSessionWithoutPrompt(
+							account.accountId,
+						);
+						check();
+						return { restored, installed: restored && !alreadyPresent };
+					},
+					(result) => result.installed,
+				);
+			}),
 		);
 		const [active, unlocked] = await Promise.all([
 			this.storage.getActiveAccount(),
 			this.storage.getUnlockedAccounts(),
 		]);
+		publication?.check();
 		this.accounts = accounts;
 		this.active =
 			active && !resolveActiveAccountId(active, accounts) ? null : active;
@@ -206,39 +264,76 @@ export class AccountSessionManager {
 		}
 	}
 
-	async refresh(): Promise<void> {
-		await this.runStateTransition(() => this.refreshState());
+	/** Auth continuations retain their capture; independent refreshes acquire anew. */
+	async refresh(publication?: MaterialPublication): Promise<void> {
+		const currentPublication =
+			publication ?? (await this.options.materialPublication?.capture());
+		await this.runStateTransition(() =>
+			this.readRefreshState(currentPublication),
+		);
 	}
 
-	private async refreshState(): Promise<void> {
-		const [accounts, active, unlocked] = await Promise.all([
+	private async readRefreshState(
+		publication?: MaterialPublication,
+	): Promise<void> {
+		publication?.check();
+		const unlocked = await this.storage.getUnlockedAccounts();
+
+		const cleanupClaims = new Map<string, MaterialFailureCleanup>();
+		const verifiedUnlocked = new Set(
+			(
+				await Promise.all(
+					unlocked.map(async (accountId) => {
+						const claim = publication?.captureCleanup?.(accountId);
+						if (claim) cleanupClaims.set(accountId, claim);
+						return (await this.verifyUnlockPolicy(
+							accountId,
+							publication,
+							claim,
+						))
+							? accountId
+							: null;
+					}),
+				)
+			).filter((accountId): accountId is string => accountId !== null),
+		);
+		publication?.check();
+		const [accounts, active, currentUnlockedIds] = await Promise.all([
 			this.storage.getAccountsList(),
 			this.storage.getActiveAccount(),
 			this.storage.getUnlockedAccounts(),
 		]);
-
+		publication?.check();
+		const currentUnlocked = new Set(currentUnlockedIds);
+		for (const accountId of verifiedUnlocked) {
+			const claim = cleanupClaims.get(accountId);
+			if (claim && !claim.isCurrent())
+				throw new MaterialPublicationSupersededError();
+		}
 		this.accounts = accounts;
 		// An account may have been removed by another surface. Treat an unknown
 		// pointer as "no active account" so the normal selection path takes over.
 		this.active =
 			active && !resolveActiveAccountId(active, accounts) ? null : active;
 		this.lockState.clear();
-		const verifiedUnlocked = new Set(
-			(
-				await Promise.all(
-					unlocked.map(async (accountId) =>
-						(await this.verifyUnlockPolicy(accountId)) ? accountId : null,
-					),
-				)
-			).filter((accountId): accountId is string => accountId !== null),
-		);
 		for (const account of accounts) {
 			this.lockState.set(
 				account.accountId,
-				verifiedUnlocked.has(account.accountId) ? "unlocked" : "locked",
+				verifiedUnlocked.has(account.accountId) &&
+					currentUnlocked.has(account.accountId)
+					? "unlocked"
+					: "locked",
 			);
 		}
 		this.initialized = true;
+		this.emit();
+	}
+
+	/** Close C1-retired descriptors without treating a storage unlock as verified. */
+	retireUnlockedProjection(accountIds?: readonly string[]): void {
+		for (const accountId of accountIds ?? this.lockState.keys()) {
+			this.lockState.set(accountId, "locked");
+		}
 		this.emit();
 	}
 
@@ -272,11 +367,31 @@ export class AccountSessionManager {
 	}
 
 	async switchAccount(accountId: ActiveAccountId): Promise<void> {
-		await this.runStateTransition(() => this.switchAccountState(accountId));
+		const publication = await this.options.materialPublication?.capture();
+		await this.runStateTransition(() =>
+			this.switchAccountState(accountId, publication),
+		);
 	}
 
-	private async switchAccountState(accountId: ActiveAccountId): Promise<void> {
-		await this.storage.setActiveAccount(accountId);
+	private async switchAccountState(
+		accountId: ActiveAccountId,
+		publication?: MaterialPublication,
+	): Promise<void> {
+		if (publication && accountId) {
+			await publication.run(
+				accountId,
+				async (check) => {
+					check();
+					await this.storage.setActiveAccount(accountId);
+					check();
+				},
+				() => false,
+			);
+		} else {
+			publication?.check();
+			await this.storage.setActiveAccount(accountId);
+			publication?.check();
+		}
 		this.active = accountId;
 		// Selection changes the visible Vault scope before restore or policy checks
 		// can yield to storage, crypto, network, or platform callbacks.
@@ -291,8 +406,14 @@ export class AccountSessionManager {
 				await this.storage.addAccount(meta);
 			}
 			if (!this.isUnlocked(accountId)) {
-				let restored = await this.storage.tryRestoreSession(true, accountId);
-				if (restored) restored = await this.verifyUnlockPolicy(accountId);
+				let restored = await this.restoreLocalSession(
+					accountId,
+					true,
+					publication,
+				);
+				if (restored)
+					restored = await this.verifyUnlockPolicy(accountId, publication);
+				publication?.check();
 				this.lockState.set(accountId, restored ? "unlocked" : "locked");
 			}
 		}
@@ -308,18 +429,23 @@ export class AccountSessionManager {
 	}
 
 	async addAccount(metadata: AccountMetadata): Promise<void> {
+		const publication = await this.options.materialPublication?.capture();
 		await this.runStateTransition(async () => {
 			await this.storage.addAccount(metadata);
-			await this.refreshState();
+			await this.readRefreshState(publication);
 		});
 	}
 
 	async registerLoginAccount(input: LoginSessionInput): Promise<string> {
-		return this.runStateTransition(() => this.registerLoginAccountState(input));
+		const publication = await this.options.materialPublication?.capture();
+		return this.runStateTransition(() =>
+			this.registerLoginAccountState(input, publication),
+		);
 	}
 
 	private async registerLoginAccountState(
 		input: LoginSessionInput,
+		publication?: MaterialPublication,
 	): Promise<string> {
 		const accounts = await this.storage.getAccountsList();
 		const serverUrl = input.serverUrl.replace(/\/$/, "");
@@ -346,7 +472,7 @@ export class AccountSessionManager {
 
 		await this.storage.addAccount(metadata);
 		await this.storage.setActiveAccount(accountId);
-		await this.refreshState();
+		await this.readRefreshState(publication);
 		return accountId;
 	}
 
@@ -386,16 +512,20 @@ export class AccountSessionManager {
 	}
 
 	async removeAccount(accountId: string): Promise<LifecycleOutcome> {
-		return this.runStateTransition(() => this.removeAccountState(accountId));
+		const publication = await this.options.materialPublication?.capture();
+		return this.runStateTransition(() =>
+			this.removeAccountState(accountId, publication),
+		);
 	}
 
 	private async removeAccountState(
 		accountId: string,
+		publication?: MaterialPublication,
 	): Promise<LifecycleOutcome> {
 		const outcome = await lifecycleRemoveAccount(accountId, this.lifecycle);
 		// Re-reads the list, the pointer the module may have moved, and the lock
 		// states, then emits — so nothing in-memory has to be patched by hand here.
-		await this.refreshState();
+		await this.readRefreshState(publication);
 
 		if (outcome.wasActive) {
 			await this.options.onActiveChanged?.(this.active);
@@ -412,28 +542,63 @@ export class AccountSessionManager {
 	async unlockAccount(
 		accountId: string,
 		skipBiometric = false,
+		publication?: MaterialPublication,
 	): Promise<boolean> {
+		const currentPublication =
+			publication ?? (await this.options.materialPublication?.capture());
 		return this.runStateTransition(() =>
-			this.unlockAccountState(accountId, skipBiometric),
+			this.unlockAccountState(accountId, skipBiometric, currentPublication),
 		);
+	}
+
+	private async restoreLocalSession(
+		accountId: string,
+		skipBiometric: boolean,
+		publication?: MaterialPublication,
+	): Promise<boolean> {
+		if (!publication)
+			return this.storage.tryRestoreSession(skipBiometric, accountId);
+		publication.check();
+		const result = await publication.run(
+			accountId,
+			async (check) => {
+				check();
+				const alreadyPresent =
+					(await this.storage.getMasterUnlockKey(accountId)) !== null;
+				check();
+				const restored = await this.storage.tryRestoreSession(
+					skipBiometric,
+					accountId,
+				);
+				check();
+				return { restored, installed: restored && !alreadyPresent };
+			},
+			(result) => result.installed,
+		);
+		return result.restored;
 	}
 
 	private async unlockAccountState(
 		accountId: string,
 		skipBiometric: boolean,
+		publication?: MaterialPublication,
 	): Promise<boolean> {
 		// Route guards may reaffirm access while navigating inside an open Vault. Once
 		// full initialization has verified policy, restoring and publishing again would
 		// turn a read-only navigation into an account-state transition. Local-only boot
 		// restoration is deliberately excluded because it has not verified policy yet.
 		if (this.initialized && this.isUnlocked(accountId)) {
+			publication?.check();
 			return true;
 		}
-		let restored = await this.storage.tryRestoreSession(
-			skipBiometric,
+		let restored = await this.restoreLocalSession(
 			accountId,
+			skipBiometric,
+			publication,
 		);
-		if (restored) restored = await this.verifyUnlockPolicy(accountId);
+		if (restored)
+			restored = await this.verifyUnlockPolicy(accountId, publication);
+		publication?.check();
 		this.lockState.set(accountId, restored ? "unlocked" : "locked");
 		this.emit();
 		return restored;

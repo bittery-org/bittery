@@ -59,6 +59,21 @@ impl SnapshotBuilder {
             findings: Findings::default(),
         }
     }
+    pub(super) fn translate_image_key(
+        &mut self,
+        record: &DecodedRecord,
+        current: &ArtifactInventory,
+        user_id: &str,
+        device_key: &[u8],
+    ) -> Result<(), RuntimeError> {
+        self.artifacts
+            .translate_image_key(record, current, user_id, device_key)
+    }
+    pub(super) fn for_archive(account_id: AccountId) -> Self {
+        let mut builder = Self::new(account_id);
+        builder.artifacts.require_portable_keys();
+        builder
+    }
     pub(crate) fn observe(&mut self, record: &DecodedRecord) -> Result<(), RuntimeError> {
         self.record_count += 1;
         let result = self.observe_inner(record);
@@ -214,7 +229,7 @@ pub(crate) async fn capture(
                     RuntimeErrorCode::Cancelled | RuntimeErrorCode::SizeRejected
                 ) =>
             {
-                return Err(error)
+                return Err(error);
             }
             Err(error) => {
                 builder.failure = Some(error.code);

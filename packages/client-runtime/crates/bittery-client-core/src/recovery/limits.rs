@@ -1,8 +1,17 @@
 //! Typed recovery resource refusals cannot be mistaken for salvageable storage corruption.
 use crate::{RecoveryBound, RuntimeError, RuntimeErrorCode};
 
+pub use bittery_crypto_core::replica_recovery::RECOVERY_CHUNK_BYTES;
+pub(crate) const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
+pub const RECOVERY_CONTROL_BYTES: usize = MAX_RECORD_BYTES + 64 * 1024;
+/// Existing Web source/spool admission bound, including authenticated envelope overhead. Core's
+/// cryptographic reader independently enforces the plaintext archive limit and frame validity.
+pub const RECOVERY_MAX_FILE_BYTES: u64 =
+    bittery_crypto_core::replica_recovery::RECOVERY_MAX_PLAINTEXT_BYTES + 1024 * 1024;
+
 pub(crate) fn exceeded(bound: RecoveryBound) -> RuntimeError {
     RuntimeError {
+        team_page_problem: None,
         code: RuntimeErrorCode::SizeRejected,
         message: "Recovery exceeds its implementation resource bound".into(),
         recovery_bound: Some(bound),

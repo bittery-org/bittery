@@ -1,4 +1,7 @@
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "profile_admission_startup_tests.rs"]
+mod profile_admission;
 use crate::{
     platform_storage::{
         AccountMetadataDocument, DeviceKeyDocument, PendingAccountInstallIntent,
@@ -50,7 +53,10 @@ struct UnusedHttpExecutor;
 
 #[async_trait]
 impl SerializedHttpExecutor for UnusedHttpExecutor {
-    async fn invoke(&self, _request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        _request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         panic!("startup tests must not invoke HTTP")
     }
 
@@ -133,16 +139,19 @@ impl SerializedPlatformStorageExecutor for MemoryPlatformExecutor {
     ) -> Result<zeroize::Zeroizing<String>, RuntimeError> {
         let request: Value = serde_json::from_str(&request_json).unwrap();
         let area = request["area"].as_str().unwrap().to_owned();
-        let key = request["key"].as_str().unwrap().to_owned();
         match request["type"].as_str().unwrap() {
-            "get" => Ok(zeroize::Zeroizing::new(
-                json!({
-                    "type": "value",
-                    "value": self.values.lock().unwrap().get(&(area, key)).cloned()
-                })
-                .to_string(),
-            )),
+            "get" => {
+                let key = request["key"].as_str().unwrap().to_owned();
+                Ok(zeroize::Zeroizing::new(
+                    json!({
+                        "type": "value",
+                        "value": self.values.lock().unwrap().get(&(area, key)).cloned()
+                    })
+                    .to_string(),
+                ))
+            }
             "set" => {
+                let key = request["key"].as_str().unwrap().to_owned();
                 if self.fail_next_set.swap(false, Ordering::SeqCst) {
                     return Err(startup_invariant("injected catalog write failure"));
                 }
@@ -153,9 +162,41 @@ impl SerializedPlatformStorageExecutor for MemoryPlatformExecutor {
                 Ok(zeroize::Zeroizing::new(json!({"type": "done"}).to_string()))
             }
             "delete" => {
+                let key = request["key"].as_str().unwrap().to_owned();
                 self.values.lock().unwrap().remove(&(area, key.clone()));
                 self.deletes.lock().unwrap().push(key);
                 Ok(zeroize::Zeroizing::new(json!({"type": "done"}).to_string()))
+            }
+            "listKeys" => {
+                assert_eq!(request.get("cursor"), Some(&Value::Null));
+                assert!(matches!(
+                    area.as_str(),
+                    "devicePlain" | "deviceSecret" | "sessionSecret"
+                ));
+                let prefix = request["prefix"].as_str().unwrap();
+                assert!(!prefix.is_empty());
+                let mut keys: Vec<_> = self
+                    .values
+                    .lock()
+                    .unwrap()
+                    .keys()
+                    .filter(|(stored_area, key)| stored_area == &area && key.starts_with(prefix))
+                    .map(|(_, key)| key.clone())
+                    .collect();
+                keys.sort();
+                assert!(
+                    keys.len() <= 128,
+                    "this fixture supports one bounded key page"
+                );
+                assert!(keys.iter().all(|key| key.len() <= 4096));
+                let response = json!({
+                    "type": "keysPage", "version": 1, "family": "platformStorage",
+                    "backingAreas": [area], "keys": keys,
+                    "continuation": {"type": "end"}
+                })
+                .to_string();
+                assert!(response.len() <= 262_144);
+                Ok(zeroize::Zeroizing::new(response))
             }
             _ => unreachable!(),
         }
@@ -195,10 +236,10 @@ fn catalog_key() -> String {
 
 fn generation_key(account: &str, incarnation: &str, document: &str) -> String {
     format!(
-            "bittery:runtime:platform-storage:account:{}:{account}:incarnation:{}:{incarnation}:{document}",
-            account.len(),
-            incarnation.len()
-        )
+        "bittery:runtime:platform-storage:account:{}:{account}:incarnation:{}:{incarnation}:{document}",
+        account.len(),
+        incarnation.len()
+    )
 }
 
 fn account(value: &str) -> AccountId {
@@ -334,6 +375,29 @@ impl VaultImageSourcePort for UnusedVaultImageSource {
     ) -> Result<(), VaultImageSourceError> {
         panic!("startup sweep must not release work")
     }
+    async fn retire_vaults(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+        _vault_ids: &[String],
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _runtime_incarnation: &str,
+        _account_id: &AccountId,
+    ) -> Result<(), VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(
         &self,
         _runtime_incarnation: &str,
@@ -350,6 +414,20 @@ struct FailFirstSweep {
 
 #[async_trait]
 impl VaultImageArtifactPort for FailFirstSweep {
+    async fn read_generation(
+        &self,
+        scope: &crate::VaultImageArtifactScope,
+        after: Option<&str>,
+    ) -> Result<Option<crate::VaultImageArtifactGeneration>, RuntimeError> {
+        self.inner.read_generation(scope, after).await
+    }
+    async fn delete_generation(
+        &self,
+        scope: &crate::VaultImageArtifactScope,
+    ) -> Result<(), RuntimeError> {
+        self.inner.delete_generation(scope).await
+    }
+
     async fn begin(&self, scope: &VaultImageArtifactScope) -> Result<(), RuntimeError> {
         self.inner.begin(scope).await
     }
@@ -401,6 +479,7 @@ fn active(account_id: &str, generation: &str) -> DeviceCatalogAccount {
     DeviceCatalogAccount {
         account_id: account(account_id),
         active_incarnation: Some(incarnation(generation)),
+        pending_retirement: None,
         pending_install: None,
     }
 }
@@ -409,6 +488,7 @@ fn pending(account_id: &str, active: Option<&str>, pending: &str) -> DeviceCatal
     DeviceCatalogAccount {
         account_id: account(account_id),
         active_incarnation: active.map(incarnation),
+        pending_retirement: None,
         pending_install: Some(PendingAccountInstallIntent {
             incarnation: incarnation(pending),
             expected_active_incarnation: active.map(incarnation),
@@ -465,9 +545,14 @@ async fn open_restores_final_active_accounts_signed_out_once() {
     let runtime = production_runtime(replica.clone(), platform);
 
     runtime.open().await.unwrap();
+    let first_open_loads = replica.loads.load(Ordering::SeqCst);
+    assert!(
+        first_open_loads > 0,
+        "startup must validate the durable Replica"
+    );
     runtime.open().await.unwrap();
 
-    assert_eq!(replica.loads.load(Ordering::SeqCst), 1);
+    assert_eq!(replica.loads.load(Ordering::SeqCst), first_open_loads);
     assert_eq!(runtime.device_revision.load(Ordering::SeqCst), 1);
     assert_eq!(
         runtime.account_access_state(&account("account-1")),
@@ -565,6 +650,18 @@ async fn open_promotes_or_rolls_back_pending_install_from_the_replica_head() {
             Some(incarnation(expected_active))
         );
         assert!(catalog.accounts[0].pending_install.is_none());
+        if head == "old" {
+            let retirement = catalog.accounts[0].pending_retirement.as_ref().unwrap();
+            assert_eq!(retirement.incarnation, incarnation("old"));
+            assert_eq!(
+                retirement.purpose,
+                crate::platform_storage::AccountRetirementPurpose::Replace
+            );
+            assert!(runtime.account_teardown_is_pending(&account("account")));
+        } else {
+            assert!(catalog.accounts[0].pending_retirement.is_none());
+            assert!(!runtime.account_teardown_is_pending(&account("account")));
+        }
         assert!(platform
             .deletes
             .lock()

@@ -1,0 +1,1217 @@
+{
+  "$defs": {
+    "BiometricFailure": {
+      "enum": [
+        "unavailable",
+        "notEnrolled",
+        "notEnabled",
+        "passwordRequired",
+        "cancelled",
+        "failed",
+        "lockedOut",
+        "accountChanged",
+        "travelUnverified",
+        "storageUnavailable"
+      ],
+      "type": "string"
+    },
+    "KdfProfile": {
+      "properties": {
+        "algorithm": {
+          "type": "string"
+        },
+        "iterations": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "algorithm",
+        "iterations"
+      ],
+      "type": "object"
+    },
+    "NativeAccountAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "keyAuthorizationAvailable": {
+          "description": "Derived capability readiness; this does not change Desktop Account lock state.",
+          "type": "boolean"
+        },
+        "keyGeneration": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "policyVerification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativePolicyVerification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restrictiveContinuity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeRestrictiveContinuity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/NativeAccountScope"
+        },
+        "unlocked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scope",
+        "unlocked",
+        "keyAuthorizationAvailable",
+        "keyGeneration"
+      ],
+      "type": "object"
+    },
+    "NativeAccountProfile": {
+      "additionalProperties": false,
+      "description": "Presentation and pinned derivation policy; this carries no new login secret.",
+      "properties": {
+        "addedAtMs": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "biometricEnabled": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": "string"
+        },
+        "lastActiveAtMs": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pinnedKdfProfile": {
+          "$ref": "#/$defs/KdfProfile"
+        },
+        "secretKeyHint": {
+          "type": "string"
+        },
+        "teamAvatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "email",
+        "name",
+        "secretKeyHint",
+        "addedAtMs",
+        "lastActiveAtMs",
+        "biometricEnabled",
+        "pinnedKdfProfile"
+      ],
+      "type": "object"
+    },
+    "NativeAccountScope": {
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "lockEpoch": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "serverUrl": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "incarnation",
+        "lockEpoch",
+        "serverUrl",
+        "userId"
+      ],
+      "type": "object"
+    },
+    "NativeAuthorityRequest": {
+      "description": "This control contract is available only to trusted native compositions.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "extensionId": {
+              "type": "string"
+            },
+            "transportId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "attachSource",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "extensionId",
+            "transportId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "sourceSnapshot",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channelId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/NativeAuthoritySnapshot"
+            },
+            "transportId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "attachDesktop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source",
+            "transportId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "insecureTransportConfirmed": {
+              "default": false,
+              "type": "boolean"
+            },
+            "sourceAccount": {
+              "type": "string"
+            },
+            "type": {
+              "const": "prepareImportForSource",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channelId",
+            "sourceAccount"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "sourceAccount": {
+              "type": "string"
+            },
+            "type": {
+              "const": "prepareIndependentRevalidation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channelId",
+            "sourceAccount"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "challenge": {
+              "$ref": "#/$defs/NativeImportChallenge"
+            },
+            "type": {
+              "const": "revalidateIndependentRestrictions",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "challenge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reply": {
+              "$ref": "#/$defs/NativeIndependentRevalidationReply"
+            },
+            "type": {
+              "const": "completeIndependentRevalidation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reply"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "challenge": {
+              "$ref": "#/$defs/NativeImportChallenge"
+            },
+            "type": {
+              "const": "export",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "challenge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "challenge": {
+              "$ref": "#/$defs/NativeImportChallenge"
+            },
+            "promptMessage": {
+              "type": "string"
+            },
+            "type": {
+              "const": "exportWithBiometric",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "challenge",
+            "promptMessage"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reply": {
+              "$ref": "#/$defs/NativeTransferReply"
+            },
+            "type": {
+              "const": "completeImport",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reply"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/NativeAuthoritySnapshot"
+            },
+            "type": {
+              "const": "applyAuthority",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channelId",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "restrictionAcknowledgement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channelId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "acknowledgement": {
+              "$ref": "#/$defs/NativeRestrictionAcknowledgement"
+            },
+            "type": {
+              "const": "acknowledgeRestrictions",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "acknowledgement"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "retireChannel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channelId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NativeAuthorityResponse": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/NativeAuthoritySnapshot"
+            },
+            "type": {
+              "const": "source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "snapshot"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "attached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channelId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "challenge": {
+              "$ref": "#/$defs/NativeImportChallenge"
+            },
+            "type": {
+              "const": "prepared",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "challenge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reply": {
+              "$ref": "#/$defs/NativeTransferReply"
+            },
+            "type": {
+              "const": "exported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reply"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reply": {
+              "$ref": "#/$defs/NativeIndependentRevalidationReply"
+            },
+            "type": {
+              "const": "independentRestrictionsRevalidated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reply"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "failure": {
+              "$ref": "#/$defs/BiometricFailure"
+            },
+            "type": {
+              "const": "biometricRefused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "failure"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "acknowledgement": {
+              "$ref": "#/$defs/NativeRestrictionAcknowledgement"
+            },
+            "type": {
+              "const": "restrictionAcknowledgement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "acknowledgement"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "applied",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NativeAuthoritySnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/$defs/NativeAccountAuthority"
+          },
+          "type": "array"
+        },
+        "channelId": {
+          "type": "string"
+        },
+        "extensionId": {
+          "type": "string"
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "restrictionChainDigest": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "minItems": 32,
+          "type": "array"
+        },
+        "restrictionFrontier": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "restrictions": {
+          "items": {
+            "$ref": "#/$defs/NativeRestrictionBatch"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "transportId": {
+          "type": "string"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "extensionId",
+        "ownerId",
+        "channelId",
+        "transportId",
+        "sequence",
+        "accounts",
+        "restrictionFrontier",
+        "restrictionChainDigest",
+        "restrictions"
+      ],
+      "type": "object"
+    },
+    "NativeChallengePurpose": {
+      "description": "One native challenge owner serves credential transfer and independent exclusion restoration.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "transfer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "excludedVaultIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "restrictionChainDigest": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 32,
+              "minItems": 32,
+              "type": "array"
+            },
+            "restrictionFrontier": {
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+              "type": "string"
+            },
+            "type": {
+              "const": "revalidateIndependentRestrictions",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "restrictionFrontier",
+            "restrictionChainDigest",
+            "excludedVaultIds"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NativeImportChallenge": {
+      "additionalProperties": false,
+      "properties": {
+        "challengeId": {
+          "type": "string"
+        },
+        "destination": {
+          "$ref": "#/$defs/NativeAccountScope"
+        },
+        "destinationChannel": {
+          "type": "string"
+        },
+        "destinationInsecureTransportConfirmed": {
+          "type": "boolean"
+        },
+        "destinationOwner": {
+          "type": "string"
+        },
+        "destinationTransport": {
+          "type": "string"
+        },
+        "extensionId": {
+          "type": "string"
+        },
+        "newDestination": {
+          "type": "boolean"
+        },
+        "purpose": {
+          "$ref": "#/$defs/NativeChallengePurpose",
+          "default": {
+            "type": "transfer"
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/NativeAccountScope"
+        },
+        "sourceChannel": {
+          "type": "string"
+        },
+        "sourceKeyGeneration": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "sourceOwner": {
+          "type": "string"
+        },
+        "sourceTransport": {
+          "type": "string"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "challengeId",
+        "extensionId",
+        "sourceOwner",
+        "sourceChannel",
+        "sourceTransport",
+        "destinationOwner",
+        "destinationChannel",
+        "destinationTransport",
+        "source",
+        "sourceKeyGeneration",
+        "destination",
+        "newDestination",
+        "destinationInsecureTransportConfirmed"
+      ],
+      "type": "object"
+    },
+    "NativeIndependentRevalidationReply": {
+      "additionalProperties": false,
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/NativeImportChallenge"
+        },
+        "sourceSessionExpiresAtMs": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "visibleVaultIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "challenge",
+        "sourceSessionExpiresAtMs",
+        "visibleVaultIds"
+      ],
+      "type": "object"
+    },
+    "NativePolicyVerification": {
+      "description": "Source verification episodes restrict admission without withdrawing an established grant.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "revision": {
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+              "type": "string"
+            },
+            "type": {
+              "const": "pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "revision"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "restrictionFrontier": {
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+              "type": "string"
+            },
+            "revision": {
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+              "type": "string"
+            },
+            "type": {
+              "const": "verified",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "revision",
+            "restrictionFrontier"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NativeRestrictionAcknowledgement": {
+      "additionalProperties": false,
+      "properties": {
+        "adoptions": {
+          "items": {
+            "$ref": "#/$defs/NativeRestrictionAdoption"
+          },
+          "type": "array"
+        },
+        "chainDigest": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "minItems": 32,
+          "type": "array"
+        },
+        "destinationChannel": {
+          "type": "string"
+        },
+        "destinationOwner": {
+          "type": "string"
+        },
+        "destinationTransport": {
+          "type": "string"
+        },
+        "frontier": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "sourceChannel": {
+          "type": "string"
+        },
+        "sourceOwner": {
+          "type": "string"
+        },
+        "sourceTransport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceOwner",
+        "sourceChannel",
+        "sourceTransport",
+        "destinationOwner",
+        "destinationChannel",
+        "destinationTransport",
+        "frontier",
+        "chainDigest",
+        "adoptions"
+      ],
+      "type": "object"
+    },
+    "NativeRestrictionAdoption": {
+      "additionalProperties": false,
+      "properties": {
+        "batchId": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "chainDigest": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "minItems": 32,
+          "type": "array"
+        },
+        "contentDigest": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "minItems": 32,
+          "type": "array"
+        },
+        "disposition": {
+          "$ref": "#/$defs/NativeRestrictionDisposition"
+        }
+      },
+      "required": [
+        "batchId",
+        "contentDigest",
+        "chainDigest",
+        "disposition"
+      ],
+      "type": "object"
+    },
+    "NativeRestrictionBatch": {
+      "additionalProperties": false,
+      "properties": {
+        "batchId": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "chainDigest": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "minItems": 32,
+          "type": "array"
+        },
+        "contentDigest": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "minItems": 32,
+          "type": "array"
+        },
+        "evidence": {
+          "$ref": "#/$defs/NativeRestrictionEvidence"
+        },
+        "fromKeyGeneration": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "previousDigest": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "minItems": 32,
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/NativeAccountScope"
+        },
+        "toKeyGeneration": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "vaultIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "batchId",
+        "previousDigest",
+        "contentDigest",
+        "chainDigest",
+        "source",
+        "fromKeyGeneration",
+        "toKeyGeneration",
+        "evidence",
+        "vaultIds"
+      ],
+      "type": "object"
+    },
+    "NativeRestrictionDisposition": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "incarnation": {
+              "type": "string"
+            },
+            "type": {
+              "const": "journalOwned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "incarnation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "noTargetAtCapture",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "incarnation": {
+              "type": "string"
+            },
+            "type": {
+              "const": "targetRemoved",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "incarnation"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NativeRestrictionEvidence": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/NativeTravelEvidence"
+            },
+            "type": {
+              "const": "verifiedPolicy",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "policy"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "existingRetirement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NativeRestrictiveContinuity": {
+      "additionalProperties": false,
+      "properties": {
+        "fromGeneration": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        },
+        "throughGeneration": {
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fromGeneration",
+        "throughGeneration"
+      ],
+      "type": "object"
+    },
+    "NativeTransferReply": {
+      "additionalProperties": false,
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/NativeImportChallenge"
+        },
+        "material": {
+          "type": "string"
+        },
+        "profile": {
+          "$ref": "#/$defs/NativeAccountProfile"
+        },
+        "travelEvidence": {
+          "$ref": "#/$defs/NativeTravelEvidence"
+        }
+      },
+      "required": [
+        "challenge",
+        "travelEvidence",
+        "profile",
+        "material"
+      ],
+      "type": "object"
+    },
+    "NativeTravelEvidence": {
+      "additionalProperties": false,
+      "description": "Nonsecret source policy evidence accompanies, but does not change, encrypted transfer material.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "hiddenVaultIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "serverEnabledAtMs": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serverUpdatedAtMs": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifiedAtMs": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "hiddenVaultIds",
+        "serverEnabledAtMs",
+        "serverUpdatedAtMs",
+        "verifiedAtMs"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "request": {
+      "$ref": "#/$defs/NativeAuthorityRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/NativeAuthorityResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response"
+  ],
+  "title": "NativeAuthorityContract",
+  "type": "object",
+  "$id": "urn:bittery:client-runtime:native-authority"
+}

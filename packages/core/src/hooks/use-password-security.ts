@@ -15,7 +15,7 @@ import {
 	scoreToStrength,
 	WEAK_PASSWORD_THRESHOLD,
 } from "@bittery/shared/password-analysis";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { PublicDecryptedItem } from "@bittery/shared/types";
 import { useMemo } from "react";
 import zxcvbn from "zxcvbn";
 
@@ -140,7 +140,9 @@ function calculateSecurityScore(
  * @param items - Array of decrypted items to analyze
  * @returns Security report including weak, reused, old passwords, score, and recommendations
  */
-export function usePasswordSecurity(items: DecryptedItem[]): SecurityReport {
+export function usePasswordSecurity(
+	items: PublicDecryptedItem[],
+): SecurityReport {
 	return useMemo(() => {
 		// Filter to only login items with passwords
 		const loginItems = items.filter(
@@ -161,7 +163,7 @@ export function usePasswordSecurity(items: DecryptedItem[]): SecurityReport {
 
 		// Analyze all passwords
 		const analysisMap = new Map<string, PasswordAnalysis>();
-		const passwordToItems = new Map<string, DecryptedItem[]>();
+		const passwordToItems = new Map<string, PublicDecryptedItem[]>();
 
 		for (const item of loginItems) {
 			// biome-ignore lint/style/noNonNullAssertion: We know password is defined here

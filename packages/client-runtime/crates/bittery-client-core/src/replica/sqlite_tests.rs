@@ -4,15 +4,17 @@ use super::{
         prepare_commit, prepare_install, reconstruct_snapshot, PreparedReplicaWrite, ReplicaHead,
         ReplicaRowKey, ReplicaStore, StoredReplicaRow,
     },
-    AuthorityItemCategory, AuthorityItemRecord, BeginBootstrapPlan, BootstrapContinuation,
+    AuthorityItemCategory, AuthorityItemRecord, AuthorityVaultRecord, AuthorityVaultRole,
+    AuthorityVaultType, BeginBootstrapPlan, BootstrapAuthority, BootstrapContinuation,
     BootstrapGenerationId, BootstrapGuard, BootstrapPageCursor, BootstrapPageIdentity,
     CreateVaultCheckpoint, CreateVaultCleanupObligation, CreateVaultImageRecord,
     CreateVaultOperationRecord, GuardedCommitPlan, ImmutableHttpRequest, InMemoryReplica,
-    ObservedOutcome, OperationKind, OperationOutcomeResult, OperationReceiptRecord,
-    OperationRecord, OperationSchedulingState, PlanMutation, PlanResult, PromoteBootstrapPlan,
-    Replica, ReplicaPersistence, ReplicaPersistenceRequest, ReplicaPersistenceResponse,
-    ResourceRef, Sha256Fingerprint, SqliteReplica, StageBootstrapPagePlan,
-    StageBootstrapPageResult, SyncCursor,
+    LegacyAdmissionBootstrap, LegacyAdmissionOrigin, LegacyCheckpointEvidence,
+    LegacyItemCacheBaseline, LegacyItemCacheMetadata, ObservedOutcome, OperationKind,
+    OperationOutcomeResult, OperationReceiptRecord, OperationRecord, OperationSchedulingState,
+    PlanMutation, PlanResult, PromoteBootstrapPlan, Replica, ReplicaPersistence,
+    ReplicaPersistenceRequest, ReplicaPersistenceResponse, ReplicaState, ResourceRef,
+    Sha256Fingerprint, SqliteReplica, StageBootstrapPagePlan, StageBootstrapPageResult, SyncCursor,
 };
 use crate::{
     http_transport::{HttpHeader, HttpMethod},
@@ -234,6 +236,8 @@ fn persisted_create_vault_operation(account_id: &str, with_image: bool) -> Opera
         icon: "lock".into(),
         encrypted_vault_key: "opaque-wrapped-key".into(),
         image: with_image.then(|| CreateVaultImageRecord {
+            protected_witness: None,
+            raw_cleanup_pending: false,
             byte_length: 11,
             content_type: "image/png".into(),
             sha256: digest.clone(),
@@ -261,9 +265,12 @@ fn persisted_create_vault_operation(account_id: &str, with_image: bool) -> Opera
         },
         request,
         request_fingerprint: canonical.fingerprint,
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: Some(intent),
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     }
 }
 
@@ -291,6 +298,106 @@ async fn install(replica: &Replica, account_id: &str) {
         )
         .await
         .unwrap();
+}
+
+fn admitted_cache(account_id: &str, cursor: Option<&str>) -> BootstrapAuthority {
+    let captured = cursor.map_or(SyncCursor::Cold, |id| SyncCursor::CapturedValue {
+        id: id.to_owned(),
+    });
+    let checkpoint = cursor.map_or(LegacyCheckpointEvidence::Missing {}, |id| {
+        LegacyCheckpointEvidence::CapturedValue { id: id.to_owned() }
+    });
+    let normalized_server_url = "https://example.test".to_owned();
+    let metadata = Some(LegacyItemCacheMetadata {
+        last_full_sync_at: 1,
+        item_count: 1,
+        cache_version: 1,
+        sync_baseline: cursor.map(|id| LegacyItemCacheBaseline {
+            server_url: "https://example.test/".to_owned(),
+            normalized_server_url: normalized_server_url.clone(),
+            cursor: SyncCursor::CapturedValue { id: id.to_owned() },
+        }),
+    });
+    BootstrapAuthority::admit_legacy(LegacyAdmissionBootstrap {
+        origin: LegacyAdmissionOrigin {
+            manifest_entries_sha256: "ab".repeat(32),
+            account_id: AccountId::from(account_id),
+            user_id: format!("user-{account_id}"),
+            incarnation: Incarnation::from(format!("incarnation-{account_id}")),
+            normalized_server_url,
+            source_active_generation: Some("source-generation".to_owned()),
+            state_key: format!("record:{account_id}:meta:meta"),
+            items_key_prefix: format!(
+                "record:item-cache-stage:{account_id}:source-generation:items:"
+            ),
+            vaults_key_prefix: format!(
+                "record:item-cache-stage:{account_id}:source-generation:vaults:"
+            ),
+            items_primed: true,
+            vaults_primed: true,
+            metadata,
+            source_id: format!("account:{account_id}:server:https%3A%2F%2Fexample.test"),
+            sync_baseline: checkpoint.clone(),
+            last_sync_cursor: checkpoint,
+            refresh_reason: None,
+        },
+        cursor: captured,
+        vaults: vec![AuthorityVaultRecord {
+            id: "vault-1".to_owned(),
+            name: "Vault".to_owned(),
+            vault_type: AuthorityVaultType::Personal,
+            icon: None,
+            image_url: None,
+            encrypted_vault_key: "wrapped-vault-key".to_owned(),
+            role: AuthorityVaultRole::Owner,
+            key_version: None,
+        }],
+        items: vec![authority_item(account_id, "item-offline", 7)],
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn admitted_offline_cache_and_baseline_state_survive_sqlite_restart() {
+    for (name, cursor, expected_state) in [
+        ("verified", Some("evt-1"), ReplicaState::Ready),
+        ("missing", None, ReplicaState::RefreshRequired),
+    ] {
+        let database = TestDatabase::new(&format!("legacy-cache-{name}"));
+        let persistence = Arc::new(SqliteReplica::open(&database.path).unwrap());
+        let replica = Replica::new(persistence.clone());
+        let account_id = AccountId::from(format!("account-{name}"));
+        install(&replica, account_id.as_str()).await;
+        let before = replica.load(&account_id).await.unwrap().unwrap();
+        let mut admitted = before.clone();
+        admitted.revision = 1;
+        admitted.bootstrap = admitted_cache(account_id.as_str(), cursor);
+        replica
+            .commit_bootstrap_snapshot(before, admitted.clone(), true)
+            .await
+            .unwrap();
+        drop(replica);
+        drop(persistence);
+
+        let reopened = Replica::new(Arc::new(SqliteReplica::open(&database.path).unwrap()));
+        let loaded = reopened.load(&account_id).await.unwrap().unwrap();
+        assert_eq!(loaded.bootstrap.state, expected_state);
+        assert_eq!(
+            loaded.bootstrap.active_cursor,
+            admitted.bootstrap.active_cursor
+        );
+        assert!(loaded.bootstrap.pages.is_empty());
+        let visible = loaded.bootstrap.snapshot();
+        assert_eq!(visible.visible_items.len(), 1);
+        assert_eq!(
+            visible.visible_items[0].encrypted_data,
+            "authoritative-sealed-item-offline"
+        );
+        assert_eq!(
+            visible.visible_vaults[0].encrypted_vault_key,
+            "wrapped-vault-key"
+        );
+    }
 }
 
 fn plan(account_id: &str, revision: u64, operation_id: &str) -> GuardedCommitPlan {
@@ -524,6 +631,8 @@ async fn sqlite_loads_a_missing_account_without_rows() {
 async fn sqlite_load_rejects_receipts_whose_kind_and_resource_target_disagree() {
     let cleanup = CreateVaultCleanupObligation {
         image: CreateVaultImageRecord {
+            protected_witness: None,
+            raw_cleanup_pending: false,
             byte_length: 8,
             content_type: "image/png".into(),
             sha256: "ab".repeat(32),
@@ -537,6 +646,8 @@ async fn sqlite_load_rejects_receipts_whose_kind_and_resource_target_disagree() 
     };
     let foreign_user_cleanup = CreateVaultCleanupObligation {
         image: CreateVaultImageRecord {
+            protected_witness: None,
+            raw_cleanup_pending: false,
             byte_length: 8,
             content_type: "image/png".into(),
             sha256: "ab".repeat(32),
@@ -661,6 +772,7 @@ async fn sqlite_load_rejects_receipts_whose_kind_and_resource_target_disagree() 
             result,
             completed_at_revision: 1,
             create_vault_cleanup,
+            legacy_lineage: None,
         };
         let raw = rusqlite::Connection::open(&database.path).unwrap();
         raw.execute(
@@ -705,6 +817,7 @@ async fn sqlite_load_preserves_a_valid_create_vault_receipt() {
             vault_id: "vault-valid".into(),
         },
         completed_at_revision: 1,
+        legacy_lineage: None,
         create_vault_cleanup: None,
     };
     let raw = rusqlite::Connection::open(&database.path).unwrap();
@@ -739,14 +852,19 @@ async fn sqlite_reopen_rejects_each_create_vault_cleanup_authority_mismatch() {
     let valid = OperationReceiptRecord {
         operation_id: "operation-sqlite-image".into(),
         kind: OperationKind::CreateVault,
-        target: ResourceRef::Vault { vault_id: "vault-sqlite-image".into() },
+        target: ResourceRef::Vault {
+            vault_id: "vault-sqlite-image".into(),
+        },
         request_fingerprint: Sha256Fingerprint::of_bytes(b"sqlite-image-request"),
         result: OperationOutcomeResult::VaultRejected {
             code: super::CreateVaultOperationRejectionCode::TeamMembershipRequired,
         },
         completed_at_revision: 1,
+        legacy_lineage: None,
         create_vault_cleanup: Some(CreateVaultCleanupObligation {
             image: CreateVaultImageRecord {
+                protected_witness: None,
+                raw_cleanup_pending: false,
                 byte_length: 1,
                 content_type: "image/jpeg".into(),
                 sha256: digest.clone(),
@@ -760,13 +878,37 @@ async fn sqlite_reopen_rejects_each_create_vault_cleanup_authority_mismatch() {
     };
     let mut cases = Vec::new();
     for (label, key) in [
-        ("user", format!("vaults/user-else/vault-sqlite-image/create/operation-sqlite-image-{digest}")),
-        ("vault", format!("vaults/user-account-sqlite-image/vault-else/create/operation-sqlite-image-{digest}")),
-        ("operation", format!("vaults/user-account-sqlite-image/vault-sqlite-image/create/operation-else-{digest}")),
-        ("sha-key", format!("vaults/user-account-sqlite-image/vault-sqlite-image/create/operation-sqlite-image-{}", "0".repeat(64))),
+        (
+            "user",
+            format!("vaults/user-else/vault-sqlite-image/create/operation-sqlite-image-{digest}"),
+        ),
+        (
+            "vault",
+            format!(
+                "vaults/user-account-sqlite-image/vault-else/create/operation-sqlite-image-{digest}"
+            ),
+        ),
+        (
+            "operation",
+            format!(
+                "vaults/user-account-sqlite-image/vault-sqlite-image/create/operation-else-{digest}"
+            ),
+        ),
+        (
+            "sha-key",
+            format!(
+                "vaults/user-account-sqlite-image/vault-sqlite-image/create/operation-sqlite-image-{}",
+                "0".repeat(64)
+            ),
+        ),
     ] {
         let mut receipt = valid.clone();
-        receipt.create_vault_cleanup.as_mut().unwrap().image.object_key = key;
+        receipt
+            .create_vault_cleanup
+            .as_mut()
+            .unwrap()
+            .image
+            .object_key = key;
         cases.push((label, receipt));
     }
     for (label, length) in [("empty", 0), ("oversized", 2_097_153)] {
@@ -1221,8 +1363,11 @@ fn valid_rejected_image_receipt() -> OperationReceiptRecord {
             code: super::CreateVaultOperationRejectionCode::VaultIdConflict,
         },
         completed_at_revision: 1,
+        legacy_lineage: None,
         create_vault_cleanup: Some(CreateVaultCleanupObligation {
             image: CreateVaultImageRecord {
+                protected_witness: None,
+                raw_cleanup_pending: false,
                 byte_length: 2_097_152,
                 content_type: "image/avif".into(),
                 sha256: sha.clone(),
@@ -1328,6 +1473,7 @@ fn serialized_create_vault_receipt_image_authority_cross_product_fails_closed() 
         (
             "no-image-rejected",
             OperationReceiptRecord {
+                legacy_lineage: None,
                 create_vault_cleanup: None,
                 ..valid_rejected_image_receipt()
             },
@@ -1335,6 +1481,7 @@ fn serialized_create_vault_receipt_image_authority_cross_product_fails_closed() 
         (
             "rejected-local-complete",
             OperationReceiptRecord {
+                legacy_lineage: None,
                 create_vault_cleanup: Some(CreateVaultCleanupObligation {
                     local_artifact_pending: false,
                     ..valid_rejected_image_receipt().create_vault_cleanup.unwrap()
@@ -1348,6 +1495,7 @@ fn serialized_create_vault_receipt_image_authority_cross_product_fails_closed() 
                 result: OperationOutcomeResult::VaultApplied {
                     vault_id: "vault-image".into(),
                 },
+                legacy_lineage: None,
                 create_vault_cleanup: None,
                 ..valid_rejected_image_receipt()
             },
@@ -1358,6 +1506,7 @@ fn serialized_create_vault_receipt_image_authority_cross_product_fails_closed() 
                 result: OperationOutcomeResult::VaultApplied {
                     vault_id: "vault-image".into(),
                 },
+                legacy_lineage: None,
                 create_vault_cleanup: Some(CreateVaultCleanupObligation {
                     remote_staging_pending: false,
                     ..valid_rejected_image_receipt().create_vault_cleanup.unwrap()
@@ -1541,7 +1690,10 @@ impl ReplicaPersistence for RecordingPersistence {
         &self,
         request: ReplicaPersistenceRequest,
     ) -> Result<ReplicaPersistenceResponse, RuntimeError> {
-        if !matches!(request, ReplicaPersistenceRequest::Load { .. }) {
+        if !matches!(
+            request,
+            ReplicaPersistenceRequest::Load { .. } | ReplicaPersistenceRequest::Inventory { .. }
+        ) {
             self.writes.lock().unwrap().push(request.clone());
         }
         self.inner.invoke(request).await
@@ -1637,6 +1789,7 @@ async fn ready_recording_replica() -> (Arc<RecordingPersistence>, Replica, Accou
                 raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"vault-page"),
                 pinned_watermark: watermark.clone(),
                 continuation: BootstrapContinuation::Final,
+                vault_key_version_included: false,
                 vaults: vec![crate::test_fixtures::personal_vault(
                     "vault-1",
                     "user-account-matrix",
@@ -1657,6 +1810,7 @@ async fn ready_recording_replica() -> (Arc<RecordingPersistence>, Replica, Accou
                 raw_response_fingerprint: Sha256Fingerprint::of_bytes(b"item-page"),
                 pinned_watermark: watermark,
                 continuation: BootstrapContinuation::Final,
+                vault_key_version_included: false,
                 vaults: Vec::new(),
                 items: vec![authority_item(account_id.as_str(), "item-existing", 1)],
             })
@@ -1667,6 +1821,7 @@ async fn ready_recording_replica() -> (Arc<RecordingPersistence>, Replica, Accou
     assert_eq!(
         replica
             .promote_bootstrap(PromoteBootstrapPlan {
+                additional_retired_vault_ids: Vec::new(),
                 guard: bootstrap_guard(account_id.as_str(), 1),
                 generation_id: BootstrapGenerationId("generation-matrix".to_owned()),
             })
@@ -1797,10 +1952,12 @@ fn sqlite_write_boundaries(request: &ReplicaPersistenceRequest) -> usize {
         ReplicaPersistenceRequest::Install { prepared } => 1 + prepared.writes.len(),
         ReplicaPersistenceRequest::Commit { prepared } => 1 + prepared.writes.len(),
         ReplicaPersistenceRequest::AdvanceLockEpoch { .. } => 1,
-        ReplicaPersistenceRequest::DeleteAccount { .. } | ReplicaPersistenceRequest::WipeDevice => {
-            2
+        ReplicaPersistenceRequest::DeleteAccountIfUnchanged { .. }
+        | ReplicaPersistenceRequest::DeleteAccount { .. }
+        | ReplicaPersistenceRequest::WipeDevice => 2,
+        ReplicaPersistenceRequest::Load { .. } | ReplicaPersistenceRequest::Inventory { .. } => {
+            panic!("a read has no SQLite write boundary")
         }
-        ReplicaPersistenceRequest::Load { .. } => panic!("a load has no SQLite write boundary"),
     }
 }
 
@@ -1929,5 +2086,203 @@ async fn sqlite_rejects_commit_and_install_writes_outside_the_guarded_account() 
     assert_eq!(
         replica.load(&AccountId::from("account-2")).await.unwrap(),
         account_2_before
+    );
+}
+
+#[tokio::test]
+async fn admission_abort_guard_preserves_a_same_head_changed_row() {
+    use super::persistence_contract::snapshot_rows;
+    let database = TestDatabase::new("admission-abort-same-head-race");
+    let store = Arc::new(SqliteReplica::open(&database.path).unwrap());
+    let replica = Replica::new(store.clone());
+    let prepared = prepare_install(
+        None,
+        "abort-account".into(),
+        "abort-user".into(),
+        "abort-generation".into(),
+    )
+    .unwrap();
+    let account_id = prepared.next_head.account_id.clone();
+    let mut expected = reconstruct_snapshot(&account_id, Some(prepared.next_head.clone()), vec![])
+        .unwrap()
+        .unwrap();
+    expected.bootstrap.policy_verification_pending = true;
+    replica
+        .stage_profile_admission_snapshot(&expected)
+        .await
+        .unwrap();
+    let loaded = replica.load_uncached(&account_id).await.unwrap().unwrap();
+    let expected_rows = snapshot_rows(loaded.clone()).unwrap();
+    assert!(!expected_rows.is_empty());
+    let mut changed = loaded;
+    changed.bootstrap.policy_verification_pending = false;
+    let row = &expected_rows[0];
+    let mut payload: serde_json::Value = serde_json::from_str(&row.payload_json).unwrap();
+    assert_eq!(payload["policyVerificationPending"], true);
+    payload["policyVerificationPending"] = serde_json::json!(false);
+    let connection = rusqlite::Connection::open(&database.path).unwrap();
+    assert_eq!(connection.execute("UPDATE replica_rows SET payload_json=?1 WHERE account_id=?2 AND store=?3 AND record_id=?4", rusqlite::params![payload.to_string(), account_id.as_str(), row.store.physical_id(), row.key.record_id]).unwrap(), 1);
+    let response = super::SerializedReplicaExecutor::invoke(store.as_ref(), serde_json::json!({"type":"deleteAccountIfUnchanged","accountId":account_id.as_str(),"expectedHead":prepared.next_head,"expectedRows":expected_rows}).to_string()).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&response).unwrap(),
+        serde_json::json!({"type":"accountDeletion","result":{"type":"conflict"}})
+    );
+    assert_eq!(
+        replica.load_uncached(&account_id).await.unwrap(),
+        Some(changed)
+    );
+}
+
+#[tokio::test]
+async fn admission_abort_guard_rolls_back_and_replays_only_complete_absence() {
+    use super::persistence_contract::{snapshot_rows, ReplicaAccountDeletionResult};
+    for boundary in [1, 2] {
+        let database = TestDatabase::new(&format!("admission-abort-rollback-{boundary}"));
+        let store = Arc::new(SqliteReplica::open(&database.path).unwrap());
+        let replica = Replica::new(store.clone());
+        let prepared = prepare_install(
+            None,
+            "abort-account".into(),
+            "abort-user".into(),
+            "abort-generation".into(),
+        )
+        .unwrap();
+        let account_id = prepared.next_head.account_id.clone();
+        let mut expected =
+            reconstruct_snapshot(&account_id, Some(prepared.next_head.clone()), vec![])
+                .unwrap()
+                .unwrap();
+        expected.bootstrap.policy_verification_pending = true;
+        replica
+            .stage_profile_admission_snapshot(&expected)
+            .await
+            .unwrap();
+        let request = ReplicaPersistenceRequest::DeleteAccountIfUnchanged {
+            account_id: account_id.clone(),
+            expected_head: prepared.next_head,
+            expected_rows: snapshot_rows(expected.clone()).unwrap(),
+        };
+        let failing = SqliteReplica::open_failing_after(&database.path, boundary).unwrap();
+        assert!(ReplicaPersistence::invoke(&failing, request.clone())
+            .await
+            .is_err());
+        assert_eq!(
+            replica.load_uncached(&account_id).await.unwrap(),
+            Some(expected)
+        );
+        assert_eq!(
+            ReplicaPersistence::invoke(store.as_ref(), request.clone())
+                .await
+                .unwrap(),
+            ReplicaPersistenceResponse::AccountDeletion {
+                result: ReplicaAccountDeletionResult::Deleted {}
+            }
+        );
+        assert_eq!(
+            ReplicaPersistence::invoke(store.as_ref(), request.clone())
+                .await
+                .unwrap(),
+            ReplicaPersistenceResponse::AccountDeletion {
+                result: ReplicaAccountDeletionResult::AlreadyAbsent {}
+            }
+        );
+        let mut duplicate = request.clone();
+        if let ReplicaPersistenceRequest::DeleteAccountIfUnchanged { expected_rows, .. } =
+            &mut duplicate
+        {
+            expected_rows.push(expected_rows[0].clone());
+        }
+        assert!(ReplicaPersistence::invoke(store.as_ref(), duplicate)
+            .await
+            .is_err());
+        let mut foreign = request.clone();
+        if let ReplicaPersistenceRequest::DeleteAccountIfUnchanged { expected_head, .. } =
+            &mut foreign
+        {
+            expected_head.account_id = "foreign-account".into();
+        }
+        assert!(ReplicaPersistence::invoke(store.as_ref(), foreign)
+            .await
+            .is_err());
+        let connection = rusqlite::Connection::open(&database.path).unwrap();
+        connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        connection
+            .execute(
+                "INSERT INTO replica_rows VALUES (?1,999,'orphan','{bad')",
+                [account_id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            ReplicaPersistence::invoke(store.as_ref(), request)
+                .await
+                .unwrap(),
+            ReplicaPersistenceResponse::AccountDeletion {
+                result: ReplicaAccountDeletionResult::Conflict {}
+            }
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM replica_rows", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn admission_abort_adapter_compares_payload_bytes_without_domain_decoding() {
+    use super::persistence_contract::ReplicaAccountDeletionResult;
+    let database = TestDatabase::new("admission-abort-opaque-payload");
+    let store = SqliteReplica::open(&database.path).unwrap();
+    let head = ReplicaHead {
+        account_id: "opaque-account".into(),
+        user_id: "user".into(),
+        incarnation: "incarnation".into(),
+        replica_revision: 0,
+        lock_epoch: 0,
+        failure: None,
+    };
+    let row = StoredReplicaRow {
+        store: ReplicaStore::Operations,
+        key: ReplicaRowKey {
+            account_id: head.account_id.clone(),
+            record_id: "opaque-operation".into(),
+        },
+        payload_json: "expected".into(),
+    };
+    let connection = rusqlite::Connection::open(&database.path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO replica_heads VALUES ('opaque-account','user','incarnation','0','0',NULL)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO replica_rows VALUES (?1,?2,?3,?4)",
+            rusqlite::params![
+                head.account_id.as_str(),
+                row.store.physical_id(),
+                row.key.record_id,
+                row.payload_json
+            ],
+        )
+        .unwrap();
+    let response = ReplicaPersistence::invoke(
+        &store,
+        ReplicaPersistenceRequest::DeleteAccountIfUnchanged {
+            account_id: head.account_id.clone(),
+            expected_head: head,
+            expected_rows: vec![row],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        response,
+        ReplicaPersistenceResponse::AccountDeletion {
+            result: ReplicaAccountDeletionResult::Deleted {}
+        }
     );
 }

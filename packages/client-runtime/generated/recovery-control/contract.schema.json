@@ -1104,6 +1104,66 @@
             "operationId",
             "chunkIndex"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "metadataJson": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "publicationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "protectedVaultImageMetadata"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId",
+            "publicationId",
+            "metadataJson"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "chunkIndex": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "publicationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "protectedVaultImageChunk"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId",
+            "publicationId",
+            "chunkIndex"
+          ]
         }
       ]
     },
@@ -1164,9 +1224,11 @@
       "enum": [
         "optimisticItems",
         "operations",
+        "crossAccountMoves",
         "attachmentMovePreparations",
         "shareCapabilities",
         "operationReceipts",
+        "rotationAttempts",
         "replicaMetadata",
         "bootstrapGenerations",
         "bootstrapPages",
@@ -1177,6 +1239,9 @@
     "RuntimeErrorCode": {
       "type": "string",
       "enum": [
+        "RECIPIENT_KEY_UNVERIFIED",
+        "RECIPIENT_KEY_CHANGED",
+        "RECIPIENT_FINGERPRINT_MISMATCH",
         "RUNTIME_CLOSED",
         "CANCELLED",
         "ACCOUNT_MISSING",
@@ -1184,8 +1249,10 @@
         "ACCOUNT_FAILED",
         "AUTHENTICATION_REQUIRED",
         "AUTHENTICATION_UNAVAILABLE",
+        "CREDENTIAL_UNAVAILABLE",
         "STORAGE_UNAVAILABLE",
         "RETRYABLE_TRANSPORT",
+        "VERSION_EVIDENCE_UNAVAILABLE",
         "AUTHORITY_MISSING",
         "ACCESS_DENIED",
         "READ_ONLY",

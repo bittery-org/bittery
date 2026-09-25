@@ -50,11 +50,13 @@ await replaceExactly(
 }\n\n\npublic protocol AttachmentProjectionProtocol`,
 );
 
-await replaceExactly(
-	swift,
-	"open func shareUrl() -> String  {\n    return try!  FfiConverterString.lift(try! rustCall() {",
-	"open func shareUrl() -> String  {\n    return try!  FfiConverterSensitiveString.lift(try! rustCall() {",
-);
+for (const method of ["shareUrl", "reveal"]) {
+	await replaceExactly(
+		swift,
+		`open func ${method}() -> String  {\n    return try!  FfiConverterString.lift(try! rustCall() {`,
+		`open func ${method}() -> String  {\n    return try!  FfiConverterSensitiveString.lift(try! rustCall() {`,
+	);
+}
 
 await replaceExactly(
 	kotlin,
@@ -111,11 +113,17 @@ private object FfiConverterSensitiveString {
 // This template implements a class for working with a Rust struct via a handle`,
 );
 
-await replaceExactly(
-	kotlin,
-	"    override fun `shareUrl`(): kotlin.String {\n            return FfiConverterString.lift(",
-	"    override fun `shareUrl`(): kotlin.String {\n            return FfiConverterSensitiveString.lift(",
-);
+for (const method of ["shareUrl", "reveal"]) {
+	await replaceExactly(
+		kotlin,
+		"override fun `" +
+			method +
+			"`(): kotlin.String {\n            return FfiConverterString.lift(",
+		"override fun `" +
+			method +
+			"`(): kotlin.String {\n            return FfiConverterSensitiveString.lift(",
+	);
+}
 
 await replaceExactly(
 	swift,

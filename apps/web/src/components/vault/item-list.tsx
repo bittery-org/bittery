@@ -1,7 +1,10 @@
 import type { ItemProjectionStatus } from "@bittery/client-runtime/protocol";
 import { useItemListFilters } from "@bittery/core/hooks";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
-import type { DecryptedItemWithContext } from "@bittery/shared/types";
+import type {
+	ItemContextMetadata,
+	PublicDecryptedItem,
+} from "@bittery/shared/types";
 import {
 	ActiveRail,
 	Checkbox,
@@ -28,9 +31,10 @@ import { Favicon } from "./favicon";
  * Optional because the importers, the extension bridge, and the share views still pass plain
  * repository Items. A row without a status renders exactly as it did before.
  */
-export type ItemListEntry = DecryptedItemWithContext & {
-	runtimeStatus?: ItemProjectionStatus;
-};
+export type ItemListEntry = PublicDecryptedItem &
+	ItemContextMetadata & {
+		runtimeStatus?: ItemProjectionStatus;
+	};
 
 interface ItemListProps {
 	items: ItemListEntry[];

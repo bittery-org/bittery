@@ -1,3 +1,6 @@
+mod protected_images;
+#[cfg(not(target_arch = "wasm32"))]
+mod protected_sqlite;
 mod report_capture;
 mod report_cases;
 use super::{
@@ -98,6 +101,18 @@ fn key(record: &RecoveryRecord) -> String {
             operation_id,
             chunk_index,
         } => format!("7/{account_id}/{operation_id}/{chunk_index:010}"),
+        RecoveryRecord::ProtectedVaultImageMetadata {
+            account_id,
+            operation_id,
+            publication_id,
+            ..
+        } => format!("6/{account_id}/{operation_id}/{publication_id}"),
+        RecoveryRecord::ProtectedVaultImageChunk {
+            account_id,
+            operation_id,
+            publication_id,
+            chunk_index,
+        } => format!("7/{account_id}/{operation_id}/{publication_id}/{chunk_index:010}"),
     }
 }
 impl Storage {
@@ -267,7 +282,25 @@ impl SerializedRecoveryExecutor for Storage {
                     .iter()
                     .find(|entry| key(&entry.record) == key(&record))
                 {
-                    if existing.record != record || existing.bytes != binary {
+                    // Physical image stores compare columns/objects, not the transport JSON's
+                    // property order. Portable repair can canonically serialize the same wrapper.
+                    let same_record = match (&existing.record, &record) {
+                        (
+                            RecoveryRecord::ProtectedVaultImageMetadata {
+                                metadata_json: before,
+                                ..
+                            },
+                            RecoveryRecord::ProtectedVaultImageMetadata {
+                                metadata_json: after,
+                                ..
+                            },
+                        ) => {
+                            serde_json::from_str::<serde_json::Value>(before).unwrap()
+                                == serde_json::from_str::<serde_json::Value>(after).unwrap()
+                        }
+                        _ => existing.record == record,
+                    };
+                    if !same_record || existing.bytes != binary {
                         Reply::Unavailable {
                             reason: RecoveryUnavailableReason::Corrupt,
                         }
@@ -390,6 +423,8 @@ fn fixture() -> (Arc<Storage>, RecoveryIdentity, Vec<u8>, String) {
         icon: "bank".into(),
         encrypted_vault_key: "wrapped".into(),
         image: Some(CreateVaultImageRecord {
+            protected_witness: None,
+            raw_cleanup_pending: false,
             byte_length: image.len() as u64,
             content_type: "image/png".into(),
             sha256: hash.clone(),
@@ -414,9 +449,12 @@ fn fixture() -> (Arc<Storage>, RecoveryIdentity, Vec<u8>, String) {
             body: Vec::new(),
         },
         request_fingerprint: canonical.fingerprint,
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: Some(intent),
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     };
     let payload = serde_json::to_string_pretty(&operation).unwrap();
     let head = ReplicaHead {
@@ -704,6 +742,7 @@ async fn older_bundle_cannot_resurrect_an_acknowledged_protected_share_result() 
             expires_at: "2026-09-09T00:00:00Z".into(),
         },
         completed_at_revision: 4,
+        legacy_lineage: None,
         create_vault_cleanup: None,
     };
     storage.entries.lock().unwrap().extend([
@@ -1104,4 +1143,116 @@ async fn protected_complete_export_retains_actual_physical_schema_provenance_and
     let report=report.expect("every protected export must authenticate its actual physical provenance and final capture report");
     assert_eq!(report.physical_schemas, actual);
     assert!(report.proves_complete(4));
+}
+
+fn retirement_journal(storage: &Storage, payload: &str) {
+    storage.entries.lock().unwrap().push(Entry {
+        record: RecoveryRecord::RawReplicaRow {
+            account_id: "account".into(),
+            store: ReplicaStore::ReplicaMetadata,
+            record_id: "vault-retirements".into(),
+            payload_json: payload.into(),
+        },
+        bytes: None,
+    });
+}
+
+#[tokio::test]
+async fn recovery_rebootstrap_preserves_vault_duties_while_discarding_corrupt_bootstrap_control() {
+    let (storage, identity, _, _) = fixture();
+    let journal = r#"{"vaultIds":["hidden"]}"#;
+    retirement_journal(&storage, journal);
+    storage.entries.lock().unwrap().push(Entry {
+        record: RecoveryRecord::RawReplicaRow {
+            account_id: "account".into(),
+            store: ReplicaStore::ReplicaMetadata,
+            record_id: "bootstrap".into(),
+            payload_json: "corrupt rebuildable control".into(),
+        },
+        bytes: None,
+    });
+    let port = make_port(&storage);
+    let snapshot = capture(&port, &identity.account_id).await.unwrap();
+    assert!(can_rebootstrap(&snapshot, &identity));
+    rebootstrap(&port, &identity, &snapshot).await.unwrap();
+    let reopened = capture(&port, &identity.account_id).await.unwrap();
+    assert!(reopened.complete);
+    assert_eq!(
+        reopened.proof.unwrap().pending_vault_retirements,
+        ["hidden"]
+    );
+    assert!(storage.entries.lock().unwrap().iter().any(|entry| matches!(&entry.record,
+        RecoveryRecord::RawReplicaRow { record_id, payload_json, .. } if record_id == "vault-retirements" && payload_json == journal)));
+}
+
+#[tokio::test]
+async fn malformed_vault_journal_is_raw_evidence_but_never_rebuildable_work() {
+    for journal in [
+        "corrupt journal",
+        r#"{"vaultIds":["hidden","hidden"]}"#,
+        r#"{"vaultIds":[]}"#,
+        r#"{"vaultIds":["hidden"],"unknown":true}"#,
+    ] {
+        let (storage, identity, _, _) = fixture();
+        retirement_journal(&storage, journal);
+        corrupt_derived(&storage);
+        let port = make_port(&storage);
+        let snapshot = capture(&port, &identity.account_id).await.unwrap();
+        assert!(snapshot.proof.is_none());
+        assert!(!can_rebootstrap(&snapshot, &identity));
+        assert!(!can_repair(&snapshot, &identity));
+        assert!(storage
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|entry| matches!(&entry.record,
+            RecoveryRecord::RawReplicaRow { payload_json, .. } if payload_json == journal)));
+    }
+}
+
+#[tokio::test]
+async fn encrypted_recovery_archive_preserves_exact_vault_journal_and_refuses_old_duties() {
+    let (storage, identity, _, _) = fixture();
+    retirement_journal(&storage, r#"{"vaultIds":["hidden"]}"#);
+    export(&storage, &identity).await;
+    corrupt_derived(&storage);
+    let port = make_port(&storage);
+    let current = capture(&port, &identity.account_id).await.unwrap();
+    repair_bundle(
+        &port,
+        &identity,
+        &current,
+        "separate recovery password",
+        "source",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        capture(&port, &identity.account_id)
+            .await
+            .unwrap()
+            .proof
+            .unwrap()
+            .pending_vault_retirements,
+        ["hidden"]
+    );
+    storage.entries.lock().unwrap().retain(|entry| {
+        !matches!(&entry.record,
+        RecoveryRecord::RawReplicaRow { record_id, .. } if record_id == "vault-retirements")
+    });
+    retirement_journal(&storage, r#"{"vaultIds":["new-duty"]}"#);
+    corrupt_derived(&storage);
+    let current = capture(&port, &identity.account_id).await.unwrap();
+    let before = storage.durable();
+    assert!(repair_bundle(
+        &port,
+        &identity,
+        &current,
+        "separate recovery password",
+        "source"
+    )
+    .await
+    .is_err());
+    assert_eq!(storage.durable(), before);
 }

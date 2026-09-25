@@ -21,6 +21,9 @@ use time::{Duration, OffsetDateTime};
 
 use std::sync::Arc;
 
+#[path = "durable_attachment_upload_tests.rs"]
+mod durable_attachment_upload;
+
 fn vault_image_binding(operation_id: &str) -> super::VaultImageStagingBinding {
     super::VaultImageStagingBinding {
         operation_id: operation_id.to_owned(),
@@ -3963,7 +3966,7 @@ async fn move_serializes_a_stale_source_attachment_delete_without_row_loss() {
 
 #[tokio::test]
 async fn move_serializes_a_concurrent_attachment_create_without_source_phantom() {
-    let storage_size = i64::from(encrypted_attachment_storage_size(16));
+    let storage_size = encrypted_attachment_storage_size(16);
     let storage = Arc::new(RecordingObjectStorage::succeeding_with_object_size(
         storage_size,
     ));

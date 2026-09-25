@@ -991,4 +991,75 @@ describe("storeUnlockSession active account", () => {
 		);
 		await storage.clearMasterUnlockKey("account-b");
 	});
+
+	it("destroys an uninstalled key when local publication admission is refused", async () => {
+		resetTravelModeEnforcerForTests();
+		const crypto = createInMemoryCryptoPort();
+		const { storage } = await makeStore(
+			[account("account-b", "user-b", "https://b.example")],
+			crypto,
+		);
+		await storage.storeTravelModeCache(
+			{ enabled: false, hiddenVaultIds: [] },
+			"account-b",
+		);
+		const { cache: itemCache } = await createTestItemCache();
+		const result: UnlockResult = {
+			token: "unlock-token",
+			user: { id: "user-b", email: "same@example.com" },
+			vaultKeys: [],
+			masterUnlockKey: await crypto.importKey(MUK),
+			kdfParams,
+		};
+		await expect(
+			storeUnlockSessionOwned(result, storage, itemCache, crypto, "account-b", {
+				materialPublication: {
+					check: () => {},
+					run: async () => {
+						throw new Error("C1 admission closed");
+					},
+				},
+			}),
+		).rejects.toThrow("C1 admission closed");
+		expect(await storage.getMasterUnlockKey("account-b")).toBeNull();
+		await expect(crypto.exportKey(result.masterUnlockKey)).rejects.toThrow(
+			/destroyed/,
+		);
+	});
+
+	it("keeps an already transferred key owned by storage if retirement follows the setter", async () => {
+		resetTravelModeEnforcerForTests();
+		const crypto = createInMemoryCryptoPort();
+		const { storage } = await makeStore(
+			[account("account-b", "user-b", "https://b.example")],
+			crypto,
+		);
+		await storage.storeTravelModeCache(
+			{ enabled: false, hiddenVaultIds: [] },
+			"account-b",
+		);
+		const { cache: itemCache } = await createTestItemCache();
+		const result: UnlockResult = {
+			token: "unlock-token",
+			user: { id: "user-b", email: "same@example.com" },
+			vaultKeys: [],
+			masterUnlockKey: await crypto.importKey(MUK),
+			kdfParams,
+		};
+		await expect(
+			storeUnlockSessionOwned(result, storage, itemCache, crypto, "account-b", {
+				materialPublication: {
+					check: () => {},
+					run: async (_accountId, publish) => {
+						await publish(() => {});
+						throw new Error("retired after transfer");
+					},
+				},
+			}),
+		).rejects.toThrow("retired after transfer");
+		expect(await storage.getMasterUnlockKey("account-b")).toBe(
+			result.masterUnlockKey,
+		);
+		await storage.clearMasterUnlockKey("account-b");
+	});
 });

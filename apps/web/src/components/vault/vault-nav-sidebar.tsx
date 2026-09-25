@@ -23,10 +23,10 @@ import {
 	IconStar as Star,
 	IconTrash as Trash,
 } from "@bittery/ui/icons";
+import type { VaultNavEntry } from "@bittery/ui/runtime-presentation";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
 import { useRef } from "react";
-import type { VaultNavEntry } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 import { useVaultDnd } from "@/providers/vault-dnd-provider";
 

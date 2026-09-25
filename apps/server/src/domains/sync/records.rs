@@ -1,6 +1,13 @@
 use sqlx::{query_as, FromRow, PgPool};
 
-use crate::{db::models::*, error::AppError, shared::transaction::database_error};
+use crate::{
+    db::{
+        enums::{VaultRole, VaultType},
+        models::*,
+    },
+    error::AppError,
+    shared::transaction::database_error,
+};
 
 const BOOTSTRAP_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
 
@@ -13,8 +20,20 @@ pub struct BoundedBootstrapRows {
 }
 
 pub struct BoundedBootstrapVaultRows {
-    pub rows: Vec<DbBootstrapVaultAccessRow>,
+    pub rows: Vec<BootstrapVersionedVaultRow>,
     pub has_more: bool,
+}
+
+#[derive(FromRow)]
+pub struct BootstrapVersionedVaultRow {
+    pub vault_id: String,
+    pub vault_name: String,
+    pub vault_type: VaultType,
+    pub vault_icon: Option<String>,
+    pub vault_image_key: Option<String>,
+    pub encrypted_vault_key: String,
+    pub role: VaultRole,
+    pub key_version: i32,
 }
 
 pub struct BoundedSyncEventRows {
@@ -356,8 +375,8 @@ pub async fn fetch_bootstrap_vaults(
         .last()
         .is_some_and(|last| last.position < last.candidate_count);
     let vault_ids: Vec<String> = weights.into_iter().map(|weight| weight.id).collect();
-    let rows = query_as::<_, DbBootstrapVaultAccessRow>(
-        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2) ORDER BY array_position($2::text[], vk.vault_id)",
+    let rows = query_as::<_, BootstrapVersionedVaultRow>(
+        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role, v.key_version FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2) ORDER BY array_position($2::text[], vk.vault_id)",
     )
     .bind(user_id)
     .bind(&vault_ids)

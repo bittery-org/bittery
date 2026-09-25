@@ -17,8 +17,21 @@
 use serde::{Deserialize, Serialize};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ts_rs::TS;
+use zeroize::Zeroizing;
 
 pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
+pub const MAX_IPC_FRAME_BYTES: usize = 64 * 1024 * 1024;
+
+pub fn validate_frame_length(length: usize, limit: usize) -> io::Result<u32> {
+    if length == 0 || length > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "IPC frame length is invalid",
+        ));
+    }
+    u32::try_from(length)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "IPC frame length is invalid"))
+}
 
 /// The pinned version as a TypeScript literal, so the extension's constant is
 /// checked against this one instead of restating it. The assertion is what keeps
@@ -408,11 +421,20 @@ where
     R: AsyncRead + Unpin,
     T: for<'de> Deserialize<'de>,
 {
+    read_frame_bounded(reader, MAX_IPC_FRAME_BYTES).await
+}
+
+pub async fn read_frame_bounded<R, T>(reader: &mut R, limit: usize) -> io::Result<T>
+where
+    R: AsyncRead + Unpin,
+    T: for<'de> Deserialize<'de>,
+{
     let mut length_bytes = [0u8; 4];
     reader.read_exact(&mut length_bytes).await?;
     let length = u32::from_le_bytes(length_bytes) as usize;
+    validate_frame_length(length, limit)?;
 
-    let mut buffer = vec![0u8; length];
+    let mut buffer = Zeroizing::new(vec![0u8; length]);
     reader.read_exact(&mut buffer).await?;
 
     serde_json::from_slice(&buffer)
@@ -424,9 +446,19 @@ where
     W: AsyncWrite + Unpin,
     T: Serialize,
 {
-    let payload = serde_json::to_vec(value)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let length = payload.len() as u32;
+    write_frame_bounded(writer, value, MAX_IPC_FRAME_BYTES).await
+}
+
+pub async fn write_frame_bounded<W, T>(writer: &mut W, value: &T, limit: usize) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+    T: Serialize,
+{
+    let payload = Zeroizing::new(
+        serde_json::to_vec(value)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+    );
+    let length = validate_frame_length(payload.len(), limit)?;
     writer.write_all(&length.to_le_bytes()).await?;
     writer.write_all(&payload).await?;
     writer.flush().await?;
@@ -446,6 +478,15 @@ mod tests {
         DESKTOP_PROTOCOL_VERSION,
     };
     use tokio::io::duplex;
+
+    #[tokio::test]
+    async fn frame_rejects_oversized_length_before_reading_or_allocating_payload() {
+        let mut bytes: &[u8] = &(64_u32 * 1024 * 1024 + 1).to_le_bytes();
+        let error = read_frame::<_, serde_json::Value>(&mut bytes)
+            .await
+            .expect_err("oversized frame must be rejected before waiting for its payload");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
 
     #[tokio::test]
     async fn frame_round_trip_preserves_payload() {

@@ -3,7 +3,7 @@
  * Uses zxcvbn for advanced password analysis and provides recommendations
  */
 
-import type { DecryptedItem } from "./types";
+import type { PublicDecryptedItem } from "./types";
 
 /**
  * Password strength levels
@@ -38,7 +38,7 @@ export type PasswordIssueType = "weak" | "reused" | "old";
  * A password with an identified issue
  */
 export interface PasswordIssue {
-	item: DecryptedItem;
+	item: PublicDecryptedItem;
 	issueType: PasswordIssueType;
 	analysis?: PasswordAnalysis;
 	reusedCount?: number;

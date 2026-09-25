@@ -4,7 +4,7 @@
  * Utilities for extracting unique tags from items and filtering items by tags.
  */
 
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { PublicDecryptedItem } from "@bittery/shared/types";
 import { useMemo } from "react";
 
 /**
@@ -13,7 +13,7 @@ import { useMemo } from "react";
  * @param items - Array of decrypted items to extract tags from
  * @returns Sorted array of unique tag strings
  */
-export function useAvailableTags(items: DecryptedItem[]): string[] {
+export function useAvailableTags(items: PublicDecryptedItem[]): string[] {
 	return useMemo(() => {
 		const tagSet = new Set<string>();
 		for (const item of items) {
@@ -35,10 +35,10 @@ export function useAvailableTags(items: DecryptedItem[]): string[] {
  * @param selectedTags - Array of tag strings to filter by
  * @returns Filtered array of items that have at least one of the selected tags
  */
-export function filterItemsByTags(
-	items: DecryptedItem[],
+export function filterItemsByTags<T extends PublicDecryptedItem>(
+	items: T[],
 	selectedTags: string[],
-): DecryptedItem[] {
+): T[] {
 	if (selectedTags.length === 0) return items;
 	return items.filter((item) =>
 		item.tags?.some((tag) => selectedTags.includes(tag)),

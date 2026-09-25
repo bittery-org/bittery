@@ -2,8 +2,9 @@ use super::*;
 use crate::attachment_artifact_store::{
     AttachmentArtifactStoreRequest, AttachmentArtifactStoreResponse,
 };
+use crate::platform_storage::AccountRetirementPurpose;
 use async_trait::async_trait;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TeardownHostCleanupRequest {
@@ -43,28 +44,50 @@ pub(super) struct UnavailableTeardownHostCleanup;
 #[derive(Default)]
 pub(super) struct PendingTeardown {
     device: bool,
-    accounts: BTreeSet<AccountId>,
+    accounts: BTreeMap<AccountId, AccountRetirementPurpose>,
 }
 
 impl PendingTeardown {
-    fn insert(&mut self, scope: &TeardownScope) {
-        match scope {
-            TeardownScope::Account { account_id } => {
-                self.accounts.insert(account_id.clone());
+    fn insert_account(
+        &mut self,
+        account_id: &AccountId,
+        purpose: AccountRetirementPurpose,
+    ) -> bool {
+        match self.accounts.get_mut(account_id) {
+            Some(current)
+                if *current == purpose || *current == AccountRetirementPurpose::Remove =>
+            {
+                false
             }
-            TeardownScope::Device => self.device = true,
+            Some(current) => {
+                *current = purpose;
+                true
+            }
+            None => {
+                self.accounts.insert(account_id.clone(), purpose);
+                true
+            }
         }
     }
 
-    fn remove(&mut self, scope: &TeardownScope) {
+    fn insert(&mut self, scope: &TeardownScope) -> bool {
         match scope {
             TeardownScope::Account { account_id } => {
-                self.accounts.remove(account_id);
+                self.insert_account(account_id, AccountRetirementPurpose::Remove)
             }
+            TeardownScope::Device => !std::mem::replace(&mut self.device, true),
+        }
+    }
+
+    fn remove(&mut self, scope: &TeardownScope) -> bool {
+        match scope {
+            TeardownScope::Account { account_id } => self.accounts.remove(account_id).is_some(),
             // A converged Wipe destroyed every Account, so it also clears their narrower scopes.
             TeardownScope::Device => {
+                let changed = self.device || !self.accounts.is_empty();
                 self.device = false;
                 self.accounts.clear();
+                changed
             }
         }
     }
@@ -75,7 +98,7 @@ impl PendingTeardown {
 
     /// Device scope fences everything, including a request that names no Account.
     fn rejects(&self, account_id: Option<&AccountId>) -> bool {
-        self.device || account_id.is_some_and(|account_id| self.accounts.contains(account_id))
+        self.device || account_id.is_some_and(|account_id| self.accounts.contains_key(account_id))
     }
 }
 
@@ -141,11 +164,10 @@ impl Runtime {
 
     /// How far this Runtime must have started before a scope may destroy.
     ///
-    /// A Device `Wipe` needs only a Runtime that is not closed. Its phases are namespace-wide and
-    /// read no catalog, and `catalog_transition` still serializes them against a concurrent
-    /// `open()`. That relaxation is the whole point: `open()` fails for as long as the Device
-    /// catalog and the durable Replica disagree, which is what a cleared IndexedDB beside a kept
-    /// `localStorage` leaves behind, and a wipe is the only way out of it.
+    /// Device Wipe requires a Runtime that is not closed, even when catalog/Replica damage prevents
+    /// open. Existing Reset journals are read when available; replacing unreadable catalog bytes
+    /// requires an independently proven fixed namespace scope. The catalog guard serializes both
+    /// recovery and ordinary namespace cleanup against open.
     ///
     /// Account scope reads the Device catalog and detaches one entry from it, so it keeps the
     /// full precondition.
@@ -157,6 +179,17 @@ impl Runtime {
     }
 
     async fn teardown(&self, scope: TeardownScope) -> Result<RuntimeResponse, RuntimeError> {
+        self.ensure_teardown_precondition(&scope)?;
+        match &scope {
+            TeardownScope::Account { account_id } => {
+                self.native_authority.retire_account(account_id);
+                self.biometric.retire(account_id);
+            }
+            TeardownScope::Device => {
+                self.native_authority.retire_all();
+                self.biometric.retire_all();
+            }
+        }
         self.ensure_teardown_precondition(&scope)?;
         // One Account lifecycle owns the intent through its exact host retirement and Core
         // convergence. This mutex is outside the shared admission/catalog/execution order so a
@@ -193,13 +226,49 @@ impl Runtime {
         let _admission = self.teardown_admission.write().await;
         self.ensure_teardown_precondition(&scope)?;
         let _catalog = self.catalog_transition.lock().await;
+        {
+            let _publication = self.publication.lock().expect("publication lock poisoned");
+            if self
+                .pending_teardown
+                .lock()
+                .expect("pending teardown lock poisoned")
+                .insert(&scope)
+            {
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        // An Account removal owns every referring source binding before deleting its target.
+        // Wipe remains namespace-wide and does not require a readable catalog.
+        let retirement_catalog = match &scope {
+            TeardownScope::Account { .. } => {
+                match self.platform_storage.load_device_catalog().await {
+                    Ok(catalog) => catalog,
+                    Err(_) => {
+                        return self
+                            .incomplete_catalog_retirement(scope, TeardownPhase::PlatformStorage);
+                    }
+                }
+            }
+            TeardownScope::Device => None,
+        };
         let mut account_ids = match &scope {
             TeardownScope::Account { account_id } => vec![account_id.clone()],
             TeardownScope::Device => self.known_teardown_accounts(),
         };
         account_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         account_ids.dedup();
-        let execution_locks: Vec<_> = account_ids
+        let mut execution_account_ids = account_ids.clone();
+        if let Some(catalog) = &retirement_catalog {
+            execution_account_ids.extend(
+                catalog
+                    .accounts
+                    .iter()
+                    .map(|entry| entry.account_id.clone()),
+            );
+            execution_account_ids.sort();
+            execution_account_ids.dedup();
+        }
+        let execution_locks: Vec<_> = execution_account_ids
             .iter()
             .map(|account_id| {
                 let mut locks = self
@@ -216,6 +285,53 @@ impl Runtime {
         for lock in &execution_locks {
             execution_guards.push(lock.lock().await);
         }
+        if let (TeardownScope::Account { account_id }, Some(catalog)) = (&scope, retirement_catalog)
+        {
+            if let Some(active) = catalog
+                .accounts
+                .iter()
+                .find(|entry| &entry.account_id == account_id)
+                .and_then(|entry| entry.active_incarnation.clone())
+            {
+                let marked = match self
+                    .mark_catalog_account_retirement(
+                        &catalog,
+                        account_id,
+                        crate::platform_storage::AccountRetirementPurpose::Remove,
+                    )
+                    .await
+                {
+                    Ok(marked) => marked,
+                    Err(_) => {
+                        return self
+                            .incomplete_catalog_retirement(scope, TeardownPhase::PlatformStorage);
+                    }
+                };
+                if self
+                    .retire_cross_account_destination_bindings(&marked, account_id, &active)
+                    .await
+                    .is_err()
+                {
+                    return self.incomplete_catalog_retirement(scope, TeardownPhase::Replica);
+                }
+            }
+        }
+        let mut profile_reset = if matches!(scope, TeardownScope::Device) {
+            match self.prepare_device_profile_reset().await {
+                Ok(prepared) => prepared,
+                Err(_) => {
+                    return self
+                        .incomplete_catalog_retirement(scope, TeardownPhase::PlatformStorage);
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(prepared) = profile_reset.as_mut() {
+            if self.reset_profile_sources(prepared).await.is_err() {
+                return self.incomplete_catalog_retirement(scope, TeardownPhase::PlatformStorage);
+            }
+        }
         self.best_effort_create_vault_remote_cleanup(&account_ids)
             .await;
         match &scope {
@@ -231,14 +347,6 @@ impl Runtime {
             }
         }
         self.delete_vault_images_for_teardown(&scope).await;
-        {
-            let _publication = self.publication.lock().expect("publication lock poisoned");
-            self.pending_teardown
-                .lock()
-                .expect("pending teardown lock poisoned")
-                .insert(&scope);
-        }
-
         let invalidated = {
             let _publication = self.publication.lock().expect("publication lock poisoned");
             let invalidated: Vec<_> = account_ids
@@ -305,14 +413,45 @@ impl Runtime {
         if cleanup.invoke(cleanup_request).await != Ok(expected_cleanup) {
             failures.push(TeardownPhase::HostCleanup);
         }
-        let platform = self.delete_platform_state(&scope).await;
+        let journal_matches = match &profile_reset {
+            Some(prepared) => self.validate_profile_reset_journal(prepared).await.is_ok(),
+            None => true,
+        };
+        let platform = if journal_matches {
+            self.delete_platform_state(&scope, profile_reset.is_some())
+                .await
+        } else {
+            PlatformDeletion {
+                result: Err(startup_invariant(
+                    "Profile reset journal changed before Core deletion",
+                )),
+                replica_allowed: false,
+            }
+        };
         if platform.result.is_err() {
             failures.push(TeardownPhase::PlatformStorage);
         }
-        if !platform.replica_allowed || self.delete_replica_state(&scope).await.is_err() {
+        let journal_matches = match &profile_reset {
+            Some(prepared) => self.validate_profile_reset_journal(prepared).await.is_ok(),
+            None => true,
+        };
+        if !journal_matches && !failures.contains(&TeardownPhase::PlatformStorage) {
+            failures.push(TeardownPhase::PlatformStorage);
+        }
+        if !platform.replica_allowed
+            || !journal_matches
+            || self.delete_replica_state(&scope).await.is_err()
+        {
             failures.push(TeardownPhase::Replica);
         }
 
+        if failures.is_empty() {
+            if let Some(prepared) = profile_reset.as_mut() {
+                if self.finish_profile_reset(prepared).await.is_err() {
+                    failures.push(TeardownPhase::PlatformStorage);
+                }
+            }
+        }
         drop(execution_guards);
         if failures.is_empty() {
             if let TeardownScope::Account { account_id } = &scope {
@@ -322,12 +461,17 @@ impl Runtime {
                     .await;
                 self.complete_vault_image_account_retirement(account_id)
                     .await;
+                self.complete_native_account_teardown(account_id)?;
             }
             let _publication = self.publication.lock().expect("publication lock poisoned");
-            self.pending_teardown
+            if self
+                .pending_teardown
                 .lock()
                 .expect("pending teardown lock poisoned")
-                .remove(&scope);
+                .remove(&scope)
+            {
+                self.device_revision.fetch_add(1, Ordering::SeqCst);
+            }
         }
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         self.publish_all_unless_closed();
@@ -344,11 +488,74 @@ impl Runtime {
         })
     }
 
+    /// Close ordinary work before intent I/O, or restore its gate during startup.
+    /// Remove dominates Replace; only verified installation may retry a pending replacement.
+    pub(super) fn gate_catalog_account_retirement(
+        &self,
+        account_id: &AccountId,
+        purpose: AccountRetirementPurpose,
+    ) {
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        if self
+            .pending_teardown
+            .lock()
+            .expect("pending teardown lock poisoned")
+            .insert_account(account_id, purpose)
+        {
+            self.device_revision.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    pub(super) fn reject_installation_during_account_removal(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), RuntimeError> {
+        let pending = self
+            .pending_teardown
+            .lock()
+            .expect("pending teardown lock poisoned");
+        if pending.device
+            || pending.accounts.get(account_id) == Some(&AccountRetirementPurpose::Remove)
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AccountMissing,
+                "Account teardown is pending",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn complete_catalog_account_replacement(&self, account_id: &AccountId) {
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        let mut pending = self
+            .pending_teardown
+            .lock()
+            .expect("pending teardown lock poisoned");
+        if pending.accounts.get(account_id) == Some(&AccountRetirementPurpose::Replace) {
+            pending.accounts.remove(account_id);
+            self.device_revision.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     pub(super) fn account_teardown_is_pending(&self, account_id: &AccountId) -> bool {
         self.pending_teardown
             .lock()
             .expect("pending teardown lock poisoned")
             .contains_account(account_id)
+    }
+
+    fn incomplete_catalog_retirement(
+        &self,
+        scope: TeardownScope,
+        phase: TeardownPhase,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        self.publish_all_unless_closed();
+        Ok(RuntimeResponse::Teardown {
+            scope,
+            status: TeardownStatus::Incomplete,
+            failures: vec![phase],
+        })
     }
 
     pub(super) fn reject_request_during_pending_teardown(
@@ -541,7 +748,11 @@ impl Runtime {
         }
     }
 
-    async fn delete_platform_state(&self, scope: &TeardownScope) -> PlatformDeletion {
+    async fn delete_platform_state(
+        &self,
+        scope: &TeardownScope,
+        preserve_reset_catalog: bool,
+    ) -> PlatformDeletion {
         match scope {
             TeardownScope::Account { account_id } => {
                 match self.platform_storage.load_device_catalog().await {
@@ -553,16 +764,17 @@ impl Runtime {
                         {
                             let retained = catalog
                                 .accounts
-                                .into_iter()
+                                .iter()
                                 .filter(|account| &account.account_id != account_id)
+                                .cloned()
                                 .collect();
-                            let updated = match DeviceCatalogDocument::new(retained) {
+                            let updated = match catalog.with_accounts(retained) {
                                 Ok(updated) => updated,
                                 Err(error) => {
                                     return PlatformDeletion {
                                         result: Err(error),
                                         replica_allowed: false,
-                                    }
+                                    };
                                 }
                             };
                             if let Err(error) =
@@ -580,7 +792,7 @@ impl Runtime {
                         return PlatformDeletion {
                             result: Err(error),
                             replica_allowed: false,
-                        }
+                        };
                     }
                 }
                 let result = self
@@ -593,7 +805,13 @@ impl Runtime {
                 }
             }
             TeardownScope::Device => {
-                let result = self.platform_storage.wipe_runtime_namespace().await;
+                let result = if preserve_reset_catalog {
+                    self.platform_storage
+                        .wipe_runtime_namespace_preserving_catalog()
+                        .await
+                } else {
+                    self.platform_storage.wipe_runtime_namespace().await
+                };
                 let replica_allowed = result.is_ok();
                 PlatformDeletion {
                     result,

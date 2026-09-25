@@ -17,18 +17,28 @@ export class WebClientRuntime {
     account_id: string,
     operation_id: string,
   ): Promise<void>;
+  begin_vault_export_output(observation_id: string): string;
   cancel(request_id: string): void;
   close(): Promise<void>;
   endVaultImageAcceptance(
     account_id: string,
     operation_id: string,
   ): Promise<void>;
+  finish_vault_export_output(
+    observation_id: string,
+    output_lease_id: string,
+  ): void;
+  /**
+   * Trusted combined-Worker composition only; renderer requests do not route here.
+   */
+  nativeAuthorityControl(request: string): Promise<string>;
   constructor();
   static normalizeAccountEmail(input: string): string;
   observe_json(
     observation_id: string,
     request_json: string,
     callback: Function,
+    control_callback?: Function | null,
   ): void;
   open(): Promise<void>;
   prepareVaultImageForOperation(
@@ -1668,6 +1678,7 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_constructor_authenticatoritemdata_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_creditcarditemdata_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_customfield_new: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_constructor_editableloginitemdata_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_identityitemdata_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_loginitemdata_new: () => number;
   readonly uniffi_bittery_client_bindings_checksum_constructor_passkey_new: () => number;
@@ -1721,6 +1732,22 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_customfield_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_customfield_label: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_customfield_value: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_custom_fields: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_note: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_notes: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_password: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_password_history: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_tags: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_title: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_account_name: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_algorithm: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_digits: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_issuer: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_period: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_totp_secret: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_url: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_urls: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_editableloginitemdata_username: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_addresses: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_custom_fields: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_identityitemdata_date_of_birth: () => number;
@@ -1746,6 +1773,8 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_created_at: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_data: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_deleted_at: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_duplicate_source_guard: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_edit_guard: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_favorite: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_item_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_itemprojection_status: () => number;
@@ -1793,6 +1822,9 @@ export interface InitOutput {
   readonly uniffi_bittery_client_bindings_checksum_method_phonenumber_id: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_phonenumber_label: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_phonenumber_number: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_publicloginitemdata_editable: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_publicloginitemdata_passkeys: () => number;
+  readonly uniffi_bittery_client_bindings_checksum_method_secretstring_reveal: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_custom_fields: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_note: () => number;
   readonly uniffi_bittery_client_bindings_checksum_method_securenoteitemdata_notes: () => number;
@@ -1857,6 +1889,25 @@ export interface InitOutput {
     c: number,
     d: number,
     e: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_constructor_editableloginitemdata_new: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+    i: number,
+    j: number,
+    k: number,
+    l: number,
+    m: number,
+    n: number,
+    o: number,
+    p: number,
+    q: number,
   ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_constructor_identityitemdata_new: (
     a: number,
@@ -1967,6 +2018,10 @@ export interface InitOutput {
     a: bigint,
     b: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_editableloginitemdata: (
+    a: bigint,
+    b: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_identityitemdata: (
     a: bigint,
     b: number,
@@ -1988,6 +2043,14 @@ export interface InitOutput {
     b: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_phonenumber: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_publicloginitemdata: (
+    a: bigint,
+    b: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_free_secretstring: (
     a: bigint,
     b: number,
   ) => void;
@@ -2224,6 +2287,86 @@ export interface InitOutput {
     b: bigint,
     c: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_custom_fields: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_note: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_notes: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_password: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_password_history: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_tags: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_title: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_account_name: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_algorithm: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_digits: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_issuer: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_period: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_totp_secret: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_url: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_urls: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_editableloginitemdata_username: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_identityitemdata_addresses: (
     a: number,
     b: bigint,
@@ -2345,6 +2488,16 @@ export interface InitOutput {
     c: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_itemprojection_deleted_at: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_duplicate_source_guard: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_itemprojection_edit_guard: (
     a: number,
     b: bigint,
     c: number,
@@ -2586,6 +2739,20 @@ export interface InitOutput {
     b: bigint,
     c: number,
   ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_publicloginitemdata_editable: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_method_publicloginitemdata_passkeys: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
+  readonly uniffi_bittery_client_bindings_fn_method_secretstring_reveal: (
+    a: number,
+    b: bigint,
+    c: number,
+  ) => void;
   readonly uniffi_bittery_client_bindings_fn_method_securenoteitemdata_custom_fields: (
     a: number,
     b: bigint,
@@ -2618,6 +2785,11 @@ export interface InitOutput {
     d: number,
     e: number,
   ) => any;
+  readonly webclientruntime_begin_vault_export_output: (
+    a: number,
+    b: number,
+    c: number,
+  ) => [number, number, number, number];
   readonly webclientruntime_cancel: (a: number, b: number, c: number) => void;
   readonly webclientruntime_close: (a: number) => any;
   readonly webclientruntime_endVaultImageAcceptance: (
@@ -2626,6 +2798,18 @@ export interface InitOutput {
     c: number,
     d: number,
     e: number,
+  ) => any;
+  readonly webclientruntime_finish_vault_export_output: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+  ) => [number, number];
+  readonly webclientruntime_nativeAuthorityControl: (
+    a: number,
+    b: number,
+    c: number,
   ) => any;
   readonly webclientruntime_new: () => number;
   readonly webclientruntime_normalizeAccountEmail: (
@@ -2639,6 +2823,7 @@ export interface InitOutput {
     d: number,
     e: number,
     f: any,
+    g: number,
   ) => [number, number];
   readonly webclientruntime_open: (a: number) => any;
   readonly webclientruntime_prepareVaultImageForOperation: (
@@ -2740,6 +2925,10 @@ export interface InitOutput {
     a: bigint,
     b: number,
   ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_editableloginitemdata: (
+    a: bigint,
+    b: number,
+  ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_clone_identityitemdata: (
     a: bigint,
     b: number,
@@ -2765,6 +2954,10 @@ export interface InitOutput {
     b: number,
   ) => bigint;
   readonly uniffi_bittery_client_bindings_fn_clone_phonenumber: (
+    a: bigint,
+    b: number,
+  ) => bigint;
+  readonly uniffi_bittery_client_bindings_fn_clone_publicloginitemdata: (
     a: bigint,
     b: number,
   ) => bigint;
@@ -2846,10 +3039,6 @@ export interface InitOutput {
   ) => void;
   readonly ffi_bittery_client_bindings_rust_future_cancel_u64: (
     a: bigint,
-  ) => void;
-  readonly uniffi_bittery_client_bindings_fn_free_secretstring: (
-    a: bigint,
-    b: number,
   ) => void;
   readonly uniffi_bittery_client_bindings_fn_free_passwordhistoryentry: (
     a: bigint,

@@ -6,6 +6,7 @@ import {
 	signUp,
 	test,
 } from "../fixtures/auth";
+import { uiText } from "../fixtures/messages";
 import { itemRow } from "../fixtures/vault";
 
 /**
@@ -17,13 +18,30 @@ test("signup, vault, item, sign out, full sign-in", async ({
 	page,
 	testUser,
 }) => {
-	// Two SRP handshakes plus WASM key generation live inside one test here.
+	// Sign-in and restart unlock handshakes plus WASM key generation live in this test.
 	test.setTimeout(240000);
 
 	const user = await signUp(page, testUser);
 	expect(user.secretKey).toMatch(/^A3-/);
 
-	await page.goto("/vaults");
+	// A document navigation replaces the Worker owner. Retained Accounts must stay locked
+	// until a real password Quick Unlock restores the Runtime's live keys.
+	async function restartIntoVaults() {
+		await page.goto("/vaults");
+		const unlock = page.getByRole("button", {
+			name: uiText("auth_signin_button_unlock_vault"),
+			exact: true,
+		});
+		await expect(unlock).toBeVisible({ timeout: 30000 });
+		await expect(page.locator("#email")).toBeDisabled();
+		await expect(page.locator("#email")).toHaveValue(user.email);
+		await page.locator("#password").fill(user.password);
+		await unlock.click();
+		await page
+			.getByRole("link", { name: uiText("nav_item_vaults"), exact: true })
+			.click();
+	}
+	await restartIntoVaults();
 
 	const newVaultButton = page.getByTestId("new-vault-button");
 	await expect(newVaultButton).toBeVisible({ timeout: 30000 });
@@ -55,6 +73,6 @@ test("signup, vault, item, sign out, full sign-in", async ({
 	await signOut(page);
 	await signIn(page, user);
 
-	await page.goto("/vaults");
+	await restartIntoVaults();
 	await expect(row).toBeVisible({ timeout: 30000 });
 });

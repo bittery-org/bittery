@@ -4,9 +4,13 @@ use super::{
     archive::{DecodedRecord, EntryHeader},
     transfer::invalid,
 };
+use crate::vault_image::{
+    protected::{recovery::PortableImageKey, validate_metadata_scope, ProtectedImageMetadata},
+    VaultImageArtifactMetadata, VaultImageArtifactScope,
+};
 use crate::RecoveryBound;
 use crate::RuntimeError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
@@ -53,55 +57,70 @@ impl Chunks {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ArtifactMetadata {
-    account_id: String,
-    operation_id: String,
-    attachment_id: String,
-    artifact_id: String,
+pub(super) struct ArtifactMetadata {
+    pub(super) account_id: String,
+    pub(super) operation_id: String,
+    pub(super) attachment_id: String,
+    pub(super) artifact_id: String,
     #[serde(with = "crate::wire::decimal_u64")]
-    byte_length: u64,
-    chunk_count: u32,
-    ciphertext_sha256: String,
-    publication_state: String,
-    durable_chunk_count: u32,
+    pub(super) byte_length: u64,
+    pub(super) chunk_count: u32,
+    pub(super) ciphertext_sha256: String,
+    pub(super) publication_state: String,
+    pub(super) durable_chunk_count: u32,
     #[serde(default)]
-    physical_generation: Option<String>,
+    pub(super) physical_generation: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ProvisionalMetadata {
-    account_id: String,
-    operation_id: String,
-    attachment_id: String,
-    generation: String,
-    current: bool,
-    publication_state: u8,
-    durable_chunk_count: u32,
-    durable_byte_length: u64,
+pub(super) struct ProvisionalMetadata {
+    pub(super) account_id: String,
+    pub(super) operation_id: String,
+    pub(super) attachment_id: String,
+    pub(super) generation: String,
+    pub(super) current: bool,
+    pub(super) publication_state: u8,
+    pub(super) durable_chunk_count: u32,
+    pub(super) durable_byte_length: u64,
     #[serde(default)]
-    minimum_chunk_index: Option<u32>,
+    pub(super) minimum_chunk_index: Option<u32>,
     #[serde(default)]
-    maximum_chunk_index: Option<u32>,
+    pub(super) maximum_chunk_index: Option<u32>,
     #[serde(default)]
-    artifact_id: Option<String>,
+    pub(super) artifact_id: Option<String>,
     #[serde(default)]
-    ciphertext_sha256: Option<String>,
+    pub(super) ciphertext_sha256: Option<String>,
     #[serde(default)]
-    byte_length: Option<String>,
+    pub(super) byte_length: Option<String>,
     #[serde(default)]
-    chunk_count: Option<u32>,
+    pub(super) chunk_count: Option<u32>,
 }
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ImageMetadata {
-    account_id: String,
-    operation_id: String,
-    vault_id: String,
+pub(super) struct ImageMetadata {
+    pub(super) account_id: String,
+    pub(super) operation_id: String,
+    pub(super) vault_id: String,
     #[serde(with = "crate::wire::decimal_u64")]
-    byte_length: u64,
-    content_type: String,
-    sha256: String,
-    published: bool,
+    pub(super) byte_length: u64,
+    pub(super) content_type: String,
+    pub(super) sha256: String,
+    pub(super) published: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) publication_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) protection: Option<ProtectedImageMetadata>,
+}
+impl ImageMetadata {
+    pub(super) fn original(&self) -> Result<VaultImageArtifactMetadata, RuntimeError> {
+        VaultImageArtifactMetadata::new(
+            VaultImageArtifactScope::new(self.account_id.clone().into(), &self.operation_id)?,
+            &self.vault_id,
+            self.byte_length,
+            &self.content_type,
+            &self.sha256,
+        )
+    }
 }
 struct Artifact {
     metadata: ArtifactMetadata,
@@ -114,6 +133,7 @@ struct Provisional {
 struct Image {
     metadata: ImageMetadata,
     chunks: Chunks,
+    portable_key: bool,
 }
 type ProvisionalKey = (String, String, String);
 
@@ -121,7 +141,8 @@ pub(crate) struct ArtifactInventory {
     account_id: String,
     artifacts: HashMap<String, Artifact>,
     provisional: HashMap<ProvisionalKey, Provisional>,
-    images: HashMap<String, Image>,
+    images: HashMap<(String, String), Image>,
+    requires_portable_keys: bool,
     pub record_hashes: HashMap<String, [u8; 32]>,
     summary_bytes: usize,
 }
@@ -132,9 +153,64 @@ impl ArtifactInventory {
             artifacts: HashMap::new(),
             provisional: HashMap::new(),
             images: HashMap::new(),
+            requires_portable_keys: false,
             record_hashes: HashMap::new(),
             summary_bytes: 0,
         }
+    }
+    pub(super) fn translate_image_key(
+        &mut self,
+        record: &DecodedRecord,
+        current: &Self,
+        user_id: &str,
+        device_key: &[u8],
+    ) -> Result<(), RuntimeError> {
+        let EntryHeader::ProtectedVaultImageKey {
+            operation_id,
+            publication_id,
+            ..
+        } = &record.header
+        else {
+            return Ok(());
+        };
+        let image = self
+            .images
+            .get_mut(&(operation_id.clone(), publication_id.clone()))
+            .ok_or_else(invalid)?;
+        let portable: PortableImageKey =
+            serde_json::from_slice(&record.body).map_err(|_| invalid())?;
+        let protection = image.metadata.protection.as_ref().ok_or_else(invalid)?;
+        let existing = current
+            .image_metadata(operation_id, publication_id)
+            .and_then(|metadata| metadata.protection.as_ref());
+        image.metadata.protection = Some(
+            crate::vault_image::protected::recovery::rewrap_or_reuse_key(
+                &image.metadata.original()?,
+                user_id,
+                &protection.witness,
+                &portable,
+                device_key,
+                existing,
+            )?,
+        );
+        Ok(())
+    }
+    pub(super) fn require_portable_keys(&mut self) {
+        self.requires_portable_keys = true;
+    }
+    pub(super) fn has_protected_images(&self) -> bool {
+        self.images
+            .keys()
+            .any(|(_, publication)| !publication.is_empty())
+    }
+    pub(super) fn image_metadata(
+        &self,
+        operation: &str,
+        publication: &str,
+    ) -> Option<&ImageMetadata> {
+        self.images
+            .get(&(operation.to_owned(), publication.to_owned()))
+            .map(|image| &image.metadata)
     }
     pub(crate) fn observe(&mut self, record: &DecodedRecord) -> Result<(), RuntimeError> {
         let key = record_key(&record.header)?;
@@ -157,6 +233,7 @@ impl ArtifactInventory {
             EntryHeader::ArtifactMetadata { .. }
                 | EntryHeader::ProvisionalMetadata { .. }
                 | EntryHeader::VaultImageMetadata { .. }
+                | EntryHeader::ProtectedVaultImageMetadata { .. }
         );
         if metadata {
             if record.body.len() > 64 * 1024 {
@@ -280,12 +357,25 @@ impl ArtifactInventory {
             EntryHeader::VaultImageMetadata {
                 account_id,
                 operation_id,
+            }
+            | EntryHeader::ProtectedVaultImageMetadata {
+                account_id,
+                operation_id,
+                ..
             } => {
+                let publication = match &record.header {
+                    EntryHeader::ProtectedVaultImageMetadata { publication_id, .. } => {
+                        Some(publication_id)
+                    }
+                    _ => None,
+                };
                 let value: ImageMetadata =
                     serde_json::from_slice(&record.body).map_err(|_| invalid())?;
                 if account_id != &self.account_id
                     || value.account_id != *account_id
                     || value.operation_id != *operation_id
+                    || value.publication_id.as_ref() != publication
+                    || value.protection.is_some() != publication.is_some()
                     || !id(operation_id)
                     || !id(&value.vault_id)
                     || value.byte_length == 0
@@ -298,11 +388,22 @@ impl ArtifactInventory {
                 {
                     return Err(invalid());
                 }
+                let original = value.original()?;
+                if let Some(protection) = &value.protection {
+                    if Some(&protection.witness.publication_id) != publication {
+                        return Err(invalid());
+                    }
+                    original.with_protection(protection.clone())?;
+                }
                 self.images.insert(
-                    operation_id.clone(),
+                    (
+                        operation_id.clone(),
+                        publication.cloned().unwrap_or_default(),
+                    ),
                     Image {
                         metadata: value,
                         chunks: Chunks::default(),
+                        portable_key: false,
                     },
                 );
             }
@@ -310,15 +411,47 @@ impl ArtifactInventory {
                 account_id,
                 operation_id,
                 chunk_index,
+            }
+            | EntryHeader::ProtectedVaultImageChunk {
+                account_id,
+                operation_id,
+                chunk_index,
+                ..
             } => {
                 if account_id != &self.account_id {
                     return Err(invalid());
                 }
                 self.images
-                    .get_mut(operation_id)
+                    .get_mut(&(
+                        operation_id.clone(),
+                        match &record.header {
+                            EntryHeader::ProtectedVaultImageChunk { publication_id, .. } => {
+                                publication_id.clone()
+                            }
+                            _ => String::new(),
+                        },
+                    ))
                     .ok_or_else(invalid)?
                     .chunks
                     .push(*chunk_index, None, &record.body)?;
+            }
+            EntryHeader::ProtectedVaultImageKey {
+                account_id,
+                operation_id,
+                publication_id,
+            } => {
+                if account_id != &self.account_id || record.body.len() > 8192 {
+                    return Err(invalid());
+                }
+                let image = self
+                    .images
+                    .get_mut(&(operation_id.clone(), publication_id.clone()))
+                    .ok_or_else(invalid)?;
+                let protection = image.metadata.protection.as_ref().ok_or_else(invalid)?;
+                let key: PortableImageKey =
+                    serde_json::from_slice(&record.body).map_err(|_| invalid())?;
+                key.validate_metadata(&image.metadata.original()?, protection)?;
+                image.portable_key = true;
             }
             _ => return Err(invalid()),
         }
@@ -349,6 +482,7 @@ pub(crate) struct ArtifactSelection {
     pub direct_artifact_ids: HashSet<String>,
     pub provisional: HashSet<ProvisionalKey>,
     pub image_operations: HashSet<String>,
+    pub protected_images: HashSet<(String, String)>,
 }
 impl ArtifactSelection {
     pub(crate) fn includes(&self, header: &EntryHeader) -> bool {
@@ -379,6 +513,23 @@ impl ArtifactSelection {
             | EntryHeader::VaultImageChunk { operation_id, .. } => {
                 self.image_operations.contains(operation_id)
             }
+            EntryHeader::ProtectedVaultImageMetadata {
+                operation_id,
+                publication_id,
+                ..
+            }
+            | EntryHeader::ProtectedVaultImageChunk {
+                operation_id,
+                publication_id,
+                ..
+            }
+            | EntryHeader::ProtectedVaultImageKey {
+                operation_id,
+                publication_id,
+                ..
+            } => self
+                .protected_images
+                .contains(&(operation_id.clone(), publication_id.clone())),
             _ => false,
         }
     }
@@ -391,6 +542,7 @@ impl ArtifactInventory {
     ) -> Result<ArtifactSelection, RuntimeError> {
         self.select_dependencies(
             &proof.head.account_id,
+            &proof.head.user_id,
             &proof.required_attachments,
             &proof.required_images,
         )
@@ -398,6 +550,7 @@ impl ArtifactInventory {
     fn select_dependencies(
         &self,
         account_id: &crate::AccountId,
+        user_id: &str,
         attachments: &[crate::replica::recovery::RequiredAttachment],
         images: &[crate::replica::recovery::RequiredImage],
     ) -> Result<ArtifactSelection, RuntimeError> {
@@ -476,7 +629,16 @@ impl ArtifactInventory {
             }
         }
         for required in images {
-            let Some(image) = self.images.get(&required.operation_id) else {
+            let publication = required
+                .image
+                .protected_witness
+                .as_ref()
+                .map(|witness| witness.publication_id.clone())
+                .unwrap_or_default();
+            let Some(image) = self
+                .images
+                .get(&(required.operation_id.clone(), publication.clone()))
+            else {
                 if required.required_bytes {
                     return Err(invalid());
                 } else {
@@ -484,21 +646,41 @@ impl ArtifactInventory {
                 }
             };
             let value = &image.metadata;
-            let count = value.byte_length.div_ceil(256 * 1024) as u32;
             if !value.published
                 || value.vault_id != required.vault_id
                 || value.byte_length != required.image.byte_length
                 || value.content_type != required.image.content_type
                 || value.sha256 != required.image.sha256
-                || !image
-                    .chunks
-                    .complete(value.byte_length, count, &value.sha256)
             {
                 return Err(invalid());
             }
-            selected
-                .image_operations
-                .insert(required.operation_id.clone());
+            if let Some(witness) = &required.image.protected_witness {
+                let protection = value.protection.as_ref().ok_or_else(invalid)?;
+                validate_metadata_scope(&value.original()?, user_id, witness, protection)?;
+                if !image.chunks.complete(
+                    witness.ciphertext_byte_length,
+                    witness.chunk_count,
+                    &witness.ciphertext_sha256,
+                ) || (self.requires_portable_keys && !image.portable_key)
+                {
+                    return Err(invalid());
+                }
+                selected
+                    .protected_images
+                    .insert((required.operation_id.clone(), publication));
+            } else {
+                let count = value.byte_length.div_ceil(256 * 1024) as u32;
+                if value.protection.is_some()
+                    || !image
+                        .chunks
+                        .complete(value.byte_length, count, &value.sha256)
+                {
+                    return Err(invalid());
+                }
+                selected
+                    .image_operations
+                    .insert(required.operation_id.clone());
+            }
         }
         Ok(selected)
     }
@@ -515,7 +697,12 @@ impl ArtifactInventory {
         }
         for required in &proof.required_attachments {
             if self
-                .select_dependencies(&proof.head.account_id, std::slice::from_ref(required), &[])
+                .select_dependencies(
+                    &proof.head.account_id,
+                    &proof.head.user_id,
+                    std::slice::from_ref(required),
+                    &[],
+                )
                 .is_ok()
             {
                 continue;
@@ -548,14 +735,26 @@ impl ArtifactInventory {
         }
         for required in &proof.required_images {
             if self
-                .select_dependencies(&proof.head.account_id, &[], std::slice::from_ref(required))
+                .select_dependencies(
+                    &proof.head.account_id,
+                    &proof.head.user_id,
+                    &[],
+                    std::slice::from_ref(required),
+                )
                 .is_ok()
             {
                 continue;
             }
-            let header = EntryHeader::VaultImageMetadata {
-                account_id: self.account_id.clone(),
-                operation_id: required.operation_id.clone(),
+            let header = match &required.image.protected_witness {
+                Some(witness) => EntryHeader::ProtectedVaultImageMetadata {
+                    account_id: self.account_id.clone(),
+                    operation_id: required.operation_id.clone(),
+                    publication_id: witness.publication_id.clone(),
+                },
+                None => EntryHeader::VaultImageMetadata {
+                    account_id: self.account_id.clone(),
+                    operation_id: required.operation_id.clone(),
+                },
             };
             let missing = read_complete
                 && record_key(&header).is_ok_and(|key| !self.record_hashes.contains_key(&key));
@@ -685,6 +884,7 @@ mod tests {
             }],
             required_images: Vec::new(),
             authority_valid: true,
+            pending_vault_retirements: Vec::new(),
         };
         for change in [
             None,

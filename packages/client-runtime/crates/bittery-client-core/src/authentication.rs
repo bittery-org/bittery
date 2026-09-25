@@ -37,12 +37,27 @@ pub(crate) struct VerifiedAuthentication {
     pub(crate) travel_mode: TravelModeResponse,
 }
 
-/// Performs the existing full SRP/KDF ceremony without installing or publishing an Account.
-pub(crate) async fn authenticate(
+/// One transient pre-finish SRP exchange, without a Server Session or installation authority.
+pub(crate) struct PreparedPasswordProof {
+    pub(crate) attempt_id: String,
+    pub(crate) client_public_key: String,
+    client_session: bittery_crypto_core::srp6a::Session,
+    kdf_profile: KdfProfile,
+    master_unlock_key: Zeroizing<[u8; 32]>,
+    srp: SrpClient,
+}
+
+impl PreparedPasswordProof {
+    pub(crate) fn client_proof(&self) -> &str {
+        &self.client_session.proof
+    }
+}
+
+pub(crate) async fn prepare_password_proof(
     http: &AuthHttpClient<'_>,
     input: AuthenticationInput<'_>,
     cancellation: RequestCancellation,
-) -> Result<VerifiedAuthentication, RuntimeError> {
+) -> Result<PreparedPasswordProof, RuntimeError> {
     // Secret Key validation intentionally precedes both random SRP work and the first request.
     if !validate_secret_key(input.secret_key) {
         return Err(authentication_failure("Secret Key is invalid"));
@@ -101,12 +116,29 @@ pub(crate) async fn authenticate(
         .map_err(|_| authentication_failure("SRP challenge is invalid"))?;
     ensure_not_cancelled(&cancellation)?;
 
+    Ok(PreparedPasswordProof {
+        attempt_id: attempt.attempt_id,
+        client_public_key: client_ephemeral.public.clone(),
+        client_session,
+        kdf_profile,
+        master_unlock_key: Zeroizing::new(derived.master_unlock_key),
+        srp,
+    })
+}
+
+/// Performs the existing full SRP/KDF ceremony without installing or publishing an Account.
+pub(crate) async fn authenticate(
+    http: &AuthHttpClient<'_>,
+    input: AuthenticationInput<'_>,
+    cancellation: RequestCancellation,
+) -> Result<VerifiedAuthentication, RuntimeError> {
+    let prepared = prepare_password_proof(http, input, cancellation.clone()).await?;
     let finish = http
         .finish_login(
-            &attempt.attempt_id,
+            &prepared.attempt_id,
             &FinishLoginRequest {
-                client_public_key: client_ephemeral.public.clone(),
-                client_proof: client_session.proof.clone(),
+                client_public_key: prepared.client_public_key.clone(),
+                client_proof: prepared.client_proof().to_owned(),
             },
             cancellation.clone(),
         )
@@ -115,12 +147,14 @@ pub(crate) async fn authenticate(
     let token = Zeroizing::new(finish.token);
     ensure_not_cancelled(&cancellation)?;
 
-    srp.verify_session(
-        &client_ephemeral.public,
-        &client_session,
-        &finish.server_proof,
-    )
-    .map_err(|_| authentication_failure("Server SRP proof is invalid"))?;
+    prepared
+        .srp
+        .verify_session(
+            &prepared.client_public_key,
+            &prepared.client_session,
+            &finish.server_proof,
+        )
+        .map_err(|_| authentication_failure("Server SRP proof is invalid"))?;
     ensure_not_cancelled(&cancellation)?;
 
     let vault_keys = http
@@ -131,8 +165,8 @@ pub(crate) async fn authenticate(
 
     Ok(VerifiedAuthentication {
         normalized_server_url: http.normalized_server_url(),
-        kdf_profile,
-        master_unlock_key: Zeroizing::new(derived.master_unlock_key),
+        kdf_profile: prepared.kdf_profile,
+        master_unlock_key: prepared.master_unlock_key,
         token,
         session_id: finish.session_id,
         expires_at: finish.expires_at,
@@ -194,7 +228,10 @@ mod tests {
 
     #[async_trait]
     impl SerializedHttpExecutor for ScriptedExecutor {
-        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        async fn invoke(
+            &self,
+            request_json: zeroize::Zeroizing<String>,
+        ) -> Result<String, RuntimeError> {
             self.requests
                 .lock()
                 .unwrap()
@@ -252,7 +289,10 @@ mod tests {
 
     #[async_trait]
     impl SerializedHttpExecutor for RealSrpExecutor {
-        async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+        async fn invoke(
+            &self,
+            request_json: zeroize::Zeroizing<String>,
+        ) -> Result<String, RuntimeError> {
             let request: Value = serde_json::from_str(&request_json).unwrap();
             let url = request["url"].as_str().unwrap().to_owned();
             let mut state = self.state.lock().unwrap();
@@ -401,6 +441,44 @@ mod tests {
             Ok(_) => panic!("expected authentication to fail"),
             Err(error) => error,
         }
+    }
+
+    #[tokio::test]
+    async fn password_proof_is_usable_without_creating_a_session_or_fetching_account_authority() {
+        let executor = Arc::new(RealSrpExecutor::new(current_kdf_profile(), false));
+        let (transport, server_url) = client(executor.clone());
+        let http = AuthHttpClient::new(&transport, &server_url, false, metadata()).unwrap();
+
+        let proof = prepare_password_proof(&http, input(None), RequestCancellation::new())
+            .await
+            .expect("a fresh password proof must be available without finishing login");
+
+        assert_eq!(proof.attempt_id, "attempt-1");
+        assert_eq!(proof.kdf_profile, current_kdf_profile());
+        let requests = executor.requests();
+        assert_eq!(
+            requests.len(),
+            1,
+            "proof preparation must not create a Session or fetch authority"
+        );
+        assert_eq!(
+            request_body(&requests[0])["clientPublicKey"],
+            proof.client_public_key
+        );
+        let state = executor.state.lock().unwrap();
+        state
+            .server
+            .derive_session(
+                &state.server_ephemeral.secret,
+                &proof.client_public_key,
+                SALT,
+                SRP_USERNAME,
+                &state.verifier,
+                &proof.client_session.proof,
+            )
+            .expect("the unchanged Server verifier must accept the prepared proof");
+        fn requires_zeroizing_muk(_: &Zeroizing<[u8; 32]>) {}
+        requires_zeroizing_muk(&proof.master_unlock_key);
     }
 
     #[tokio::test]

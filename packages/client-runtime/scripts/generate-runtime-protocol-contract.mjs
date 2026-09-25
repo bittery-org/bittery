@@ -60,6 +60,7 @@ const entryPoints = {
 	validateRuntimeOutcome: ["outcome", "RuntimeOutcome"],
 	validateObservationRequest: ["observation", "ObservationRequest"],
 	validateRuntimeProjection: ["projection", "RuntimeProjection"],
+	validateObservationControl: ["observation_control", "ObservationControl"],
 };
 const exports = {};
 for (const [name, [slug, definition]] of Object.entries(entryPoints)) {

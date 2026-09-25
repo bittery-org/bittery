@@ -1,3 +1,5 @@
+import type { RuntimeSessionSnapshot } from "@bittery/client-runtime/client";
+import { useRuntimeSession } from "@bittery/client-runtime/react";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
 import { Button, toast } from "@bittery/ui";
@@ -14,7 +16,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
-import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_auth/invite/$token")({
@@ -25,6 +26,31 @@ export const Route = createFileRoute("/_auth/invite/$token")({
 });
 
 type InviteMessageCatalog = ReturnType<typeof useI18n>["m"];
+
+export type InvitationSessionMode =
+	| "loading"
+	| "signedIn"
+	| "locked"
+	| "signedOut"
+	| "signIn";
+
+export function invitationSessionMode(
+	session: RuntimeSessionSnapshot,
+): InvitationSessionMode {
+	if (session.state === "loading") return "loading";
+	if (session.state === "unlocked")
+		return session.accountId === null ? "signIn" : "signedIn";
+	if (session.state === "locked") return "locked";
+	if (session.state === "signedOut") return "signedOut";
+	return "signIn";
+}
+
+export function invitationAuthView(
+	sessionMode: InvitationSessionMode,
+	selectedView: "signup" | "signin" | null,
+): "signup" | "signin" {
+	return selectedView ?? (sessionMode === "signedOut" ? "signup" : "signin");
+}
 
 function getInvitationRoleLabel(role: string, m: InviteMessageCatalog): string {
 	switch (role) {
@@ -64,12 +90,9 @@ function InvitationPage() {
 	const navigate = useNavigate();
 	const api = useApiClient();
 	const { m } = useI18n();
-	const [view, setView] = useState<"signup" | "signin">("signup");
-	const authenticatedQuery = useQuery({
-		queryKey: ["auth", "isAuthenticated"],
-		queryFn: () => storage.isAuthenticated(),
-	});
-	const authenticated = authenticatedQuery.data ?? null;
+	const sessionMode = invitationSessionMode(useRuntimeSession());
+	const [view, setView] = useState<"signup" | "signin" | null>(null);
+	const authenticated = sessionMode === "signedIn";
 
 	// Get invitation details
 	const invitationQuery = useQuery({
@@ -103,7 +126,7 @@ function InvitationPage() {
 	});
 
 	// Loading auth state
-	if (authenticatedQuery.isLoading) {
+	if (sessionMode === "loading") {
 		return (
 			<div className="flex w-full flex-col items-center justify-center py-12">
 				<Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -214,9 +237,10 @@ function InvitationPage() {
 
 	// Not authenticated - show signup/signin forms
 	if (!authenticated) {
+		const authView = invitationAuthView(sessionMode, view);
 		return (
 			<div className="w-full">
-				{view === "signup" ? (
+				{authView === "signup" ? (
 					<SignUpForm
 						onSwitchToSignIn={() => setView("signin")}
 						invitationToken={token}

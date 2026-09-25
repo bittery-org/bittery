@@ -48,6 +48,81 @@ fn corpus_declares_independent_oracle_empty_cursor_long_retry_and_plaintext_caus
 }
 
 #[test]
+fn attachment_move_corpus_retains_typed_registration_and_enriches_only_resume_evidence() {
+    let corpus: Value = serde_json::from_str(
+        &std::fs::read_to_string(corpus_path()).expect("Replica corpus is checked in"),
+    )
+    .expect("Replica corpus is JSON");
+    let history = corpus["histories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|history| history["name"] == "cross-account-move-attachment-registration-resume")
+        .expect("named Attachment Move history exists");
+    let steps = history["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 23);
+    let step = |label: &str| {
+        steps
+            .iter()
+            .find(|step| step["label"] == label)
+            .unwrap_or_else(|| panic!("missing Attachment history step {label}"))
+    };
+    let record = |label: &str| row_payload(step(label), "crossAccountMoves", "semantic-cross-move");
+    let admitted = record("admit fixed encrypted Attachment metadata and original source overlay");
+    assert_eq!(
+        admitted["source"]["attachments"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(admitted["target"]["attachments"], serde_json::json!([]));
+    assert_eq!(admitted["attachments"][0]["progress"]["type"], "pending");
+    assert_eq!(admitted["children"][0]["type"], "itemOperation");
+
+    let prepared = record("retain immutable registration request before binary dispatch");
+    let registration = &prepared["children"][1];
+    assert_eq!(registration["type"], "attachmentRegistration");
+    assert!(registration.get("operationId").is_none());
+    assert!(registration.get("kind").is_none());
+    assert!(registration["result"].is_null());
+    assert_eq!(prepared["attachments"][0]["progress"]["type"], "encrypted");
+    assert_eq!(
+        prepared["attachments"][0]["targetMetadata"],
+        admitted["attachments"][0]["targetMetadata"]
+    );
+    assert_eq!(
+        step("lost registration checkpoint acknowledgement refuses duplicate source commit")
+            ["expectedResponse"]["result"]["type"],
+        "stale"
+    );
+
+    let resumed =
+        record("explicit Resume retains stage and requests while proving current registration");
+    assert_eq!(resumed["source"], prepared["source"]);
+    assert_eq!(resumed["target"], prepared["target"]);
+    assert_eq!(resumed["stage"], prepared["stage"]);
+    assert_eq!(resumed["attachments"], prepared["attachments"]);
+    assert_eq!(resumed["children"][0], prepared["children"][0]);
+    let mut enriched = resumed["children"][1].clone();
+    assert_eq!(enriched["result"]["type"], "verifiedPresent");
+    enriched["result"] = Value::Null;
+    assert_eq!(&enriched, registration);
+    assert_eq!(resumed["destinationBinding"]["bindingRevision"], "2");
+    assert_eq!(resumed["destinationBinding"]["status"], "active");
+
+    let completed = record("complete original Attachment Move only with current source absence");
+    assert_eq!(completed["stage"]["type"], "completed");
+    assert_eq!(completed["attachments"], resumed["attachments"]);
+    assert_eq!(completed["children"][1], resumed["children"][1]);
+    for index in [2, 3] {
+        assert_eq!(completed["children"][index]["type"], "itemOperation");
+        assert_eq!(
+            completed["children"][index]["result"]["result"]["type"],
+            "applied"
+        );
+    }
+    assert_eq!(steps.last().unwrap()["request"]["type"], "load");
+}
+
+#[test]
 fn bootstrap_corpus_accumulates_phase_scoped_pages_before_promotion() {
     let corpus: Value = serde_json::from_str(
         &std::fs::read_to_string(corpus_path()).expect("Replica corpus is checked in"),

@@ -1,3 +1,4 @@
+import type { WebVaultCapabilityScope } from "../web-vault-capability-scopes";
 /**
  * The Web main-thread composition root: one Worker, one owner, every channel.
  *
@@ -105,14 +106,19 @@ export interface WebClientRuntime {
 
 /** A reusable JavaScript-host facade for granting one plaintext Upload source. */
 export interface AttachmentUploadSourceGrants {
+	captureScope(accountId: string, vaultId: string): WebVaultCapabilityScope;
+	release(capabilityId: string): Promise<void>;
 	grant(source: AttachmentUploadSourceGrant): string;
 }
 
 /** A reusable JavaScript-host facade for granting one atomic plaintext Download sink. */
 export interface AttachmentDownloadSinkGrants {
+	captureScope(accountId: string, vaultId: string): WebVaultCapabilityScope;
+	release(capabilityId: string): Promise<void>;
 	grant(sink: AttachmentDownloadSinkGrant): string;
 }
 export interface VaultImageSourceGrants {
+	captureScope(accountId: string, vaultId?: string): WebVaultCapabilityScope;
 	grant(source: VaultImageSourceGrant): string;
 	discard(capabilityId: string): Promise<void>;
 }
@@ -124,12 +130,18 @@ export function createWebClientRuntime(
 	const recoveryFiles = new RecoveryFileRegistry();
 	const attachmentDownloads = new WebAttachmentDownloadSinkRegistry();
 	const attachmentDownloadSinks: AttachmentDownloadSinkGrants = {
+		captureScope: (accountId, vaultId) =>
+			attachmentDownloads.captureScope(accountId, vaultId),
+		release: (id) => attachmentDownloads.release(id),
 		grant: (sink) => attachmentDownloads.grant(sink),
 	};
 	const attachmentUploads = new WebAttachmentUploadSourceRegistry();
 	const vaultImages = createVaultImageSourceRegistryOwner();
 	const vaultImageSources: VaultImageSourceGrants = vaultImages.grants;
 	const attachmentUploadSources: AttachmentUploadSourceGrants = {
+		captureScope: (accountId, vaultId) =>
+			attachmentUploads.captureScope(accountId, vaultId),
+		release: (id) => attachmentUploads.release(id),
 		grant: (source) => attachmentUploads.grant(source),
 	};
 	const fallbackHostRequest =
@@ -293,7 +305,7 @@ export function createWebClientRuntime(
 		cryptoChannel: workerOwner.channel("crypto"),
 		runtime,
 		normalizeAccountEmail: runtime.normalizeAccountEmail,
-		close,
+		close: runtime.close,
 	};
 }
 

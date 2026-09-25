@@ -103,3 +103,35 @@ test("Swift Vault-image callbacks use object handles and wipe transferred String
 	assert.doesNotMatch(artifact, /FfiConverterData\.lift\(binaryChunk/);
 	assert.doesNotMatch(answer, /FfiConverterData\.lower\(\$0\)/);
 });
+
+test("transient setup secret reveal wipes the transferred native String buffer", () => {
+	assert.match(
+		swift,
+		/open func reveal\(\) -> String\s*\{\s*return try!\s+FfiConverterSensitiveString\.lift/,
+	);
+	assert.match(
+		kotlin,
+		/override fun `reveal`\(\): kotlin\.String\s*\{\s*return FfiConverterSensitiveString\.lift/,
+	);
+});
+
+test("ordinary Login drafts and projections use opaque native objects", () => {
+	for (const name of ["EditableLoginItemData", "PublicLoginItemData"]) {
+		assert.ok(
+			kotlin.includes(`public interface ${name}Interface`),
+			`${name} needs a Kotlin object interface`,
+		);
+		assert.ok(
+			!new RegExp(`data class ${name}\\s*\\(`).test(kotlin),
+			`${name} must not be a Kotlin data class`,
+		);
+		assert.ok(
+			swift.includes(`public protocol ${name}Protocol`),
+			`${name} needs a Swift object protocol`,
+		);
+		assert.ok(
+			!new RegExp(`public struct ${name}\\b`).test(swift),
+			`${name} must not be a Swift value struct`,
+		);
+	}
+});

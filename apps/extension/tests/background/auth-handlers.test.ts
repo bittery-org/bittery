@@ -27,6 +27,11 @@ const forgetSessionCalls: (string | undefined)[] = [];
 const clearItemCacheCalls: (string | undefined)[] = [];
 let forgetSessionError: Error | null = null;
 let canQuickUnlock = true;
+let storedAuthToken: string | null = null;
+let holdTokenWrite: Promise<void> | null = null;
+let tokenWriteEntered: (() => void) | null = null;
+let holdForgetSession: Promise<void> | null = null;
+let forgetSessionEntered: (() => void) | null = null;
 
 mock.module(path.join(bgDir, "services/account-resolution.ts"), () => ({
 	resolveEmailFromAccountId: async (accountId: string) =>
@@ -37,7 +42,16 @@ const storageMock = {
 	getAccountsList: async () => accounts,
 	hasStoredSecretKey: async () => true,
 	canQuickUnlock: async () => canQuickUnlock,
-	getAuthToken: async () => "token",
+	getAuthToken: async () => storedAuthToken,
+	getAccountMetadata: async (accountId: string) =>
+		accounts.find((account) => account.accountId === accountId) ?? null,
+	getVaultKeys: async () => [{ vaultId: "existing" }],
+	storeAuthToken: async (token: string) => {
+		tokenWriteEntered?.();
+		await holdTokenWrite;
+		storedAuthToken = token;
+	},
+	tryRestoreSession: async () => {},
 	getServerUrl: async () => "http://localhost:3000",
 	getActiveAccount: async () => activeAccount,
 	setActiveAccount: async (value: unknown) => {
@@ -48,10 +62,13 @@ const storageMock = {
 		return new Uint8Array([9]);
 	},
 	forgetSession: async (accountId?: string) => {
+		forgetSessionEntered?.();
+		await holdForgetSession;
 		if (forgetSessionError) {
 			throw forgetSessionError;
 		}
 		forgetSessionCalls.push(accountId);
+		storedAuthToken = null;
 	},
 };
 
@@ -128,6 +145,7 @@ mock.module(path.join(bgDir, "desktop-client.ts"), () => ({
 			triggerDesktopUnlockCalls++;
 			return triggerDesktopUnlockResult;
 		},
+		getAuthToken: async () => "desktop-token",
 	},
 }));
 
@@ -146,14 +164,52 @@ mock.module(path.join(bgDir, "session-manager.ts"), () => ({
 mock.module("@bittery/core/services/auth-service", () => ({
 	performSRPUnlock: async () => ({ masterUnlockKey: new Uint8Array([1]) }),
 	storeUnlockSession: async () => {},
-	storeUnlockSessionOwned: async () => {},
-	performSRPLogin: async () => ({}),
-	storeLoginSessionOwned: async () => {},
+	storeUnlockSessionOwned: async (
+		result: { masterUnlockKey: Uint8Array },
+		_storage: unknown,
+		_itemCache: unknown,
+		_crypto: unknown,
+		accountId: string,
+		options: {
+			materialPublication?: {
+				run: <T>(id: string, write: () => Promise<T>) => Promise<T>;
+			};
+			onMasterUnlockKeyTransferred?: () => void;
+		},
+	) => {
+		await options.materialPublication?.run(accountId, async () => {
+			await storageMock.storeAuthToken("local-unlock-token");
+			options.onMasterUnlockKeyTransferred?.();
+			return result.masterUnlockKey;
+		});
+	},
+	performSRPLogin: async () => ({ masterUnlockKey: new Uint8Array([2]) }),
+	storeLoginSessionOwned: async (
+		_result: { masterUnlockKey: Uint8Array },
+		_secret: string,
+		_storage: unknown,
+		_itemCache: unknown,
+		_crypto: unknown,
+		_email: string,
+		options: {
+			materialPublication?: {
+				run: <T>(id: string, write: () => Promise<T>) => Promise<T>;
+			};
+			onMasterUnlockKeyTransferred?: () => void;
+		},
+	) => {
+		await options.materialPublication?.run("acc-uuid-1", async () => {
+			await storageMock.storeAuthToken("local-login-token");
+			options.onMasterUnlockKeyTransferred?.();
+		});
+		return "acc-uuid-1";
+	},
 }));
 
 const runtime = { accounts: {}, vaultRuntime: {} };
 let reconciledRuntime: unknown;
 mock.module(path.join(bgDir, "vault-runtime.ts"), () => ({
+	backgroundClientRuntime: { accounts: { retireUnlockedProjection: () => {} } },
 	reconcileClientRuntime: async (supplied: unknown) => {
 		reconciledRuntime = supplied;
 	},
@@ -162,10 +218,22 @@ mock.module(path.join(bgDir, "vault-runtime.ts"), () => ({
 mock.module("@bittery/shared/api-client-factory", () => ({
 	createAccountApiClient: () => ({}),
 	createApiClientForServer: () => ({}),
+	getDefaultServerUrl: () => "http://localhost:3000",
 }));
 
-const { handleCanQuickUnlock, handleLogout, handleQuickUnlockAll } =
-	await import(path.join(bgDir, "auth-handlers.ts"));
+const {
+	handleCanQuickUnlock,
+	handleLogin,
+	handleLogout,
+	handleQuickUnlock,
+	handleQuickUnlockAll,
+} = await import(path.join(bgDir, "auth-handlers.ts"));
+const { hydrateDesktopAccountMaterial } = await import(
+	path.join(bgDir, "desktop-key-material.ts")
+);
+const { nativeMessagingClient } = await import(
+	path.join(bgDir, "native-messaging-client.ts")
+);
 
 beforeEach(() => {
 	accounts = [];
@@ -179,6 +247,11 @@ beforeEach(() => {
 	clearItemCacheCalls.length = 0;
 	forgetSessionError = null;
 	canQuickUnlock = true;
+	storedAuthToken = null;
+	holdTokenWrite = null;
+	tokenWriteEntered = null;
+	holdForgetSession = null;
+	forgetSessionEntered = null;
 	desktopStatus = null;
 	triggerDesktopUnlockResult = true;
 	triggerDesktopUnlockCalls = 0;
@@ -293,6 +366,59 @@ describe("handleQuickUnlockAll", () => {
 });
 
 describe("handleLogout", () => {
+	test("drains an actual held desktop token write before forgetting the Session", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		activeAccount = "acc-uuid-1";
+		desktopStatus = {
+			available: true,
+			locked: false,
+			unlockedAccounts: ["acc-uuid-1"],
+		};
+		let releaseWrite!: () => void;
+		holdTokenWrite = new Promise<void>((resolve) => {
+			releaseWrite = resolve;
+		});
+		const entered = new Promise<void>((resolve) => {
+			tokenWriteEntered = resolve;
+		});
+		let releaseForget!: () => void;
+		holdForgetSession = new Promise<void>((resolve) => {
+			releaseForget = resolve;
+		});
+		let forgetBegan = false;
+		const forgetting = new Promise<void>((resolve) => {
+			forgetSessionEntered = () => {
+				forgetBegan = true;
+				resolve();
+			};
+		});
+		const hydration = hydrateDesktopAccountMaterial("acc-uuid-1");
+		await entered;
+
+		const signOut = handleLogout(runtime as never);
+		await Bun.sleep(1);
+		let successorAdmitted = false;
+		const successor = nativeMessagingClient
+			.captureDeliveryGeneration()
+			.then(() => {
+				successorAdmitted = true;
+			});
+		await Bun.sleep(10);
+		expect(forgetBegan).toBe(false);
+		expect(forgetSessionCalls).toEqual([]);
+		expect(successorAdmitted).toBe(false);
+		releaseWrite();
+		await expect(hydration).rejects.toThrow("Native delivery retired");
+		await forgetting;
+		expect(successorAdmitted).toBe(false);
+		releaseForget();
+		expect(await signOut).toEqual({ success: true });
+		await successor;
+		expect(successorAdmitted).toBe(true);
+		expect(forgetSessionCalls).toEqual(["acc-uuid-1"]);
+		expect(storedAuthToken).toBeNull();
+	});
+
 	test("drops the session and its item cache together", async () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
 		activeAccount = "acc-uuid-1";
@@ -302,19 +428,6 @@ describe("handleLogout", () => {
 		expect(response).toEqual({ success: true });
 		expect(clearItemCacheCalls).toEqual(["acc-uuid-1"]);
 		expect(forgetSessionCalls).toEqual(["acc-uuid-1"]);
-	});
-
-	test("reports a failed storage step instead of claiming success", async () => {
-		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
-		activeAccount = "acc-uuid-1";
-		forgetSessionError = new Error("chrome.storage unavailable");
-
-		const response = await handleLogout(runtime as never);
-
-		expect(response.success).toBe(false);
-		// Best effort is the module's contract: the ciphertext goes even when the
-		// record that names its keys survives.
-		expect(clearItemCacheCalls).toEqual(["acc-uuid-1"]);
 	});
 });
 
@@ -381,4 +494,72 @@ describe("handleQuickUnlockAll with a connected desktop app", () => {
 		expect(response.success).toBe(true);
 		expect(setMasterUnlockKeyCalls.length).toBe(1);
 	});
+});
+
+test("Login, Quick Unlock and password Unlock All wait for held C1 before local publication", async () => {
+	for (const [kind, call] of [
+		[
+			"login",
+			() =>
+				handleLogin(
+					{ email: "a@example.com", password: "pw", secretKey: "A3" },
+					runtime as never,
+				),
+		],
+		["quick", () => handleQuickUnlock({ password: "pw" }, runtime as never)],
+		["all", () => handleQuickUnlockAll({ password: "pw" }, runtime as never)],
+	] as const) {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		activeAccount = "acc-uuid-1";
+		storedAuthToken = null;
+		setMasterUnlockKeyCalls.length = 0;
+		let release!: () => void;
+		let entered!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const started = new Promise<void>((resolve) => (entered = resolve));
+		nativeMessagingClient.configureRetirementCleanup(async () => {
+			entered();
+			await held;
+		});
+		const retirement = nativeMessagingClient.retireObservedStatus({
+			locked: true,
+			timestamp: 1,
+		});
+		await started;
+		let settled = false;
+		const operation = call().then((result) => {
+			settled = true;
+			return result;
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		try {
+			expect(settled).toBe(false);
+			expect(storedAuthToken).toBeNull();
+			expect(setMasterUnlockKeyCalls).toEqual([]);
+		} finally {
+			release();
+		}
+		await retirement;
+		expect((await operation).success).toBe(true);
+		expect(setMasterUnlockKeyCalls.length).toBe(1);
+		expect(nativeMessagingClient.needsMaterialCleanup()).toBe(false);
+		expect(kind).toBeTruthy();
+	}
+});
+
+// A failed C1 leaves this process's transport lifetime closed. Keep this last
+// so later cases cannot accidentally rely on reopening an incomplete cleanup.
+test("handleLogout reports a failed storage step instead of claiming success", async () => {
+	accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+	activeAccount = "acc-uuid-1";
+	forgetSessionError = new Error("chrome.storage unavailable");
+
+	const response = await handleLogout(runtime as never);
+
+	expect(response.success).toBe(false);
+	expect(clearItemCacheCalls).toEqual(["acc-uuid-1"]);
+	await expect(
+		nativeMessagingClient.captureDeliveryGeneration(),
+	).rejects.toThrow("Extension signOutAccount did not complete safely");
 });

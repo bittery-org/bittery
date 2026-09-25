@@ -48,44 +48,36 @@ pub fn allowed_extension_ids() -> Vec<String> {
     ids
 }
 
-/// Browser-extension origins derived from [`allowed_extension_ids`].
-///
-/// NOTE: currently unused. The origin allowlist below was written for the
-/// native messaging host's `argv[1]` (Chrome launches the host with the calling
-/// extension's origin as the first argument), but `native_host.rs::main` never
-/// inspects `argv`. It also does not match Chrome's argument verbatim: Chrome
-/// passes `chrome-extension://<id>/` (trailing slash), matching the
-/// `allowed_origins` entries written by `create_manifest_json`, while these two
-/// helpers build the origin without the trailing slash. Wiring them up as-is
-/// would therefore reject every real browser invocation. Left in place rather
-/// than deleted so the intended check can be finished deliberately.
+/// Browser launch origins use the same exact allowlist as the installed manifest.
 #[allow(dead_code)]
 pub fn allowed_extension_origins() -> Vec<String> {
     allowed_extension_ids()
         .into_iter()
-        .map(|id| format!("chrome-extension://{}", id))
+        .map(|id| format!("chrome-extension://{id}/"))
         .collect()
 }
 
-/// Used by the `bittery-native-host` binary target (see
-/// `native_host.rs::is_allowlisted_extension_id`), which pulls this module in
-/// via `mod native_messaging_installer;`. It is dead only in the `bittery_lib`
-/// target, hence the allow.
 #[allow(dead_code)]
 pub fn allowed_origin_for_extension_id(extension_id: &str) -> Option<String> {
     allowed_extension_ids()
         .into_iter()
         .find(|id| id == extension_id)
-        .map(|id| format!("chrome-extension://{}", id))
+        .map(|id| format!("chrome-extension://{id}/"))
 }
 
-/// See the note on [`allowed_extension_origins`] — the intended `argv[1]`
-/// origin check is not wired up yet.
+/// Accept the browser origin with its optional trailing slash, never a path, query or payload ID.
+#[allow(dead_code)]
+pub fn extension_id_for_origin(origin: &str) -> Option<String> {
+    let origin = origin.strip_suffix('/').unwrap_or(origin);
+    let id = origin.strip_prefix("chrome-extension://")?;
+    allowed_extension_ids()
+        .into_iter()
+        .find(|allowed| allowed == id)
+}
+
 #[allow(dead_code)]
 pub fn is_allowed_extension_origin(origin: &str) -> bool {
-    allowed_extension_origins()
-        .into_iter()
-        .any(|allowed_origin| allowed_origin == origin)
+    extension_id_for_origin(origin).is_some()
 }
 
 /// Install native messaging host manifest for all detected browsers
@@ -384,5 +376,29 @@ pub fn is_installed() -> bool {
         hkcu.open_subkey(CHROME_REG_KEY).is_ok()
             || hkcu.open_subkey(EDGE_REG_KEY).is_ok()
             || hkcu.open_subkey(BRAVE_REG_KEY).is_ok()
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::{is_allowed_extension_origin, DEV_EXTENSION_ID};
+
+    #[test]
+    fn native_browser_origin_accepts_manifest_origin_and_rejects_payload_like_values() {
+        assert!(is_allowed_extension_origin(&format!(
+            "chrome-extension://{DEV_EXTENSION_ID}/"
+        )));
+        for origin in [
+            DEV_EXTENSION_ID.to_owned(),
+            format!("https://{DEV_EXTENSION_ID}/"),
+            format!("chrome-extension://{DEV_EXTENSION_ID}/unexpected"),
+            format!("chrome-extension://{DEV_EXTENSION_ID}//"),
+            format!("chrome-extension://{DEV_EXTENSION_ID}/?origin=trusted"),
+            format!("chrome-extension://{DEV_EXTENSION_ID}.attacker/"),
+            "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/".to_owned(),
+            String::new(),
+        ] {
+            assert!(!is_allowed_extension_origin(&origin));
+        }
     }
 }

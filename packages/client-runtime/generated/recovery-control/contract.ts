@@ -135,9 +135,21 @@ accountId: string
 chunkIndex: number
 operationId: string
 type: "vaultImageChunk"
+} | {
+accountId: string
+metadataJson: string
+operationId: string
+publicationId: string
+type: "protectedVaultImageMetadata"
+} | {
+accountId: string
+chunkIndex: number
+operationId: string
+publicationId: string
+type: "protectedVaultImageChunk"
 })
-export type ReplicaStore = ("optimisticItems" | "operations" | "attachmentMovePreparations" | "shareCapabilities" | "operationReceipts" | "replicaMetadata" | "bootstrapGenerations" | "bootstrapPages" | "authorityVaults" | "authorityItems")
-export type RuntimeErrorCode = ("RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "STORAGE_UNAVAILABLE" | "RETRYABLE_TRANSPORT" | "AUTHORITY_MISSING" | "ACCESS_DENIED" | "READ_ONLY" | "QUOTA_EXCEEDED" | "SIZE_REJECTED" | "SOURCE_FAILURE" | "SINK_FAILURE" | "INVARIANT_VIOLATION")
+export type ReplicaStore = ("optimisticItems" | "operations" | "crossAccountMoves" | "attachmentMovePreparations" | "shareCapabilities" | "operationReceipts" | "rotationAttempts" | "replicaMetadata" | "bootstrapGenerations" | "bootstrapPages" | "authorityVaults" | "authorityItems")
+export type RuntimeErrorCode = ("RECIPIENT_KEY_UNVERIFIED" | "RECIPIENT_KEY_CHANGED" | "RECIPIENT_FINGERPRINT_MISMATCH" | "RUNTIME_CLOSED" | "CANCELLED" | "ACCOUNT_MISSING" | "ACCOUNT_ALREADY_INSTALLED" | "ACCOUNT_FAILED" | "AUTHENTICATION_REQUIRED" | "AUTHENTICATION_UNAVAILABLE" | "CREDENTIAL_UNAVAILABLE" | "STORAGE_UNAVAILABLE" | "RETRYABLE_TRANSPORT" | "VERSION_EVIDENCE_UNAVAILABLE" | "AUTHORITY_MISSING" | "ACCESS_DENIED" | "READ_ONLY" | "QUOTA_EXCEEDED" | "SIZE_REJECTED" | "SOURCE_FAILURE" | "SINK_FAILURE" | "INVARIANT_VIOLATION")
 export type RecoveryControlResponse = ({
 physicalSchemas: RecoveryPhysicalSchemas
 type: "maintenanceEntered"

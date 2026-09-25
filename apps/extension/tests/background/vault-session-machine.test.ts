@@ -431,6 +431,10 @@ describe("vault session machine — lifecycle sequences", () => {
 	});
 });
 
+const isolatedDelivery = {
+	withLifecycleCleanup: <T>(cleanup: () => Promise<T>) => cleanup(),
+};
+
 describe("lifecycle adapter — session invalidation", () => {
 	const ACCOUNT: AccountMetadata = {
 		accountId: "acc-1",
@@ -454,6 +458,7 @@ describe("lifecycle adapter — session invalidation", () => {
 	test("uses the known connection account instead of scanning by session id", async () => {
 		const targets: unknown[] = [];
 		const adapter = createLifecycleAdapter({
+			delivery: isolatedDelivery,
 			deps: {} as never,
 			invalidate: async (target) => {
 				targets.push(target);
@@ -480,6 +485,7 @@ describe("lifecycle adapter — session invalidation", () => {
 			email: "other@example.com",
 		};
 		const adapter = createLifecycleAdapter({
+			delivery: isolatedDelivery,
 			deps: {} as never,
 			invalidate: async (target) => {
 				targets.push(target);
@@ -499,6 +505,7 @@ describe("lifecycle adapter — session invalidation", () => {
 	test("uses session id resolution only when no connection account is known", async () => {
 		const targets: unknown[] = [];
 		const adapter = createLifecycleAdapter({
+			delivery: isolatedDelivery,
 			deps: {} as never,
 			invalidate: async (target) => {
 				targets.push(target);
@@ -514,6 +521,7 @@ describe("lifecycle adapter — session invalidation", () => {
 	test("an explicit fallback account id outranks the resolver and replaces 'active'", async () => {
 		const targets: unknown[] = [];
 		const adapter = createLifecycleAdapter({
+			delivery: isolatedDelivery,
 			deps: {} as never,
 			invalidate: async (target) => {
 				targets.push(target);
@@ -529,6 +537,7 @@ describe("lifecycle adapter — session invalidation", () => {
 
 	test("lockAll rejects when C1 reports step failures", async () => {
 		const adapter = createLifecycleAdapter({
+			delivery: isolatedDelivery,
 			deps: {} as never,
 			lockAll: async () =>
 				outcome(
@@ -542,6 +551,7 @@ describe("lifecycle adapter — session invalidation", () => {
 
 	test("session invalidation rejects instead of projecting step failures", async () => {
 		const adapter = createLifecycleAdapter({
+			delivery: isolatedDelivery,
 			deps: {} as never,
 			invalidate: async () =>
 				outcome(

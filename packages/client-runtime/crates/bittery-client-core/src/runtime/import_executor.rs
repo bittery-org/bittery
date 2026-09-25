@@ -1,27 +1,17 @@
-//! Sending one accepted Import batch and reconciling its authoritative answer.
+//! Exact replay and receipt reconciliation for one accepted Import batch.
 //!
-//! One cycle asks what the Server already decided, replays the identical bytes, reads the answer
-//! through the crate's one semantic-answer policy, fetches the complete authority within its
-//! Item, byte, page, and cursor bounds, and installs it under one guarded commit. Only an
-//! authoritative outcome ends the batch; every other answer moves the durable backoff.
+//! A retained result describes the original batch even when its Items were later edited, moved,
+//! hidden, or deleted. Completion retains that result and asks the existing Bootstrap owner for
+//! current authority; it never installs an old request as today's Items.
 
 use super::*;
-use crate::replica::{
-    AuthorityItemRecord, OperationOutcomeResult, OperationRecord, PlanMutation,
-    RecomputedPlanResult,
-};
+use crate::replica::{OperationOutcomeResult, OperationRecord, PlanMutation};
 use async_trait::async_trait;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ImportExchangeResponse {
     pub status: u16,
     pub body: Vec<u8>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ImportAuthorityPage {
-    pub raw_response_body: Vec<u8>,
-    pub next_cursor: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,12 +48,6 @@ pub(crate) trait ImportExecutorPort: ImportExecutorThreading {
         &self,
         operation: &OperationRecord,
     ) -> Result<ImportExchangeResponse, ImportExecutorError>;
-    async fn fetch_items(
-        &self,
-        vault_id: &str,
-        item_ids: &[String],
-        cursor: Option<&str>,
-    ) -> Result<ImportAuthorityPage, ImportExecutorError>;
     async fn renew_session(&self) -> Result<(), ImportExecutorError>;
     async fn before_reconcile(&self, _operation: &OperationRecord) {}
 }
@@ -117,7 +101,7 @@ impl Runtime {
         let Some(snapshot) = self.replica.snapshot(account_id) else {
             return Ok(ImportExecutorPass::ParkedFenced);
         };
-        if snapshot.failure.is_some() {
+        if snapshot.failure.is_some() || !self.completion_scope_is_current(&snapshot) {
             return Ok(ImportExecutorPass::ParkedFenced);
         }
         let Some(operation) = snapshot
@@ -130,7 +114,11 @@ impl Runtime {
         };
         let accepted = super::import::decode_import_request(&operation)?;
         let mut renewed = false;
-        let hint = match exchange(&mut renewed, port, || port.lookup(&operation)).await {
+        let hint = exchange(&mut renewed, port, || port.lookup(&operation)).await;
+        if !self.completion_scope_is_current(&snapshot) {
+            return Ok(ImportExecutorPass::ParkedFenced);
+        }
+        let hint = match hint {
             Exchange::Value(value) => value,
             Exchange::Retryable => return self.schedule_import_retry(snapshot, operation).await,
             Exchange::ReauthenticationRequired => {
@@ -138,7 +126,11 @@ impl Runtime {
                 return Ok(ImportExecutorPass::ReauthenticationRequired);
             }
         };
-        let replay = match exchange(&mut renewed, port, || port.post_exact(&operation)).await {
+        let replay = exchange(&mut renewed, port, || port.post_exact(&operation)).await;
+        if !self.completion_scope_is_current(&snapshot) {
+            return Ok(ImportExecutorPass::ParkedFenced);
+        }
+        let replay = match replay {
             Exchange::Value(value) => value,
             Exchange::Retryable => return self.schedule_import_retry(snapshot, operation).await,
             Exchange::ReauthenticationRequired => {
@@ -149,10 +141,15 @@ impl Runtime {
         let observed = match self.read_import_response(&operation, &replay) {
             ValidatedImportAnswer::Outcome(outcome) => outcome,
             ValidatedImportAnswer::Transient => {
-                return self.schedule_import_retry(snapshot, operation).await
+                return self.schedule_import_retry(snapshot, operation).await;
             }
             ValidatedImportAnswer::IdentityReused => {
-                self.fail_account_module_fenced(account_id).await;
+                if !matches!(
+                    self.fail_account_module_at_snapshot(&snapshot).await,
+                    super::outcome::CompletionResult::Failed
+                ) {
+                    return self.schedule_import_retry(snapshot, operation).await;
+                }
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::AccountFailed,
                     "Import replay reused an Operation identity",
@@ -164,7 +161,12 @@ impl Runtime {
                 ValidatedImportAnswer::Outcome(hint) if hint == observed => {}
                 ValidatedImportAnswer::Transient => {}
                 ValidatedImportAnswer::Outcome(_) | ValidatedImportAnswer::IdentityReused => {
-                    self.fail_account_module_fenced(account_id).await;
+                    if !matches!(
+                        self.fail_account_module_at_snapshot(&snapshot).await,
+                        super::outcome::CompletionResult::Failed
+                    ) {
+                        return self.schedule_import_retry(snapshot, operation).await;
+                    }
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::AccountFailed,
                         "Import lookup contradicted the exact replay",
@@ -173,149 +175,36 @@ impl Runtime {
             }
         }
 
-        let authority = match &observed.result {
-            OperationOutcomeResult::ImportApplied {
-                vault_id,
-                imported_count,
-            } => {
-                if usize::from(*imported_count) != accepted.items.len() {
-                    return Err(invalid("Import outcome count changed the accepted batch"));
+        match &observed.result {
+            OperationOutcomeResult::ImportApplied { imported_count, .. }
+                if usize::from(*imported_count) == accepted.items.len() => {}
+            OperationOutcomeResult::ImportApplied { .. } => {
+                if !matches!(
+                    self.fail_account_module_at_snapshot(&snapshot).await,
+                    super::outcome::CompletionResult::Failed
+                ) {
+                    return self.schedule_import_retry(snapshot, operation).await;
                 }
-                if accepted.items.is_empty() {
-                    Vec::new()
-                } else {
-                    let ids = accepted
-                        .items
-                        .iter()
-                        .map(|item| item.item_id.clone())
-                        .collect::<Vec<_>>();
-                    match self
-                        .fetch_import_authority(port, &mut renewed, vault_id, &ids)
-                        .await
-                    {
-                        Ok(items) => items,
-                        Err(error) if error.code == RuntimeErrorCode::AuthenticationRequired => {
-                            self.mark_reauthentication_required(account_id);
-                            return Ok(ImportExecutorPass::ReauthenticationRequired);
-                        }
-                        Err(error) if error.code == RuntimeErrorCode::InvariantViolation => {
-                            return Err(error)
-                        }
-                        Err(_) => {
-                            return self.schedule_import_retry(snapshot, operation).await;
-                        }
-                    }
-                }
-            }
-            OperationOutcomeResult::ImportRejected { .. } => Vec::new(),
-            _ => return Err(invalid("Import executor received another outcome kind")),
-        };
-        if matches!(
-            observed.result,
-            OperationOutcomeResult::ImportApplied { .. }
-        ) {
-            validate_authority(&accepted.items, operation.vault_id(), &authority)?;
-        }
-        port.before_reconcile(&operation).await;
-        let result = self
-            .replica
-            .execute_recomputing(GuardedCommitPlan::new(
-                account_id.clone(),
-                snapshot.incarnation,
-                snapshot.revision,
-                snapshot.lock_epoch,
-                vec![PlanMutation::ReconcileImportItems {
-                    outcome: observed,
-                    items: authority,
-                }],
-            ))
-            .await?;
-        match result {
-            RecomputedPlanResult::Applied { snapshot } => {
-                self.replica.cache(snapshot);
-                self.device_revision.fetch_add(1, Ordering::SeqCst);
-                self.decrypt_visible_items(account_id)?;
-                self.publish_all_unless_closed();
-                Ok(ImportExecutorPass::Completed)
-            }
-            RecomputedPlanResult::Fenced { .. } | RecomputedPlanResult::Missing => {
-                Ok(ImportExecutorPass::ParkedFenced)
-            }
-        }
-    }
-
-    async fn fetch_import_authority(
-        &self,
-        port: &dyn ImportExecutorPort,
-        renewed: &mut bool,
-        vault_id: &str,
-        item_ids: &[String],
-    ) -> Result<Vec<AuthorityItemRecord>, RuntimeError> {
-        let mut cursor = None;
-        let mut seen_cursors = std::collections::HashSet::new();
-        let mut bytes = 0usize;
-        let mut items = Vec::new();
-        let mut complete = false;
-        // Every bound here is a liveness bound, not a correctness one. This runs under the
-        // Account execution lock, so an answer that keeps offering one more page would stall
-        // every other Operation on the Account rather than merely waste a fetch.
-        for _ in 0..super::import::MAX_IMPORT_AUTHORITY_PAGES {
-            let page = match exchange(renewed, port, || {
-                port.fetch_items(vault_id, item_ids, cursor.as_deref())
-            })
-            .await
-            {
-                Exchange::Value(value) => value,
-                Exchange::Retryable => return Err(retry("Import authority fetch failed")),
-                Exchange::ReauthenticationRequired => {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::AuthenticationRequired,
-                        "Import authority requires reauthentication",
-                    ))
-                }
-            };
-            bytes = bytes
-                .checked_add(page.raw_response_body.len())
-                .ok_or_else(|| invalid("Import authority byte count overflowed"))?;
-            if bytes > super::import::MAX_IMPORT_AUTHORITY_BYTES {
-                return Err(invalid("Import authority exceeded its byte bound"));
-            }
-            let decoded: Vec<crate::server_contract::ItemResponseDto> =
-                serde_json::from_slice(&page.raw_response_body)
-                    .map_err(|_| invalid("Import authority page is malformed"))?;
-            if items.len() + decoded.len() > super::import::MAX_IMPORT_ITEMS {
-                return Err(invalid("Import authority exceeded its Item bound"));
-            }
-            let carried_items = !decoded.is_empty();
-            for item in decoded {
-                items.push(
-                    super::bootstrap::authority_item_from_dto(item)
-                        .map_err(|_| invalid("Import authority Item is invalid"))?,
-                );
-            }
-            let Some(next) = page.next_cursor else {
-                complete = true;
-                break;
-            };
-            if next.is_empty() || !seen_cursors.insert(next.clone()) {
-                return Err(invalid("Import authority cursor did not advance"));
-            }
-            if !carried_items {
-                return Err(invalid(
-                    "Import authority continued past a page carrying no Items",
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AccountFailed,
+                    "Import outcome count changed the accepted batch",
                 ));
             }
-            if seen_cursors.iter().map(String::len).sum::<usize>()
-                > super::import::MAX_IMPORT_AUTHORITY_CURSOR_BYTES
-            {
-                return Err(invalid("Import authority exceeded its cursor byte bound"));
-            }
-            cursor = Some(next);
+            OperationOutcomeResult::ImportRejected { .. } => {}
+            _ => return Err(invalid("Import executor received another outcome kind")),
         }
-        if !complete {
-            return Err(invalid("Import authority exceeded its page bound"));
+        port.before_reconcile(&operation).await;
+        match self
+            .commit_completion_fenced(
+                account_id,
+                &snapshot,
+                PlanMutation::ReconcileRetainedResult { outcome: observed },
+            )
+            .await
+        {
+            super::outcome::CompletionResult::Completed => Ok(ImportExecutorPass::Completed),
+            _ => self.schedule_import_retry(snapshot, operation).await,
         }
-        Ok(items)
     }
 
     /// Narrows the crate's one semantic-answer policy to the answers an Import batch may carry.
@@ -355,6 +244,9 @@ impl Runtime {
         snapshot: crate::replica::ReplicaSnapshot,
         operation: OperationRecord,
     ) -> Result<ImportExecutorPass, RuntimeError> {
+        if !self.completion_scope_is_current(&snapshot) {
+            return Ok(ImportExecutorPass::ParkedFenced);
+        }
         Ok(if self.persist_backoff(&snapshot, &operation).await {
             ImportExecutorPass::RetryScheduled
         } else {
@@ -373,46 +265,6 @@ enum ValidatedImportAnswer {
     IdentityReused,
 }
 
-fn validate_authority(
-    expected: &[super::import::ImportRequestItem],
-    vault_id: &str,
-    actual: &[AuthorityItemRecord],
-) -> Result<(), RuntimeError> {
-    if expected.len() != actual.len() {
-        return Err(invalid("Import authority omitted accepted Items"));
-    }
-    let expected = expected
-        .iter()
-        .map(|item| (item.item_id.as_str(), item))
-        .collect::<std::collections::HashMap<_, _>>();
-    let mut seen = std::collections::HashSet::new();
-    for actual in actual {
-        let Some(expected) = expected.get(actual.id.as_str()) else {
-            return Err(invalid("Import authority returned an unaccepted Item"));
-        };
-        if actual.id != expected.item_id
-            || actual.vault_id != vault_id
-            || actual.category != expected.category.clone().into()
-            || actual.favorite != expected.favorite
-            || actual.encrypted_data != expected.encrypted_data
-            || actual.encryption_iv != expected.encryption_iv
-            || actual.encryption_algorithm != expected.encryption_algorithm
-            || actual.version != 1
-            || actual.encryption_version != 1
-        {
-            return Err(invalid("Import authority changed accepted Item bytes"));
-        }
-        if !seen.insert(actual.id.as_str()) {
-            return Err(invalid("Import authority repeated an accepted Item"));
-        }
-    }
-    Ok(())
-}
-
 fn invalid(message: &str) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::InvariantViolation, message)
-}
-
-fn retry(message: &str) -> RuntimeError {
-    RuntimeError::new(RuntimeErrorCode::RetryableTransport, message)
 }

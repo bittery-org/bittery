@@ -1407,6 +1407,92 @@ describe("VaultRepository Item sync projections", () => {
 		});
 	});
 
+	// Admission must partition this local row from confirmed authority and refresh: the real
+	// legacy producer replaces the cached Server Item while leaving its old baseline intact.
+	for (const semanticId of [undefined, "semantic-failed-create"] as const) {
+		it(`legacy failed Create cache preserves the exact projection and stale baseline (${semanticId ?? "command ID"})`, async () => {
+			const { repo, itemCache, crypto, vaultCrypto } = await setup();
+			const confirmed = {
+				...(await cachedItem("colliding_item", crypto, vaultCrypto)),
+				version: 1,
+				favorite: true,
+			};
+			await itemCache.setCachedItems([confirmed], ACCOUNT_ID);
+			const metadata = {
+				lastFullSyncAt: 1234,
+				itemCount: 1,
+				cacheVersion: 1,
+				syncBaseline: {
+					serverUrl: "https://bittery.test",
+					cursorId: "confirmed-cursor",
+				},
+			};
+			await itemCache.setItemCacheMetadata(metadata, ACCOUNT_ID);
+			await repo.hydrate();
+			const local = await cachedItem(confirmed.id, crypto, vaultCrypto);
+			const timestamp = Date.parse(
+				semanticId ? "2026-08-03T04:05:06.007Z" : "2026-08-03T04:05:06.000Z",
+			);
+			const command: ItemSyncCommand = {
+				accountId: ACCOUNT_ID,
+				id: "source-failed-create",
+				...(semanticId ? { operationId: semanticId } : {}),
+				attemptId: "distinct-wire-attempt",
+				type: "create",
+				entityId: local.id,
+				vaultId: local.vaultId,
+				category: local.category,
+				encryptedPayload: {
+					encryptedData: local.encryptedData,
+					encryptionIv: local.encryptionIv,
+					encryptionAlgorithm: local.encryptionAlgorithm,
+					encryptionVersion: 1,
+					encryptedByUserId: USER_ID,
+				},
+				baseVersion: 0,
+				timestamp,
+				retryCount: 2,
+				status: "pending",
+			};
+			const originalCommand = structuredClone(command);
+			await repo.applyItemCommand(command);
+			expect(await itemCache.getCachedItems(ACCOUNT_ID)).toEqual([confirmed]);
+			await repo.rejectItemCommand(command, "item_id_conflict");
+
+			const failure = {
+				operationId: semanticId ?? command.id,
+				code: "item_id_conflict" as const,
+			};
+			expect(await itemCache.getCachedItems(ACCOUNT_ID)).toEqual([
+				{
+					id: local.id,
+					vaultId: local.vaultId,
+					accountId: ACCOUNT_ID,
+					accountEmail: "user@bittery.test",
+					serverUrl: "https://bittery.test",
+					category: local.category,
+					favorite: false,
+					encryptedData: local.encryptedData,
+					encryptionIv: local.encryptionIv,
+					encryptionAlgorithm: local.encryptionAlgorithm,
+					version: 1,
+					encryptionVersion: 1,
+					encryptedByUserId: USER_ID,
+					lastModifiedBy: USER_ID,
+					createdAt: new Date(timestamp).toISOString(),
+					updatedAt: new Date(timestamp).toISOString(),
+					deletedAt: null,
+					optimisticFailure: failure,
+				},
+			]);
+			expect(command).toEqual({ ...originalCommand, status: "failed" });
+			expect(await itemCache.getItemCacheMetadata(ACCOUNT_ID)).toEqual(
+				metadata,
+			);
+			expect(repo.getById(local.id)?.optimisticFailure).toEqual(failure);
+		});
+	}
+
 	it("keeps an optimistic metadata command out of the authoritative cache", async () => {
 		const { repo, itemCache, crypto, vaultCrypto } = await setup();
 		const item = await cachedItem("overlay_item", crypto, vaultCrypto);
@@ -1420,6 +1506,70 @@ describe("VaultRepository Item sync projections", () => {
 		expect(authoritative?.favorite).toBe(false);
 		expect(authoritative?.version).toBe(1);
 	});
+
+	// Rust profile admission reconstructs these projections from the confirmed cache and queue.
+	// In particular, metadata changes keep both version fields and permanent delete stays visible.
+	for (const [kind, deletedAt, favorite] of [
+		["toggle_favorite", null, true],
+		["toggle_favorite", null, false],
+		["toggle_favorite", null, undefined],
+		["delete", null, undefined],
+		["restore", null, undefined],
+		["restore", "2026-08-02T00:00:00.000Z", undefined],
+		["permanent_delete", null, undefined],
+		["permanent_delete", "2026-08-02T00:00:00.000Z", undefined],
+	] as const) {
+		it(`legacy admission projection: ${kind}, ${deletedAt ? "trashed" : "live"}, favorite=${favorite}`, async () => {
+			const { repo, itemCache, crypto, vaultCrypto } = await setup();
+			const item = {
+				...(await cachedItem("legacy_metadata", crypto, vaultCrypto)),
+				version: 6,
+				favorite: true,
+				deletedAt,
+			};
+			await itemCache.setCachedItems([item], ACCOUNT_ID);
+			await repo.hydrate();
+			const read = () =>
+				repo.getById(item.id) ??
+				repo.getDeleted().find((entry) => entry.id === item.id);
+			const before = read();
+			expect(before).toBeDefined();
+			if (!before) throw new Error("Legacy base Item did not decrypt");
+			const persisted = await itemCache.getCachedItems(ACCOUNT_ID);
+			const timestamp = Date.parse("2026-08-03T04:05:06.007Z");
+			await repo.applyItemCommand({
+				accountId: ACCOUNT_ID,
+				id: "source-command",
+				operationId: "semantic-operation",
+				attemptId: "wire-attempt",
+				type: kind,
+				entityId: item.id,
+				vaultId: item.vaultId,
+				baseVersion: item.version,
+				timestamp,
+				retryCount: 0,
+				...(favorite === undefined ? {} : { favorite }),
+			});
+
+			expect(read()).toEqual({
+				...before,
+				favorite: kind === "toggle_favorite" ? (favorite ?? false) : true,
+				deletedAt:
+					kind === "delete"
+						? new Date(timestamp).toISOString()
+						: kind === "restore"
+							? null
+							: deletedAt,
+				updatedAt:
+					kind === "permanent_delete"
+						? item.updatedAt
+						: new Date(timestamp).toISOString(),
+			});
+			expect(read()?.version).toBe(6);
+			expect(read()?.encryptionVersion).toBe(1);
+			expect(await itemCache.getCachedItems(ACCOUNT_ID)).toEqual(persisted);
+		});
+	}
 
 	it("retains the optimistic overlay when a newer event arrives first", async () => {
 		const { repo, itemCache, crypto, vaultCrypto } = await setup();

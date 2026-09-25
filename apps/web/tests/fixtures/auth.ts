@@ -278,38 +278,16 @@ export async function signUp(
 		await page.goto(new URL("/home", appOrigin).href);
 		await page.waitForURL("**/home", { timeout });
 	}
-	// Signup installs the legacy browser account before the process-owned Rust
-	// Runtime has authenticated it. The Runtime route guard therefore sends the
-	// first visit through the existing password Quick Unlock ceremony. Complete
-	// that real ceremony so this helper's promise (a usable signed-in page) stays
-	// true while the migration has two installation moments.
-	const unlockButton = page.getByRole("button", {
-		name: "Unlock Vault",
-		exact: true,
-	});
-	const needsRuntimeUnlock = await Promise.race([
-		unlockButton.waitFor({ state: "visible", timeout }).then(() => true),
-		appShell(page)
-			.waitFor({ state: "visible", timeout })
-			.then(() => false),
-	]);
-	let secretKey: string | undefined;
-	if (needsRuntimeUnlock) {
-		await options.beforeRuntimeSignIn?.(page);
-		// A just-created legacy account has no Rust installation to quick-unlock yet.
-		// Keep the Secret Key before switching the form, then perform the full Rust
-		// Sign-in that creates that installation.
-		secretKey = await readSecretKey(page);
-		await switchToFullSignIn(page, timeout);
-		await page.locator("#email").fill(user.email);
-		await page.locator("#secretKey").fill(secretKey);
-		await page.locator("#password").fill(user.password);
-		await page.getByRole("button", { name: "Sign In", exact: true }).click();
-		await page.waitForURL("**/home", { timeout });
-	}
-	await waitForAppReady(page);
-
-	return { ...user, secretKey: secretKey ?? (await readSecretKey(page)) };
+	return {
+		...user,
+		secretKey: await completeRuntimeSignupHandoff(
+			page,
+			user,
+			timeout,
+			"/home",
+			options.beforeRuntimeSignIn,
+		),
+	};
 }
 
 /**
@@ -359,6 +337,55 @@ async function switchToFullSignIn(page: Page, timeout: number): Promise<void> {
 	}
 }
 
+/**
+ * Complete the public full Runtime sign-in after either signup flow.
+ *
+ * Signup first installs the legacy browser account. The Runtime route guard
+ * then sends the first visit through Quick Unlock, where no Runtime
+ * installation exists yet. The existing public switch and full sign-in form
+ * establish it; an invited self-hosted signup resumes at `/team` afterwards.
+ */
+export async function completeRuntimeSignupHandoff(
+	page: Page,
+	user: TestUser,
+	timeout: number,
+	returnTo: "/home" | "/team",
+	beforeRuntimeSignIn?: (page: Page) => Promise<void>,
+): Promise<string> {
+	const unlockButton = page.getByRole("button", {
+		name: "Unlock Vault",
+		exact: true,
+	});
+	const needsRuntimeUnlock = await Promise.race([
+		unlockButton.waitFor({ state: "visible", timeout }).then(() => true),
+		appShell(page)
+			.waitFor({ state: "visible", timeout })
+			.then(() => false),
+	]);
+	let secretKey: string | undefined;
+	if (needsRuntimeUnlock) {
+		await beforeRuntimeSignIn?.(page);
+		// Keep the Secret Key before switching forms, then perform the full
+		// Runtime sign-in that creates the account's installation.
+		secretKey = await readSecretKey(page);
+		await switchToFullSignIn(page, timeout);
+		await page.locator("#email").fill(user.email);
+		await page.locator("#secretKey").fill(secretKey);
+		await page.locator("#password").fill(user.password);
+		await page.getByRole("button", { name: "Sign In", exact: true }).click();
+		await page.waitForURL("**/home", { timeout });
+		if (returnTo !== "/home") {
+			// Keep the process-owned Runtime alive through ordinary in-app navigation.
+			const destination = page.locator(`a[href="${returnTo}"]`).first();
+			await expect(destination).toBeVisible({ timeout });
+			await destination.click();
+			await page.waitForURL(`**${returnTo}`, { timeout });
+		}
+	}
+	await waitForAppReady(page);
+	return secretKey ?? (await readSecretKey(page));
+}
+
 export interface SelfHostedSignUpOptions {
 	/**
 	 * The `/invite/$token` link this signup accepts. Without it the form is the
@@ -374,9 +401,10 @@ export interface SelfHostedSignUpOptions {
  * Complete a signup against a self-hosted server, where `SelfHostedSignUpForm`
  * is what `/signup` and `/invite/$token` both render.
  *
- * A different form from the one `signUp()` drives, and a shorter flow: the
- * server reports `requiresEmailVerification: false` in self-hosted mode, so
- * there is no code to wait for and the outbox never receives one.
+ * A different form from the one `signUp()` drives. The server reports
+ * `requiresEmailVerification: false` in self-hosted mode, so there is no code
+ * to wait for and the outbox never receives one. Both flows finish through the
+ * same public Runtime sign-in handoff.
  */
 export async function signUpSelfHosted(
 	page: Page,
@@ -428,10 +456,18 @@ export async function signUpSelfHosted(
 
 	// An invitation is accepted server-side as part of the signup, which is what
 	// lands the new account on the team rather than on its own home.
+	const returnTo = inviteUrl ? "/team" : "/home";
 	await page.waitForURL(inviteUrl ? "**/team" : "**/home", { timeout });
-	await waitForAppReady(page);
 
-	return { ...user, secretKey: await readSecretKey(page) };
+	return {
+		...user,
+		secretKey: await completeRuntimeSignupHandoff(
+			page,
+			user,
+			timeout,
+			returnTo,
+		),
+	};
 }
 
 /**

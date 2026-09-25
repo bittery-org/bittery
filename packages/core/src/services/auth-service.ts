@@ -37,6 +37,7 @@ import {
 	createStoredAccountApiClient,
 	createStoredAccountUnlockApiClient,
 } from "./api-client";
+import type { MaterialPublication } from "./material-publication";
 import {
 	getTravelModeEnforcer,
 	TravelModeVerificationError,
@@ -45,6 +46,8 @@ import type { TravelModeApiClient } from "./travel-mode-service";
 import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
 
 export interface StoreAuthSessionOptions {
+	/** Captured before external authentication; guards only Account material writes. */
+	materialPublication?: MaterialPublication;
 	travelModeApiClient?: TravelModeApiClient;
 	/**
 	 * Builds the travel mode client from the token the flow just obtained.
@@ -66,6 +69,16 @@ export interface StoreAuthSessionOptions {
 	onMasterUnlockKeyTransferred?: () => void;
 	/** Reconciles an explicitly owned account runtime after direct storage writes. */
 	onSessionStored?: () => void | Promise<void>;
+}
+
+function publishSession<T>(
+	accountId: string,
+	options: StoreAuthSessionOptions | undefined,
+	write: (check: () => void) => Promise<T>,
+): Promise<T> {
+	return options?.materialPublication
+		? options.materialPublication.run(accountId, write)
+		: write(() => {});
 }
 
 async function resolveAccountIdForLogin(
@@ -558,8 +571,19 @@ export async function storeLoginSession(
 	// previous session's ciphertext. Drop it before anything writes the new session.
 	// `AccountStore` cannot do this itself — it holds only a `PlatformPort`, and the
 	// cache lives behind a `RecordPort`. See packages/storage/CONTEXT.md §4.2.
-	await itemCache.clearItemCache(accountId);
-
+	if (options?.materialPublication) {
+		await options.materialPublication.run(
+			accountId,
+			async (check) => {
+				check();
+				await itemCache.clearItemCache(accountId);
+				check();
+			},
+			() => false,
+		);
+	} else {
+		await itemCache.clearItemCache(accountId);
+	}
 	await prepareTravelModeForSession(
 		accountId,
 		storage,
@@ -569,52 +593,67 @@ export async function storeLoginSession(
 
 	const travelMode = getTravelModeEnforcer(storage, itemCache);
 
-	await storage.storeAuthToken(result.token, accountId);
-	await storage.storeServerUrl(serverUrl, accountId);
-	await persistPinnedKdfProfileIfNeeded(accountId, result.kdfParams, storage);
-	const vaultKeys = await travelMode.stripVaultKeysIfActive(
-		accountId,
-		result.vaultKeys,
-	);
-	await storage.storeVaultKeys(vaultKeys, accountId);
-
-	if (result.user.encryptedPrivateKey) {
-		await storage.storeEncryptedPrivateKey(
-			result.user.encryptedPrivateKey,
+	await publishSession(accountId, options, async (check) => {
+		check();
+		await storage.storeAuthToken(result.token, accountId);
+		check();
+		await storage.storeServerUrl(serverUrl, accountId);
+		check();
+		await persistPinnedKdfProfileIfNeeded(accountId, result.kdfParams, storage);
+		check();
+		const vaultKeys = await travelMode.stripVaultKeysIfActive(
 			accountId,
+			result.vaultKeys,
 		);
-	}
+		check();
+		await storage.storeVaultKeys(vaultKeys, accountId);
+		check();
 
-	await storage.storeSecretKey(secretKey, accountId);
+		if (result.user.encryptedPrivateKey) {
+			await storage.storeEncryptedPrivateKey(
+				result.user.encryptedPrivateKey,
+				accountId,
+			);
+			check();
+		}
 
-	// `storeSessionData` borrows the ref; ownership transfers only after every other
-	// fallible local write succeeds.
-	await storage.storeSessionData(
-		result.masterUnlockKey,
-		accountId,
-		resolvedEmail,
-		result.user.id,
-		result.expiresAt,
-		result.sessionId,
-	);
-	await storage.addAccount({
-		accountId,
-		email: resolvedEmail,
-		userId: result.user.id,
-		name: result.user.name || resolvedEmail.split("@")[0] || "User",
-		serverUrl,
-		teamName: result.user.teamName,
-		teamAvatarUrl: result.user.teamAvatarUrl,
-		addedAt: Date.now(),
-		lastActiveAt: Date.now(),
-		secretKeyHint: `${secretKey.slice(0, 4)}••••`,
-		biometricEnabled: await storage.isBiometricEnabled(accountId),
-		insecureTransportConfirmed: options?.insecureTransportConfirmed === true,
+		await storage.storeSecretKey(secretKey, accountId);
+		check();
+
+		// `storeSessionData` borrows the ref; ownership transfers only after every other
+		// fallible local write succeeds.
+		await storage.storeSessionData(
+			result.masterUnlockKey,
+			accountId,
+			resolvedEmail,
+			result.user.id,
+			result.expiresAt,
+			result.sessionId,
+		);
+		check();
+		await storage.addAccount({
+			accountId,
+			email: resolvedEmail,
+			userId: result.user.id,
+			name: result.user.name || resolvedEmail.split("@")[0] || "User",
+			serverUrl,
+			teamName: result.user.teamName,
+			teamAvatarUrl: result.user.teamAvatarUrl,
+			addedAt: Date.now(),
+			lastActiveAt: Date.now(),
+			secretKeyHint: `${secretKey.slice(0, 4)}••••`,
+			biometricEnabled: await storage.isBiometricEnabled(accountId),
+			insecureTransportConfirmed: options?.insecureTransportConfirmed === true,
+		});
+		check();
+
+		await storage.setActiveAccount(accountId);
+		check();
+		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
+		// The store owns this ref even if retirement began during the setter.
+		options?.onMasterUnlockKeyTransferred?.();
+		check();
 	});
-
-	await storage.setActiveAccount(accountId);
-	await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
-	options?.onMasterUnlockKeyTransferred?.();
 
 	try {
 		await options?.onSessionStored?.();
@@ -889,59 +928,75 @@ export async function storeUnlockSession(
 
 	const travelMode = getTravelModeEnforcer(storage, itemCache);
 
-	await storage.storeAuthToken(result.token, accountId);
-	await storage.storeServerUrl(serverUrl, accountId);
-	await persistPinnedKdfProfileIfNeeded(accountId, result.kdfParams, storage);
-	const vaultKeys = await travelMode.stripVaultKeysIfActive(
-		accountId,
-		result.vaultKeys,
-	);
-	await storage.storeVaultKeys(vaultKeys, accountId);
-
-	if (result.user.encryptedPrivateKey) {
-		await storage.storeEncryptedPrivateKey(
-			result.user.encryptedPrivateKey,
+	await publishSession(accountId, options, async (check) => {
+		check();
+		await storage.storeAuthToken(result.token, accountId);
+		check();
+		await storage.storeServerUrl(serverUrl, accountId);
+		check();
+		await persistPinnedKdfProfileIfNeeded(accountId, result.kdfParams, storage);
+		check();
+		const vaultKeys = await travelMode.stripVaultKeysIfActive(
 			accountId,
+			result.vaultKeys,
 		);
-	}
+		check();
+		await storage.storeVaultKeys(vaultKeys, accountId);
+		check();
 
-	// Borrowed by `storeSessionData`; ownership transfers after the remaining writes.
-	await storage.storeSessionData(
-		result.masterUnlockKey,
-		accountId,
-		resolvedEmail,
-		result.user.id,
-		result.expiresAt,
-		result.sessionId,
-	);
-
-	if (options?.setActive ?? true) {
-		const currentActive = await storage.getActiveAccount();
-		if (currentActive !== accountId) {
-			await storage.setActiveAccount(accountId);
+		if (result.user.encryptedPrivateKey) {
+			await storage.storeEncryptedPrivateKey(
+				result.user.encryptedPrivateKey,
+				accountId,
+			);
+			check();
 		}
-	}
 
-	// `addAccount` replaces the record wholesale, so spread the stored one to keep the
-	// fields an unlock never sees — `lastActiveAt` among them, which `setActiveAccount`
-	// owns because an unlock-all runs this for every account.
-	const storedAccount = await storage.getAccountMetadata(accountId);
-	if (storedAccount) {
-		await storage.addAccount({
-			...storedAccount,
-			// Keys the account de-dupe; keep the stored identity if the response omits it.
-			userId: storedAccount.userId || result.user.id,
-			name: result.user.name || storedAccount.name,
-			// Absent means "not reported" as often as "no team": the metadata sync corrects
-			// a stale name, nothing recovers a blanked one.
-			teamName: result.user.teamName ?? storedAccount.teamName,
-			teamAvatarUrl: result.user.teamAvatarUrl ?? storedAccount.teamAvatarUrl,
-		});
-	}
+		// Borrowed by `storeSessionData`; ownership transfers after the remaining writes.
+		await storage.storeSessionData(
+			result.masterUnlockKey,
+			accountId,
+			resolvedEmail,
+			result.user.id,
+			result.expiresAt,
+			result.sessionId,
+		);
+		check();
 
-	await storage.updateLastMasterPasswordEntry(accountId);
-	await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
-	options?.onMasterUnlockKeyTransferred?.();
+		if (options?.setActive ?? true) {
+			const currentActive = await storage.getActiveAccount();
+			check();
+			if (currentActive !== accountId) {
+				await storage.setActiveAccount(accountId);
+				check();
+			}
+		}
+
+		// `addAccount` replaces the record wholesale, so spread the stored one to keep the
+		// fields an unlock never sees — `lastActiveAt` among them, which `setActiveAccount`
+		// owns because an unlock-all runs this for every account.
+		const storedAccount = await storage.getAccountMetadata(accountId);
+		check();
+		if (storedAccount) {
+			await storage.addAccount({
+				...storedAccount,
+				// Keys the account de-dupe; keep the stored identity if the response omits it.
+				userId: storedAccount.userId || result.user.id,
+				name: result.user.name || storedAccount.name,
+				// Absent means "not reported" as often as "no team": the metadata sync corrects
+				// a stale name, nothing recovers a blanked one.
+				teamName: result.user.teamName ?? storedAccount.teamName,
+				teamAvatarUrl: result.user.teamAvatarUrl ?? storedAccount.teamAvatarUrl,
+			});
+			check();
+		}
+
+		await storage.updateLastMasterPasswordEntry(accountId);
+		check();
+		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
+		options?.onMasterUnlockKeyTransferred?.();
+		check();
+	});
 }
 
 /** Stores an unlock while retaining responsibility for its MUK until the store accepts it. */

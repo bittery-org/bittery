@@ -80,6 +80,41 @@ impl JsVaultImageArtifactPort {
 
 #[async_trait::async_trait(?Send)]
 impl core::VaultImageArtifactPort for JsVaultImageArtifactPort {
+    async fn read_generation(
+        &self,
+        family: &core::VaultImageArtifactScope,
+        after: Option<&str>,
+    ) -> Result<Option<core::VaultImageArtifactGeneration>, core::RuntimeError> {
+        let request = VaultImageControlRequest::ReadGeneration {
+            scope: family.into(),
+            after_publication_id: after.map(str::to_owned),
+        };
+        let (response, _) = self.invoke(request, None).await?;
+        match response {
+            VaultImageControlResponse::Generation { generation } => {
+                generation.into_core(family, after).map(Some)
+            }
+            VaultImageControlResponse::Missing => Ok(None),
+            _ => Err(invariant()),
+        }
+    }
+    async fn delete_generation(
+        &self,
+        scope: &core::VaultImageArtifactScope,
+    ) -> Result<(), core::RuntimeError> {
+        expect_artifact(
+            self.invoke(
+                VaultImageControlRequest::DeleteGeneration {
+                    scope: scope.into(),
+                },
+                None,
+            )
+            .await?
+            .0,
+            VaultImageControlResponse::Deleted,
+        )
+    }
+
     async fn begin(&self, scope: &core::VaultImageArtifactScope) -> Result<(), core::RuntimeError> {
         match self
             .invoke(
@@ -398,6 +433,51 @@ impl core::VaultImageSourcePort for JsVaultImageSourcePort {
             VaultImageSourceControlResponse::AcceptanceEnded,
         )
     }
+    async fn retire_vaults(
+        &self,
+        _runtime_incarnation: &str,
+        account_id: &core::AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), core::VaultImageSourceError> {
+        expect_source_retired(
+            self.invoke(VaultImageSourceControlRequest::RetireVaults {
+                account_id: account_id.as_str().into(),
+                vault_ids: vault_ids.to_vec(),
+            })
+            .await?
+            .0,
+        )
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _runtime_incarnation: &str,
+        account_id: &core::AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), core::VaultImageSourceError> {
+        expect_source_retired(
+            self.invoke(VaultImageSourceControlRequest::CompleteVaultRetirement {
+                account_id: account_id.as_str().into(),
+                vault_ids: vault_ids.to_vec(),
+            })
+            .await?
+            .0,
+        )
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _runtime_incarnation: &str,
+        account_id: &core::AccountId,
+    ) -> Result<(), core::VaultImageSourceError> {
+        expect_source_retired(
+            self.invoke(
+                VaultImageSourceControlRequest::ForgetAccountVaultRetirements {
+                    account_id: account_id.as_str().into(),
+                },
+            )
+            .await?
+            .0,
+        )
+    }
     async fn retire_runtime(
         &self,
         _runtime_incarnation: &str,
@@ -415,6 +495,7 @@ impl From<&core::VaultImageArtifactScope> for VaultImageScopeControl {
         Self {
             account_id: scope.account_id().as_str().into(),
             operation_id: scope.operation_id().into(),
+            publication_id: scope.publication_id().map(str::to_owned),
         }
     }
 }
@@ -426,6 +507,7 @@ impl From<&core::VaultImageArtifactMetadata> for VaultImageMetadataControl {
             byte_length: metadata.byte_length().to_string(),
             content_type: metadata.content_type().into(),
             sha256: metadata.sha256().into(),
+            protection: metadata.protection().cloned(),
         }
     }
 }
@@ -490,6 +572,7 @@ fn expect_source(
 fn invariant() -> core::RuntimeError {
     core::RuntimeError {
         recovery_bound: None,
+        team_page_problem: None,
         code: core::RuntimeErrorCode::InvariantViolation,
         message: "Vault image host invocation failed".into(),
     }

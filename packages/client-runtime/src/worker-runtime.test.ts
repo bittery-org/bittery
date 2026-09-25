@@ -93,6 +93,12 @@ class RuntimeDouble {
 		return this.requestResult;
 	}
 
+	begin_vault_export_output(): string {
+		throw new Error("Unexpected Export output admission");
+	}
+	finish_vault_export_output(): void {
+		throw new Error("Unexpected Export output cleanup");
+	}
 	unobserve(observationId: string): void {
 		this.observations.delete(observationId);
 	}
@@ -2471,4 +2477,115 @@ describe("recovery ownership", () => {
 		expect(fresh.requests.map((x) => x.requestId)).toEqual(["wipe"]);
 		await service.close();
 	});
+});
+
+test("a failed close retains control delivery until the same owner completes cleanup", async () => {
+	let subscriber: ((value: unknown) => void) | undefined;
+	let closeCalls = 0;
+	const channel = {
+		async request<T = unknown>(): Promise<T> {
+			return undefined as T;
+		},
+		subscribe(listener: (value: unknown) => void) {
+			subscriber = listener;
+			return () => {
+				subscriber = undefined;
+			};
+		},
+	};
+	const runtime = createWorkerRuntime(channel, async () => {
+		closeCalls += 1;
+		if (closeCalls === 1) throw new Error("host cleanup incomplete");
+	});
+	const controls: string[] = [];
+	await runtime.observe("export", "{}", () => undefined, {
+		onControl: (json) => controls.push(json),
+	});
+	await expect(runtime.close()).rejects.toThrow("host cleanup incomplete");
+	subscriber?.({
+		type: "observationControl",
+		observationId: "export",
+		controlJson: '{"type":"vaultExportRetired","reason":"runtimeClosed"}',
+	});
+	expect(controls).toEqual([
+		'{"type":"vaultExportRetired","reason":"runtimeClosed"}',
+	]);
+	await runtime.unobserve("export");
+	await runtime.close();
+	expect(closeCalls).toBe(2);
+	expect(subscriber).toBeUndefined();
+});
+
+test("Export output waits for successful host delivery and keeps admitted cleanup after retirement", async () => {
+	let notify: ((value: unknown) => void) | undefined;
+	let resolveAdmission: ((lease: string) => void) | undefined;
+	const admission = new Promise<string>((resolve) => {
+		resolveAdmission = resolve;
+	});
+	const requests: unknown[] = [];
+	const channel = {
+		async request<T = unknown>(payload: unknown): Promise<T> {
+			requests.push(payload);
+			if ((payload as { type: string }).type === "beginVaultExportOutput")
+				return (await admission) as T;
+			return undefined as T;
+		},
+		subscribe(listener: (value: unknown) => void) {
+			notify = listener;
+			return () => {
+				notify = undefined;
+			};
+		},
+	};
+	const runtime = createWorkerRuntime(channel, async () => undefined);
+	let reentrant: Promise<unknown> | undefined;
+	await runtime.observe(
+		"export",
+		JSON.stringify({ type: "vaultExport", accountId: "a", vaultIds: ["v"] }),
+		() => {
+			reentrant = runtime
+				.beginVaultExportOutput("export")
+				.catch((error) => error);
+		},
+	);
+	await expect(runtime.beginVaultExportOutput("export")).rejects.toThrow(
+		"not been delivered",
+	);
+	notify?.({
+		type: "observation",
+		observationId: "export",
+		projectionJson: "{}",
+	});
+	expect(await reentrant).toBeInstanceOf(Error);
+	expect(requests).toHaveLength(1);
+	const admitted = runtime.beginVaultExportOutput("export");
+	notify?.({
+		type: "observationControl",
+		observationId: "export",
+		controlJson: '{"type":"vaultExportRetired","reason":"scopeRetired"}',
+	});
+	resolveAdmission?.("original-lease");
+	expect(await admitted).toBe("original-lease");
+	await expect(runtime.beginVaultExportOutput("export")).rejects.toThrow(
+		"retired",
+	);
+	await runtime.finishVaultExportOutput("export", "original-lease");
+	expect(requests).toEqual([
+		{
+			type: "observe",
+			observationId: "export",
+			requestJson: JSON.stringify({
+				type: "vaultExport",
+				accountId: "a",
+				vaultIds: ["v"],
+			}),
+		},
+		{ type: "beginVaultExportOutput", observationId: "export" },
+		{
+			type: "finishVaultExportOutput",
+			observationId: "export",
+			outputLeaseId: "original-lease",
+		},
+	]);
+	await runtime.close();
 });

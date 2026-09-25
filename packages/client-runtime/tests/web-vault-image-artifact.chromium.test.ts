@@ -6,6 +6,58 @@ afterAll(() => {
 	for (const server of servers) server.stop(true);
 });
 describe("Vault-image artifact in actual Chromium IndexedDB", () => {
+	test("upgrades legacy raw rows and retains exact protected bytes through store reopen and family cleanup", async () => {
+		const build = await Bun.build({
+			entrypoints: [
+				new URL(
+					"./web-vault-image-artifact-chromium-harness.ts",
+					import.meta.url,
+				).pathname,
+			],
+			target: "browser",
+			format: "esm",
+		});
+		expect(build.success).toBe(true);
+		const script = await build.outputs[0].text();
+		const server = Bun.serve({
+			port: 0,
+			fetch(request) {
+				return new URL(request.url).pathname === "/harness.js"
+					? new Response(script, {
+							headers: { "content-type": "text/javascript" },
+						})
+					: new Response('<script type="module" src="/harness.js"></script>', {
+							headers: { "content-type": "text/html" },
+						});
+			},
+		});
+		servers.push(server);
+		const browser = await chromium.launch({ headless: true });
+		try {
+			const page = await browser.newPage();
+			await page.goto(`http://127.0.0.1:${server.port}/`);
+			await page.waitForFunction(
+				() => "runProtectedImageStorageHistory" in globalThis,
+			);
+			expect(
+				await page.evaluate(() => globalThis.runProtectedImageStorageHistory()),
+			).toEqual({
+				raw: [97, 98, 99],
+				rawAgain: [97, 98, 99],
+				ciphertext: [19, 82, 177, 4, 66],
+				wiped: [0, 0, 0, 0, 0],
+				firstGenerationIsRaw: true,
+				nextGenerationIsProtected: true,
+				erasedRaw: { type: "missing" },
+				preservedProtected: [19, 82, 177, 4, 66],
+				missingRaw: { type: "missing" },
+				missingProtected: { type: "missing" },
+			});
+		} finally {
+			await browser.close();
+		}
+	}, 15_000);
+
 	test("publishes exact bytes, wipes the transferred chunk, restarts, and sweeps orphans", async () => {
 		const build = await Bun.build({
 			entrypoints: [

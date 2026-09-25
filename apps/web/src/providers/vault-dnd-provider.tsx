@@ -1,11 +1,12 @@
 import { useRuntimeSession } from "@bittery/client-runtime/react";
-import type { DecryptedItem } from "@bittery/shared/types";
+import type { PublicDecryptedItem } from "@bittery/shared/types";
 import {
 	type DragItemData,
 	type DropVaultData,
 	ItemDragPreview,
 	toast,
 } from "@bittery/ui";
+import { useAccountPresentationState } from "@bittery/ui/runtime-presentation";
 import {
 	DndContext,
 	type DragEndEvent,
@@ -17,13 +18,12 @@ import {
 } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, type ReactNode, useContext } from "react";
-import { useAccountPresentationState } from "@/hooks/use-account-presentation-state";
 import { useMoveItem } from "@/hooks/use-runtime-item-mutations";
 import { getServerUrl } from "@/lib/auth-server";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface DndContextValue {
-	activeItem: DecryptedItem | null;
+	activeItem: PublicDecryptedItem | null;
 	isDragging: boolean;
 }
 
@@ -44,7 +44,7 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 	const { m } = useI18n();
 	const session = useRuntimeSession();
 	const [drag, setDrag, readDrag] = useAccountPresentationState<{
-		item: DecryptedItem;
+		item: PublicDecryptedItem;
 		sourceVaultId: string;
 		accountId: string;
 	}>(session.state === "unlocked" ? session.accountId : null);

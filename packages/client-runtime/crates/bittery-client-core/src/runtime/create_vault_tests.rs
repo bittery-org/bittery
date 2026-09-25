@@ -1,34 +1,11 @@
 use super::*;
-use crate::{CreateVaultType, Incarnation, VaultImageSourceInput};
+use crate::{CreateVaultType, Incarnation, VaultImageArtifactPort, VaultImageSourceInput};
 use async_trait::async_trait;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-
-fn authority_page(
-    items: Vec<crate::server_contract::AuthVaultKeyResponse>,
-    has_more: bool,
-    next_cursor: Option<String>,
-) -> super::create_vault_executor::CreateVaultAuthorityPage {
-    let raw_response_body =
-        serde_json::to_vec(&crate::server_contract::CursorPageAuthVaultKeyResponse {
-            items,
-            has_more,
-            next_cursor,
-        })
-        .unwrap();
-    super::create_vault_executor::CreateVaultAuthorityPage {
-        raw_response_body: Some(raw_response_body),
-    }
-}
-
-fn decoded_authority_page(
-    page: &super::create_vault_executor::CreateVaultAuthorityPage,
-) -> crate::server_contract::CursorPageAuthVaultKeyResponse {
-    serde_json::from_slice(page.raw_response_body.as_ref().unwrap()).unwrap()
-}
 
 struct OneImageSource {
     bytes: Option<Vec<u8>>,
@@ -48,7 +25,7 @@ impl crate::VaultImageSource for OneImageSource {
     }
 }
 
-struct ExactImageSourcePort;
+pub(super) struct ExactImageSourcePort;
 
 #[async_trait]
 impl crate::VaultImageSourcePort for ExactImageSourcePort {
@@ -96,6 +73,29 @@ impl crate::VaultImageSourcePort for ExactImageSourcePort {
         Ok(())
     }
 
+    async fn retire_vaults(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(
         &self,
         _runtime_incarnation: &str,
@@ -109,6 +109,13 @@ struct TrackingImageSourcePort {
     scope: Mutex<Option<(String, String)>>,
     acceptance: Mutex<Vec<&'static str>>,
     fail_begin: AtomicBool,
+}
+
+pub(super) fn fail_end_once_source() -> Arc<dyn crate::VaultImageSourcePort> {
+    Arc::new(FailEndOnceImageSourcePort {
+        inner: TrackingImageSourcePort::default(),
+        failures_left: AtomicUsize::new(1),
+    })
 }
 
 struct FailEndOnceImageSourcePort {
@@ -177,6 +184,29 @@ impl crate::VaultImageSourcePort for FailEndOnceImageSourcePort {
         }
     }
 
+    async fn retire_vaults(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(
         &self,
         runtime_incarnation: &str,
@@ -194,6 +224,20 @@ struct FailDeleteArtifactPort {
 
 #[async_trait]
 impl crate::VaultImageArtifactPort for FailDeleteArtifactPort {
+    async fn read_generation(
+        &self,
+        scope: &crate::VaultImageArtifactScope,
+        after: Option<&str>,
+    ) -> Result<Option<crate::VaultImageArtifactGeneration>, RuntimeError> {
+        self.inner.read_generation(scope, after).await
+    }
+    async fn delete_generation(
+        &self,
+        scope: &crate::VaultImageArtifactScope,
+    ) -> Result<(), RuntimeError> {
+        self.inner.delete_generation(scope).await
+    }
+
     async fn begin(&self, scope: &crate::VaultImageArtifactScope) -> Result<(), RuntimeError> {
         self.inner.begin(scope).await
     }
@@ -291,13 +335,56 @@ impl crate::VaultImageSourcePort for TrackingImageSourcePort {
         self.acceptance.lock().unwrap().push("end");
         Ok(())
     }
+    async fn retire_vaults(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(&self, _: &str) -> Result<(), crate::VaultImageSourceError> {
         Ok(())
     }
 }
 
+async fn image_platform() -> Arc<operation_fixtures::MemoryPlatform> {
+    let platform = operation_fixtures::MemoryPlatform::new();
+    PlatformStorage::new(platform.clone())
+        .store_device_key(&DeviceKeyDocument::new([7; 32]))
+        .await
+        .unwrap();
+    platform
+}
+
 async fn unlocked_runtime() -> (Arc<Runtime>, AccountId, Incarnation) {
-    let runtime = Runtime::new();
+    let persistence = Arc::new(InMemoryReplica::default());
+    let runtime = Runtime::with_persistence(
+        persistence.clone(),
+        Arc::new(PlatformStorage::new(image_platform().await)),
+        Arc::new(HttpTransport::unavailable()),
+        None,
+        None,
+        true,
+        Arc::new(SystemClock),
+        Arc::new(SystemDeviceTimer),
+        Some(persistence),
+    );
     let account_id = AccountId::from("account-1");
     let incarnation = Incarnation::from("incarnation-1");
     let installed = runtime
@@ -549,9 +636,9 @@ async fn image_is_published_before_acceptance_and_only_exact_artifact_metadata_s
         .contains("opaque-image-source"));
 }
 
-struct FailingThenExactStaging {
-    failures_left: AtomicUsize,
-    calls: Mutex<Vec<&'static str>>,
+pub(super) struct FailingThenExactStaging {
+    pub(super) failures_left: AtomicUsize,
+    pub(super) calls: Mutex<Vec<&'static str>>,
 }
 
 #[async_trait]
@@ -593,6 +680,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for FailingThenExactSta
         &self,
         _grant: &super::create_vault_staging::CreateVaultUploadGrant,
         bytes: &[u8],
+        _cancellation: RequestCancellation,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
         self.calls.lock().unwrap().push("upload");
         assert_eq!(bytes, b"image-bytes");
@@ -612,7 +700,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for FailingThenExactSta
 
     async fn renew_session(
         &self,
-    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+    ) -> Result<(), super::create_vault_staging::CreateVaultRecoveryError> {
         self.calls.lock().unwrap().push("renew");
         Ok(())
     }
@@ -720,6 +808,7 @@ async fn image_staging_restarts_between_every_durable_checkpoint_with_identical_
     let executor = super::create_tests::create_vault_restart_executor();
     let account_id = AccountId::from("account-1");
     let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
+    let platform = image_platform().await;
     let staging = FailingThenExactStaging {
         failures_left: AtomicUsize::new(0),
         calls: Mutex::new(Vec::new()),
@@ -727,7 +816,7 @@ async fn image_staging_restarts_between_every_durable_checkpoint_with_identical_
 
     let first = Runtime::with_serialized_executors(
         executor.clone(),
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        platform.clone(),
         Arc::new(super::create_tests::UnusedHttp),
     );
     first.install_vault_image_ingress(
@@ -770,7 +859,7 @@ async fn image_staging_restarts_between_every_durable_checkpoint_with_identical_
 
     let second = Runtime::with_serialized_executors(
         executor.clone(),
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        platform.clone(),
         Arc::new(super::create_tests::UnusedHttp),
     );
     second.install_vault_image_ingress(
@@ -804,7 +893,7 @@ async fn image_staging_restarts_between_every_durable_checkpoint_with_identical_
 
     let third = Runtime::with_serialized_executors(
         executor.clone(),
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        platform.clone(),
         Arc::new(super::create_tests::UnusedHttp),
     );
     third.install_vault_image_ingress(
@@ -839,7 +928,7 @@ async fn image_staging_restarts_between_every_durable_checkpoint_with_identical_
 
     let fourth = Runtime::with_serialized_executors(
         executor,
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        platform.clone(),
         Arc::new(super::create_tests::UnusedHttp),
     );
     fourth.install_vault_image_ingress(
@@ -887,25 +976,6 @@ fn wire_rejection(
     }
 }
 
-fn authority_key(
-    authority: &crate::replica::AuthorityVaultRecord,
-) -> crate::server_contract::AuthVaultKeyResponse {
-    crate::server_contract::AuthVaultKeyResponse {
-        encrypted_vault_key: authority.encrypted_vault_key.clone(),
-        role: crate::server_contract::VaultRole::Owner,
-        vault_icon: authority.icon.clone(),
-        vault_id: authority.id.clone(),
-        vault_image_url: authority.image_url.clone(),
-        vault_name: authority.name.clone(),
-        vault_type: match authority.vault_type {
-            crate::replica::AuthorityVaultType::Personal => {
-                crate::server_contract::VaultType::Personal
-            }
-            crate::replica::AuthorityVaultType::Team => crate::server_contract::VaultType::Team,
-        },
-    }
-}
-
 #[async_trait]
 impl super::create_vault_executor::CreateVaultExecutorPort for LostAppliedResponseExecutor {
     async fn lookup(
@@ -942,6 +1012,7 @@ impl super::create_vault_executor::CreateVaultExecutorPort for LostAppliedRespon
             image_url: None,
             encrypted_vault_key: intent.encrypted_vault_key.clone(),
             role: crate::replica::AuthorityVaultRole::Owner,
+            key_version: None,
         });
         if !self.committed.swap(true, Ordering::SeqCst) {
             return Err(super::create_vault_staging::CreateVaultStagingError::Retryable);
@@ -954,41 +1025,6 @@ impl super::create_vault_executor::CreateVaultExecutorPort for LostAppliedRespon
         ))
     }
 
-    async fn fetch_vault(
-        &self,
-        _vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        let authority = self.authority.lock().unwrap().clone().unwrap();
-        Ok(super::create_vault_executor::CreateVaultAuthorityRecord {
-            id: authority.id,
-            name: authority.name,
-            vault_type: authority.vault_type,
-            icon: authority.icon,
-            image_url: authority.image_url,
-            role: authority.role,
-        })
-    }
-
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        Ok(authority_page(
-            vec![authority_key(
-                self.authority.lock().unwrap().as_ref().unwrap(),
-            )],
-            false,
-            None,
-        ))
-    }
-
     async fn renew_session(
         &self,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
@@ -997,7 +1033,8 @@ impl super::create_vault_executor::CreateVaultExecutorPort for LostAppliedRespon
 }
 
 #[tokio::test]
-async fn lost_applied_response_requires_exact_replay_then_reconciles_authority_and_receipt() {
+async fn lost_applied_response_requires_exact_replay_then_receipts_and_requests_current_authority()
+{
     let (runtime, account_id, _) = unlocked_runtime().await;
     runtime.seed_ready_personal_vault_in_memory(&account_id);
     let response = runtime
@@ -1054,11 +1091,18 @@ async fn lost_applied_response_requires_exact_replay_then_reconciles_authority_a
     assert!(snapshot.operations.is_empty());
     assert_eq!(snapshot.receipts.len(), 1);
     assert_eq!(snapshot.receipts[0].operation_id, operation_id);
-    assert!(snapshot
+    assert!(!snapshot
         .bootstrap
         .vaults
         .values()
-        .any(|vault| vault.id == vault_id && vault.name == "Recovered Vault"));
+        .any(|vault| vault.id == vault_id));
+    assert_eq!(
+        snapshot.bootstrap.state,
+        crate::replica::ReplicaState::RefreshRequired
+    );
+    let server_authority = executor.authority.lock().unwrap();
+    assert_eq!(server_authority.as_ref().unwrap().id, vault_id);
+    assert_eq!(server_authority.as_ref().unwrap().name, "Recovered Vault");
     assert_eq!(executor.put_calls.load(Ordering::SeqCst), 2);
 }
 
@@ -1145,27 +1189,6 @@ impl super::create_vault_executor::CreateVaultExecutorPort for MisTaggedExecutor
             }
         };
         Ok(super::create_vault_executor::CreateVaultOperationResponse { status: 200, body })
-    }
-
-    async fn fetch_vault(
-        &self,
-        _vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("invalid tagged outcome must preserve work before authority fetch")
-    }
-
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("invalid tagged outcome must preserve work before authority key fetch")
     }
 
     async fn renew_session(
@@ -1272,27 +1295,6 @@ impl super::create_vault_executor::CreateVaultExecutorPort for RejectedExecutor 
                 code: wire_rejection(self.code),
             },
         ))
-    }
-
-    async fn fetch_vault(
-        &self,
-        _vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("a rejected create-Vault outcome has no authority fetch")
-    }
-
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("a rejected create-Vault outcome has no authority key fetch")
     }
 
     async fn renew_session(
@@ -1610,7 +1612,7 @@ async fn accepted_create_vault_restarts_with_identical_bytes_and_outlives_lock_a
     let account_id = AccountId::from("account-1");
     let first = Runtime::with_serialized_executors(
         executor.clone(),
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        operation_fixtures::MemoryPlatform::new(),
         Arc::new(super::create_tests::UnusedHttp),
     );
     first.open().await.unwrap();
@@ -1656,7 +1658,7 @@ async fn accepted_create_vault_restarts_with_identical_bytes_and_outlives_lock_a
 
     let restarted = Runtime::with_serialized_executors(
         executor,
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        operation_fixtures::MemoryPlatform::new(),
         Arc::new(super::create_tests::UnusedHttp),
     );
     restarted.open().await.unwrap();
@@ -1706,25 +1708,6 @@ impl super::create_vault_executor::CreateVaultExecutorPort for PauseBeforeReconc
             },
         ))
     }
-    async fn fetch_vault(
-        &self,
-        _vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("rejected outcome has no Vault fetch")
-    }
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("rejected outcome has no Vault-key fetch")
-    }
     async fn renew_session(
         &self,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
@@ -1742,7 +1725,7 @@ async fn restart_between_exact_outcome_fetch_and_guarded_commit_replays_and_conv
     let account_id = AccountId::from("account-1");
     let first = Arc::new(Runtime::with_serialized_executors(
         persistence.clone(),
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        operation_fixtures::MemoryPlatform::new(),
         Arc::new(super::create_tests::UnusedHttp),
     ));
     first.open().await.unwrap();
@@ -1795,7 +1778,7 @@ async fn restart_between_exact_outcome_fetch_and_guarded_commit_replays_and_conv
 
     let restarted = Runtime::with_serialized_executors(
         persistence,
-        Arc::new(super::create_tests::SuccessfulDeletePlatform),
+        operation_fixtures::MemoryPlatform::new(),
         Arc::new(super::create_tests::UnusedHttp),
     );
     restarted.open().await.unwrap();
@@ -1952,6 +1935,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for AlwaysUnauthorizedS
         &self,
         _grant: &super::create_vault_staging::CreateVaultUploadGrant,
         _bytes: &[u8],
+        _cancellation: RequestCancellation,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
         panic!("status never authorized staging")
     }
@@ -1966,7 +1950,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for AlwaysUnauthorizedS
     }
     async fn renew_session(
         &self,
-    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+    ) -> Result<(), super::create_vault_staging::CreateVaultRecoveryError> {
         self.renewals.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -2060,6 +2044,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for RenewThenConfirmSta
         &self,
         _grant: &super::create_vault_staging::CreateVaultUploadGrant,
         _bytes: &[u8],
+        _cancellation: RequestCancellation,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
         panic!("confirmed staging does not upload")
     }
@@ -2074,7 +2059,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for RenewThenConfirmSta
     }
     async fn renew_session(
         &self,
-    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+    ) -> Result<(), super::create_vault_staging::CreateVaultRecoveryError> {
         self.renewals.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -2105,25 +2090,6 @@ impl super::create_vault_executor::CreateVaultExecutorPort for UnauthorizedLooku
         super::create_vault_staging::CreateVaultStagingError,
     > {
         panic!("second 401 parks before PUT")
-    }
-    async fn fetch_vault(
-        &self,
-        _vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("second 401 parks before authority")
-    }
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        panic!("second 401 parks before authority keys")
     }
     async fn renew_session(
         &self,
@@ -2193,580 +2159,6 @@ async fn one_renewal_budget_spans_staging_and_final_recovery_exchanges() {
     );
 }
 
-struct AuthorityBoundsPort {
-    vault_id: String,
-    vault_name: String,
-    pages:
-        Mutex<std::collections::VecDeque<super::create_vault_executor::CreateVaultAuthorityPage>>,
-}
-
-#[async_trait]
-impl super::create_vault_executor::CreateVaultExecutorPort for AuthorityBoundsPort {
-    async fn lookup(
-        &self,
-        _operation: &crate::replica::OperationRecord,
-    ) -> Result<
-        Option<super::create_vault_executor::CreateVaultOperationResponse>,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        Ok(None)
-    }
-
-    async fn put_exact(
-        &self,
-        operation: &crate::replica::OperationRecord,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultOperationResponse,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        Ok(tagged_create_vault_outcome(
-            operation,
-            crate::server_contract::CreateVaultOperationResult::Applied {
-                vault_id: self.vault_id.clone(),
-            },
-        ))
-    }
-
-    async fn fetch_vault(
-        &self,
-        _vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        Ok(super::create_vault_executor::CreateVaultAuthorityRecord {
-            id: self.vault_id.clone(),
-            name: self.vault_name.clone(),
-            vault_type: crate::replica::AuthorityVaultType::Personal,
-            icon: Some("lock".into()),
-            image_url: None,
-            role: crate::replica::AuthorityVaultRole::Owner,
-        })
-    }
-
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        _cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        Ok(self.pages.lock().unwrap().pop_front().unwrap())
-    }
-
-    async fn renew_session(
-        &self,
-    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
-        Ok(())
-    }
-}
-
-fn bounds_authority_key(
-    vault_id: impl Into<String>,
-    encrypted_vault_key: impl Into<String>,
-    vault_name: impl Into<String>,
-) -> crate::server_contract::AuthVaultKeyResponse {
-    crate::server_contract::AuthVaultKeyResponse {
-        encrypted_vault_key: encrypted_vault_key.into(),
-        role: crate::server_contract::VaultRole::Owner,
-        vault_icon: Some("lock".into()),
-        vault_id: vault_id.into(),
-        vault_image_url: None,
-        vault_name: vault_name.into(),
-        vault_type: crate::server_contract::VaultType::Personal,
-    }
-}
-
-fn authority_page_with_exact_bytes(
-    target_bytes: usize,
-    mut items: Vec<crate::server_contract::AuthVaultKeyResponse>,
-) -> super::create_vault_executor::CreateVaultAuthorityPage {
-    let measured = authority_page(items.clone(), false, None)
-        .raw_response_body
-        .as_ref()
-        .unwrap()
-        .len();
-    assert!(measured <= target_bytes);
-    items[0]
-        .vault_name
-        .push_str(&"x".repeat(target_bytes - measured));
-    let page = authority_page(items, false, None);
-    assert_eq!(page.raw_response_body.as_ref().unwrap().len(), target_bytes);
-    page
-}
-
-fn authority_page_with_exact_item_bytes(
-    target_bytes: usize,
-    mut items: Vec<crate::server_contract::AuthVaultKeyResponse>,
-) -> super::create_vault_executor::CreateVaultAuthorityPage {
-    let measured = serde_json::to_vec(&items).unwrap().len();
-    assert!(measured <= target_bytes);
-    items[0]
-        .vault_name
-        .push_str(&"x".repeat(target_bytes - measured));
-    assert_eq!(serde_json::to_vec(&items).unwrap().len(), target_bytes);
-    authority_page(items, false, None)
-}
-
-fn paginate_authority_pages(
-    mut pages: Vec<super::create_vault_executor::CreateVaultAuthorityPage>,
-) -> Vec<super::create_vault_executor::CreateVaultAuthorityPage> {
-    let page_count = pages.len();
-    for (index, page) in pages.iter_mut().enumerate() {
-        let decoded = decoded_authority_page(page);
-        *page = authority_page(
-            decoded.items,
-            index + 1 < page_count,
-            (index + 1 < page_count).then(|| format!("authority-page-{}", index + 1)),
-        );
-    }
-    pages
-}
-
-async fn accepted_create_vault_for_authority_bounds(
-) -> (Arc<Runtime>, AccountId, String, String, String) {
-    let (runtime, account_id, _) = unlocked_runtime().await;
-    runtime.seed_ready_personal_vault_in_memory(&account_id);
-    let RuntimeResponse::VaultCreationAccepted {
-        operation_id,
-        vault_id,
-        ..
-    } = runtime
-        .request(
-            RuntimeRequest::CreateVault {
-                account_id: account_id.clone(),
-                name: "Bounded Vault".into(),
-                vault_type: CreateVaultType::Personal,
-                icon: "lock".into(),
-                image_source: None,
-            },
-            RequestCancellation::new(),
-        )
-        .await
-        .unwrap()
-    else {
-        panic!("expected accepted create-Vault Operation")
-    };
-    let encrypted_vault_key = runtime.replica().snapshot(&account_id).unwrap().operations[0]
-        .create_vault
-        .as_ref()
-        .unwrap()
-        .encrypted_vault_key
-        .clone();
-    (
-        runtime,
-        account_id,
-        operation_id,
-        vault_id,
-        encrypted_vault_key,
-    )
-}
-
-async fn assert_authority_pages(
-    pages: impl FnOnce(&str, &str) -> Vec<super::create_vault_executor::CreateVaultAuthorityPage>,
-    succeeds: bool,
-) {
-    let (runtime, account_id, operation_id, vault_id, encrypted_vault_key) =
-        accepted_create_vault_for_authority_bounds().await;
-    let port = AuthorityBoundsPort {
-        vault_id: vault_id.clone(),
-        vault_name: "Bounded Vault".into(),
-        pages: Mutex::new(pages(&vault_id, &encrypted_vault_key).into()),
-    };
-    let result = runtime
-        .drive_create_vault_executor_cycle(&account_id, &operation_id, &port)
-        .await;
-    assert_eq!(
-        result.is_ok(),
-        succeeds,
-        "unexpected authority result: {result:?}"
-    );
-    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
-    assert_eq!(snapshot.operations.is_empty(), succeeds);
-    assert_eq!(snapshot.receipts.len(), usize::from(succeeds));
-}
-
-#[tokio::test]
-async fn create_vault_authority_rejects_one_key_page_over_the_four_mibibyte_bound() {
-    const PAGE_BYTES: usize = 4 * 1024 * 1024;
-    let (runtime, account_id, operation_id, vault_id, encrypted_vault_key) =
-        accepted_create_vault_for_authority_bounds().await;
-    let page = authority_page_with_exact_bytes(
-        PAGE_BYTES + 1,
-        vec![
-            bounds_authority_key("foreign-vault", "foreign-wrapped", "foreign"),
-            bounds_authority_key(&vault_id, &encrypted_vault_key, "Bounded Vault"),
-        ],
-    );
-    let port = AuthorityBoundsPort {
-        vault_id,
-        vault_name: "Bounded Vault".into(),
-        pages: Mutex::new([page].into()),
-    };
-
-    assert!(runtime
-        .drive_create_vault_executor_cycle(&account_id, &operation_id, &port)
-        .await
-        .is_err());
-    let snapshot = runtime.replica().snapshot(&account_id).unwrap();
-    assert_eq!(snapshot.operations.len(), 1);
-    assert!(snapshot.receipts.is_empty());
-}
-
-#[tokio::test]
-async fn create_vault_authority_rejects_a_full_wire_page_over_four_mibibytes() {
-    const RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-    assert_authority_pages(
-        move |vault_id, encrypted_vault_key| {
-            vec![authority_page(
-                vec![bounds_authority_key(
-                    vault_id,
-                    encrypted_vault_key,
-                    "Bounded Vault",
-                )],
-                true,
-                Some("c".repeat(RESPONSE_BYTES)),
-            )]
-        },
-        false,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn create_vault_authority_page_count_and_byte_boundaries_are_exact() {
-    const PAGE_ITEMS: usize = 500;
-    const PAGE_BYTES: usize = 4 * 1024 * 1024;
-    for (count, succeeds) in [(PAGE_ITEMS, true), (PAGE_ITEMS + 1, false)] {
-        assert_authority_pages(
-            move |vault_id, encrypted_vault_key| {
-                let mut items = (0..count.saturating_sub(1))
-                    .map(|index| {
-                        bounds_authority_key(
-                            format!("count-{index}"),
-                            format!("wrapped-{index}"),
-                            format!("Count {index}"),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                items.push(bounds_authority_key(
-                    vault_id,
-                    encrypted_vault_key,
-                    "Bounded Vault",
-                ));
-                vec![authority_page(items, false, None)]
-            },
-            succeeds,
-        )
-        .await;
-    }
-    for (bytes, succeeds) in [(PAGE_BYTES, true), (PAGE_BYTES + 1, false)] {
-        assert_authority_pages(
-            move |vault_id, encrypted_vault_key| {
-                vec![authority_page_with_exact_bytes(
-                    bytes,
-                    vec![
-                        bounds_authority_key("byte-filler", "wrapped-filler", "filler"),
-                        bounds_authority_key(vault_id, encrypted_vault_key, "Bounded Vault"),
-                    ],
-                )]
-            },
-            succeeds,
-        )
-        .await;
-    }
-}
-
-fn authority_count_pages(
-    count: usize,
-    vault_id: &str,
-    encrypted_vault_key: &str,
-) -> Vec<super::create_vault_executor::CreateVaultAuthorityPage> {
-    let mut items = (0..count.saturating_sub(1))
-        .map(|index| {
-            bounds_authority_key(
-                format!("aggregate-count-{index}"),
-                format!("wrapped-{index}"),
-                "foreign",
-            )
-        })
-        .collect::<Vec<_>>();
-    items.push(bounds_authority_key(
-        vault_id,
-        encrypted_vault_key,
-        "Bounded Vault",
-    ));
-    paginate_authority_pages(
-        items
-            .chunks(500)
-            .map(|items| authority_page(items.to_vec(), false, None))
-            .collect(),
-    )
-}
-
-fn authority_aggregate_byte_pages(
-    target_bytes: usize,
-    vault_id: &str,
-    encrypted_vault_key: &str,
-) -> Vec<super::create_vault_executor::CreateVaultAuthorityPage> {
-    let page_target = target_bytes / 9;
-    let mut pages = (0..8)
-        .map(|index| {
-            authority_page_with_exact_item_bytes(
-                page_target,
-                vec![bounds_authority_key(
-                    format!("aggregate-byte-{index}"),
-                    format!("wrapped-{index}"),
-                    "foreign",
-                )],
-            )
-        })
-        .collect::<Vec<_>>();
-    let prefix_item_bytes = pages
-        .iter()
-        .flat_map(|page| decoded_authority_page(page).items)
-        .map(|item| serde_json::to_vec(&item).unwrap().len())
-        .sum::<usize>();
-    let last_page_bytes = target_bytes - prefix_item_bytes - 8;
-    pages.push(authority_page_with_exact_item_bytes(
-        last_page_bytes,
-        vec![
-            bounds_authority_key("aggregate-byte-last", "wrapped-last", "foreign"),
-            bounds_authority_key(vault_id, encrypted_vault_key, "Bounded Vault"),
-        ],
-    ));
-    let all_items = pages
-        .iter()
-        .flat_map(|page| decoded_authority_page(page).items)
-        .collect::<Vec<_>>();
-    assert_eq!(serde_json::to_vec(&all_items).unwrap().len(), target_bytes);
-    paginate_authority_pages(pages)
-}
-
-#[tokio::test]
-async fn create_vault_authority_aggregate_count_and_byte_boundaries_are_exact() {
-    const ITEMS: usize = 21_000;
-    const BYTES: usize = 32 * 1024 * 1024;
-    for (count, succeeds) in [(ITEMS, true), (ITEMS + 1, false)] {
-        assert_authority_pages(
-            move |vault_id, encrypted_vault_key| {
-                authority_count_pages(count, vault_id, encrypted_vault_key)
-            },
-            succeeds,
-        )
-        .await;
-    }
-    for (bytes, succeeds) in [(BYTES, true), (BYTES + 1, false)] {
-        assert_authority_pages(
-            move |vault_id, encrypted_vault_key| {
-                authority_aggregate_byte_pages(bytes, vault_id, encrypted_vault_key)
-            },
-            succeeds,
-        )
-        .await;
-    }
-}
-
-#[tokio::test]
-async fn create_vault_authority_rejects_page_cursor_and_identity_pathologies_at_public_seam() {
-    const PAGE_BYTES: usize = 4 * 1024 * 1024;
-    for (page_bytes, succeeds) in [(PAGE_BYTES, true), (PAGE_BYTES + 1, false)] {
-        assert_authority_pages(
-            move |vault_id, encrypted_vault_key| {
-                let item = bounds_authority_key("cursor-foreign", "cursor-wrapped", "foreign");
-                let base = authority_page(vec![item.clone()], true, Some(String::new()));
-                let cursor_bytes = page_bytes - base.raw_response_body.as_ref().unwrap().len();
-                vec![
-                    authority_page(vec![item], true, Some("c".repeat(cursor_bytes))),
-                    authority_page(
-                        vec![bounds_authority_key(
-                            vault_id,
-                            encrypted_vault_key,
-                            "Bounded Vault",
-                        )],
-                        false,
-                        None,
-                    ),
-                ]
-            },
-            succeeds,
-        )
-        .await;
-    }
-
-    const AGGREGATE_CURSOR_BYTES: usize = 32 * 1024 * 1024;
-    for (cursor_bytes, succeeds) in [
-        (AGGREGATE_CURSOR_BYTES, true),
-        (AGGREGATE_CURSOR_BYTES + 1, false),
-    ] {
-        assert_authority_pages(
-            move |vault_id, encrypted_vault_key| {
-                let base = cursor_bytes / 9;
-                let mut pages = (0..9)
-                    .map(|index| {
-                        let length = if index == 8 {
-                            cursor_bytes - base * 8
-                        } else {
-                            base
-                        };
-                        authority_page(
-                            vec![bounds_authority_key(
-                                format!("cursor-total-{index}"),
-                                format!("cursor-wrapped-{index}"),
-                                "foreign",
-                            )],
-                            true,
-                            Some(format!("{index}{}", "c".repeat(length - 1))),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                pages.push(authority_page(
-                    vec![bounds_authority_key(
-                        vault_id,
-                        encrypted_vault_key,
-                        "Bounded Vault",
-                    )],
-                    false,
-                    None,
-                ));
-                pages
-            },
-            succeeds,
-        )
-        .await;
-    }
-
-    assert_authority_pages(
-        |vault_id, encrypted_vault_key| {
-            let mut pages = (0..200)
-                .map(|index| {
-                    authority_page(
-                        vec![bounds_authority_key(
-                            format!("page-{index}"),
-                            format!("wrapped-{index}"),
-                            "foreign",
-                        )],
-                        true,
-                        Some(format!("page-cursor-{index}")),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let mut decoded = decoded_authority_page(&pages[199]);
-            decoded.items.push(bounds_authority_key(
-                vault_id,
-                encrypted_vault_key,
-                "Bounded Vault",
-            ));
-            pages[199] = authority_page(decoded.items, decoded.has_more, decoded.next_cursor);
-            pages
-        },
-        false,
-    )
-    .await;
-
-    assert_authority_pages(
-        |vault_id, encrypted_vault_key| {
-            let mut pages = paginate_authority_pages(
-                (0..200)
-                    .map(|index| {
-                        authority_page(
-                            vec![bounds_authority_key(
-                                format!("exact-page-{index}"),
-                                format!("exact-wrapped-{index}"),
-                                "foreign",
-                            )],
-                            false,
-                            None,
-                        )
-                    })
-                    .collect(),
-            );
-            let mut decoded = decoded_authority_page(&pages[199]);
-            decoded.items.push(bounds_authority_key(
-                vault_id,
-                encrypted_vault_key,
-                "Bounded Vault",
-            ));
-            pages[199] = authority_page(decoded.items, decoded.has_more, decoded.next_cursor);
-            pages
-        },
-        true,
-    )
-    .await;
-
-    for pages in [
-        vec![
-            authority_page(
-                vec![bounds_authority_key("cycle-1", "wrapped-1", "foreign")],
-                true,
-                Some("cycle-a".into()),
-            ),
-            authority_page(
-                vec![bounds_authority_key("cycle-2", "wrapped-2", "foreign")],
-                true,
-                Some("cycle-b".into()),
-            ),
-            authority_page(
-                vec![bounds_authority_key("cycle-3", "wrapped-3", "foreign")],
-                true,
-                Some("cycle-a".into()),
-            ),
-        ],
-        vec![authority_page(
-            vec![
-                bounds_authority_key("duplicate", "wrapped-1", "foreign"),
-                bounds_authority_key("duplicate", "wrapped-2", "foreign"),
-            ],
-            false,
-            None,
-        )],
-        vec![
-            authority_page(
-                vec![bounds_authority_key("before-empty", "wrapped", "foreign")],
-                true,
-                Some("later-empty".into()),
-            ),
-            authority_page(Vec::new(), true, Some("after-empty".into())),
-        ],
-    ] {
-        assert_authority_pages(move |_, _| pages, false).await;
-    }
-}
-
-#[tokio::test]
-async fn create_vault_authority_requires_present_well_formed_raw_response_evidence() {
-    assert_authority_pages(
-        |vault_id, encrypted_vault_key| {
-            let mut page = authority_page(
-                vec![bounds_authority_key(
-                    vault_id,
-                    encrypted_vault_key,
-                    "Bounded Vault",
-                )],
-                false,
-                None,
-            );
-            page.raw_response_body = None;
-            vec![page]
-        },
-        false,
-    )
-    .await;
-
-    assert_authority_pages(
-        |vault_id, encrypted_vault_key| {
-            let _ = (vault_id, encrypted_vault_key);
-            let page = super::create_vault_executor::CreateVaultAuthorityPage {
-                raw_response_body: Some(b"not-json".to_vec()),
-            };
-            vec![page]
-        },
-        false,
-    )
-    .await;
-}
-
 struct RecoveryExchangeMatrixPort {
     target: &'static str,
     failures_left: AtomicUsize,
@@ -2776,7 +2168,6 @@ struct RecoveryExchangeMatrixPort {
     race_at: Option<&'static str>,
     race_context: Mutex<Option<(Arc<Runtime>, AccountId)>>,
     raced: AtomicBool,
-    foreign_only: bool,
 }
 
 impl RecoveryExchangeMatrixPort {
@@ -2852,6 +2243,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for RecoveryExchangeMat
         &self,
         _grant: &super::create_vault_staging::CreateVaultUploadGrant,
         bytes: &[u8],
+        _cancellation: RequestCancellation,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
         self.maybe_fail("upload")?;
         assert_eq!(bytes, b"image-bytes");
@@ -2870,7 +2262,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for RecoveryExchangeMat
     }
     async fn renew_session(
         &self,
-    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+    ) -> Result<(), super::create_vault_staging::CreateVaultRecoveryError> {
         self.renewals.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -2909,79 +2301,8 @@ impl super::create_vault_executor::CreateVaultExecutorPort for RecoveryExchangeM
             },
         ))
     }
-    async fn fetch_vault(
-        &self,
-        _vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        self.maybe_fail("vault")?;
-        self.race_guard("authority_fetch").await;
-        let accepted = self.accepted.lock().unwrap();
-        let (vault_id, _, name) = accepted.as_ref().unwrap();
-        Ok(super::create_vault_executor::CreateVaultAuthorityRecord {
-            id: vault_id.clone(),
-            name: name.clone(),
-            vault_type: crate::replica::AuthorityVaultType::Personal,
-            icon: Some("lock".into()),
-            image_url: Some("https://example.invalid/vault-image".into()),
-            role: crate::replica::AuthorityVaultRole::Owner,
-        })
-    }
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        let exchange = if cursor.is_none() {
-            "key_first"
-        } else {
-            "key_second"
-        };
-        self.maybe_fail(exchange)?;
-        if exchange == "key_second" {
-            self.race_guard("final_commit").await;
-        }
-        if cursor.is_none() {
-            let accepted = self.accepted.lock().unwrap();
-            let (_, encrypted_vault_key, _) = accepted.as_ref().unwrap();
-            Ok(authority_page(
-                vec![crate::server_contract::AuthVaultKeyResponse {
-                    encrypted_vault_key: encrypted_vault_key.clone(),
-                    role: crate::server_contract::VaultRole::Owner,
-                    vault_icon: Some("lock".into()),
-                    vault_id: "foreign-vault".into(),
-                    vault_image_url: Some("https://example.invalid/vault-image".into()),
-                    vault_name: "Foreign matching ciphertext".into(),
-                    vault_type: crate::server_contract::VaultType::Personal,
-                }],
-                true,
-                Some("next".into()),
-            ))
-        } else {
-            let accepted = self.accepted.lock().unwrap();
-            let (vault_id, encrypted_vault_key, name) = accepted.as_ref().unwrap();
-            Ok(authority_page(
-                (!self.foreign_only)
-                    .then(|| crate::server_contract::AuthVaultKeyResponse {
-                        encrypted_vault_key: encrypted_vault_key.clone(),
-                        role: crate::server_contract::VaultRole::Owner,
-                        vault_icon: Some("lock".into()),
-                        vault_id: vault_id.clone(),
-                        vault_image_url: Some("https://example.invalid/vault-image".into()),
-                        vault_name: name.clone(),
-                        vault_type: crate::server_contract::VaultType::Personal,
-                    })
-                    .into_iter()
-                    .collect(),
-                false,
-                None,
-            ))
-        }
+    async fn before_reconcile(&self, _operation: &crate::replica::OperationRecord) {
+        self.race_guard("final_commit").await;
     }
     async fn renew_session(
         &self,
@@ -3039,45 +2360,13 @@ async fn matrix_recovery(
             race_at: None,
             race_context: Mutex::new(None),
             raced: AtomicBool::new(false),
-            foreign_only: false,
         },
     )
 }
 
 #[tokio::test]
-async fn foreign_vault_with_matching_wrapped_ciphertext_cannot_reconcile_created_vault_authority() {
-    let (runtime, account_id, operation_id, mut port) = matrix_recovery("none", 0, false).await;
-    port.foreign_only = true;
-    let before = runtime.replica().snapshot(&account_id).unwrap().operations[0].clone();
-    let error = runtime
-        .drive_create_vault_recovery_cycle(&account_id, &operation_id, &port, &port)
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        super::create_vault_staging::CreateVaultRecoveryError::Fatal(RuntimeError {
-            code: RuntimeErrorCode::InvariantViolation,
-            ..
-        })
-    ));
-    let after = runtime.replica().snapshot(&account_id).unwrap();
-    assert_eq!(after.operations.len(), 1);
-    assert_eq!(after.operations[0].operation_id, before.operation_id);
-    assert_eq!(after.operations[0].target, before.target);
-    assert_eq!(
-        after.operations[0]
-            .create_vault
-            .as_ref()
-            .unwrap()
-            .encrypted_vault_key,
-        before.create_vault.as_ref().unwrap().encrypted_vault_key
-    );
-    assert!(after.receipts.is_empty());
-}
-
-#[tokio::test]
-async fn real_guard_races_at_checkpoint_authority_fetch_and_final_commit_preserve_work() {
-    for race_at in ["checkpoint", "authority_fetch", "final_commit"] {
+async fn real_guard_races_at_checkpoint_and_final_commit_preserve_work() {
+    for race_at in ["checkpoint", "final_commit"] {
         let (runtime, account_id, operation_id, mut port) = matrix_recovery("none", 0, false).await;
         port.race_at = Some(race_at);
         *port.race_context.lock().unwrap() = Some((runtime.clone(), account_id.clone()));
@@ -3102,17 +2391,7 @@ async fn real_guard_races_at_checkpoint_authority_fetch_and_final_commit_preserv
 
 #[tokio::test]
 async fn every_recovery_exchange_survives_more_than_five_failures_without_discarding_work() {
-    for exchange in [
-        "status",
-        "grant",
-        "upload",
-        "confirm",
-        "lookup",
-        "put",
-        "vault",
-        "key_first",
-        "key_second",
-    ] {
+    for exchange in ["status", "grant", "upload", "confirm", "lookup", "put"] {
         let (runtime, account_id, operation_id, port) = matrix_recovery(exchange, 6, false).await;
         for _ in 0..6 {
             assert_eq!(
@@ -3146,17 +2425,7 @@ async fn every_recovery_exchange_survives_more_than_five_failures_without_discar
 
 #[tokio::test]
 async fn every_recovery_exchange_renews_once_on_first_401_and_parks_on_second_401() {
-    for exchange in [
-        "status",
-        "grant",
-        "upload",
-        "confirm",
-        "lookup",
-        "put",
-        "vault",
-        "key_first",
-        "key_second",
-    ] {
+    for exchange in ["status", "grant", "upload", "confirm", "lookup", "put"] {
         let (runtime, account_id, operation_id, port) = matrix_recovery(exchange, 1, true).await;
         assert_eq!(
             runtime
@@ -3192,9 +2461,12 @@ async fn every_recovery_exchange_renews_once_on_first_401_and_parks_on_second_40
 
 #[tokio::test]
 async fn a_lock_epoch_fence_at_create_vault_commit_accepts_no_work() {
-    let runtime = Runtime::with_serialized_replica_executor(
+    let runtime = Runtime::with_serialized_executors(
         super::create_tests::create_vault_fenced_executor(),
+        image_platform().await,
+        Arc::new(super::create_tests::UnusedHttp),
     );
+    runtime.open().await.unwrap();
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
     runtime.unlock_account(&account_id).await.unwrap();
@@ -3222,9 +2494,12 @@ async fn a_lock_epoch_fence_at_create_vault_commit_accepts_no_work() {
 
 #[tokio::test]
 async fn published_artifact_is_ended_and_deleted_when_guarded_acceptance_commit_fails() {
-    let runtime = Runtime::with_serialized_replica_executor(
+    let runtime = Runtime::with_serialized_executors(
         super::create_tests::create_vault_failing_executor(),
+        image_platform().await,
+        Arc::new(super::create_tests::UnusedHttp),
     );
+    runtime.open().await.unwrap();
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
     runtime.unlock_account(&account_id).await.unwrap();
@@ -3259,16 +2534,16 @@ async fn published_artifact_is_ended_and_deleted_when_guarded_acceptance_commit_
         .operations
         .is_empty());
     assert_eq!(*sources.acceptance.lock().unwrap(), vec!["begin", "end"]);
-    let (operation_id, vault_id) = sources.scope.lock().unwrap().clone().unwrap();
-    let metadata = crate::VaultImageArtifactMetadata::new(
-        crate::VaultImageArtifactScope::new(account_id, operation_id).unwrap(),
-        vault_id,
-        11,
-        "image/png",
-        format!("{:x}", Sha256::digest(b"image-bytes")),
-    )
-    .unwrap();
-    assert!(artifacts.read_all(&metadata).await.is_err());
+    let (operation_id, _) = sources.scope.lock().unwrap().clone().unwrap();
+    let family = crate::VaultImageArtifactScope::new(account_id, operation_id).unwrap();
+    assert!(
+        artifacts
+            .read_generation(&family, None)
+            .await
+            .unwrap()
+            .is_none(),
+        "failed acceptance must remove the actual protected publication"
+    );
 }
 
 #[tokio::test]
@@ -3312,15 +2587,24 @@ async fn begin_acceptance_and_immediate_delete_failure_leave_only_a_startup_swee
         .is_empty());
     assert_eq!(artifacts.delete_calls.load(Ordering::SeqCst), 1);
     let (operation_id, vault_id) = sources.scope.lock().unwrap().clone().unwrap();
-    let metadata = crate::VaultImageArtifactMetadata::new(
-        crate::VaultImageArtifactScope::new(account_id.clone(), operation_id).unwrap(),
-        vault_id,
-        11,
-        "image/png",
-        format!("{:x}", Sha256::digest(b"image-bytes")),
-    )
-    .unwrap();
+    let family = crate::VaultImageArtifactScope::new(account_id.clone(), operation_id).unwrap();
+    let metadata = artifacts
+        .inner
+        .read_generation(&family, None)
+        .await
+        .unwrap()
+        .unwrap()
+        .metadata
+        .unwrap();
+    assert_eq!(metadata.vault_id(), vault_id);
+    assert_eq!(metadata.byte_length(), 11);
+    assert_eq!(metadata.content_type(), "image/png");
     assert_eq!(
+        metadata.sha256(),
+        format!("{:x}", Sha256::digest(b"image-bytes"))
+    );
+    assert!(metadata.protection().is_some());
+    assert_ne!(
         artifacts.inner.read_all(&metadata).await.unwrap(),
         b"image-bytes"
     );
@@ -3334,9 +2618,12 @@ async fn begin_acceptance_and_immediate_delete_failure_leave_only_a_startup_swee
 
 #[tokio::test]
 async fn fenced_acceptance_and_delete_failure_leave_a_sweepable_orphan_without_an_operation() {
-    let runtime = Runtime::with_serialized_replica_executor(
+    let runtime = Runtime::with_serialized_executors(
         super::create_tests::create_vault_fenced_executor(),
+        image_platform().await,
+        Arc::new(super::create_tests::UnusedHttp),
     );
+    runtime.open().await.unwrap();
     let account_id = AccountId::from("account-1");
     runtime.replica().load(&account_id).await.unwrap().unwrap();
     runtime.unlock_account(&account_id).await.unwrap();
@@ -3378,15 +2665,24 @@ async fn fenced_acceptance_and_delete_failure_leave_a_sweepable_orphan_without_a
     assert_eq!(*sources.acceptance.lock().unwrap(), vec!["begin", "end"]);
     assert_eq!(artifacts.delete_calls.load(Ordering::SeqCst), 1);
     let (operation_id, vault_id) = sources.scope.lock().unwrap().clone().unwrap();
-    let metadata = crate::VaultImageArtifactMetadata::new(
-        crate::VaultImageArtifactScope::new(account_id.clone(), operation_id).unwrap(),
-        vault_id,
-        11,
-        "image/png",
-        format!("{:x}", Sha256::digest(b"image-bytes")),
-    )
-    .unwrap();
+    let family = crate::VaultImageArtifactScope::new(account_id.clone(), operation_id).unwrap();
+    let metadata = artifacts
+        .inner
+        .read_generation(&family, None)
+        .await
+        .unwrap()
+        .unwrap()
+        .metadata
+        .unwrap();
+    assert_eq!(metadata.vault_id(), vault_id);
+    assert_eq!(metadata.byte_length(), 11);
+    assert_eq!(metadata.content_type(), "image/png");
     assert_eq!(
+        metadata.sha256(),
+        format!("{:x}", Sha256::digest(b"image-bytes"))
+    );
+    assert!(metadata.protection().is_some());
+    assert_ne!(
         artifacts.inner.read_all(&metadata).await.unwrap(),
         b"image-bytes"
     );
@@ -3398,14 +2694,14 @@ async fn fenced_acceptance_and_delete_failure_leave_a_sweepable_orphan_without_a
     assert!(artifacts.inner.read_all(&metadata).await.is_err());
 }
 
-async fn seed_rejected_image_cleanup(
+pub(super) async fn seed_rejected_image_cleanup(
     persistence: &crate::replica::InMemoryReplica,
     operation_id: &str,
 ) -> crate::replica::OperationRecord {
     seed_image_cleanup(persistence, operation_id, true).await
 }
 
-async fn seed_image_cleanup(
+pub(super) async fn seed_image_cleanup(
     persistence: &crate::replica::InMemoryReplica,
     operation_id: &str,
     reconcile_rejection: bool,
@@ -3435,7 +2731,9 @@ async fn seed_image_cleanup(
             body: Vec::new(),
         },
         request_fingerprint: crate::replica::Sha256Fingerprint([0; 32]),
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: Some(CreateVaultOperationRecord {
             account_id: account_id.clone(),
             name: "Rejected image".into(),
@@ -3443,6 +2741,8 @@ async fn seed_image_cleanup(
             icon: "lock".into(),
             encrypted_vault_key: "wrapped".into(),
             image: Some(CreateVaultImageRecord {
+                protected_witness: None,
+                raw_cleanup_pending: false,
                 byte_length: 11,
                 content_type: "image/png".into(),
                 sha256: image_sha256.clone(),
@@ -3454,6 +2754,7 @@ async fn seed_image_cleanup(
             checkpoint: CreateVaultCheckpoint::FinalRequestFrozen,
         }),
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     };
     let (request, fingerprint) = super::create_vault::create_vault_http_request(
         operation.vault_id(),
@@ -3945,6 +3246,29 @@ impl crate::VaultImageSourcePort for LifecyclePngSource {
     ) -> Result<(), crate::VaultImageSourceError> {
         Ok(())
     }
+    async fn retire_vaults(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(&self, _: &str) -> Result<(), crate::VaultImageSourceError> {
         self.runtime_retirements.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -3988,9 +3312,7 @@ async fn accepted_png_survives_retirement(action: PreserveImageRetirement) {
     let persistence = Arc::new(InMemoryReplica::default());
     let runtime = Runtime::with_persistence(
         persistence.clone(),
-        Arc::new(PlatformStorage::new(
-            operation_fixtures::MemoryPlatform::new(),
-        )),
+        Arc::new(PlatformStorage::new(image_platform().await)),
         Arc::new(HttpTransport::unavailable()),
         None,
         None,
@@ -4062,8 +3384,41 @@ async fn accepted_png_survives_retirement(action: PreserveImageRetirement) {
         &image.sha256,
     )
     .unwrap();
+    let witness = image
+        .protected_witness
+        .as_ref()
+        .expect("accepted PNG must be protected");
+    let family = metadata.scope().clone();
+    let publication = artifacts
+        .read_generation(&family, None)
+        .await
+        .unwrap()
+        .unwrap()
+        .metadata
+        .unwrap();
+    assert_eq!(publication.protection().unwrap().witness, *witness);
+    let ciphertext = artifacts.read_all(&publication).await.unwrap();
+    assert_ne!(ciphertext, bytes);
+    let facade = crate::VaultImageIngressFacade::new(
+        "read-fixture",
+        Arc::new(ExactImageSourcePort),
+        artifacts.clone(),
+    )
+    .unwrap();
     assert_eq!(
-        artifacts.read_all(&metadata).await.unwrap().as_slice(),
+        facade
+            .read_protected_bound(
+                &metadata,
+                witness,
+                crate::vault_image::VaultImageProtection {
+                    user_id: "user-1",
+                    device_key: &[7; 32]
+                },
+                &RequestCancellation::new()
+            )
+            .await
+            .unwrap()
+            .as_slice(),
         bytes.as_slice()
     );
     match action {
@@ -4119,11 +3474,11 @@ async fn accepted_png_survives_retirement(action: PreserveImageRetirement) {
     );
     assert_eq!(
         artifacts
-            .read_all(&metadata)
+            .read_all(&publication)
             .await
             .expect("ordinary source retirement must retain accepted PNG bytes")
             .as_slice(),
-        bytes.as_slice()
+        ciphertext.as_slice()
     );
     assert!(
         sources.account_retirements.load(Ordering::SeqCst)
@@ -4132,8 +3487,8 @@ async fn accepted_png_survives_retirement(action: PreserveImageRetirement) {
     );
     runtime.close().await;
     assert_eq!(
-        artifacts.read_all(&metadata).await.unwrap().as_slice(),
-        bytes.as_slice()
+        artifacts.read_all(&publication).await.unwrap().as_slice(),
+        ciphertext.as_slice()
     );
 }
 #[tokio::test]
@@ -4151,4 +3506,210 @@ async fn accepted_png_survives_sign_out() {
 #[tokio::test]
 async fn accepted_png_survives_busy_recovery_admission() {
     accepted_png_survives_retirement(PreserveImageRetirement::BusyRecovery).await;
+}
+
+#[tokio::test]
+async fn retained_create_vault_receipts_without_requiring_its_original_current_authority() {
+    let (runtime, account_id, operation_id, port) = matrix_recovery("vault", 1, false).await;
+    let original_visible = runtime
+        .replica()
+        .snapshot(&account_id)
+        .unwrap()
+        .bootstrap
+        .snapshot()
+        .visible_vaults;
+    let result = runtime
+        .drive_create_vault_recovery_cycle(&account_id, &operation_id, &port, &port)
+        .await
+        .unwrap();
+    assert_eq!(
+        result,
+        super::create_vault_executor::CreateVaultExecutorPass::Completed
+    );
+    let after = runtime.replica().snapshot(&account_id).unwrap();
+    assert!(after.operations.is_empty());
+    assert_eq!(after.receipts.len(), 1);
+    assert!(
+        after.receipts[0]
+            .create_vault_cleanup
+            .as_ref()
+            .unwrap()
+            .local_artifact_pending
+    );
+    assert_eq!(
+        after.bootstrap.state,
+        crate::replica::ReplicaState::RefreshRequired
+    );
+    assert_eq!(after.bootstrap.snapshot().visible_vaults, original_visible);
+    assert_eq!(
+        port.failures_left.load(Ordering::SeqCst),
+        1,
+        "receipt-only completion must never query the old Vault or key representation"
+    );
+}
+
+#[tokio::test]
+async fn stale_create_vault_identity_error_cannot_fail_a_newer_replica_head() {
+    struct StaleIdentityReply {
+        runtime: Arc<Runtime>,
+        account_id: AccountId,
+    }
+    #[async_trait]
+    impl super::create_vault_executor::CreateVaultExecutorPort for StaleIdentityReply {
+        async fn lookup(
+            &self,
+            _: &crate::replica::OperationRecord,
+        ) -> Result<
+            Option<super::create_vault_executor::CreateVaultOperationResponse>,
+            super::create_vault_staging::CreateVaultStagingError,
+        > {
+            Ok(None)
+        }
+        async fn put_exact(
+            &self,
+            operation: &crate::replica::OperationRecord,
+        ) -> Result<
+            super::create_vault_executor::CreateVaultOperationResponse,
+            super::create_vault_staging::CreateVaultStagingError,
+        > {
+            let snapshot = self.runtime.replica.snapshot(&self.account_id).unwrap();
+            let mut newer = operation.clone();
+            newer.scheduling.attempt_count += 1;
+            self.runtime
+                .replica
+                .execute_exact(GuardedCommitPlan::new(
+                    self.account_id.clone(),
+                    snapshot.incarnation,
+                    snapshot.revision,
+                    snapshot.lock_epoch,
+                    vec![PlanMutation::RescheduleOperation(newer)],
+                ))
+                .await
+                .unwrap();
+            super::create_vault_executor::CreateVaultExecutorPort::put_exact(
+                &MisTaggedExecutor(InvalidCreateVaultReplay::ChangedFingerprint),
+                operation,
+            )
+            .await
+        }
+        async fn renew_session(
+            &self,
+        ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
+            Ok(())
+        }
+    }
+    let (runtime, account_id, operation_id, staging) = matrix_recovery("none", 0, false).await;
+    let reply = StaleIdentityReply {
+        runtime: runtime.clone(),
+        account_id: account_id.clone(),
+    };
+    let result = runtime
+        .drive_create_vault_recovery_cycle(&account_id, &operation_id, &staging, &reply)
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(super::create_vault_staging::CreateVaultRecoveryError::ParkedFenced)
+        ),
+        "stale identity failure must retry its original scope"
+    );
+    let after = runtime.replica.snapshot(&account_id).unwrap();
+    assert_eq!(after.failure, None);
+    assert_eq!(after.operations.len(), 1);
+    assert!(after.receipts.is_empty());
+}
+
+#[tokio::test]
+async fn failed_create_vault_receipt_write_preserves_work_and_uses_durable_retry() {
+    struct FailReceiptCommit(Arc<InMemoryReplica>, AtomicBool);
+    #[async_trait]
+    impl ReplicaPersistence for FailReceiptCommit {
+        async fn invoke(
+            &self,
+            request: crate::replica::ReplicaPersistenceRequest,
+        ) -> Result<crate::replica::ReplicaPersistenceResponse, RuntimeError> {
+            if matches!(
+                &request,
+                crate::replica::ReplicaPersistenceRequest::Commit { .. }
+            ) && self.1.swap(false, Ordering::SeqCst)
+            {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::InvariantViolation,
+                    "physical receipt write failed",
+                ));
+            }
+            self.0.invoke(request).await
+        }
+    }
+    let (original, account_id, _) = unlocked_runtime().await;
+    original.seed_ready_personal_vault_in_memory(&account_id);
+    let response = original
+        .request(
+            RuntimeRequest::CreateVault {
+                account_id: account_id.clone(),
+                name: "Receipt retry".into(),
+                vault_type: CreateVaultType::Personal,
+                icon: "lock".into(),
+                image_source: None,
+            },
+            RequestCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let RuntimeResponse::VaultCreationAccepted { operation_id, .. } = response else {
+        panic!("expected accepted Vault")
+    };
+    let persistence = original.test_persistence.as_ref().unwrap().clone();
+    let before = persistence.snapshot(&account_id).unwrap();
+    let runtime = Runtime::with_persistence(
+        Arc::new(FailReceiptCommit(
+            persistence.clone(),
+            AtomicBool::new(true),
+        )),
+        Arc::new(PlatformStorage::unavailable()),
+        Arc::new(HttpTransport::unavailable()),
+        None,
+        None,
+        true,
+        operation_fixtures::TestClock::new(),
+        Arc::new(SystemDeviceTimer),
+        Some(persistence.clone()),
+    );
+    runtime.replica.load(&account_id).await.unwrap();
+    let port = LostAppliedResponseExecutor {
+        committed: AtomicBool::new(true),
+        authority: Mutex::new(None),
+        put_calls: AtomicUsize::new(0),
+    };
+    assert_eq!(
+        runtime
+            .drive_create_vault_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap(),
+        super::create_vault_executor::CreateVaultExecutorPass::RetryScheduled
+    );
+    let waiting = persistence.snapshot(&account_id).unwrap();
+    assert!(waiting.failure.is_none());
+    assert_eq!(waiting.operations[0].request, before.operations[0].request);
+    assert_eq!(
+        waiting.operations[0].request_fingerprint,
+        before.operations[0].request_fingerprint
+    );
+    assert_eq!(waiting.operations[0].scheduling.attempt_count, 1);
+    assert!(
+        waiting.operations[0].scheduling.not_before_ms
+            > before.operations[0].scheduling.not_before_ms
+    );
+    assert_eq!(waiting.receipts, before.receipts);
+    assert_eq!(waiting.bootstrap, before.bootstrap);
+    assert_eq!(
+        runtime
+            .drive_create_vault_executor_cycle(&account_id, &operation_id, &port)
+            .await
+            .unwrap(),
+        super::create_vault_executor::CreateVaultExecutorPass::Completed
+    );
+    let after = persistence.snapshot(&account_id).unwrap();
+    assert!(after.operations.is_empty());
+    assert_eq!(after.receipts.len(), 1);
 }

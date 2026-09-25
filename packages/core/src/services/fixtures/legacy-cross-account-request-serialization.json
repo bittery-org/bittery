@@ -1,0 +1,53 @@
+{
+	"command": {
+		"accountId": "account:source",
+		"accountEmail": "source@example.test",
+		"id": "source-command:cross-account",
+		"operationId": "semantic:cross-account:42",
+		"attemptId": "attempt:cross-account:99",
+		"type": "cross_account_move",
+		"entityId": "source:item/雪",
+		"vaultId": "source:vault/雪",
+		"targetAccountId": "account:target",
+		"targetVaultId": "target:vault/目标",
+		"targetItemId": "target:item/雪",
+		"category": "secure-note",
+		"encryptedPayload": {
+			"encryptedData": "target-ciphertext-雪",
+			"encryptionIv": "target-iv",
+			"encryptionAlgorithm": "AES-GCM-AAD-V1",
+			"encryptionVersion": 1,
+			"encryptedByUserId": "target:user"
+		},
+		"baseVersion": 41,
+		"timestamp": 1770000000000,
+		"retryCount": 0,
+		"status": "pending"
+	},
+	"captures": [
+		{
+			"serverUrl": "https://target.legacy.invalid",
+			"method": "PUT",
+			"path": "/api/v1/vaults/target%3Avault%2F%E7%9B%AE%E6%A0%87/items/target%3Aitem%2F%E9%9B%AA",
+			"operationId": "semantic:cross-account:42:create-target",
+			"ifMatch": null,
+			"body": "{\"category\":\"secure-note\",\"encryptedData\":\"target-ciphertext-雪\",\"encryptionIv\":\"target-iv\",\"encryptionAlgorithm\":\"AES-GCM-AAD-V1\"}"
+		},
+		{
+			"serverUrl": "https://source.legacy.invalid",
+			"method": "DELETE",
+			"path": "/api/v1/items/source%3Aitem%2F%E9%9B%AA",
+			"operationId": "semantic:cross-account:42:trash-source",
+			"ifMatch": "\"41\"",
+			"body": ""
+		},
+		{
+			"serverUrl": "https://source.legacy.invalid",
+			"method": "DELETE",
+			"path": "/api/v1/items/source%3Aitem%2F%E9%9B%AA/permanent",
+			"operationId": "semantic:cross-account:42:delete-source",
+			"ifMatch": "\"42\"",
+			"body": ""
+		}
+	]
+}

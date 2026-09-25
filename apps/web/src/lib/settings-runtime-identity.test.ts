@@ -15,23 +15,47 @@ describe("Settings deletion Runtime identity wiring", () => {
 				{
 					accountId: "account-1",
 					access: "unlocked",
-					displayIdentity: { email: "wrong@example.test" },
+					displayIdentity: {
+						email: "wrong@example.test",
+						name: "Test Account",
+						teamName: null,
+						teamAvatarUrl: null,
+						serverUrl: "https://vault.example.test",
+						secretKeyHint: "A3-A••••",
+					},
 					failure: null,
 					replicaRevision: "1",
+					unlockCapabilities: {
+						password: false,
+						desktop: false,
+						signIn: false,
+					},
 				},
 				{
 					accountId: "account-2",
 					access: "unlocked",
-					displayIdentity: { email: "person@example.test" },
+					displayIdentity: {
+						email: "person@example.test",
+						name: "Test Account",
+						teamName: null,
+						teamAvatarUrl: null,
+						serverUrl: "https://vault.example.test",
+						secretKeyHint: "A3-A••••",
+					},
 					failure: null,
 					replicaRevision: "1",
+					unlockCapabilities: {
+						password: false,
+						desktop: false,
+						signIn: false,
+					},
 				},
 			],
 			waitingReason: null,
 			code: null,
 		};
 
-		expect(activeRuntimeAccountDisplayIdentity(session)).toEqual({
+		expect(activeRuntimeAccountDisplayIdentity(session)).toMatchObject({
 			email: "person@example.test",
 		});
 	});
@@ -46,6 +70,11 @@ describe("Settings deletion Runtime identity wiring", () => {
 					access: "signedOut",
 					failure: "INVARIANT_VIOLATION",
 					replicaRevision: "0",
+					unlockCapabilities: {
+						password: false,
+						desktop: false,
+						signIn: false,
+					},
 				},
 			],
 			waitingReason: null,
@@ -111,16 +140,40 @@ describe("Settings deletion Runtime identity wiring", () => {
 				{
 					accountId: "account-1",
 					access: "unlocked",
-					displayIdentity: { email: "wrong@example.test" },
+					displayIdentity: {
+						email: "wrong@example.test",
+						name: "Test Account",
+						teamName: null,
+						teamAvatarUrl: null,
+						serverUrl: "https://vault.example.test",
+						secretKeyHint: "A3-A••••",
+					},
 					failure: null,
 					replicaRevision: "1",
+					unlockCapabilities: {
+						password: false,
+						desktop: false,
+						signIn: false,
+					},
 				},
 				{
 					accountId: "account-2",
 					access: "unlocked",
-					displayIdentity: { email: "right@example.test" },
+					displayIdentity: {
+						email: "right@example.test",
+						name: "Test Account",
+						teamName: null,
+						teamAvatarUrl: null,
+						serverUrl: "https://vault.example.test",
+						secretKeyHint: "A3-A••••",
+					},
 					failure: null,
 					replicaRevision: "1",
+					unlockCapabilities: {
+						password: false,
+						desktop: false,
+						signIn: false,
+					},
 				},
 			],
 			waitingReason: null,

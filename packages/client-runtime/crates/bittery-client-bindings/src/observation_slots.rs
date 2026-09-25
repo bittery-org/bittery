@@ -56,6 +56,20 @@ impl<T> ObservationSlots<T> {
         self.lock().remove(observation_id)
     }
 
+    /// Callback failure belongs to one installation, even if that callback reused its old id.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn remove_if(&self, observation_id: &str, expected: &Arc<T>) -> Option<Arc<T>> {
+        let mut entries = self.lock();
+        if entries
+            .get(observation_id)
+            .is_some_and(|entry| Arc::ptr_eq(entry, expected))
+        {
+            entries.remove(observation_id)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn ids(&self) -> Vec<String> {
         self.lock().keys().cloned().collect()
     }

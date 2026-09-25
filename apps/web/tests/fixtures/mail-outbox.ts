@@ -53,6 +53,10 @@ function currentProjectName(): string {
 
 /** Absolute path of the outbox the given project's API server writes to. */
 export function mailOutboxPath(projectName = currentProjectName()): string {
+	// Dedicated native compatibility acceptance uses a separately leased Server and
+	// outbox. Its test-results directory is cleared when Playwright starts.
+	if (process.env.BITTERY_NATIVE97_MAIL_OUTBOX)
+		return process.env.BITTERY_NATIVE97_MAIL_OUTBOX;
 	const outboxPath = (MAIL_OUTBOX_PATHS as Record<string, string | undefined>)[
 		projectName
 	];

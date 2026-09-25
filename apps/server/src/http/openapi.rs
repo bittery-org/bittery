@@ -204,8 +204,8 @@ mod tests {
             })
             .sum::<usize>();
 
-        assert_eq!(paths.len(), 98);
-        assert_eq!(operation_count, 112);
+        assert_eq!(paths.len(), 100);
+        assert_eq!(operation_count, 114);
     }
 
     #[test]
@@ -451,7 +451,7 @@ mod tests {
             .count();
 
         assert_eq!(public, 17);
-        assert_eq!(bearer, 95);
+        assert_eq!(bearer, 97);
         assert_eq!(public + bearer, operations.len());
 
         for operation_id in [

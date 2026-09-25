@@ -34,7 +34,9 @@ function grant(
 	sink = emptySink(),
 ): string {
 	return registry.grant({
+		scope: registry.captureScope("account-one", "vault-one"),
 		accountId: "account-one",
+		vaultId: "vault-one",
 		attachmentId: "attachment-one",
 		sink,
 	});
@@ -43,6 +45,7 @@ function begin(capabilityId: string, accountId = "account-one"): string {
 	return control({
 		type: "begin",
 		accountId,
+		vaultId: "vault-one",
 		attachmentId: "attachment-one",
 		capabilityId,
 		requestScope: capabilityId,
@@ -50,13 +53,99 @@ function begin(capabilityId: string, accountId = "account-one"): string {
 }
 
 describe("Web Attachment Download sink capabilities", () => {
+	test("selective retirement drains its plaintext write and preserves another Vault with the same Attachment", async () => {
+		const registry = await activeRegistry();
+		let release!: () => void;
+		let started!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const writing = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const discarded: string[] = [];
+		const add = (vaultId: string, accountId = "account-one") =>
+			registry.grant({
+				scope: registry.captureScope(accountId, vaultId),
+				accountId,
+				vaultId,
+				attachmentId: "same-attachment",
+				sink: {
+					write: async () => {
+						started();
+						await held;
+					},
+					commit: async () => {},
+					discard: async () => {
+						discarded.push(`${accountId}/${vaultId}`);
+					},
+				},
+			});
+		const hidden = add("hidden");
+		const visible = add("visible");
+		add("hidden", "account-two");
+		const beginScoped = (capabilityId: string, vaultId: string) =>
+			control({
+				type: "begin",
+				capabilityId,
+				accountId: "account-one",
+				vaultId,
+				attachmentId: "same-attachment",
+				requestScope: capabilityId,
+			});
+		expect(
+			await registry.invoke(
+				beginScoped(hidden, "hidden"),
+				undefined,
+				runtimeScope,
+			),
+		).toBe('{"type":"begun"}');
+		const bytes = new Uint8Array([8]);
+		const write = registry.invoke(
+			control({ type: "write", capabilityId: hidden }),
+			bytes,
+			runtimeScope,
+		);
+		await writing;
+		let finished = false;
+		const retire = registry
+			.invoke(
+				control({
+					type: "retireVaults",
+					accountId: "account-one",
+					vaultIds: ["hidden"],
+				}),
+				undefined,
+				runtimeScope,
+			)
+			.then((value) => {
+				finished = true;
+				return value;
+			});
+		expect(() => add("hidden")).toThrow();
+		await Promise.resolve();
+		expect(finished).toBe(false);
+		release();
+		await write;
+		expect(await retire).toBe('{"type":"retired"}');
+		expect([...bytes]).toEqual([0]);
+		expect(discarded).toEqual(["account-one/hidden"]);
+		expect(
+			await registry.invoke(
+				beginScoped(visible, "visible"),
+				undefined,
+				runtimeScope,
+			),
+		).toBe('{"type":"begun"}');
+		await registry.drainClose();
+	});
 	test("one total bound backpressures grants without evicting live cleanup identities", async () => {
 		let next = 0;
 		const registry = await activeRegistry({
 			identity: () => `bounded-${next++}`,
 		});
 		const capabilities = Array.from(
-			{ length: MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 2 },
+			{ length: MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 3 },
 			() => grant(registry),
 		);
 		expect(() => grant(registry)).toThrow("capacity");
@@ -88,10 +177,12 @@ describe("Web Attachment Download sink capabilities", () => {
 			identity: () => `expiring-${next++}`,
 		});
 		const capabilities = Array.from(
-			{ length: MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 2 },
+			{ length: MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 3 },
 			() =>
 				registry.grant({
+					scope: registry.captureScope("account-one", "vault-one"),
 					accountId: "account-one",
+					vaultId: "vault-one",
 					attachmentId: "attachment-one",
 					expiresAt: 2,
 					sink: {
@@ -110,7 +201,7 @@ describe("Web Attachment Download sink capabilities", () => {
 				runtimeScope,
 			),
 		).toBe('{"type":"invariantViolation"}');
-		expect(discards).toBe(MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 2);
+		expect(discards).toBe(MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 3);
 		expect(() => grant(registry)).not.toThrow();
 	});
 	test("requires the trusted Runtime handshake before a grant", () => {
@@ -199,6 +290,7 @@ describe("Web Attachment Download sink capabilities", () => {
 				control({
 					type: "begin",
 					accountId: "account-one",
+					vaultId: "vault-one",
 					attachmentId: "attachment-one",
 					capabilityId,
 					requestScope: "foreign-request",
@@ -342,7 +434,9 @@ describe("Web Attachment Download sink capabilities", () => {
 		])
 			expect(() =>
 				registry.grant({
+					scope: registry.captureScope("a", "vault-one"),
 					accountId: "a",
+					vaultId: "vault-one",
 					attachmentId: "b",
 					expiresAt,
 					sink: emptySink(),
@@ -350,11 +444,19 @@ describe("Web Attachment Download sink capabilities", () => {
 			).toThrow();
 		now = Number.MAX_VALUE;
 		expect(() =>
-			registry.grant({ accountId: "a", attachmentId: "b", sink: emptySink() }),
+			registry.grant({
+				scope: registry.captureScope("a", "vault-one"),
+				vaultId: "vault-one",
+				accountId: "a",
+				attachmentId: "b",
+				sink: emptySink(),
+			}),
 		).toThrow();
 		now = 20;
 		const capabilityId = registry.grant({
+			scope: registry.captureScope("a", "vault-one"),
 			accountId: "a",
+			vaultId: "vault-one",
 			attachmentId: "b",
 			expiresAt: 30,
 			sink: emptySink(),
@@ -365,6 +467,7 @@ describe("Web Attachment Download sink capabilities", () => {
 				control({
 					type: "begin",
 					accountId: "a",
+					vaultId: "vault-one",
 					attachmentId: "b",
 					capabilityId,
 					requestScope: capabilityId,
@@ -704,7 +807,9 @@ describe("Web Attachment Download sink capabilities", () => {
 			},
 		});
 		const other = registry.grant({
+			scope: registry.captureScope("account-two", "vault-one"),
 			accountId: "account-two",
+			vaultId: "vault-one",
 			attachmentId: "attachment-two",
 			sink: emptySink(),
 		});
@@ -744,6 +849,7 @@ describe("Web Attachment Download sink capabilities", () => {
 				control({
 					type: "begin",
 					accountId: "account-two",
+					vaultId: "vault-one",
 					attachmentId: "attachment-two",
 					capabilityId: other,
 					requestScope: other,
@@ -766,7 +872,9 @@ describe("Web Attachment Download sink capabilities", () => {
 		).toBe('{"type":"retired"}');
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("empty-account", "vault-one"),
 				accountId: "empty-account",
+				vaultId: "vault-one",
 				attachmentId: "attachment-one",
 				sink: emptySink(),
 			}),
@@ -783,7 +891,9 @@ describe("Web Attachment Download sink capabilities", () => {
 		).toBe('{"type":"retirementCompleted"}');
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("empty-account", "vault-one"),
 				accountId: "empty-account",
+				vaultId: "vault-one",
 				attachmentId: "attachment-one",
 				sink: emptySink(),
 			}),
@@ -940,16 +1050,20 @@ describe("Web Attachment Download sink capabilities", () => {
 				runtimeScope,
 			),
 		).toBe('{"type":"retired"}');
-		for (let index = 0; index < 1020; index += 1) {
+		for (let index = 0; index < 1017; index += 1) {
 			registry.grant({
+				scope: registry.captureScope("live-account", "vault-one"),
 				accountId: "live-account",
+				vaultId: "vault-one",
 				attachmentId: `attachment-${index}`,
 				sink: emptySink(),
 			});
 		}
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("live-account", "vault-one"),
 				accountId: "live-account",
+				vaultId: "vault-one",
 				attachmentId: "identity-1025",
 				sink: emptySink(),
 			}),
@@ -966,7 +1080,9 @@ describe("Web Attachment Download sink capabilities", () => {
 		).toBe('{"type":"retirementCompleted"}');
 		expect(() =>
 			registry.grant({
+				scope: registry.captureScope("live-account", "vault-one"),
 				accountId: "live-account",
+				vaultId: "vault-one",
 				attachmentId: "freed-capacity",
 				sink: emptySink(),
 			}),
@@ -1024,7 +1140,7 @@ describe("Web Attachment Download sink capabilities", () => {
 		const registry = await activeRegistry({
 			identity: () => `runtime-slot-${next++}`,
 		});
-		const capabilities = Array.from({ length: 1022 }, () => grant(registry));
+		const capabilities = Array.from({ length: 1020 }, () => grant(registry));
 		for (const capabilityId of capabilities) {
 			expect(
 				await registry.invoke(
@@ -1093,10 +1209,12 @@ describe("Web Attachment Download sink capabilities", () => {
 			identity: () => `burst-${next++}`,
 		});
 		const capabilities = Array.from(
-			{ length: MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 2 },
+			{ length: MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 3 },
 			() =>
 				registry.grant({
+					scope: registry.captureScope("account-one", "vault-one"),
 					accountId: "account-one",
+					vaultId: "vault-one",
 					attachmentId: "attachment-one",
 					expiresAt: 2,
 					sink: {
@@ -1124,7 +1242,7 @@ describe("Web Attachment Download sink capabilities", () => {
 			);
 		}
 		await Promise.resolve();
-		expect(discards).toBe(MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 2);
+		expect(discards).toBe(MAX_ATTACHMENT_DOWNLOAD_SINK_IDENTITIES - 3);
 		release();
 		await Promise.all(repeatedInvocations);
 		await registry.invoke(
@@ -1182,4 +1300,82 @@ describe("Web Attachment Download sink capabilities", () => {
 			await registry.drainClose();
 		}
 	});
+});
+
+test("startup Vault cleanup owns only the prepared Runtime and survives commit", async () => {
+	const registry = new WebAttachmentDownloadSinkRegistry();
+	await prepareWebAttachmentDownloadRuntimeIncarnation(registry, "startup");
+	const retiring = control({
+		type: "retireVaults",
+		accountId: "account-a",
+		vaultIds: ["hidden"],
+	});
+	expect(await registry.invoke(retiring, undefined, "foreign")).toBe(
+		'{"type":"invariantViolation"}',
+	);
+	expect(await registry.invoke(retiring, undefined, "startup")).toBe(
+		'{"type":"retired"}',
+	);
+	expect(() => registry.captureScope("account-a", "visible")).toThrow();
+	await commitWebAttachmentDownloadRuntimeIncarnation(registry, "startup");
+	expect(() => registry.captureScope("account-a", "hidden")).toThrow();
+	expect(() => registry.captureScope("account-a", "visible")).not.toThrow();
+	expect(() => registry.captureScope("account-b", "hidden")).not.toThrow();
+	expect(
+		await registry.invoke(
+			control({
+				type: "completeVaultRetirement",
+				accountId: "account-a",
+				vaultIds: ["hidden"],
+			}),
+			undefined,
+			"startup",
+		),
+	).toBe('{"type":"retirementCompleted"}');
+	expect(() => registry.captureScope("account-a", "hidden")).not.toThrow();
+	await registry.drainClose();
+});
+
+test("prepared cleanup waits for prepare and cannot broaden Account admission", async () => {
+	const registry = new WebAttachmentDownloadSinkRegistry();
+	const preparation = prepareWebAttachmentDownloadRuntimeIncarnation(
+		registry,
+		"startup",
+	);
+	const retiring = control({
+		type: "retireVaults",
+		accountId: "account-a",
+		vaultIds: ["visible-again"],
+	});
+	expect(await registry.invoke(retiring, undefined, "startup")).toBe(
+		'{"type":"invariantViolation"}',
+	);
+	await preparation;
+	expect(await registry.invoke(retiring, undefined, "startup")).toBe(
+		'{"type":"retired"}',
+	);
+	expect(
+		await registry.invoke(
+			control({ type: "retireAccount", accountId: "account-a" }),
+			undefined,
+			"startup",
+		),
+	).toBe('{"type":"invariantViolation"}');
+	expect(
+		await registry.invoke(
+			control({
+				type: "completeVaultRetirement",
+				accountId: "account-a",
+				vaultIds: ["visible-again"],
+			}),
+			undefined,
+			"startup",
+		),
+	).toBe('{"type":"retirementCompleted"}');
+	expect(() => registry.captureScope("account-a", "visible-again")).toThrow();
+	await commitWebAttachmentDownloadRuntimeIncarnation(registry, "startup");
+	expect(() =>
+		registry.captureScope("account-a", "visible-again"),
+	).not.toThrow();
+	await registry.drainClose();
 });

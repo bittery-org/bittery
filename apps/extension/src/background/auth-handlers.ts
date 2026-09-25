@@ -5,7 +5,11 @@
  * Uses shared auth utilities from @bittery/core for SRP login/unlock logic.
  */
 
-import { signOutAccount } from "@bittery/core/services/account-lifecycle";
+import {
+	IncompleteLifecycleOutcomeError,
+	requireCompleteLifecycleOutcome,
+	signOutAccount,
+} from "@bittery/core/services/account-lifecycle";
 import {
 	performSRPLogin,
 	performSRPUnlock,
@@ -21,6 +25,8 @@ import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
+import { localMaterialPublication } from "./local-material-publication";
+import { nativeMessagingClient } from "./native-messaging-client";
 import type {
 	Acknowledgement,
 	AuthTokenResponse,
@@ -54,6 +60,7 @@ export async function handleLogin(
 	payload: LoginPayload,
 	runtime: ClientRuntime,
 ): Promise<Acknowledgement> {
+	const publication = await localMaterialPublication.capture();
 	const { email, password, secretKey } = payload;
 	const serverUrl = payload.serverUrl ?? DEFAULT_SERVER_URL;
 
@@ -82,14 +89,17 @@ export async function handleLogin(
 		crypto,
 		email,
 		{
+			materialPublication: publication,
 			serverUrl,
 			insecureTransportConfirmed: payload.insecureTransportConfirmed === true,
 			onMasterUnlockKeyTransferred: () => {
+				publication.check();
 				setMasterUnlockKey(result.masterUnlockKey);
 			},
-			onSessionStored: () => reconcileClientRuntime(runtime),
+			onSessionStored: () => reconcileClientRuntime(runtime, publication),
 		},
 	);
+	publication.check();
 
 	// Start activity tracking
 	updateActivity();
@@ -104,6 +114,7 @@ export async function handleQuickUnlock(
 	payload: PasswordPayload,
 	runtime: ClientRuntime,
 ): Promise<UnlockResponse> {
+	const publication = await localMaterialPublication.capture();
 	const { password } = payload;
 
 	// A connected-but-locked desktop owns the unlock; unlocking locally here
@@ -137,14 +148,18 @@ export async function handleQuickUnlock(
 		itemCache,
 		crypto,
 		activeAccount,
-		{ setActive: true },
+		{
+			setActive: true,
+			materialPublication: publication,
+			onMasterUnlockKeyTransferred: () => {
+				publication.check();
+				setMasterUnlockKey(result.masterUnlockKey);
+			},
+		},
 	);
-	await reconcileClientRuntime(runtime);
-
-	// Set MUK in extension's in-memory session manager (for auto-lock)
-	if (result.masterUnlockKey) {
-		setMasterUnlockKey(result.masterUnlockKey);
-	}
+	publication.check();
+	await reconcileClientRuntime(runtime, publication);
+	publication.check();
 
 	// Start activity tracking
 	updateActivity();
@@ -172,8 +187,19 @@ export async function handleCheckAuth(
 	// through a lock and the popup is asking again.
 	if (localAuthenticated && !isUnlocked()) {
 		const restored = await restoreUnlockedSessions(runtime.accounts);
-		if (restored.muk) {
-			setMasterUnlockKey(restored.muk);
+		const muk = restored.muk;
+		if (muk) {
+			const accountId = restored.accountIds[0];
+			if (!accountId || !restored.publication)
+				throw new Error("Restored key has no publication owner");
+			await restored.publication.run(
+				accountId,
+				async (check) => {
+					check();
+					setMasterUnlockKey(muk);
+				},
+				() => false,
+			);
 		}
 	}
 
@@ -302,23 +328,46 @@ export async function handleLogout(
 	runtime: ClientRuntime,
 ): Promise<Acknowledgement> {
 	const accountId = await storage.getActiveAccount();
-	const outcome = accountId
-		? await signOutAccount(accountId, lifecycleDeps)
-		: null;
+	let incomplete: IncompleteLifecycleOutcomeError | null = null;
+	let signedOut = false;
+	if (accountId) {
+		try {
+			await nativeMessagingClient.withLifecycleCleanup(
+				async () => {
+					const outcome = await signOutAccount(accountId, lifecycleDeps);
+					return requireCompleteLifecycleOutcome(outcome, {
+						operation: "Extension signOutAccount",
+					});
+				},
+				(outcome) => outcome.affected.map((account) => account.accountId),
+				accountId,
+			);
+			signedOut = true;
+		} catch (error) {
+			if (!(error instanceof IncompleteLifecycleOutcomeError)) throw error;
+			incomplete = error;
+		}
+	}
 	// `source: "logout"` never refuses: signing out must lock even next to a desktop app.
-	await vaultSession.dispatch({
-		type: "LOCK_REQUESTED",
-		source: "logout",
-		at: Date.now(),
-	});
+	try {
+		await vaultSession.dispatch({
+			type: "LOCK_REQUESTED",
+			source: "logout",
+			at: Date.now(),
+		});
+	} catch (error) {
+		// A partial Sign out already holds the material fence closed. Preserve the
+		// caller's failed acknowledgement after the lock's remaining effects run.
+		if (!incomplete) throw error;
+	}
 
 	// The module reports instead of throwing, so a genuinely failed storage step
 	// has to be surfaced here or the popup would call a partial wipe a success.
-	if (outcome && outcome.failures.length > 0) {
-		console.error("[Auth] Sign-out steps failed:", outcome.failures);
+	if (incomplete) {
+		console.error("[Auth] Sign-out steps failed:", incomplete.outcome.failures);
 		return { success: false };
 	}
-	if (outcome) await reconcileClientRuntime(runtime);
+	if (signedOut) await reconcileClientRuntime(runtime);
 	return { success: true };
 }
 
@@ -359,6 +408,7 @@ export async function handleQuickUnlockAll(
 	payload: PasswordPayload,
 	runtime: ClientRuntime,
 ): Promise<PasswordUnlockAllResponse> {
+	const publication = await localMaterialPublication.capture();
 	const { password } = payload;
 
 	// A connected-but-locked desktop owns the unlock; unlocking locally here
@@ -385,8 +435,10 @@ export async function handleQuickUnlockAll(
 			itemCache,
 			crypto,
 			credentialMirror: lifecycleDeps.credentialMirror,
+			materialPublication: publication,
 		},
 	);
+	publication.check();
 
 	if (!activeAccountId) {
 		throw new Error("Failed to unlock any accounts");
@@ -395,12 +447,21 @@ export async function handleQuickUnlockAll(
 	// The other accounts stay unlocked in the background; only the active one
 	// gets its MUK seeded into the in-memory session manager for auto-lock.
 	const activeMuk = await storage.getMasterUnlockKey(activeAccountId);
+	publication.check();
 	if (activeMuk) {
-		setMasterUnlockKey(activeMuk);
+		await publication.run(
+			activeAccountId,
+			async (check) => {
+				check();
+				setMasterUnlockKey(activeMuk);
+			},
+			() => false,
+		);
 	}
 
 	updateActivity();
-	await reconcileClientRuntime(runtime);
+	await reconcileClientRuntime(runtime, publication);
+	publication.check();
 
 	return {
 		success: true,

@@ -6,6 +6,9 @@
     "observation": {
       "$ref": "#/$defs/ObservationRequest"
     },
+    "observation_control": {
+      "$ref": "#/$defs/ObservationControl"
+    },
     "outcome": {
       "$ref": "#/$defs/RuntimeOutcome"
     },
@@ -20,7 +23,8 @@
     "request",
     "outcome",
     "observation",
-    "projection"
+    "projection",
+    "observation_control"
   ],
   "$defs": {
     "AccountAccessState": {
@@ -37,10 +41,36 @@
       "properties": {
         "email": {
           "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secretKeyHint": {
+          "type": "string"
+        },
+        "serverUrl": {
+          "type": "string"
+        },
+        "teamAvatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamName": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "email"
+        "email",
+        "name",
+        "teamName",
+        "teamAvatarUrl",
+        "serverUrl",
+        "secretKeyHint"
       ]
     },
     "AccountStatus": {
@@ -76,6 +106,14 @@
           "type": "string",
           "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
         },
+        "unlockCapabilities": {
+          "$ref": "#/$defs/AccountUnlockCapabilities",
+          "default": {
+            "desktop": false,
+            "password": false,
+            "signIn": false
+          }
+        },
         "waitingReason": {
           "anyOf": [
             {
@@ -91,6 +129,50 @@
         "accountId",
         "replicaRevision",
         "access",
+        "unlockCapabilities",
+        "failure"
+      ]
+    },
+    "AccountUnlockCapabilities": {
+      "description": "Core-supported Account unlock actions. Biometric eligibility retains its dedicated projection.\nDesktop authorization may require opening or reconnecting Desktop before its explicit ceremony.",
+      "type": "object",
+      "properties": {
+        "desktop": {
+          "type": "boolean"
+        },
+        "password": {
+          "type": "boolean"
+        },
+        "signIn": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "password",
+        "desktop",
+        "signIn"
+      ]
+    },
+    "AccountUnlockResult": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accountId",
         "failure"
       ]
     },
@@ -98,6 +180,14 @@
       "type": "string",
       "enum": [
         "reauthenticationRequired"
+      ]
+    },
+    "ActivityKind": {
+      "type": "string",
+      "enum": [
+        "interaction",
+        "focus",
+        "blur"
       ]
     },
     "Address": {
@@ -257,6 +347,131 @@
         "totpSecret"
       ]
     },
+    "AvailableVaultMember": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "userId",
+        "name",
+        "email",
+        "publicKey"
+      ]
+    },
+    "BiometricAccountAvailability": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BiometricFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accountId",
+        "enabled",
+        "failure"
+      ]
+    },
+    "BiometricAccountUnlock": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "failure": {
+          "description": "None means the explicitly requested Account unlocked successfully.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BiometricFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accountId",
+        "failure"
+      ]
+    },
+    "BiometricFailure": {
+      "type": "string",
+      "enum": [
+        "unavailable",
+        "notEnrolled",
+        "notEnabled",
+        "passwordRequired",
+        "cancelled",
+        "failed",
+        "lockedOut",
+        "accountChanged",
+        "travelUnverified",
+        "storageUnavailable"
+      ]
+    },
+    "BiometricHardware": {
+      "type": "object",
+      "properties": {
+        "hasHardware": {
+          "type": "boolean"
+        },
+        "isEnrolled": {
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BiometricKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "hasHardware",
+        "isEnrolled",
+        "kind"
+      ]
+    },
+    "BiometricKind": {
+      "type": "string",
+      "enum": [
+        "touchId",
+        "faceId",
+        "windowsHello",
+        "fingerprint",
+        "face",
+        "other"
+      ]
+    },
     "CreateShareDraft": {
       "type": "object",
       "properties": {
@@ -396,6 +611,306 @@
         "title"
       ]
     },
+    "CrossAccountMoveBlockedReason": {
+      "type": "string",
+      "enum": [
+        "destinationRetired",
+        "missingSourceEvidence",
+        "sourceChanged",
+        "targetChanged",
+        "missingProof",
+        "missingArtifact"
+      ]
+    },
+    "CrossAccountMoveDisposition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ready"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "legacyHeld"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/CrossAccountMoveWaitingReason"
+            },
+            "type": {
+              "type": "string",
+              "const": "waiting"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "reason"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/CrossAccountMoveBlockedReason"
+            },
+            "type": {
+              "type": "string",
+              "const": "blocked"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "reason"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rejected"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "code"
+          ]
+        }
+      ]
+    },
+    "CrossAccountMovePhase": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "targetCreate"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "nextIndex": {
+              "type": "integer",
+              "maximum": 4294967295,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "attachments"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "nextIndex"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sourceTrash"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "sourceDelete"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "completed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "rejected"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "CrossAccountMoveProjection": {
+      "type": "object",
+      "properties": {
+        "destinationServerUrl": {
+          "type": "string"
+        },
+        "destinationUserId": {
+          "type": "string"
+        },
+        "destinationVaultId": {
+          "type": "string"
+        },
+        "disposition": {
+          "$ref": "#/$defs/CrossAccountMoveDisposition"
+        },
+        "phase": {
+          "$ref": "#/$defs/CrossAccountMovePhase"
+        },
+        "sourceVisible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "phase",
+        "destinationServerUrl",
+        "destinationUserId",
+        "destinationVaultId",
+        "sourceVisible",
+        "disposition"
+      ]
+    },
+    "CrossAccountMoveResumeGuard": {
+      "description": "Stateless stale-input evidence. Both Accounts and current Server authority are still checked.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "bindingRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "ownerIncarnation": {
+          "type": "string"
+        },
+        "sourceIncarnation": {
+          "type": "string"
+        },
+        "sourceLockEpoch": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "sourceReplicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "targetAccountId": {
+          "type": "string"
+        },
+        "targetIncarnation": {
+          "type": "string"
+        },
+        "targetLockEpoch": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "sourceIncarnation",
+        "sourceLockEpoch",
+        "targetAccountId",
+        "targetIncarnation",
+        "targetLockEpoch",
+        "operationId",
+        "bindingRevision",
+        "sourceReplicaRevision",
+        "ownerIncarnation"
+      ]
+    },
+    "CrossAccountMoveWaitingReason": {
+      "type": "string",
+      "enum": [
+        "accountLocked",
+        "offline",
+        "policyVerificationPending",
+        "accessUnavailable",
+        "attachmentAccessDenied",
+        "attachmentQuotaExceeded",
+        "attachmentSizeRejected"
+      ]
+    },
+    "CurrentVaultMember": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/VaultRole"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "userId",
+        "name",
+        "email",
+        "role"
+      ]
+    },
     "CustomField": {
       "type": "object",
       "properties": {
@@ -427,6 +942,337 @@
         "password",
         "email",
         "url"
+      ]
+    },
+    "DeviceSetupDisclosure": {
+      "description": "Transient setup disclosure: never part of an observation or persisted projection.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "lockEpoch": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "secretKey": {
+          "type": "string"
+        },
+        "serverUrl": {
+          "type": "string"
+        },
+        "teamName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "incarnation",
+        "lockEpoch",
+        "email",
+        "serverUrl",
+        "teamName",
+        "secretKey"
+      ]
+    },
+    "DuplicateSourceGuard": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "itemVersion": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": -2147483648
+            },
+            "type": {
+              "type": "string",
+              "const": "authoritative"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "itemVersion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "acceptedOverlay"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operationId"
+          ]
+        }
+      ]
+    },
+    "EditableItemDraft": {
+      "description": "A normal Create or Update cannot submit a credential, even if the caller forges JSON.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "login"
+            },
+            "data": {
+              "$ref": "#/$defs/EditableLoginItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "secure-note"
+            },
+            "data": {
+              "$ref": "#/$defs/SecureNoteItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "credit-card"
+            },
+            "data": {
+              "$ref": "#/$defs/CreditCardItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "identity"
+            },
+            "data": {
+              "$ref": "#/$defs/IdentityItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "authenticator"
+            },
+            "data": {
+              "$ref": "#/$defs/AuthenticatorItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        }
+      ]
+    },
+    "EditableLoginItemData": {
+      "description": "Ordinary callers can edit the Login fields shown in the UI, never its credential array.",
+      "type": "object",
+      "properties": {
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PasswordHistoryEntry"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "INTERNAL_ERROR",
+        "BAD_REQUEST",
+        "NOT_FOUND",
+        "FORBIDDEN",
+        "UNAUTHORIZED",
+        "CONFLICT",
+        "RATE_LIMITED",
+        "PAYLOAD_TOO_LARGE",
+        "INVALID_REQUEST",
+        "UNSUPPORTED_MEDIA_TYPE",
+        "PRECONDITION_REQUIRED",
+        "VERSION_CONFLICT",
+        "API_ROUTE_NOT_FOUND",
+        "METHOD_NOT_ALLOWED",
+        "SERVICE_UNAVAILABLE",
+        "INVALID_QUERY",
+        "INVALID_PAGE_LIMIT",
+        "INVALID_LIMIT",
+        "INVALID_CURSOR",
+        "INVALID_IF_MATCH",
+        "INVALID_VERSION",
+        "INVALID_ITEM_STATE",
+        "INVALID_EMAIL",
+        "ACCOUNT_DELETION_CONFIRMATION_MISMATCH",
+        "ACCOUNT_DELETION_BLOCKED",
+        "FIELD_CANNOT_BE_CLEARED",
+        "SEARCH_TOO_LONG",
+        "TOO_MANY_HIDDEN_VAULTS",
+        "INVALID_IDEMPOTENCY_KEY",
+        "IDEMPOTENCY_NOT_ALLOWED",
+        "INVALID_OPERATION_ID",
+        "OPERATION_ID_REUSED",
+        "OPERATION_OUTCOME_NOT_FOUND",
+        "ATTACHMENT_STAGING_INCOMPLETE",
+        "ATTACHMENT_STAGING_MISMATCH",
+        "ATTACHMENT_STAGING_BUSY",
+        "ATTACHMENT_AUTHORITY_STALE",
+        "ATTACHMENT_QUOTA_EXCEEDED",
+        "ROTATION_STALE_VAULT_VERSION",
+        "ROTATION_STALE_MEMBER_SET",
+        "ROTATION_STALE_ITEM_STATE",
+        "ROTATION_STALE_ATTACHMENT_STATE"
       ]
     },
     "IdentityItemData": {
@@ -583,6 +1429,189 @@
         "favorite"
       ]
     },
+    "InvitationAdminAction": {
+      "type": "string",
+      "enum": [
+        "cancel",
+        "resend"
+      ]
+    },
+    "InvitationCandidate": {
+      "type": "object",
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "recipientUserId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "recipientUserId",
+        "publicKey",
+        "fingerprint"
+      ]
+    },
+    "InvitationComposerData": {
+      "type": "object",
+      "properties": {
+        "billingEnabled": {
+          "type": "boolean"
+        },
+        "seatPreview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvitationSeatPreview"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teamId": {
+          "type": "string"
+        },
+        "teamPlanActive": {
+          "type": "boolean"
+        },
+        "vaults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InvitationComposerVault"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "teamId",
+        "vaults",
+        "billingEnabled",
+        "teamPlanActive",
+        "seatPreview"
+      ]
+    },
+    "InvitationComposerVault": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "InvitationSeatPreview": {
+      "type": "object",
+      "properties": {
+        "currency": {
+          "type": "string"
+        },
+        "currentQuantity": {
+          "type": "string"
+        },
+        "estimatedNextPaymentCents": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InvitationSeatPreviewLine"
+          }
+        },
+        "nextQuantity": {
+          "type": "string"
+        },
+        "totalLineItemsCents": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "currentQuantity",
+        "nextQuantity",
+        "estimatedNextPaymentCents",
+        "totalLineItemsCents",
+        "lines"
+      ]
+    },
+    "InvitationSeatPreviewLine": {
+      "type": "object",
+      "properties": {
+        "amountCents": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isProration": {
+          "type": "boolean"
+        },
+        "periodEnd": {
+          "type": "string"
+        },
+        "periodStart": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unitAmountCents": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "amountCents",
+        "currency",
+        "periodStart",
+        "periodEnd",
+        "quantity",
+        "unitAmountCents",
+        "isProration"
+      ]
+    },
+    "InvitationStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "accepted",
+        "declined",
+        "expired"
+      ]
+    },
+    "InvitationUncertainPhase": {
+      "type": "string",
+      "enum": [
+        "firstSend",
+        "cancelOriginal",
+        "replacementSend"
+      ]
+    },
     "ItemDraft": {
       "oneOf": [
         {
@@ -672,6 +1701,78 @@
         }
       ]
     },
+    "ItemDuplicateGuard": {
+      "description": "Selection evidence for same-Vault Duplicate. This names either one confirmed Item version\nor one exact locally accepted encrypted overlay, never a synthetic confirmed authority row.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "incarnationId": {
+          "type": "string"
+        },
+        "lockEpoch": {
+          "type": "string"
+        },
+        "replicaRevision": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/DuplicateSourceGuard"
+        },
+        "sourceItemId": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "incarnationId",
+        "lockEpoch",
+        "sourceItemId",
+        "vaultId",
+        "replicaRevision",
+        "source"
+      ]
+    },
+    "ItemEditGuard": {
+      "description": "Stateless evidence of the authoritative Item version the caller actually edited.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "itemVersion": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "lockEpoch": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "incarnation",
+        "lockEpoch",
+        "itemId",
+        "vaultId",
+        "itemVersion"
+      ]
+    },
     "ItemProjection": {
       "type": "object",
       "properties": {
@@ -688,12 +1789,32 @@
           "type": "string"
         },
         "data": {
-          "$ref": "#/$defs/ItemDraft"
+          "$ref": "#/$defs/PublicItemDraft"
         },
         "deletedAt": {
           "type": [
             "string",
             "null"
+          ]
+        },
+        "duplicateSourceGuard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemDuplicateGuard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "editGuard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemEditGuard"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "favorite": {
@@ -880,8 +2001,109 @@
         "title"
       ]
     },
+    "MyInvitationAction": {
+      "type": "string",
+      "enum": [
+        "accept",
+        "decline"
+      ]
+    },
+    "MyTeamInvitation": {
+      "description": "Only authenticated pending Invitations addressed to this User are projected.",
+      "type": "object",
+      "properties": {
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "invitedBy": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/TeamRole"
+        },
+        "teamId": {
+          "type": "string"
+        },
+        "teamName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "teamId",
+        "teamName",
+        "role",
+        "invitedBy",
+        "expiresAt"
+      ]
+    },
+    "ObservationControl": {
+      "description": "Nonplaintext terminal controls bypass revoked plaintext delivery tokens.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/VaultExportRetirementReason"
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultExportRetired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "reason"
+          ]
+        }
+      ]
+    },
     "ObservationRequest": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultExport"
+            },
+            "vaultIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultIds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "travelMode"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -973,6 +2195,16 @@
             "null"
           ]
         },
+        "crossAccountMove": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossAccountMoveProjection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "importedCount": {
           "type": [
             "integer",
@@ -1017,6 +2249,8 @@
       "type": "string",
       "enum": [
         "createVault",
+        "updateVault",
+        "deleteVault",
         "createItem",
         "updateItem",
         "setItemFavorite",
@@ -1025,7 +2259,13 @@
         "moveItem",
         "permanentlyDeleteItem",
         "createShare",
-        "importItems"
+        "importItems",
+        "createVaultMemberRemovalRotationPlans",
+        "finalizeVaultMemberRemovalRotationPlans",
+        "createTeamLeaveRotationPlans",
+        "finalizeTeamLeaveRotationPlans",
+        "createTeamMemberRemovalRotationPlans",
+        "finalizeTeamMemberRemovalRotationPlans"
       ]
     },
     "OperationResolution": {
@@ -1033,7 +2273,9 @@
       "enum": [
         "pending",
         "applied",
-        "rejected"
+        "rejected",
+        "legacyFailed",
+        "legacyConflicted"
       ]
     },
     "OperationsProjection": {
@@ -1257,6 +2499,409 @@
         "number"
       ]
     },
+    "ProfileAdmissionCleanupStatus": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "pendingObligations": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "state": {
+              "type": "string",
+              "const": "pending"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "pendingObligations"
+          ]
+        }
+      ]
+    },
+    "ProfileAdmissionImportPhase": {
+      "type": "string",
+      "enum": [
+        "preparing",
+        "aborting",
+        "aborted",
+        "committed",
+        "complete"
+      ]
+    },
+    "ProfileAdmissionInspectionState": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "notStarted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "admissionId": {
+              "type": "string"
+            },
+            "phase": {
+              "$ref": "#/$defs/ProfileAdmissionImportPhase"
+            },
+            "type": {
+              "type": "string",
+              "const": "import"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "admissionId",
+            "phase"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "phase": {
+              "$ref": "#/$defs/ProfileAdmissionResetPhase"
+            },
+            "type": {
+              "type": "string",
+              "const": "reset"
+            },
+            "wipeId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "wipeId",
+            "phase"
+          ]
+        }
+      ]
+    },
+    "ProfileAdmissionResetPhase": {
+      "type": "string",
+      "enum": [
+        "wiping",
+        "wiped"
+      ]
+    },
+    "PublicItemDraft": {
+      "description": "The ordinary Item surface. Credential metadata is visible, but signing material is not.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "login"
+            },
+            "data": {
+              "$ref": "#/$defs/PublicLoginItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "secure-note"
+            },
+            "data": {
+              "$ref": "#/$defs/SecureNoteItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "credit-card"
+            },
+            "data": {
+              "$ref": "#/$defs/CreditCardItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "identity"
+            },
+            "data": {
+              "$ref": "#/$defs/IdentityItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "const": "authenticator"
+            },
+            "data": {
+              "$ref": "#/$defs/AuthenticatorItemData"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "data"
+          ]
+        }
+      ]
+    },
+    "PublicLoginItemData": {
+      "description": "Ordinary callers can edit the Login fields shown in the UI, never its credential array.",
+      "type": "object",
+      "properties": {
+        "customFields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CustomField"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passkeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PublicPasskey"
+          }
+        },
+        "password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PasswordHistoryEntry"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "totpAccountName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpAlgorithm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpAlgorithm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpDigits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TotpDigits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totpIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "totpPeriod": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "totpSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "PublicPasskey": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "credentialId": {
+          "type": "string"
+        },
+        "lastUsedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "publicKeyFingerprint": {
+          "description": "Stale-selection evidence over the exact persisted public-key String, not a trust root.",
+          "type": "string"
+        },
+        "rpId": {
+          "type": "string"
+        },
+        "rpName": {
+          "type": "string"
+        },
+        "signCount": {
+          "type": "integer",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PasskeyStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PasskeyStatusReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusUpdatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transports": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "userDisplayName": {
+          "type": "string"
+        },
+        "userHandle": {
+          "type": "string"
+        },
+        "userName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "credentialId",
+        "rpId",
+        "rpName",
+        "userHandle",
+        "userName",
+        "userDisplayName",
+        "publicKey",
+        "publicKeyFingerprint",
+        "algorithm",
+        "signCount",
+        "transports",
+        "createdAt"
+      ]
+    },
     "RecoveryBound": {
       "description": "Closed recovery implementation guards; these are not Account capacity limits.",
       "type": "string",
@@ -1314,6 +2959,216 @@
         "unreadable"
       ]
     },
+    "RotationCandidate": {
+      "type": "object",
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "userId",
+        "publicKey",
+        "fingerprint"
+      ]
+    },
+    "RotationFinalizeRejectionCode": {
+      "type": "string",
+      "enum": [
+        "team_membership_changed",
+        "personal_team_departure_forbidden",
+        "team_owner_leave_forbidden",
+        "rotation_plan_unavailable",
+        "rotation_plan_mismatch",
+        "rotation_plan_incomplete",
+        "rotation_plan_stale",
+        "rotation_plan_set_mismatch"
+      ]
+    },
+    "RotationIntent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "vaultMemberRemoval"
+            },
+            "userId": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "vaultId",
+            "userId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "teamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamLeave"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "teamId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "teamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamMemberRemoval"
+            },
+            "userId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "teamId",
+            "userId"
+          ]
+        }
+      ]
+    },
+    "RotationPlanSelection": {
+      "type": "object",
+      "properties": {
+        "expectedKeyVersion": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": -2147483648
+        },
+        "planId": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "planId",
+        "vaultId",
+        "expectedKeyVersion"
+      ]
+    },
+    "RotationSelection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "authorityGenerationId": {
+          "type": "string"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RotationCandidate"
+          }
+        },
+        "incarnationId": {
+          "type": "string"
+        },
+        "intent": {
+          "$ref": "#/$defs/RotationIntent"
+        },
+        "lockEpoch": {
+          "type": "string"
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RotationPlanSelection"
+          }
+        },
+        "startOperationId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "incarnationId",
+        "lockEpoch",
+        "authorityGenerationId",
+        "intent",
+        "startOperationId",
+        "plans",
+        "candidates"
+      ]
+    },
+    "RotationStartRejectionCode": {
+      "type": "string",
+      "enum": [
+        "team_member_not_found",
+        "personal_team_departure_forbidden",
+        "team_owner_leave_forbidden"
+      ]
+    },
+    "RotationTerminalOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "personalTeamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "applied"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "personalTeamId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/RotationFinalizeRejectionCode"
+            },
+            "type": {
+              "type": "string",
+              "const": "rejected"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "code"
+          ]
+        }
+      ]
+    },
     "RuntimeError": {
       "type": "object",
       "properties": {
@@ -1332,6 +3187,16 @@
               "type": "null"
             }
           ]
+        },
+        "teamPageProblem": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TeamPageProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1342,6 +3207,9 @@
     "RuntimeErrorCode": {
       "type": "string",
       "enum": [
+        "RECIPIENT_KEY_UNVERIFIED",
+        "RECIPIENT_KEY_CHANGED",
+        "RECIPIENT_FINGERPRINT_MISMATCH",
         "RUNTIME_CLOSED",
         "CANCELLED",
         "ACCOUNT_MISSING",
@@ -1349,8 +3217,10 @@
         "ACCOUNT_FAILED",
         "AUTHENTICATION_REQUIRED",
         "AUTHENTICATION_UNAVAILABLE",
+        "CREDENTIAL_UNAVAILABLE",
         "STORAGE_UNAVAILABLE",
         "RETRYABLE_TRANSPORT",
+        "VERSION_EVIDENCE_UNAVAILABLE",
         "AUTHORITY_MISSING",
         "ACCESS_DENIED",
         "READ_ONLY",
@@ -1400,6 +3270,38 @@
     },
     "RuntimeProjection": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "vaultExport"
+            },
+            "value": {
+              "$ref": "#/$defs/VaultExportProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "travelMode"
+            },
+            "value": {
+              "$ref": "#/$defs/TravelModeProjection"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -1484,6 +3386,614 @@
     },
     "RuntimeRequest": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listAvailableVaultMembers"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "vaultId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listVaultMembers"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "vaultId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "role": {
+              "$ref": "#/$defs/VaultRole"
+            },
+            "type": {
+              "type": "string",
+              "const": "addVaultMember"
+            },
+            "userId": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "vaultId",
+            "userId",
+            "role"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "intent": {
+              "$ref": "#/$defs/RotationIntent"
+            },
+            "startOperationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "prepareRotation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "intent"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "selection": {
+              "$ref": "#/$defs/RotationSelection"
+            },
+            "type": {
+              "type": "string",
+              "const": "completeRotation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "selection"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "startOperationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "inspectRotation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "startOperationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listTeamLeaveAttempts"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "startOperationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "acknowledgeTeamLeaveAttempt"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "startOperationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "listMyTeamInvitations"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "invitationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "acceptMyTeamInvitation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "invitationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "invitationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "declineMyTeamInvitation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "invitationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "teamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "readInvitationComposer"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "teamId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "role": {
+              "$ref": "#/$defs/TeamRole"
+            },
+            "teamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "createTeamInvitation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "teamId",
+            "email",
+            "role"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "continuationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "provisionTeamInvitation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "continuationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "continuationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "releaseInvitationContinuation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "continuationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "invitationId": {
+              "type": "string"
+            },
+            "teamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "cancelTeamInvitation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "teamId",
+            "invitationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "invitationId": {
+              "type": "string"
+            },
+            "teamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "resendTeamInvitation"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "teamId",
+            "invitationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "readTeamPage"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "inspectProfileAdmission"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "admissionId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "abortProfileAdmission"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "admissionId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "recipientKeyScope"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "ownKeyFingerprint"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "expectedFingerprint": {
+              "type": "string"
+            },
+            "publicKey": {
+              "type": "string"
+            },
+            "recipientUserId": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "verifyRecipientKey"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "recipientUserId",
+            "publicKey",
+            "expectedFingerprint",
+            "scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "publicKey": {
+              "type": "string"
+            },
+            "recipientUserId": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "verifiedRecipientKey"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "recipientUserId",
+            "publicKey",
+            "scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "masterPassword": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "disableTravelMode"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "masterPassword"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "hiddenVaultIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "enableTravelMode"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "hiddenVaultIds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "hiddenVaultIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "setTravelModeHiddenVaults"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "hiddenVaultIds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "refreshTravelMode"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -1601,6 +4111,211 @@
             "masterPassword",
             "secretKey",
             "insecureTransportConfirmed"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "biometricAvailability"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountIds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "type": {
+              "type": "string",
+              "const": "setBiometricEnabled"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "enabled"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "promptMessage": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "biometricUnlock"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "promptMessage"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "promptMessage": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "biometricUnlockAccounts"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountIds",
+            "promptMessage"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "periodMs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)|-(?:[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7][0-9]{0}|9223372036854775808)))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "setMasterPasswordReentryPeriod"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "periodMs"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "localSecuritySettings"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "timeoutMs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)|-(?:[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7][0-9]{0}|9223372036854775808)))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "setInactivityTimeout"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "timeoutMs"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/ActivityKind"
+            },
+            "type": {
+              "type": "string",
+              "const": "recordActivity"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "deviceSetup"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "masterPassword": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "quickUnlockAccounts"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountIds",
+            "masterPassword"
           ]
         },
         {
@@ -1726,6 +4441,63 @@
             "accountId": {
               "type": "string"
             },
+            "type": {
+              "type": "string",
+              "const": "deleteVault"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "vaultId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "icon": {
+              "$ref": "#/$defs/VaultIconPatch"
+            },
+            "image": {
+              "$ref": "#/$defs/VaultImageChange"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "updateVault"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "vaultId",
+            "name",
+            "icon",
+            "image"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
             "icon": {
               "type": "string"
             },
@@ -1766,7 +4538,7 @@
               "type": "string"
             },
             "draft": {
-              "$ref": "#/$defs/ItemDraft"
+              "$ref": "#/$defs/EditableItemDraft"
             },
             "type": {
               "type": "string",
@@ -1820,7 +4592,10 @@
               "type": "string"
             },
             "draft": {
-              "$ref": "#/$defs/ItemDraft"
+              "$ref": "#/$defs/EditableItemDraft"
+            },
+            "guard": {
+              "$ref": "#/$defs/ItemEditGuard"
             },
             "itemId": {
               "type": "string"
@@ -1835,7 +4610,74 @@
             "type",
             "accountId",
             "itemId",
+            "guard",
             "draft"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "credentialId": {
+              "type": "string"
+            },
+            "guard": {
+              "$ref": "#/$defs/ItemEditGuard"
+            },
+            "itemId": {
+              "type": "string"
+            },
+            "publicKeyFingerprint": {
+              "type": "string"
+            },
+            "rpId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "removePasskey"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "itemId",
+            "guard",
+            "rpId",
+            "credentialId",
+            "publicKeyFingerprint"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "sourceGuard": {
+              "$ref": "#/$defs/ItemDuplicateGuard"
+            },
+            "sourceItemId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "duplicateItem"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "sourceItemId",
+            "sourceGuard",
+            "title"
           ]
         },
         {
@@ -1914,6 +4756,12 @@
             "itemId": {
               "type": "string"
             },
+            "targetAccountId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "targetVaultId": {
               "type": "string"
             },
@@ -1928,6 +4776,53 @@
             "accountId",
             "itemId",
             "targetVaultId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "expectedBindingRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "targetAccountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "prepareCrossAccountMoveResume"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "operationId",
+            "targetAccountId",
+            "expectedBindingRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "guard": {
+              "$ref": "#/$defs/CrossAccountMoveResumeGuard"
+            },
+            "type": {
+              "type": "string",
+              "const": "resumeCrossAccountMove"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "guard"
           ]
         },
         {
@@ -2024,6 +4919,9 @@
             "accountId": {
               "type": "string"
             },
+            "itemId": {
+              "type": "string"
+            },
             "linkId": {
               "type": "string"
             },
@@ -2036,6 +4934,7 @@
           "required": [
             "type",
             "accountId",
+            "itemId",
             "linkId"
           ]
         },
@@ -2043,6 +4942,9 @@
           "type": "object",
           "properties": {
             "accountId": {
+              "type": "string"
+            },
+            "itemId": {
               "type": "string"
             },
             "linkId": {
@@ -2057,6 +4959,7 @@
           "required": [
             "type",
             "accountId",
+            "itemId",
             "linkId"
           ]
         },
@@ -2183,6 +5086,927 @@
     },
     "RuntimeResponse": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "members": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AvailableVaultMember"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "availableVaultMembers"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "members"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "members": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CurrentVaultMember"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultMembers"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "members"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "vaultMemberAdded"
+            },
+            "userId": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "vaultId",
+            "userId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "currentRole": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VaultRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultMemberAddUncertain"
+            },
+            "userId": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "vaultId",
+            "userId",
+            "currentRole"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "selection": {
+              "$ref": "#/$defs/RotationSelection"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationPrepared"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "selection"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "startOperationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationStartPending"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "startOperationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "attempts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TeamLeaveAttempt"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "teamLeaveAttempts"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "attempts"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "teamLeaveAttemptAcknowledged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/RotationStartRejectionCode"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationStartRejected"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "plans": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RotationPlanSelection"
+              }
+            },
+            "startOperationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationPreparationRequiresCrypto"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "startOperationId",
+            "plans"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "startOperationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationAttemptConsumed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "startOperationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "finalizeOperationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationFinalizePending"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "finalizeOperationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "finalizeOperationId": {
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/RotationTerminalOutcome"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationRefreshRequired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "finalizeOperationId",
+            "outcome"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "personalTeamId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationCompleted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "personalTeamId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/RotationFinalizeRejectionCode"
+            },
+            "type": {
+              "type": "string",
+              "const": "rotationRejected"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invitations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/MyTeamInvitation"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "myTeamInvitations"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "invitations"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "teamId": {
+              "type": "string"
+            },
+            "teamName": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "myTeamInvitationAccepted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "teamId",
+            "teamName"
+          ]
+        },
+        {
+          "description": "The Server confirmed acceptance, but Core has not installed fresh Vault authority.",
+          "type": "object",
+          "properties": {
+            "teamId": {
+              "type": "string"
+            },
+            "teamName": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "myTeamInvitationAcceptRefreshRequired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "teamId",
+            "teamName"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "myTeamInvitationDeclined"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A lost reply never proves a mutation's result, even when later reads show absence.",
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/MyInvitationAction"
+            },
+            "currentTeamId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "invitationId": {
+              "type": "string"
+            },
+            "pending": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "myTeamInvitationUncertain"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "action",
+            "invitationId",
+            "pending",
+            "currentTeamId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "composer": {
+              "$ref": "#/$defs/InvitationComposerData"
+            },
+            "type": {
+              "type": "string",
+              "const": "invitationComposer"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "composer"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "candidate": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvitationCandidate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "continuationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "invitationId": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamInvitationCreated"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "invitationId",
+            "token",
+            "candidate",
+            "continuationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invitationId": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamInvitationProvisioned"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "invitationId",
+            "token"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invitationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamInvitationProvisioningNotRequired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "invitationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "originalInvitationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "phase": {
+              "$ref": "#/$defs/InvitationUncertainPhase"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamInvitationUncertain"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "phase",
+            "originalInvitationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "invitationContinuationReleased"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invitationId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamInvitationCancelled"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "invitationId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invitationId": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamInvitationResent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "invitationId",
+            "token"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/InvitationAdminAction"
+            },
+            "invitationId": {
+              "type": "string"
+            },
+            "pending": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "teamInvitationAdminUncertain"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "action",
+            "invitationId",
+            "pending"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "page": {
+              "$ref": "#/$defs/TeamPageData"
+            },
+            "type": {
+              "type": "string",
+              "const": "teamPage"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "admissionId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "profileAdmissionAborted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "admissionId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "$ref": "#/$defs/ProfileAdmissionInspectionState"
+            },
+            "type": {
+              "type": "string",
+              "const": "profileAdmissionInspection"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "guard": {
+              "$ref": "#/$defs/CrossAccountMoveResumeGuard"
+            },
+            "type": {
+              "type": "string",
+              "const": "crossAccountMoveResumePrepared"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "guard"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "recipientKeyScope"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fingerprint": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "ownKeyFingerprint"
+            },
+            "userId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "userId",
+            "fingerprint"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "recipientKeyVerified"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "publicKey": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "verifiedRecipientKey"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "publicKey"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/TravelModeCommandResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "travelMode"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "activityRecorded"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "inactivityTimeoutMs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)|-(?:[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7][0-9]{0}|9223372036854775808)))$"
+            },
+            "masterPasswordReentryPeriodMs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)|-(?:[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7][0-9]{0}|9223372036854775808)))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "localSecuritySettings"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "inactivityTimeoutMs",
+            "masterPasswordReentryPeriodMs"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "disclosure": {
+              "$ref": "#/$defs/DeviceSetupDisclosure"
+            },
+            "type": {
+              "type": "string",
+              "const": "deviceSetup"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "disclosure"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AccountUnlockResult"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "accountsUnlocked"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accounts"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BiometricAccountAvailability"
+              }
+            },
+            "hardware": {
+              "$ref": "#/$defs/BiometricHardware"
+            },
+            "masterPasswordReentryPeriodMs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)|-(?:[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7][0-9]{0}|9223372036854775808)))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "biometricAvailability"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "hardware",
+            "accounts",
+            "masterPasswordReentryPeriodMs"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "type": {
+              "type": "string",
+              "const": "biometricEnabled"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "enabled"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BiometricAccountUnlock"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "biometricUnlock"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accounts"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "periodMs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)|-(?:[1-9][0-9]{0,17}|(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7][0-9]{0}|9223372036854775808)))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "masterPasswordReentryPeriod"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "periodMs"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -2315,6 +6139,58 @@
             "accountId",
             "requestId",
             "outcome"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultDeletionAccepted"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operationId",
+            "vaultId",
+            "replicaRevision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string"
+            },
+            "replicaRevision": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+            },
+            "type": {
+              "type": "string",
+              "const": "vaultUpdateAccepted"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operationId",
+            "vaultId",
+            "replicaRevision"
           ]
         },
         {
@@ -2637,6 +6513,16 @@
         "closed": {
           "type": "boolean"
         },
+        "profileAdmissionCleanup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProfileAdmissionCleanupStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "revision": {
           "type": "string",
           "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
@@ -2956,6 +6842,279 @@
         "accounts"
       ]
     },
+    "TeamLeaveAttempt": {
+      "description": "A nonterminal Team-leave attempt already owned by this Account's Replica journal.",
+      "type": "object",
+      "properties": {
+        "startOperationId": {
+          "type": "string"
+        },
+        "teamId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "teamId",
+        "startOperationId"
+      ]
+    },
+    "TeamPageData": {
+      "type": "object",
+      "properties": {
+        "invitations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TeamPageInvitation"
+          }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TeamPageMember"
+          }
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TeamPageDetails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teamManagementEnabled": {
+          "type": "boolean"
+        },
+        "user": {
+          "$ref": "#/$defs/TeamPageUser"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "user",
+        "team",
+        "members",
+        "invitations",
+        "teamManagementEnabled"
+      ]
+    },
+    "TeamPageDetails": {
+      "type": "object",
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memberCount": {
+          "type": "string"
+        },
+        "memberLimit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "ownerName": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "userRole": {
+          "$ref": "#/$defs/TeamPageRole"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "imageUrl",
+        "ownerId",
+        "ownerName",
+        "userRole",
+        "memberCount",
+        "memberLimit",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TeamPageFieldError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "pointer": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pointer",
+        "code"
+      ]
+    },
+    "TeamPageInvitation": {
+      "type": "object",
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "invitedBy": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/TeamPageRole"
+        },
+        "status": {
+          "$ref": "#/$defs/InvitationStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "email",
+        "role",
+        "status",
+        "invitedBy",
+        "createdAt",
+        "expiresAt"
+      ]
+    },
+    "TeamPageMember": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "joinedAt": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/TeamPageRole"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "userId",
+        "name",
+        "email",
+        "role",
+        "joinedAt"
+      ]
+    },
+    "TeamPageProblem": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "fieldErrors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TeamPageFieldError"
+          }
+        },
+        "message": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "retryAfterSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "code",
+        "message",
+        "requestId",
+        "retryable",
+        "retryAfterSeconds",
+        "fieldErrors"
+      ]
+    },
+    "TeamPageRole": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "TeamPageUser": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "email"
+      ]
+    },
+    "TeamRole": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
     "TeardownPhase": {
       "description": "Closed, bounded failure vocabulary. It deliberately carries no host detail or identity.",
       "type": "string",
@@ -3022,6 +7181,340 @@
         6,
         7,
         8
+      ]
+    },
+    "TravelModeCommandResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "enforcement": {
+              "$ref": "#/$defs/TravelModeEnforcement"
+            },
+            "policy": {
+              "$ref": "#/$defs/TravelModePolicy"
+            },
+            "type": {
+              "type": "string",
+              "const": "confirmed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "policy",
+            "enforcement"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/TravelModePolicy"
+            },
+            "type": {
+              "type": "string",
+              "const": "retryRequired"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "policy"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "lastVerifiedPolicy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TravelModePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "uncertain"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "lastVerifiedPolicy"
+          ]
+        }
+      ]
+    },
+    "TravelModeEnforcement": {
+      "type": "string",
+      "enum": [
+        "unverified",
+        "retiring",
+        "ready",
+        "refreshing"
+      ]
+    },
+    "TravelModePolicy": {
+      "description": "Presentation of verified durable metadata; timestamps retain decimal millisecond wire values.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "hiddenVaultIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "serverEnabledAtMs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serverUpdatedAtMs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verifiedAtMs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "hiddenVaultIds",
+        "serverEnabledAtMs",
+        "serverUpdatedAtMs",
+        "verifiedAtMs"
+      ]
+    },
+    "TravelModeProjection": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/TravelModeEnforcement"
+        },
+        "lastVerifiedPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TravelModePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "revision",
+        "lastVerifiedPolicy",
+        "enforcement"
+      ]
+    },
+    "VaultExportItem": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AttachmentProjection"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/ItemDraft"
+        },
+        "deletedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "favorite": {
+          "type": "boolean"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ItemProjectionStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "itemId",
+        "vaultId",
+        "data",
+        "favorite",
+        "createdAt",
+        "updatedAt",
+        "status"
+      ]
+    },
+    "VaultExportProjection": {
+      "description": "Plaintext only the foreground, scoped Export loan can deliver.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VaultExportItem"
+          }
+        },
+        "replicaRevision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18}|(?:1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615))$"
+        },
+        "vaults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VaultProjection"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "replicaRevision",
+        "items",
+        "vaults"
+      ]
+    },
+    "VaultExportRetirementReason": {
+      "type": "string",
+      "enum": [
+        "scopeRetired",
+        "runtimeClosed",
+        "connectionClosed"
+      ]
+    },
+    "VaultIconPatch": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unchanged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "clear"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "set"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "value"
+          ]
+        }
+      ]
+    },
+    "VaultImageChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unchanged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "remove"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/VaultImageSourceInput"
+            },
+            "type": {
+              "type": "string",
+              "const": "source"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "source"
+          ]
+        }
       ]
     },
     "VaultImageSourceInput": {
@@ -3100,6 +7593,15 @@
       "enum": [
         "personal",
         "team"
+      ]
+    },
+    "VaultRole": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "admin",
+        "member",
+        "read-only"
       ]
     },
     "WritableVaultCatalogProjection": {

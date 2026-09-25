@@ -307,6 +307,49 @@
         }
       ]
     },
+    "ReplicaAccountDeletionResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "deleted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "alreadyAbsent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "conflict"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
     "ReplicaHead": {
       "type": "object",
       "properties": {
@@ -378,8 +421,68 @@
         }
       ]
     },
+    "ReplicaInventoryContinuation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "more"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "cursor"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "end"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ReplicaInventoryFamily": {
+      "type": "string",
+      "enum": [
+        "replica"
+      ]
+    },
     "ReplicaPersistenceRequest": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "inventory"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "cursor"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -455,6 +558,35 @@
               "type": "string",
               "minLength": 1
             },
+            "expectedHead": {
+              "$ref": "#/$defs/ReplicaHead"
+            },
+            "expectedRows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/StoredReplicaRow"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "deleteAccountIfUnchanged"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "expectedHead",
+            "expectedRows"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "minLength": 1
+            },
             "type": {
               "type": "string",
               "const": "deleteAccount"
@@ -483,6 +615,57 @@
     },
     "ReplicaPersistenceResponse": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "#/$defs/ReplicaAccountDeletionResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "accountDeletion"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "continuation": {
+              "$ref": "#/$defs/ReplicaInventoryContinuation"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ReplicaPhysicalKey"
+              },
+              "maxItems": 128
+            },
+            "family": {
+              "$ref": "#/$defs/ReplicaInventoryFamily"
+            },
+            "type": {
+              "type": "string",
+              "const": "inventoryPage"
+            },
+            "version": {
+              "type": "integer",
+              "const": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "version",
+            "family",
+            "entries",
+            "continuation"
+          ]
+        },
         {
           "type": "object",
           "properties": {
@@ -593,6 +776,53 @@
         }
       ]
     },
+    "ReplicaPhysicalKey": {
+      "description": "Physical presence only. A row does not require a corresponding Account head.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "head"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "recordId": {
+              "type": "string"
+            },
+            "store": {
+              "$ref": "#/$defs/ReplicaStore"
+            },
+            "type": {
+              "type": "string",
+              "const": "row"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "accountId",
+            "store",
+            "recordId"
+          ]
+        }
+      ]
+    },
     "ReplicaRowKey": {
       "type": "object",
       "properties": {
@@ -614,9 +844,11 @@
       "enum": [
         "optimisticItems",
         "operations",
+        "crossAccountMoves",
         "attachmentMovePreparations",
         "shareCapabilities",
         "operationReceipts",
+        "rotationAttempts",
         "replicaMetadata",
         "bootstrapGenerations",
         "bootstrapPages",
@@ -627,6 +859,9 @@
     "RuntimeErrorCode": {
       "type": "string",
       "enum": [
+        "RECIPIENT_KEY_UNVERIFIED",
+        "RECIPIENT_KEY_CHANGED",
+        "RECIPIENT_FINGERPRINT_MISMATCH",
         "RUNTIME_CLOSED",
         "CANCELLED",
         "ACCOUNT_MISSING",
@@ -634,8 +869,10 @@
         "ACCOUNT_FAILED",
         "AUTHENTICATION_REQUIRED",
         "AUTHENTICATION_UNAVAILABLE",
+        "CREDENTIAL_UNAVAILABLE",
         "STORAGE_UNAVAILABLE",
         "RETRYABLE_TRANSPORT",
+        "VERSION_EVIDENCE_UNAVAILABLE",
         "AUTHORITY_MISSING",
         "ACCESS_DENIED",
         "READ_ONLY",

@@ -187,8 +187,8 @@ test("historical v1-v4 schemas are refused unchanged instead of defaulting earli
 });
 
 test("every fresh-schema migration failure leaves no partially created database", async () => {
-	// One heads store, then ten record stores and their Account indexes.
-	for (let boundary = 1; boundary <= 21; boundary += 1) {
+	// One heads store, twelve record stores and their Account indexes, plus recovery input.
+	for (let boundary = 1; boundary <= 27; boundary += 1) {
 		factory = new IDBFactory();
 		Object.defineProperty(globalThis, "indexedDB", {
 			configurable: true,
@@ -208,7 +208,7 @@ test("every fresh-schema migration failure leaves no partially created database"
 });
 
 test("a future database version is refused without resetting existing stores", async () => {
-	const database = await legacy(9);
+	const database = await legacy(11);
 	database.close();
 	await expect(
 		new IndexedDbReplicaExecutor().invoke(load),
@@ -216,8 +216,8 @@ test("a future database version is refused without resetting existing stores", a
 		code: "STORAGE_UNAVAILABLE",
 		reason: "unsupported_version",
 	});
-	const retained = await result(factory.open(databaseName, 9));
-	expect(retained.version).toBe(9);
+	const retained = await result(factory.open(databaseName, 11));
+	expect(retained.version).toBe(11);
 	const transaction = retained.transaction("operations", "readonly");
 	expect(
 		await result(transaction.objectStore("operations").getAll()),
@@ -265,6 +265,6 @@ test("an open connection closes on versionchange so another context can upgrade"
 	await new IndexedDbReplicaExecutor().invoke(load).catch(() => undefined);
 	const upgraded = await upgrade;
 	expect(versionChanges).toBe(1);
-	expect(upgraded?.version).toBe(9);
+	expect(upgraded?.version).toBe(11);
 	upgraded?.close();
 });

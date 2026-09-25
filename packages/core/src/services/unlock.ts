@@ -26,6 +26,10 @@ import {
 	performSRPUnlock,
 	storeUnlockSessionOwned,
 } from "./auth-service";
+import {
+	type MaterialPublication,
+	MaterialPublicationSupersededError,
+} from "./material-publication";
 import { selectActiveAccountAfterUnlock } from "./select-active-account";
 import {
 	getTravelModeEnforcer,
@@ -80,6 +84,8 @@ export interface UnlockDeps {
 /** Only the SRP (password) path derives keys, so only it takes a `CryptoPort`. */
 export interface PasswordUnlockDeps extends UnlockDeps {
 	crypto: CryptoPort;
+	/** Captured before this multi-Account ceremony starts. */
+	materialPublication?: MaterialPublication;
 	/** Internal seam for deterministic ceremony tests; production resolves stored Account URLs. */
 	accountAuthClientFactory?: (
 		storage: AccountStore,
@@ -213,6 +219,7 @@ async function acquireWithPassword(
 		crypto,
 		credentialMirror,
 		accountAuthClientFactory,
+		materialPublication,
 	}: PasswordUnlockDeps,
 ): Promise<AcquireResult> {
 	const candidates: UnlockCandidate[] = [];
@@ -220,7 +227,9 @@ async function acquireWithPassword(
 
 	for (const account of targets) {
 		const { accountId, email } = account;
+		const cleanup = materialPublication?.captureCleanup?.(accountId);
 		try {
+			materialPublication?.check();
 			if (!(await storage.hasStoredSecretKey(accountId))) {
 				failed.push({ accountId, email, reason: "no_stored_secret_key" });
 				continue;
@@ -247,6 +256,7 @@ async function acquireWithPassword(
 					accountAuthClientFactory: async () => apiClient,
 				},
 			);
+			materialPublication?.check();
 			// No `travelModeApiClient`: the client above may hold a dead token or none at
 			// all, and travel mode is verified before the new one is committed to storage.
 			// `storeUnlockSession` builds that client from the token this unlock just
@@ -260,19 +270,27 @@ async function acquireWithPassword(
 				{
 					serverUrl,
 					setActive: false,
+					materialPublication,
 				},
 			);
 
 			candidates.push({ account, apiClient: null, verified: true });
 		} catch (error) {
+			if (error instanceof MaterialPublicationSupersededError) throw error;
+			// A retired ceremony must not turn into an ordinary per-Account
+			// credential failure and continue publishing sibling Accounts.
+			materialPublication?.check();
 			// The credential was accepted before travel mode is verified, so a
 			// verification failure must not be reported as a rejected password.
 			if (error instanceof TravelModeVerificationError) {
-				const outcome = await lockAccount(accountId, {
-					storage,
-					itemCache,
-					credentialMirror,
-				});
+				const lock = () =>
+					lockAccount(accountId, {
+						storage,
+						itemCache,
+						credentialMirror,
+					});
+				const outcome = cleanup ? await cleanup.run(lock) : await lock();
+				if (!outcome) throw new MaterialPublicationSupersededError();
 				if (outcome.failures.length > 0) {
 					console.error(
 						"[Unlock] Failed to fully lock an unverified session:",
@@ -471,10 +489,12 @@ async function runUnlock(
 	{ accounts, previousActive }: UnlockPlan,
 	{ storage, itemCache, credentialMirror }: UnlockDeps,
 	opts?: UnlockOptions,
+	materialPublication?: MaterialPublication,
 ): Promise<UnlockOutcome> {
 	const enforcer = getTravelModeEnforcer(storage, itemCache);
 	const unlocked: string[] = [];
 	for (const { account, apiClient, verified } of candidates) {
+		materialPublication?.check();
 		if (
 			verified ||
 			(await enforcer.verifyOrClear(
@@ -505,8 +525,21 @@ async function runUnlock(
 		accounts,
 	});
 	if (activeAccountId && opts?.setActive !== false) {
-		await storage.setActiveAccount(activeAccountId);
+		if (materialPublication) {
+			await materialPublication.run(
+				activeAccountId,
+				async (check) => {
+					check();
+					await storage.setActiveAccount(activeAccountId);
+					check();
+				},
+				() => false,
+			);
+		} else {
+			await storage.setActiveAccount(activeAccountId);
+		}
 	}
+	materialPublication?.check();
 
 	return { activeAccountId, unlocked, failed };
 }
@@ -523,7 +556,7 @@ export async function unlockAllWithPassword(
 		input.password,
 		deps,
 	);
-	return runUnlock(acquired, plan, deps, opts);
+	return runUnlock(acquired, plan, deps, opts, deps.materialPublication);
 }
 
 /** Unlock every account (optionally narrowed to stable account IDs) with one OS prompt. */

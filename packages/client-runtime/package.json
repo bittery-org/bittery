@@ -7,6 +7,9 @@
 		"./protocol": {
 			"default": "./generated/runtime-protocol/contract.ts"
 		},
+		"./protocol-validation": {
+			"default": "./generated/runtime-protocol/validator.js"
+		},
 		"./worker": {
 			"default": "./src/worker/index.ts"
 		},
@@ -54,15 +57,19 @@
 		"check:bindings:web": "./scripts/check-web-bindings.sh",
 		"generate:server-contract": "node ./scripts/generate-server-contract.mjs",
 		"generate:persistence-contract": "node ./scripts/generate-persistence-contract.mjs",
+		"generate:profile-admission-contract": "node ./scripts/generate-profile-admission-contract.mjs",
 		"generate:platform-storage-contract": "node ./scripts/generate-platform-storage-contract.mjs",
 		"generate:http-transport-contract": "node ./scripts/generate-http-transport-contract.mjs",
 		"generate:artifact-control-contract": "node ./scripts/generate-artifact-control-contract.mjs",
 		"generate:transfer-control-contract": "node ./scripts/generate-transfer-control-contract.mjs",
 		"generate:vault-image-control-contract": "node ./scripts/generate-vault-image-control-contract.mjs",
+		"generate:native-authority-contract": "node ./scripts/generate-native-authority-contract.mjs",
+		"check:native-authority-contract": "node ./scripts/generate-native-authority-contract.mjs --check",
 		"generate:runtime-protocol-contract": "node ./scripts/generate-runtime-protocol-contract.mjs",
 		"generate:replica-conformance": "cargo run --quiet --manifest-path ./Cargo.toml -p bittery-client-core --features replica-conformance --bin generate-replica-conformance-corpus",
 		"check:server-contract": "node ./scripts/generate-server-contract.mjs --check",
 		"check:persistence-contract": "node ./scripts/generate-persistence-contract.mjs --check",
+		"check:profile-admission-contract": "node ./scripts/generate-profile-admission-contract.mjs --check",
 		"check:platform-storage-contract": "node ./scripts/generate-platform-storage-contract.mjs --check",
 		"check:http-transport-contract": "node ./scripts/generate-http-transport-contract.mjs --check",
 		"check:artifact-control-contract": "node ./scripts/generate-artifact-control-contract.mjs --check",
@@ -71,9 +78,9 @@
 		"check:runtime-protocol-contract": "node ./scripts/generate-runtime-protocol-contract.mjs --check",
 		"check:replica-conformance": "cargo run --quiet --manifest-path ./Cargo.toml -p bittery-client-core --features replica-conformance --bin generate-replica-conformance-corpus -- --check",
 		"check:rust": "cargo fmt --all --check --manifest-path ./Cargo.toml && cargo clippy --manifest-path ./Cargo.toml --workspace --all-targets -- -D warnings && cargo test --manifest-path ./Cargo.toml --workspace",
-		"check:generated": "pnpm run check:server-contract && pnpm run check:persistence-contract && pnpm run check:platform-storage-contract && pnpm run check:http-transport-contract && pnpm run check:artifact-control-contract && pnpm run check:transfer-control-contract && pnpm run check:vault-image-control-contract && pnpm run check:recovery-control && pnpm run check:runtime-protocol-contract && pnpm run check:replica-conformance && pnpm run check:bindings:native && pnpm run check:bindings:web",
+		"check:generated": "pnpm run check:server-contract && pnpm run check:persistence-contract && pnpm run check:platform-storage-contract && pnpm run check:profile-admission-contract && pnpm run check:http-transport-contract && pnpm run check:artifact-control-contract && pnpm run check:transfer-control-contract && pnpm run check:vault-image-control-contract && pnpm run check:recovery-control && pnpm run check:native-authority-contract && pnpm run check:runtime-protocol-contract && pnpm run check:replica-conformance && pnpm run check:bindings:native && pnpm run check:bindings:web",
 		"check": "pnpm run check:rust && pnpm run test:generator && pnpm run check:generated",
-		"test:generator": "node --test ./scripts/generate-server-contract.test.mjs ./scripts/generate-http-transport-contract.test.mjs ./scripts/generate-artifact-control-contract.test.mjs ./scripts/generate-transfer-control-contract.test.mjs ./scripts/generate-vault-image-control-contract.test.mjs ./scripts/generate-runtime-protocol-contract.test.mjs ./scripts/generate-recovery-control-contract.test.mjs ./scripts/generated-validator-esm.test.mjs ./scripts/harden-native-secret-bindings.test.mjs",
+		"test:generator": "node --test ./scripts/generate-profile-admission-contract.test.mjs ./scripts/generate-server-contract.test.mjs ./scripts/generate-http-transport-contract.test.mjs ./scripts/generate-artifact-control-contract.test.mjs ./scripts/generate-transfer-control-contract.test.mjs ./scripts/generate-vault-image-control-contract.test.mjs ./scripts/generate-runtime-protocol-contract.test.mjs ./scripts/generate-native-authority-contract.test.mjs ./scripts/generate-recovery-control-contract.test.mjs ./scripts/generated-validator-esm.test.mjs ./scripts/harden-native-secret-bindings.test.mjs",
 		"test:bindings:web": "./scripts/test-web-binding-harness.sh",
 		"test:chromium": "node ./scripts/test-chromium.mjs",
 		"test:binary-transfer:chromium": "node ./scripts/test-chromium.mjs binary-transfer",

@@ -11,6 +11,106 @@ import {
 
 const run = promisify(execFile);
 
+test("generated Operations projections distinguish local legacy holds from Server results", () => {
+	const projection = (resolution) => ({
+		type: "operations",
+		value: {
+			accountId: "account",
+			replicaRevision: "1",
+			operations: [
+				{
+					operationId: "original-create",
+					kind: "createItem",
+					attemptCount: "5",
+					nextAttemptAtMs: null,
+					resolution,
+					importedCount: null,
+					rejectionCode: null,
+				},
+			],
+		},
+	});
+	for (const resolution of [
+		"legacyFailed",
+		"legacyConflicted",
+		"pending",
+		"applied",
+		"rejected",
+	]) {
+		assert.equal(
+			validateRuntimeProjection(projection(resolution)),
+			true,
+			resolution,
+		);
+	}
+	assert.equal(validateRuntimeProjection(projection("failed")), false);
+});
+
+test("generated Operations validator accepts the parked missing-source projection", () => {
+	const projection = (reason) => ({
+		type: "operations",
+		value: {
+			accountId: "source-account",
+			replicaRevision: "1",
+			operations: [
+				{
+					operationId: "original-move",
+					kind: "moveItem",
+					attemptCount: "0",
+					nextAttemptAtMs: null,
+					resolution: "pending",
+					importedCount: null,
+					rejectionCode: null,
+					crossAccountMove: {
+						phase: { type: "targetCreate" },
+						destinationServerUrl: "https://target.invalid",
+						destinationUserId: "target-user",
+						destinationVaultId: "target-vault",
+						sourceVisible: false,
+						disposition: { type: "blocked", reason },
+					},
+				},
+			],
+		},
+	});
+	assert.equal(
+		validateRuntimeProjection(projection("missingSourceEvidence")),
+		true,
+	);
+	assert.equal(
+		validateRuntimeProjection(projection("missingSourceEvidnce")),
+		false,
+	);
+});
+
+test("Travel policy projections preserve an absent legacy receipt without making it optional", () => {
+	const projection = (policy) => ({
+		type: "travelMode",
+		value: {
+			accountId: "account",
+			revision: "0",
+			enforcement: "ready",
+			lastVerifiedPolicy: policy,
+		},
+	});
+	const policy = {
+		enabled: false,
+		hiddenVaultIds: [],
+		serverEnabledAtMs: null,
+		serverUpdatedAtMs: null,
+		verifiedAtMs: null,
+	};
+	assert.equal(validateRuntimeProjection(projection(policy)), true);
+	assert.equal(
+		validateRuntimeProjection(
+			projection({ ...policy, verifiedAtMs: "1700000000000" }),
+		),
+		true,
+	);
+	const { verifiedAtMs: _receipt, ...missing } = policy;
+	assert.equal(validateRuntimeProjection(projection(missing)), false);
+});
+
 test("generated Runtime protocol artifacts match the Rust contract", async () => {
 	await run(
 		"node",
@@ -235,6 +335,74 @@ test("the outcome envelope is declared rather than implied by Serde", () => {
 	);
 });
 
+test("Team results keep Server invitation statuses and problem codes closed", () => {
+	const invitation = {
+		id: "invitation-1",
+		email: "member@example.test",
+		role: "member",
+		status: "pending",
+		invitedBy: "owner-1",
+		createdAt: "2026-01-01T00:00:00Z",
+		expiresAt: "2026-01-08T00:00:00Z",
+	};
+	const success = {
+		type: "succeeded",
+		value: {
+			type: "teamPage",
+			page: {
+				user: { id: "owner-1", name: "Owner", email: "owner@example.test" },
+				team: null,
+				members: [],
+				invitations: [invitation],
+				teamManagementEnabled: false,
+			},
+		},
+	};
+	assert.equal(validateRuntimeOutcome(success), true);
+	assert.equal(
+		validateRuntimeOutcome({
+			...success,
+			value: {
+				...success.value,
+				page: {
+					...success.value.page,
+					invitations: [{ ...invitation, status: "not-a-server-status" }],
+				},
+			},
+		}),
+		false,
+	);
+
+	const problem = {
+		status: 403,
+		code: "FORBIDDEN",
+		message: "Team read refused",
+		requestId: "request-403",
+		retryable: false,
+		retryAfterSeconds: null,
+		fieldErrors: [],
+	};
+	const failure = {
+		type: "failed",
+		value: {
+			code: "ACCESS_DENIED",
+			message: "Team read refused",
+			teamPageProblem: problem,
+		},
+	};
+	assert.equal(validateRuntimeOutcome(failure), true);
+	assert.equal(
+		validateRuntimeOutcome({
+			...failure,
+			value: {
+				...failure.value,
+				teamPageProblem: { ...problem, code: "NOT_A_SERVER_CODE" },
+			},
+		}),
+		false,
+	);
+});
+
 test("every revision crosses the boundary as a canonical decimal string", () => {
 	const accepted = (replicaRevision) => ({
 		type: "succeeded",
@@ -286,6 +454,11 @@ test("every revision crosses the boundary as a canonical decimal string", () => 
 						access: "unlocked",
 						waitingReason: "reauthenticationRequired",
 						failure: null,
+						unlockCapabilities: {
+							password: false,
+							desktop: false,
+							signIn: false,
+						},
 					},
 				],
 				closed: false,
@@ -561,6 +734,177 @@ test("teardown scope and partial failures stay explicit, closed, and redacted", 
 				type: "teardown",
 				scope: { type: "device" },
 				status: "complete",
+			},
+		}),
+		true,
+	);
+});
+
+test("Vault mutation bindings keep patches and image capabilities closed", () => {
+	const scope = { accountId: "account-1", vaultId: "vault-1" };
+	const update = {
+		...scope,
+		type: "updateVault",
+		name: null,
+		icon: { type: "unchanged" },
+		image: { type: "unchanged" },
+	};
+	const source = {
+		capabilityId: "source-1",
+		byteLength: "42",
+		contentType: "image/png",
+	};
+	for (const icon of [
+		{ type: "unchanged" },
+		{ type: "clear" },
+		{ type: "set", value: "star" },
+	]) {
+		for (const image of [
+			{ type: "unchanged" },
+			{ type: "remove" },
+			{ type: "source", source },
+		]) {
+			assert.equal(validateRuntimeRequest({ ...update, icon, image }), true);
+		}
+	}
+	for (const image of [
+		{ type: "remove", source },
+		{ type: "source", source: { ...source, byteLength: 42 } },
+		{ type: "source", source: { ...source, path: "/private/image.png" } },
+		{
+			type: "source",
+			source: { ...source, uploadUrl: "https://objects.test/image" },
+		},
+	]) {
+		assert.equal(validateRuntimeRequest({ ...update, image }), false);
+	}
+	assert.equal(
+		validateRuntimeRequest({
+			...update,
+			icon: { type: "clear", value: "star" },
+		}),
+		false,
+	);
+	assert.equal(validateRuntimeRequest({ ...scope, type: "deleteVault" }), true);
+	assert.equal(
+		validateRuntimeRequest({
+			...scope,
+			type: "deleteVault",
+			sessionToken: "token",
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest({ vaultId: "vault-1", type: "deleteVault" }),
+		false,
+	);
+	for (const type of ["vaultUpdateAccepted", "vaultDeletionAccepted"]) {
+		assert.equal(
+			validateRuntimeOutcome({
+				type: "succeeded",
+				value: {
+					type,
+					operationId: "operation-1",
+					vaultId: "vault-1",
+					replicaRevision: "4",
+				},
+			}),
+			true,
+		);
+	}
+});
+
+test("Share Link actions require their explicit parent Item", () => {
+	for (const type of ["listShareAccessLogs", "revokeShareLink"]) {
+		assert.equal(
+			validateRuntimeRequest({ type, accountId: "account", linkId: "link" }),
+			false,
+		);
+		assert.equal(
+			validateRuntimeRequest({
+				type,
+				accountId: "account",
+				itemId: "item",
+				linkId: "link",
+			}),
+			true,
+		);
+	}
+});
+
+test("profile admission inspection and explicit Abort are closed startup controls", () => {
+	assert.equal(
+		validateRuntimeRequest({ type: "inspectProfileAdmission" }),
+		true,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "inspectProfileAdmission",
+			accountId: "account",
+		}),
+		false,
+	);
+	assert.equal(
+		validateRuntimeRequest({
+			type: "abortProfileAdmission",
+			admissionId: "fixed-admission",
+		}),
+		true,
+	);
+	for (const request of [
+		{ type: "abortProfileAdmission" },
+		{ type: "abortProfileAdmission", admissionId: null },
+		{
+			type: "abortProfileAdmission",
+			admissionId: "fixed-admission",
+			manifest: {},
+		},
+	])
+		assert.equal(validateRuntimeRequest(request), false);
+	const outcome = (state) => ({
+		type: "succeeded",
+		value: { type: "profileAdmissionInspection", state },
+	});
+	assert.equal(validateRuntimeOutcome(outcome({ type: "notStarted" })), true);
+	for (const phase of [
+		"preparing",
+		"aborting",
+		"aborted",
+		"committed",
+		"complete",
+	])
+		assert.equal(
+			validateRuntimeOutcome(
+				outcome({ type: "import", admissionId: "fixed-admission", phase }),
+			),
+			true,
+		);
+	for (const phase of ["wiping", "wiped"])
+		assert.equal(
+			validateRuntimeOutcome(
+				outcome({ type: "reset", wipeId: "fixed-reset", phase }),
+			),
+			true,
+		);
+	for (const state of [
+		{ type: "import", admissionId: "fixed-admission", phase: "future" },
+		{
+			type: "import",
+			admissionId: "fixed-admission",
+			phase: "preparing",
+			manifest: {},
+		},
+		{ type: "reset", wipeId: "fixed-reset", phase: "preparing" },
+		null,
+		[],
+	])
+		assert.equal(validateRuntimeOutcome(outcome(state)), false);
+	assert.equal(
+		validateRuntimeOutcome({
+			type: "succeeded",
+			value: {
+				type: "profileAdmissionAborted",
+				admissionId: "fixed-admission",
 			},
 		}),
 		true,

@@ -8,15 +8,27 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 let sink: AtomicAttachmentDownloadSink | undefined;
+let releasedUploads = 0;
+let releasedDownloads = 0;
 const currentSink = () => sink;
 mock.module("@/lib/crypto", () => ({
 	attachmentDownloadSinks: {
+		captureScope: () => ({}),
+		release: async () => {
+			releasedDownloads++;
+		},
 		grant(input: { sink: AtomicAttachmentDownloadSink }) {
 			sink = input.sink;
 			return "download-grant";
 		},
 	},
-	attachmentUploadSources: { grant: () => "upload-grant" },
+	attachmentUploadSources: {
+		captureScope: () => ({}),
+		grant: () => "upload-grant",
+		release: async () => {
+			releasedUploads++;
+		},
+	},
 }));
 mock.module("@bittery/shared/api", () => ({ useApiClient: () => ({}) }));
 mock.module("@bittery/shared/api-query", () => ({
@@ -44,6 +56,8 @@ for (const departure of [
 ] as const)
 	test(`foreground Download never caches plaintext or publishes after ${departure}`, async () => {
 		sink = undefined;
+		releasedUploads = 0;
+		releasedDownloads = 0;
 		const transport = createFakeRuntimeTransport();
 		const runtime = createRuntimeClient({ transport });
 		const release = runtime.session().subscribe(() => {});
@@ -64,7 +78,19 @@ for (const departure of [
 							access,
 							failure: null,
 							replicaRevision: "1",
-							displayIdentity: { email: "a@example.test" },
+							unlockCapabilities: {
+								password: false,
+								desktop: false,
+								signIn: false,
+							},
+							displayIdentity: {
+								email: "a@example.test",
+								name: "Test Account",
+								teamName: null,
+								teamAvatarUrl: null,
+								serverUrl: "https://vault.example.test",
+								secretKeyHint: "A3-A••••",
+							},
 						},
 					],
 				},
@@ -85,6 +111,7 @@ for (const departure of [
 			changeItem = () => setItemId("other-item");
 			const attachments = useRuntimeItemAttachments({
 				id: itemId,
+				vaultId: "vault",
 				accountId: "account",
 			});
 			download = attachments.download;
@@ -179,6 +206,10 @@ for (const departure of [
 					fileName: "private.txt",
 				});
 			else expect(value).toBe("AbortError");
+			expect(releasedUploads).toBe(departure === "upload" ? 1 : 0);
+			expect(releasedDownloads).toBe(
+				departure !== "upload" && departure !== "after-unmount" ? 1 : 0,
+			);
 			expect(
 				query
 					.getMutationCache()

@@ -16,6 +16,7 @@ import type {
 	DesktopStatus,
 } from "./desktop-protocol";
 import { emitBackgroundEvent } from "./events";
+import { nativeMessagingClient } from "./native-messaging-client";
 import {
 	type DesktopModeStateSnapshot,
 	evaluateDesktopRecoveryDecision,
@@ -243,7 +244,13 @@ export class DesktopSyncService {
 	 */
 	async checkDesktopStatus(): Promise<DesktopStatus | null> {
 		const previousLocked = this.lastDesktopStatus?.locked ?? null;
+		const wasAvailable = this.desktopAvailable;
 		const data = await desktopClient.getLockStatus();
+		const retirement =
+			(data?.locked && previousLocked !== true) ||
+			(data === null && wasAvailable)
+				? nativeMessagingClient.retireObservedStatus(data)
+				: null;
 
 		this.lastDesktopStatus = data;
 		this.desktopAvailable = data !== null;
@@ -252,6 +259,7 @@ export class DesktopSyncService {
 		if ((data?.locked ?? null) !== previousLocked) {
 			desktopClient.clearCache();
 		}
+		if (retirement) await retirement;
 
 		await vaultSession.dispatch({
 			type: "DESKTOP_OBSERVED",
@@ -278,6 +286,13 @@ export class DesktopSyncService {
 	}
 
 	private async handleDesktopEvent(event: DesktopEventPayload): Promise<void> {
+		// The transport fences delivery synchronously and runs C1 cleanup behind its
+		// material drain, including when this service has no event subscription.
+		if (
+			(event.event === "lock" || event.event === "desktop_close") &&
+			nativeMessagingClient.hasRetirementCleanup()
+		)
+			return;
 		await this.saveDesktopModeState();
 
 		if (event.event === "lock") {

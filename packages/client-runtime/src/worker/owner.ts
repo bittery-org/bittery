@@ -27,7 +27,10 @@ export interface WorkerRpcChannel {
 		payload: unknown,
 		options?: { signal?: AbortSignal },
 	): Promise<T>;
-	subscribe(listener: (value: unknown) => void): () => void;
+	subscribe(
+		listener: (value: unknown) => void,
+		onFailure?: (error: WorkerRpcError) => void,
+	): () => void;
 }
 
 export interface SharedWorkerOwner {
@@ -49,10 +52,52 @@ export interface SharedWorkerOwnerDeps {
 	preserveHostRequestDuringClose?: (payload: unknown) => boolean;
 }
 
+interface ChannelSubscription {
+	notify: (value: unknown) => void;
+	onFailure?: (error: WorkerRpcError) => void;
+}
+
 interface PendingRequest {
+	preserveDuringClose: boolean;
 	resolve: (value: unknown) => void;
 	reject: (error: unknown) => void;
 	detachAbort: () => void;
+}
+
+// Transport-only exception: the existing Runtime observation owns whether this ID is live.
+// This cannot initialize work or reopen a Worker once close has completed.
+function isObservationCleanup(
+	channel: WorkerChannelName,
+	value: unknown,
+): boolean {
+	if (channel !== "runtime" || typeof value !== "object" || value === null)
+		return false;
+	try {
+		const type = Object.getOwnPropertyDescriptor(value, "type");
+		const observation = Object.getOwnPropertyDescriptor(value, "observationId");
+		if (
+			type === undefined ||
+			!Object.hasOwn(type, "value") ||
+			observation === undefined ||
+			!Object.hasOwn(observation, "value") ||
+			typeof observation.value !== "string"
+		)
+			return false;
+		if (type.value === "unobserve") return Reflect.ownKeys(value).length === 2;
+		if (
+			type.value !== "finishVaultExportOutput" ||
+			Reflect.ownKeys(value).length !== 3
+		)
+			return false;
+		const lease = Object.getOwnPropertyDescriptor(value, "outputLeaseId");
+		return (
+			lease !== undefined &&
+			Object.hasOwn(lease, "value") &&
+			typeof lease.value === "string"
+		);
+	} catch {
+		return false;
+	}
 }
 
 function backendFailure(error: unknown, fallback: string): WorkerRpcError {
@@ -84,7 +129,7 @@ export function createSharedWorkerOwner(
 	const nextIds = new Map<WorkerChannelName, number>();
 	let nextControlId = 0;
 	const pending = new Map<string, PendingRequest>();
-	const listeners = new Map<WorkerChannelName, Set<(value: unknown) => void>>();
+	const listeners = new Map<WorkerChannelName, Set<ChannelSubscription>>();
 	const activeHostRequests = new Map<
 		number,
 		{
@@ -137,6 +182,10 @@ export function createSharedWorkerOwner(
 
 	function completeCloseAfterTermination(target: SharedWorkerHandle): void {
 		if (closeCompletion !== null) return;
+		// Core may finish draining as soon as unobserve releases its handle, before the router
+		// posts that cleanup response. Keep the same pending entry and Worker until its ACK lands.
+		if (failure === null && (closeAcknowledgement === null || pending.size > 0))
+			return;
 		const completion = settleAndTerminate(target);
 		closeCompletion = completion;
 		void completion.then(
@@ -162,6 +211,20 @@ export function createSharedWorkerOwner(
 	function failWorker(error: WorkerRpcError): void {
 		if (failure !== null) return;
 		failure = error;
+		// The same channel subscriptions own idle observers as well as active RPC consumers.
+		// Fence delivery and detach them before invoking host cleanup, including reentrant calls.
+		const retired = [...listeners.values()].flatMap((entries) => [...entries]);
+		listeners.clear();
+		for (const entry of retired) {
+			const notify = entry.onFailure;
+			entry.onFailure = undefined;
+			try {
+				notify?.(error);
+			} catch {
+				// One failed consumer cleanup cannot suppress retirement of the others. The
+				// connection remains failed; this is not a successful host cleanup ACK.
+			}
+		}
 		for (const request of pending.values()) {
 			request.detachAbort();
 			request.reject(error);
@@ -335,7 +398,7 @@ export function createSharedWorkerOwner(
 						return;
 					}
 					for (const listener of listeners.get(reply.channel) ?? [])
-						listener(value);
+						listener.notify(value);
 					return;
 				}
 				if (reply.type === "close-ack") {
@@ -374,6 +437,7 @@ export function createSharedWorkerOwner(
 				request.detachAbort();
 				if (reply.ok) request.resolve(value);
 				else request.reject(new WorkerRpcError(reply.code, reply.message));
+				if (worker !== null) completeCloseAfterTermination(worker);
 			};
 			worker.onerror = (event) => {
 				failWorker(
@@ -398,15 +462,20 @@ export function createSharedWorkerOwner(
 	return {
 		channel(channel) {
 			return {
-				subscribe(listener) {
+				subscribe(listener, onFailure) {
+					if (failure !== null) {
+						onFailure?.(failure);
+						return () => undefined;
+					}
+					const entry = { notify: listener, onFailure };
 					let channelListeners = listeners.get(channel);
 					if (channelListeners === undefined) {
 						channelListeners = new Set();
 						listeners.set(channel, channelListeners);
 					}
-					channelListeners.add(listener);
+					channelListeners.add(entry);
 					return () => {
-						channelListeners?.delete(listener);
+						channelListeners?.delete(entry);
 						if (channelListeners?.size === 0) listeners.delete(channel);
 					};
 				},
@@ -415,9 +484,10 @@ export function createSharedWorkerOwner(
 					options?: { signal?: AbortSignal },
 				) {
 					if (failure !== null) return Promise.reject(failure);
+					const preserveDuringClose = isObservationCleanup(channel, payload);
 					if (
 						closed ||
-						closePromise !== null ||
+						(closePromise !== null && !preserveDuringClose) ||
 						closeAcknowledgement !== null
 					) {
 						return Promise.reject(
@@ -461,9 +531,11 @@ export function createSharedWorkerOwner(
 									"The worker request was cancelled.",
 								),
 							);
+							completeCloseAfterTermination(target);
 						};
 						options?.signal?.addEventListener("abort", abort, { once: true });
 						pending.set(key(channel, id), {
+							preserveDuringClose,
 							resolve,
 							reject,
 							detachAbort: () =>
@@ -484,6 +556,7 @@ export function createSharedWorkerOwner(
 						request?.reject(
 							backendFailure(error, "Could not post the worker request."),
 						);
+						completeCloseAfterTermination(target);
 					}
 					return answer as Promise<T>;
 				},
@@ -502,13 +575,14 @@ export function createSharedWorkerOwner(
 				closed = true;
 				return Promise.resolve();
 			}
-			for (const request of pending.values()) {
+			for (const [id, request] of pending) {
+				if (request.preserveDuringClose) continue;
+				pending.delete(id);
 				request.detachAbort();
 				request.reject(
 					new WorkerRpcError("closed", "The shared worker is closing."),
 				);
 			}
-			pending.clear();
 			abortNonCleanupHostRequests();
 			const target = worker;
 			const id = nextControlId++;

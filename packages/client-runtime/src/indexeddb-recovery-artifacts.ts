@@ -25,8 +25,16 @@ export async function addRecoveryArtifact(
 				binaryChunk.byteLength > 262144))
 	)
 		throw new Error("Recovery artifact binary pairing is invalid");
+	const protectedImage =
+		record.type === "protectedVaultImageMetadata" ||
+		record.type === "protectedVaultImageChunk";
 	const image =
-		record.type === "vaultImageMetadata" || record.type === "vaultImageChunk";
+		protectedImage ||
+		record.type === "vaultImageMetadata" ||
+		record.type === "vaultImageChunk";
+	const publication = protectedImage ? record.publicationId : "";
+	if (protectedImage && !publication)
+		throw new Error("Recovery protected publication is invalid");
 	const provisional =
 		record.type === "provisionalMetadata" || record.type === "provisionalChunk";
 	const storeName = provisional
@@ -54,6 +62,23 @@ export async function addRecoveryArtifact(
 		const bytes = new Uint8Array(binaryChunk);
 		value = { ...scope, bytes: image ? bytes : bytes.buffer };
 	}
+	if (image) {
+		if (
+			!protectedImage &&
+			(Object.hasOwn(value, "publicationId") ||
+				Object.hasOwn(value, "protection"))
+		)
+			throw new Error("Raw recovery image cannot contain protected metadata");
+		if (
+			protectedImage &&
+			metadata &&
+			(value.protection == null ||
+				typeof value.protection !== "object" ||
+				Array.isArray(value.protection))
+		)
+			throw new Error("Recovery protected metadata is invalid");
+		value = { ...value, publicationId: publication };
+	}
 	const key: IDBValidKey[] = [accountId];
 	if ("artifactId" in record) key.push(record.artifactId);
 	else {
@@ -62,6 +87,7 @@ export async function addRecoveryArtifact(
 			key.push(record.attachmentId, record.generation);
 		}
 	}
+	if (image) key.push(publication);
 	if (!metadata) key.push(record.chunkIndex);
 	const db = await (image
 		? openVaultImageArtifactDatabase()

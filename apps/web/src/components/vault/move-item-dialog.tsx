@@ -18,9 +18,9 @@ import {
 	IconCheck as Check,
 	IconLoaderCircle as LoaderCircle,
 } from "@bittery/ui/icons";
+import type { RuntimeVaultOption } from "@bittery/ui/runtime-presentation";
 import { useMemo, useState } from "react";
 import { useRuntimeItems } from "@/hooks/use-runtime-items";
-import type { RuntimeVaultOption } from "@/lib/runtime-items";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function MoveItemDialog({

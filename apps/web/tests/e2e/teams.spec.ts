@@ -68,6 +68,55 @@ function inviteeAddress(): string {
 }
 
 let owner: TestUser;
+const fingerprints = new Map<string, string>();
+
+async function readOwnFingerprint(page: Page): Promise<string> {
+	// Full navigation intentionally restarts the Runtime locked; use the live app links.
+	const settings = page.locator('a[href="/settings"]').first();
+	if (!(await settings.isVisible()))
+		await page.getByTestId("user-menu").click();
+	await settings.click();
+	await page
+		.getByRole("tab", { name: uiText("settings_tab_security"), exact: true })
+		.click();
+	await page
+		.getByRole("button", { name: uiText("recipient_key_show") })
+		.click();
+	const code = page.getByTestId("own-key-fingerprint");
+	await expect(code).toHaveText(/^BVK1-[A-F0-9]{64}$/);
+	const fingerprint = await code.textContent();
+	if (!fingerprint) throw new Error("Own fingerprint was not displayed");
+	await page.locator('a[href="/vaults"]').first().click();
+	await waitForAppReady(page);
+	return fingerprint;
+}
+
+async function verifyRecipientPrompt(page: Page, email: string) {
+	const dialog = page.getByRole("dialog", {
+		name: uiText("recipient_key_verify_title"),
+		exact: true,
+	});
+	await expect(dialog).toBeVisible();
+	const fingerprint = fingerprints.get(email);
+	if (!fingerprint)
+		throw new Error(`No independently obtained fingerprint for ${email}`);
+	await dialog
+		.getByLabel(uiText("recipient_key_fingerprint_label"))
+		.fill(`BVK1-${"0".repeat(64)}`);
+	await dialog
+		.getByRole("button", { name: uiText("recipient_key_verify_action") })
+		.click();
+	await expect(dialog.getByRole("alert")).toHaveText(
+		uiText("recipient_key_mismatch"),
+	);
+	await dialog
+		.getByLabel(uiText("recipient_key_fingerprint_label"))
+		.fill(fingerprint);
+	await dialog
+		.getByRole("button", { name: uiText("recipient_key_verify_action") })
+		.click();
+	await expect(dialog).toBeHidden();
+}
 
 test.beforeAll(async ({ browser }) => {
 	test.setTimeout(300000);
@@ -75,9 +124,11 @@ test.beforeAll(async ({ browser }) => {
 	try {
 		// The Team plan's signup step is the product's only "create a team" form:
 		// it is what names the team the new account owns.
-		owner = await signUp(await context.newPage(), generateTestUser(), {
+		const ownerPage = await context.newPage();
+		owner = await signUp(ownerPage, generateTestUser(), {
 			plan: "team",
 		});
+		fingerprints.set(owner.email, await readOwnFingerprint(ownerPage));
 	} finally {
 		await context.close();
 	}
@@ -88,18 +139,8 @@ test.beforeAll(async ({ browser }) => {
  * A shared vault for a team member to be added to.
  */
 async function createSharedVault(page: Page): Promise<string> {
-	const vaultId = await createVault(page, `Team vault ${nanoid(6)}`);
-
-	await page.getByTestId("vault-menu-button").click();
-	await page.getByTestId("make-shared-button").click();
-	await page.getByTestId("make-shared-confirm-button").click();
-	await expect(
-		toastWithText(
-			page,
-			uiText("vaults_detail_toast_convert_to_shared_success"),
-		),
-	).toBeVisible();
-	return vaultId;
+	// Exercise sharing independently of the separate personal-to-team conversion flow.
+	return createVault(page, `Team vault ${nanoid(6)}`, { type: "team" });
 }
 
 /** Add a login and optionally an Attachment, exercising both rotation manifests. */
@@ -118,7 +159,14 @@ async function populateSharedVault(
 	if (attachmentName) {
 		const attachmentContents = `rotation attachment ${nanoid(12)}`;
 		const pane = page.getByTestId("item-detail-pane");
-		await pane.locator('input[type="file"]').setInputFiles({
+		const choosingFile = page.waitForEvent("filechooser");
+		await pane
+			.getByRole("button", {
+				name: uiText("vaults_detail_items_attachments_action_attach_file"),
+				exact: true,
+			})
+			.click();
+		await (await choosingFile).setFiles({
 			name: attachmentName,
 			mimeType: "text/plain",
 			buffer: Buffer.from(attachmentContents),
@@ -237,9 +285,17 @@ async function addVaultMember(page: Page, email: string): Promise<void> {
 			exact: true,
 		})
 		.click();
-	await expect(
-		toastWithText(page, uiText("vaults_add_member_dialog_toast_member_added")),
-	).toBeVisible();
+	const verification = page.getByRole("dialog", {
+		name: uiText("recipient_key_verify_title"),
+		exact: true,
+	});
+	const success = toastWithText(
+		page,
+		uiText("vaults_add_member_dialog_toast_member_added"),
+	);
+	await expect(verification.or(success)).toBeVisible();
+	if (await verification.isVisible()) await verifyRecipientPrompt(page, email);
+	await expect(success).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(addDialog).toBeHidden();
 	await expect(membersDialog.getByTestId("member-row")).toHaveCount(2, {
@@ -263,6 +319,7 @@ async function joinTeamThroughInvite(
 	const context = await browser.newContext();
 	const memberPage = await context.newPage();
 	invitee = await signUpFromInvite(memberPage, inviteUrl, invitee);
+	fingerprints.set(invitee.email, await readOwnFingerprint(memberPage));
 	return { invitee, memberPage, close: () => context.close() };
 }
 
@@ -300,6 +357,28 @@ test("the Team plan signup names the team the new account owns", async ({
 	).toBeVisible();
 });
 
+test("a new recipient invitation publishes one link and a pending Team entry", async ({
+	page,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	await signIn(page, owner);
+	await openTeamPage(page);
+	const email = inviteeAddress();
+	const link = await inviteMember(page, email, "member");
+	expect(new URL(link).pathname).toMatch(/^\/invite\/[^/]+$/);
+	await openTeamPage(page);
+	await openTeamTab(page, "team_page_tab_invitations");
+	const invitations = page.getByRole("tabpanel");
+	await expect(invitations.getByText(email)).toBeVisible({
+		timeout: VAULT_READY_TIMEOUT_MS,
+	});
+	await expect(
+		invitations.getByText(uiText("team_invitations_status_pending"), {
+			exact: true,
+		}),
+	).toBeVisible();
+});
+
 test("an invitation can be resent for a fresh link and then cancelled", async ({
 	page,
 	browser,
@@ -331,19 +410,43 @@ test("an invitation can be resent for a fresh link and then cancelled", async ({
 		invitations.getByText(uiText("team_role_admin"), { exact: true }),
 	).toBeVisible();
 
-	// A signed-in visitor gets the accept/decline screen, not a signup form.
-	await openInviteLink(
-		page,
-		firstLink,
-		page.getByRole("heading", { name: uiText("auth_invite_header_title") }),
-	);
-	await expect(page.getByText(owner.organizationName).first()).toBeVisible();
-	await expect(
-		page.getByRole("button", { name: uiText("auth_invite_action_accept") }),
-	).toBeVisible();
-	await expect(
-		page.getByRole("button", { name: uiText("auth_invite_action_decline") }),
-	).toBeVisible();
+	// Give the invite view its own browser profile and Session. A second tab of
+	// this profile would replace the admin page's Server Session when it unlocks.
+	// The full navigation still starts this view's Runtime locked, so its owner
+	// must Quick Unlock before the authenticated actions become available.
+	const inviteContext = await browser.newContext();
+	try {
+		const inviteView = await inviteContext.newPage();
+		await signIn(inviteView, owner);
+		await inviteView.goto(firstLink);
+		const unlock = inviteView.getByRole("button", {
+			name: "Unlock Vault",
+			exact: true,
+		});
+		await expect(unlock).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		await inviteView.locator("#password").fill(owner.password);
+		await unlock.click();
+		await expect(
+			inviteView.getByRole("heading", {
+				name: uiText("auth_invite_header_title"),
+			}),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		await expect(
+			inviteView.getByText(owner.organizationName).first(),
+		).toBeVisible();
+		await expect(
+			inviteView.getByRole("button", {
+				name: uiText("auth_invite_action_accept"),
+			}),
+		).toBeVisible();
+		await expect(
+			inviteView.getByRole("button", {
+				name: uiText("auth_invite_action_decline"),
+			}),
+		).toBeVisible();
+	} finally {
+		await inviteContext.close();
+	}
 
 	await openTeamPage(page);
 	await openTeamTab(page, "team_page_tab_invitations");
@@ -446,7 +549,7 @@ test("removing a Vault member rotates its Item and Attachment keys", async ({
 		// exact download below cover the Attachment ciphertext on both sides of the
 		// rotation.
 		await joined.memberPage.reload();
-		await waitForAppReady(joined.memberPage);
+		await signIn(joined.memberPage, joined.invitee);
 		await openVault(joined.memberPage, vaultId);
 		await openItem(joined.memberPage, itemTitle);
 		await expect(
@@ -490,7 +593,7 @@ test("removing a Vault member rotates its Item and Attachment keys", async ({
 		// Reloading discards every in-memory query result, so these assertions prove
 		// the server-committed key and Attachment envelope survive a fresh client.
 		await page.reload();
-		await waitForAppReady(page);
+		await signIn(page, owner);
 		await openVault(page, vaultId);
 		await openItem(page, itemTitle);
 		await expectAttachmentDownload(page, attachmentName, attachmentContents);
@@ -498,12 +601,11 @@ test("removing a Vault member rotates its Item and Attachment keys", async ({
 		// Vault-only removal keeps team membership but evicts the inaccessible
 		// Vault from the removed member's authoritative client state.
 		await joined.memberPage.reload();
-		await waitForAppReady(joined.memberPage);
-		await gotoRoute(
-			joined.memberPage,
-			"/vaults",
+		await signIn(joined.memberPage, joined.invitee);
+		await joined.memberPage.locator('a[href="/vaults"]').first().click();
+		await expect(
 			joined.memberPage.getByTestId("new-vault-button"),
-		);
+		).toBeVisible();
 		await expect(
 			joined.memberPage.locator(`a[href="/vaults/${vaultId}"]`),
 		).toHaveCount(0);
@@ -762,6 +864,7 @@ test("a member can leave the team, rotating the keys they held", async ({
 				name: uiText("team_leave_dialog_action_confirm"),
 			})
 			.click();
+		await verifyRecipientPrompt(member, owner.email);
 		await expect(
 			toastWithText(member, uiText("team_leave_dialog_toast_left")),
 		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });

@@ -8,7 +8,11 @@
  * has a `team_id`, and every ordinary signup creates a team of one.
  */
 import { expect, type Locator, type Page } from "@playwright/test";
-import { readSecretKey, type TestUser, waitForAppReady } from "./auth";
+import {
+	completeRuntimeSignupHandoff,
+	readSecretKey,
+	type TestUser,
+} from "./auth";
 import { mailOutboxNow, waitForCode } from "./mail-outbox";
 import { uiText } from "./messages";
 import { cssAttributeValue, gotoRoute, VAULT_READY_TIMEOUT_MS } from "./vault";
@@ -17,11 +21,17 @@ export type TeamRole = "member" | "admin";
 
 /** Open `/team` and wait for the tabs, which only render once the team loads. */
 export async function openTeamPage(page: Page): Promise<void> {
-	await gotoRoute(
-		page,
-		"/team",
-		page.getByRole("tab", { name: uiText("team_page_tab_members") }),
-	);
+	const ready = page.getByRole("tab", {
+		name: uiText("team_page_tab_members"),
+	});
+	const link = page.locator('a[href="/team"]').first();
+	if (await link.isVisible()) {
+		// Keep the process-owned Runtime unlocked during ordinary in-app navigation.
+		await link.click();
+		await expect(ready).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		return;
+	}
+	await gotoRoute(page, "/team", ready);
 }
 
 /** Switch to one of the `/team` tabs and wait for it to become the active one. */
@@ -106,6 +116,26 @@ export async function signUpFromInvite(
 	page: Page,
 	inviteUrl: string,
 	invitee: TestUser,
+	afterRegistration?: (registered: TestUser) => Promise<void>,
+): Promise<TestUser> {
+	const registered = await registerFromInvite(page, inviteUrl, invitee);
+	await afterRegistration?.(registered);
+	return {
+		...registered,
+		secretKey: await completeRuntimeSignupHandoff(
+			page,
+			registered,
+			VAULT_READY_TIMEOUT_MS,
+			"/team",
+		),
+	};
+}
+
+/** Complete invitation registration before the separate Runtime sign-in ceremony. */
+export async function registerFromInvite(
+	page: Page,
+	inviteUrl: string,
+	invitee: TestUser,
 ): Promise<TestUser> {
 	const form = page.getByTestId("signup-form");
 	await openInviteLink(page, inviteUrl, form);
@@ -134,6 +164,5 @@ export async function signUpFromInvite(
 	// The server accepts the invitation during signup, so the new member lands
 	// on the team page rather than back on the invitation.
 	await page.waitForURL("**/team", { timeout: VAULT_READY_TIMEOUT_MS });
-	await waitForAppReady(page);
 	return { ...invitee, secretKey: await readSecretKey(page) };
 }

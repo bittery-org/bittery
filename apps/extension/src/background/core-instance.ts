@@ -4,6 +4,8 @@ import { toCachedItem } from "@bittery/shared/item-mapping";
 import { crypto } from "../lib/crypto";
 import { itemCache, storage } from "../lib/storage";
 import { vaultCrypto, vaultRepository } from "../lib/vault-runtime";
+import { enqueueOutboundCommand } from "./outbound-drain";
+import { syncCacheService } from "./services/sync-cache-service";
 
 export function createBackgroundCore(runtime: ClientRuntime) {
 	return createCoreContext({
@@ -14,14 +16,10 @@ export function createBackgroundCore(runtime: ClientRuntime) {
 		vaultRuntime: runtime.vaultRuntime,
 		commandQueue: {
 			enqueue: async (command) => {
-				const { enqueueOutboundCommand } = await import("./outbound-drain");
 				await enqueueOutboundCommand(command);
 			},
 		},
 		hydrateItem: async (accountId, itemId) => {
-			const { syncCacheService } = await import(
-				"./services/sync-cache-service"
-			);
 			const client = await syncCacheService.getClientForAccountId(accountId);
 			if (!client) {
 				throw new Error(`No authenticated client for account ${accountId}`);

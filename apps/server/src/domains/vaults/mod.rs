@@ -1,3 +1,4 @@
+pub(crate) mod vault_image_cleanup;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -29,14 +30,16 @@ pub(crate) mod travel_mode;
 mod vault_image_staging;
 
 pub(crate) use attachments::{
-    create_attachment_move_manifest, create_vault_attachment, create_vault_attachment_upload,
-    delete_vault_attachment, get_attachment_download_url, list_vault_attachments_page,
-    update_vault_attachment, verify_attachment_move_staging, AttachmentMoveFinalizeIntent,
-    AttachmentMoveStagingStatus,
+    cleanup_durable_attachment_uploads, create_attachment_move_manifest, create_vault_attachment,
+    create_vault_attachment_upload, delete_vault_attachment, get_attachment_download_url,
+    list_vault_attachments_page, update_vault_attachment, verify_attachment_move_staging,
+    AttachmentMoveFinalizeIntent, AttachmentMoveStagingStatus,
 };
 pub(crate) use catalog::{
     convert_vault_type, create_vault_image_upload, delete_vault, execute_create_vault_operation,
-    get_vault, get_vault_stats, list_vaults_page, update_vault, CreateVaultOperationInput,
+    execute_delete_vault_operation, execute_update_vault_operation, get_vault, get_vault_stats,
+    list_vaults_page, update_vault, CreateVaultOperationInput, DeleteVaultOperationInput,
+    UpdateVaultOperationInput,
 };
 pub(crate) use favicon::{fetch_and_store_favicon, get_fetched_favicon, list_domains_to_refresh};
 pub(crate) use items::{
@@ -67,6 +70,8 @@ use items::oversized;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod vault_mutation_tests;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -186,6 +191,16 @@ pub struct CreateAttachmentUploadInput {
     pub file_name: String,
     pub content_type: String,
     pub file_size: i32,
+    pub durable_upload: Option<DurableAttachmentUploadInput>,
+    #[serde(skip)]
+    pub request_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DurableAttachmentUploadInput {
+    pub attachment_id: String,
+    pub ciphertext_sha256: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -236,6 +251,8 @@ pub struct CreateAttachmentUploadResponse {
     pub attachment_id: String,
     pub storage_key: String,
     pub upload_url: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub upload_headers: Vec<crate::integrations::storage::PresignedUploadHeader>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -439,3 +456,6 @@ attachment_download_shape!(service_struct {
     #[serde(rename_all = "camelCase")]
     pub struct AttachmentDownloadResponse
 });
+
+#[cfg(test)]
+mod vault_image_cleanup_tests;

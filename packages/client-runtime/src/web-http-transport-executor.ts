@@ -34,6 +34,15 @@ export class WebHttpTransportExecutor {
 
 	async invoke(requestJson: string): Promise<string> {
 		const request = parseRequest(requestJson);
+		try {
+			return await this.#invoke(request);
+		} finally {
+			if (!("type" in request)) request.body.fill(0);
+			else if (request.type === "openStream") request.request.body.fill(0);
+		}
+	}
+
+	async #invoke(request: HttpRequest | HttpStreamCommand): Promise<string> {
 		if ("type" in request) {
 			return serializeStream(
 				request.type === "openStream"
@@ -45,12 +54,18 @@ export class WebHttpTransportExecutor {
 			throw new HttpTransportInvocationError();
 		}
 		const controller = new AbortController();
+		controller.signal.addEventListener("abort", () => request.body.fill(0), {
+			once: true,
+		});
 		this.#active.set(request.dispatchId, controller);
 		let result: HttpResponse;
 		try {
 			assertBodySupported(request);
 			assertUniqueHeaderNames(request.headers);
-			const browserHeaders = await browserOwnedHeaders(request);
+			const browserHeaders = await browserOwnedHeaders(
+				request,
+				controller.signal,
+			);
 			const browserRequest = prepareRequest(
 				request,
 				browserHeaders,
@@ -88,12 +103,20 @@ export class WebHttpTransportExecutor {
 			reading: true,
 			maxChunkBytes: request.maxResponseBytes,
 		};
+		state.controller.signal.addEventListener(
+			"abort",
+			() => request.body.fill(0),
+			{ once: true },
+		);
 		this.#active.set(request.dispatchId, state.controller);
 		this.#streams.set(request.dispatchId, state);
 		try {
 			assertBodySupported(request);
 			assertUniqueHeaderNames(request.headers);
-			const browserHeaders = await browserOwnedHeaders(request);
+			const browserHeaders = await browserOwnedHeaders(
+				request,
+				state.controller.signal,
+			);
 			const requestObject = prepareRequest(
 				request,
 				browserHeaders,
@@ -177,6 +200,8 @@ function prepareRequest(
 	browserHeaders: HttpRequest["headers"],
 	signal: AbortSignal,
 ): Request {
+	const body =
+		request.body.length === 0 ? undefined : Uint8Array.from(request.body);
 	try {
 		const browserRequest = new Request(request.url, {
 			method: request.method,
@@ -184,8 +209,7 @@ function prepareRequest(
 				name,
 				value,
 			]),
-			body:
-				request.body.length === 0 ? undefined : Uint8Array.from(request.body),
+			body,
 			signal,
 			redirect: "manual",
 			credentials: "omit",
@@ -197,6 +221,11 @@ function prepareRequest(
 		return browserRequest;
 	} catch {
 		throw new HttpTransportInvocationError();
+	} finally {
+		// Request copies BufferSource bytes. Erase only our mutable handoff; Fetch/JS-engine
+		// managed copies and immutable JSON strings cannot be forensically wiped here.
+		body?.fill(0);
+		request.body.fill(0);
 	}
 }
 
@@ -207,6 +236,7 @@ function prepareRequest(
  */
 async function browserOwnedHeaders(
 	request: HttpRequest,
+	signal: AbortSignal,
 ): Promise<HttpRequest["headers"]> {
 	if (request.method !== "PUT") return request.headers;
 	const byName = new Map(
@@ -231,12 +261,20 @@ async function browserOwnedHeaders(
 	) {
 		throw new HttpTransportInvocationError();
 	}
-	const digest = new Uint8Array(
-		await globalThis.crypto.subtle.digest(
-			"SHA-256",
-			Uint8Array.from(request.body),
-		),
-	);
+	signal.throwIfAborted();
+	const digestInput = Uint8Array.from(request.body);
+	const wipe = () => digestInput.fill(0);
+	signal.addEventListener("abort", wipe, { once: true });
+	let digest: Uint8Array;
+	try {
+		digest = new Uint8Array(
+			await globalThis.crypto.subtle.digest("SHA-256", digestInput),
+		);
+	} finally {
+		wipe();
+		signal.removeEventListener("abort", wipe);
+	}
+	signal.throwIfAborted();
 	const actualHex = [...digest]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");

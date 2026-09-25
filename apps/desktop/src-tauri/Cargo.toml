@@ -6,6 +6,11 @@ authors = ["you"]
 edition = "2021"
 default-run = "Bittery"
 
+[features]
+# Enabled only with the Runtime-owned Desktop listener at the atomic application cutover.
+# The isolated protocol-1 fixture builds the actual native binary with this feature explicitly.
+native-runtime-legacy-source = []
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
@@ -25,18 +30,29 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-biometry = "0.2"
+tauri-plugin-biometry = { version = "=0.2.8", path = "vendor/tauri-plugin-biometry" }
 tauri-plugin-store = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tempfile = "3"
 dirs = "6.0"
 base64 = "0.23"
 
 # Native crypto
 bittery-crypto-core = { path = "../../../packages/crypto/core/crates/bittery-crypto-core" }
+bittery-client-core = { path = "../../../packages/client-runtime/crates/bittery-client-core" }
+async-trait = "=0.1.89"
+rusqlite = { version = "=0.40.2", features = ["blob", "bundled"] }
+zeroize = { version = "=1.9.0", features = ["derive", "serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+bytes = "1"
 ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 
 # OS keychain access (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 # Platform-specific features must be enabled for actual keychain storage

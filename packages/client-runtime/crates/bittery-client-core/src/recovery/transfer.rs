@@ -14,6 +14,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 pub(crate) struct RecoveryPort {
     executor: Arc<dyn SerializedRecoveryExecutor>,
+    platform_storage: Option<crate::platform_storage::PlatformStorage>,
     physical_schemas: std::sync::Mutex<Option<super::control::RecoveryPhysicalSchemas>>,
     pub recovery_id: String,
     pub cancellation: RequestCancellation,
@@ -26,10 +27,37 @@ impl RecoveryPort {
     ) -> Self {
         Self {
             executor,
+            platform_storage: None,
             physical_schemas: std::sync::Mutex::new(None),
             recovery_id,
             cancellation,
         }
+    }
+    pub(crate) fn with_platform_storage(
+        mut self,
+        storage: crate::platform_storage::PlatformStorage,
+    ) -> Self {
+        self.platform_storage = Some(storage);
+        self
+    }
+    pub(super) async fn image_device_key(
+        &self,
+    ) -> Result<crate::platform_storage::DeviceKeyDocument, RuntimeError> {
+        if self.cancellation.is_cancelled() {
+            return Err(cancelled());
+        }
+        let storage = self
+            .platform_storage
+            .as_ref()
+            .ok_or_else(|| unavailable(RecoveryUnavailableReason::StorageUnavailable))?;
+        let key = storage
+            .load_device_key()
+            .await?
+            .ok_or_else(|| unavailable(RecoveryUnavailableReason::StorageUnavailable))?;
+        if self.cancellation.is_cancelled() {
+            return Err(cancelled());
+        }
+        Ok(key)
     }
     pub(crate) fn record_physical_schemas(
         &self,
@@ -140,7 +168,7 @@ impl RecoveryPort {
         lease.armed = false;
         let (json, bytes) = result?;
         let bytes = bytes.map(Zeroizing::new);
-        if json.len() > MAX_RECORD_BYTES + 64 * 1024 {
+        if json.len() > super::limits::RECOVERY_CONTROL_BYTES {
             return Err(exceeded(RecoveryBound::ControlBytes));
         }
         if bytes
@@ -444,6 +472,33 @@ pub(super) fn archive_record(
             EntryHeader::VaultImageChunk {
                 account_id,
                 operation_id,
+                chunk_index,
+            },
+            None,
+        ),
+        RecoveryRecord::ProtectedVaultImageMetadata {
+            account_id,
+            operation_id,
+            publication_id,
+            metadata_json,
+        } => (
+            EntryHeader::ProtectedVaultImageMetadata {
+                account_id,
+                operation_id,
+                publication_id,
+            },
+            Some(metadata_json),
+        ),
+        RecoveryRecord::ProtectedVaultImageChunk {
+            account_id,
+            operation_id,
+            publication_id,
+            chunk_index,
+        } => (
+            EntryHeader::ProtectedVaultImageChunk {
+                account_id,
+                operation_id,
+                publication_id,
                 chunk_index,
             },
             None,
@@ -777,14 +832,22 @@ pub(crate) async fn export_snapshot(
 ) -> Result<(u64, RecoveryClassification), RuntimeError> {
     use sha2::Digest;
     let identity_available = server_url.is_some() && user_id.is_some();
-    let complete = snapshot.complete && identity_available;
+    let mut findings = snapshot.findings.clone();
+    let device_key =
+        super::protected_images::export_device_key(port, snapshot, &mut findings).await?;
+    let key_findings = findings.clone().finish()?.iter().any(|finding| {
+        matches!(
+            finding,
+            super::report::RecoveryFinding::UnavailableVaultImageKey { .. }
+        )
+    });
+    let complete = snapshot.complete && identity_available && !key_findings;
     let classification = if complete {
         RecoveryClassification::Complete
     } else {
         RecoveryClassification::Partial
     };
     let result = async {
-        let mut findings = snapshot.findings.clone();
         if !identity_available {
             findings.push(super::report::RecoveryFinding::IdentityUnavailable);
         }
@@ -792,7 +855,11 @@ pub(crate) async fn export_snapshot(
         let mut sink = EnvelopeSink::new(port, account_id, capability_id, password).await?;
         sink.record(
             EntryHeader::Manifest {
-                version: 1,
+                version: if snapshot.artifacts.has_protected_images() {
+                    2
+                } else {
+                    1
+                },
                 account_id: account_id.as_str().into(),
                 server_url,
                 user_id,
@@ -884,8 +951,44 @@ pub(crate) async fn export_snapshot(
                     }
                 }
             }
+            let portable = match (&record.header, &device_key) {
+                (
+                    EntryHeader::ProtectedVaultImageMetadata {
+                        operation_id,
+                        publication_id,
+                        ..
+                    },
+                    Some(key),
+                ) if snapshot
+                    .selection
+                    .as_ref()
+                    .is_some_and(|selection| selection.includes(&record.header)) =>
+                {
+                    let metadata = snapshot
+                        .artifacts
+                        .image_metadata(operation_id, publication_id)
+                        .ok_or_else(invalid)?;
+                    match super::protected_images::portable_key(snapshot, metadata, key) {
+                        Ok(key) => Some((
+                            EntryHeader::ProtectedVaultImageKey {
+                                account_id: account_id.as_str().into(),
+                                operation_id: operation_id.clone(),
+                                publication_id: publication_id.clone(),
+                            },
+                            Zeroizing::new(serde_json::to_vec(&key).map_err(|_| invalid())?),
+                        )),
+                        Err(_) if !complete => None,
+                        Err(error) => return Err(error),
+                    }
+                }
+                _ => None,
+            };
             sink.record(record.header, &record.body).await?;
             count += 1;
+            if let Some((header, key)) = portable {
+                sink.record(header, &key).await?;
+                count += 1;
+            }
         }
         if count == 0 {
             return Err(invalid());
@@ -912,7 +1015,9 @@ pub(crate) async fn export_snapshot(
             source_read_complete: snapshot.read_complete,
             export_read_complete,
             accepted_work_validated: snapshot.read_complete && snapshot.proof.is_some(),
-            artifact_dependencies_validated: snapshot.read_complete && snapshot.selection.is_some(),
+            artifact_dependencies_validated: snapshot.read_complete
+                && snapshot.selection.is_some()
+                && !key_findings,
             exported_record_count: u32::try_from(count).map_err(|_| invalid())?,
             findings: findings.finish()?,
         };

@@ -189,7 +189,7 @@ test("physical Account inventory discovers orphaned scopes across all three data
 		{
 			open: openVaultImageArtifactDatabase,
 			name: "artifacts",
-			value: { accountId: "image-only", operationId: "op" },
+			value: { accountId: "image-only", operationId: "op", publicationId: "" },
 		},
 	];
 	for (const entry of stores) {
@@ -260,4 +260,63 @@ test("capture cancellation aborts the active readonly transaction without consum
 			payloadJson: row.payloadJson,
 		},
 	});
+});
+
+test("image recovery captures raw and protected siblings without losing publication identity", async () => {
+	const db = await openVaultImageArtifactDatabase();
+	const tx = db.transaction(["artifacts", "chunks"], "readwrite");
+	for (const publicationId of ["", "protected-a", "protected-b"]) {
+		tx.objectStore("artifacts").put({
+			accountId: "a",
+			operationId: "op",
+			publicationId,
+			...(publicationId ? { protection: { opaque: publicationId } } : {}),
+		});
+		tx.objectStore("chunks").put({
+			accountId: "a",
+			operationId: "op",
+			publicationId,
+			chunkIndex: 0,
+			bytes: new Uint8Array([1, 255]),
+		});
+	}
+	await new Promise<void>((resolve, reject) => {
+		tx.oncomplete = () => resolve();
+		tx.onabort = () => reject(tx.error);
+	});
+	db.close();
+	const reader = new RecoveryRecordReader();
+	const records = [];
+	let cursor: string | null | undefined;
+	for (;;) {
+		const result = await reader.read("a", cursor);
+		if (result.control.type === "end") break;
+		if (result.control.type !== "entry") throw new Error("expected entry");
+		records.push(result);
+		cursor = result.control.nextCursor;
+	}
+	expect(
+		records.map((value) =>
+			value.control.type === "entry" ? value.control.record.type : "",
+		),
+	).toEqual([
+		"vaultImageMetadata",
+		"protectedVaultImageMetadata",
+		"protectedVaultImageMetadata",
+		"vaultImageChunk",
+		"protectedVaultImageChunk",
+		"protectedVaultImageChunk",
+	]);
+	expect(records[1]?.control).toMatchObject({
+		record: {
+			publicationId: "protected-a",
+			metadataJson: JSON.stringify({
+				accountId: "a",
+				operationId: "op",
+				publicationId: "protected-a",
+				protection: { opaque: "protected-a" },
+			}),
+		},
+	});
+	expect(records[5]?.binaryChunk).toEqual(new Uint8Array([1, 255]));
 });

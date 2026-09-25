@@ -55,6 +55,15 @@ class JoinedUploadRuntime implements WebClientRuntimeLike {
 	): void {
 		this.inner.observe_json(observationId, requestJson, listener);
 	}
+	begin_vault_export_output(observationId: string): string {
+		return this.inner.begin_vault_export_output(observationId);
+	}
+	finish_vault_export_output(
+		observationId: string,
+		outputLeaseId: string,
+	): void {
+		this.inner.finish_vault_export_output(observationId, outputLeaseId);
+	}
 	unobserve(observationId: string): void {
 		this.inner.unobserve(observationId);
 	}

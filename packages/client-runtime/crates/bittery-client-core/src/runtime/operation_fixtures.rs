@@ -106,12 +106,12 @@ impl DeviceTimer for TestTimer {
 
 // ---------------------------------------------------------------- the Device's local stores
 
-pub(super) struct MemoryPlatform {
+pub(crate) struct MemoryPlatform {
     pub(super) values: Mutex<BTreeMap<(String, String), String>>,
 }
 
 impl MemoryPlatform {
-    pub(super) fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             values: Mutex::new(BTreeMap::new()),
         })
@@ -293,6 +293,8 @@ pub(super) struct StoredItem {
 }
 
 pub(super) struct FakeServer {
+    /// The authenticated Actor whose private Item namespace this fixture serves.
+    pub(super) user_id: &'static str,
     pub(super) requests: Mutex<Vec<RecordedRequest>>,
     /// The Server's final-only Operation table, keyed the way the real one is keyed.
     pub(super) outcomes: Mutex<BTreeMap<String, StoredOutcome>>,
@@ -333,6 +335,7 @@ pub(super) struct FakeServer {
 impl FakeServer {
     pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
+            user_id: USER,
             requests: Mutex::new(Vec::new()),
             outcomes: Mutex::new(BTreeMap::new()),
             created_items: Mutex::new(Vec::new()),
@@ -627,6 +630,14 @@ impl FakeServer {
     }
 
     pub(super) fn handle_existing_item_mutation(&self, request: &RecordedRequest) -> Value {
+        self.handle_existing_item_mutation_for_item(request, "item-existing")
+    }
+
+    pub(super) fn handle_existing_item_mutation_for_item(
+        &self,
+        request: &RecordedRequest,
+        item_id: &str,
+    ) -> Value {
         if !self.authorized(request) {
             return completed(401, b"{}".to_vec());
         }
@@ -649,33 +660,37 @@ impl FakeServer {
             return completed(428, b"{}".to_vec());
         };
         let path = request.url.trim_start_matches(SERVER_URL);
-        let (kind, operation_kind, route) = match (request.method.as_str(), path) {
-            ("PATCH", "/api/v1/items/item-existing") => (
+        let item_path = format!("/api/v1/items/{item_id}");
+        let Some(suffix) = path.strip_prefix(&item_path) else {
+            return completed(404, b"{}".to_vec());
+        };
+        let (kind, operation_kind, route) = match (request.method.as_str(), suffix) {
+            ("PATCH", "") => (
                 "update_item",
                 crate::replica::OperationKind::UpdateItem,
                 "PATCH /api/v1/items/{itemId}",
             ),
-            ("PATCH", "/api/v1/items/item-existing/favorite") => (
+            ("PATCH", "/favorite") => (
                 "set_item_favorite",
                 crate::replica::OperationKind::SetItemFavorite,
                 "PATCH /api/v1/items/{itemId}/favorite",
             ),
-            ("DELETE", "/api/v1/items/item-existing") => (
+            ("DELETE", "") => (
                 "trash_item",
                 crate::replica::OperationKind::TrashItem,
                 "DELETE /api/v1/items/{itemId}",
             ),
-            ("POST", "/api/v1/items/item-existing/restore") => (
+            ("POST", "/restore") => (
                 "restore_item",
                 crate::replica::OperationKind::RestoreItem,
                 "POST /api/v1/items/{itemId}/restore",
             ),
-            ("POST", "/api/v1/items/item-existing/moves") => (
+            ("POST", "/moves") => (
                 "move_item",
                 crate::replica::OperationKind::MoveItem,
                 "POST /api/v1/items/{itemId}/moves",
             ),
-            ("DELETE", "/api/v1/items/item-existing/permanent") => (
+            ("DELETE", "/permanent") => (
                 "permanently_delete_item",
                 crate::replica::OperationKind::PermanentlyDeleteItem,
                 "DELETE /api/v1/items/{itemId}/permanent",
@@ -685,7 +700,7 @@ impl FakeServer {
         let fingerprint = item_operation_fingerprint(
             operation_kind,
             route,
-            "item-existing",
+            item_id,
             &request.body,
             expected_version,
         )
@@ -710,7 +725,7 @@ impl FakeServer {
             StoredResult::ExistingItemRejected { kind, code }
         } else {
             let mut items = self.created_items.lock().unwrap();
-            let position = items.iter().position(|item| item.id == "item-existing");
+            let position = items.iter().position(|item| item.id == item_id);
             let Some(position) = position else {
                 return completed(500, b"{}".to_vec());
             };
@@ -749,7 +764,7 @@ impl FakeServer {
             }
             StoredResult::ExistingItemApplied {
                 kind,
-                item_id: "item-existing".into(),
+                item_id: item_id.into(),
                 version: next_version,
             }
         };
@@ -816,7 +831,7 @@ impl FakeServer {
             .find(|item| item.id == item_id)
             .cloned();
         match stored {
-            Some(item) => completed(200, item_body(&item)),
+            Some(item) => completed(200, item_body_for_user(&item, self.user_id)),
             None => completed(404, b"{}".to_vec()),
         }
     }
@@ -872,7 +887,7 @@ impl FakeServer {
             "type": "operation_resolved",
             "entityType": "operation",
             "entityId": operation_id,
-            "userId": USER,
+            "userId": self.user_id,
             "vaultId": null,
             "clientId": null,
             "metadata": null,
@@ -994,6 +1009,10 @@ pub(super) fn outcome_body(operation_id: &str, result: &StoredResult) -> Vec<u8>
 }
 
 pub(super) fn item_body(item: &StoredItem) -> Vec<u8> {
+    item_body_for_user(item, USER)
+}
+
+pub(super) fn item_body_for_user(item: &StoredItem, user_id: &str) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "id": item.id,
         "vaultId": item.vault_id,
@@ -1004,8 +1023,8 @@ pub(super) fn item_body(item: &StoredItem) -> Vec<u8> {
         "encryptionAlgorithm": item.encryption_algorithm,
         "encryptionVersion": item.encryption_version,
         "version": item.version,
-        "encryptedByUserId": USER,
-        "lastModifiedBy": USER,
+        "encryptedByUserId": user_id,
+        "lastModifiedBy": user_id,
         "createdAt": "2026-08-24T00:00:00Z",
         "updatedAt": "2026-08-24T00:00:00Z",
         "deletedAt": item.deleted_at,
@@ -1015,7 +1034,10 @@ pub(super) fn item_body(item: &StoredItem) -> Vec<u8> {
 
 #[async_trait]
 impl crate::http_transport::SerializedHttpExecutor for FakeServer {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         let value: Value = serde_json::from_str(&request_json).unwrap();
         let request = RecordedRequest {
             method: value["method"].as_str().unwrap().to_owned(),
@@ -1105,6 +1127,10 @@ pub(super) async fn seeded_with_share_item(hold_time: bool) -> Harness {
     .await
 }
 
+pub(super) async fn seeded_with_team_vault(hold_time: bool) -> Harness {
+    seeded_inner(hold_time, SeedAuthority::TeamVault).await
+}
+
 pub(super) async fn seeded_with_existing_item(hold_time: bool, deleted: bool) -> Harness {
     seeded_inner(
         hold_time,
@@ -1118,6 +1144,7 @@ pub(super) async fn seeded_with_existing_item(hold_time: bool, deleted: bool) ->
 
 enum SeedAuthority {
     Empty,
+    TeamVault,
     ExistingItem {
         deleted: bool,
         include_target_vault: bool,
@@ -1136,6 +1163,14 @@ async fn seeded_inner(hold_time: bool, authority: SeedAuthority) -> Harness {
         .unwrap();
     match authority {
         SeedAuthority::Empty => seed_ready_personal_vault(&state, &account_id).unwrap(),
+        SeedAuthority::TeamVault => {
+            let mut vault = personal_vault(TEST_VAULT_ID, USER);
+            vault.vault_type = AuthorityVaultType::Team;
+            vault.name = "Shared".into();
+            state
+                .seed_ready_authority(&account_id, vec![vault], vec![])
+                .unwrap();
+        }
         SeedAuthority::ExistingItem {
             deleted,
             include_target_vault,

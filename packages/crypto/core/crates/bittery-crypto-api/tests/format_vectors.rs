@@ -27,6 +27,67 @@ fn context() -> api::EncryptionContext {
 }
 
 #[test]
+fn rsa_member_wrapper_opens_through_core_and_existing_api_with_both_private_key_envelopes() {
+    let pair = core::generate_rsa_key_pair().unwrap();
+    let key = [23; 32];
+    let wrapping_key = [7; 32];
+    let ciphertext = core::encrypt_vault_key_for_member(&key, &pair.public_key).unwrap();
+    for scoped in [false, true] {
+        let api_context = scoped.then(context);
+        let core_context = api_context.clone().map(|value| core::AadContext {
+            vault_id: value.vault_id,
+            entity_id: value.entity_id,
+            entity_type: value.entity_type,
+            version: value.version,
+            user_id: value.user_id,
+        });
+        let envelope = match &core_context {
+            Some(context) => core::encrypt_with_aad(&pair.private_key, &wrapping_key, context),
+            None => core::encrypt(&pair.private_key, &wrapping_key),
+        }
+        .unwrap();
+        assert_eq!(
+            core::decrypt_rsa_wrapped_key(
+                &ciphertext,
+                &envelope,
+                &wrapping_key,
+                core_context.as_ref()
+            )
+            .unwrap(),
+            key
+        );
+        let api_key = block_on(api::import_key(wrapping_key.to_vec())).unwrap();
+        let restored = block_on(api::decrypt_rsa_wrapped_key(
+            ciphertext.clone(),
+            api::EncryptedData {
+                ciphertext: envelope.ciphertext.clone(),
+                iv: envelope.iv.clone(),
+                algorithm: envelope.algorithm.clone(),
+            },
+            api_key,
+            api_context,
+        ))
+        .unwrap();
+        assert_eq!(block_on(api::export_key(restored)).unwrap(), key);
+        assert!(core::decrypt_rsa_wrapped_key(
+            &ciphertext,
+            &envelope,
+            &[99; 32],
+            core_context.as_ref()
+        )
+        .is_err());
+        let short = core::rsa_encrypt(&BASE64.encode([1; 31]), &pair.public_key).unwrap();
+        assert!(matches!(
+            core::decrypt_rsa_wrapped_key(&short, &envelope, &wrapping_key, core_context.as_ref()),
+            Err(core::CryptoError::InvalidKeyLength {
+                expected: 32,
+                actual: 31
+            })
+        ));
+    }
+}
+
+#[test]
 fn fixed_aes_256_gcm_aad_vector_is_stable_and_opens_through_both_layers() {
     let key: Vec<u8> = (0..32).collect();
     let iv: Vec<u8> = (16..28).collect();

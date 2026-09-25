@@ -102,6 +102,39 @@ export class WebClientRuntime {
     return ret;
   }
   /**
+   * @param {string} observation_id
+   * @returns {string}
+   */
+  begin_vault_export_output(observation_id) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+      const ptr0 = passStringToWasm0(
+        observation_id,
+        wasm.__wbindgen_malloc,
+        wasm.__wbindgen_realloc,
+      );
+      const len0 = WASM_VECTOR_LEN;
+      const ret = wasm.webclientruntime_begin_vault_export_output(
+        this.__wbg_ptr,
+        ptr0,
+        len0,
+      );
+      var ptr2 = ret[0];
+      var len2 = ret[1];
+      if (ret[3]) {
+        ptr2 = 0;
+        len2 = 0;
+        throw takeFromExternrefTable0(ret[2]);
+      }
+      deferred3_0 = ptr2;
+      deferred3_1 = len2;
+      return getStringFromWasm0(ptr2, len2);
+    } finally {
+      wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+  }
+  /**
    * @param {string} request_id
    */
   cancel(request_id) {
@@ -147,6 +180,53 @@ export class WebClientRuntime {
     );
     return ret;
   }
+  /**
+   * @param {string} observation_id
+   * @param {string} output_lease_id
+   */
+  finish_vault_export_output(observation_id, output_lease_id) {
+    const ptr0 = passStringToWasm0(
+      observation_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(
+      output_lease_id,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.webclientruntime_finish_vault_export_output(
+      this.__wbg_ptr,
+      ptr0,
+      len0,
+      ptr1,
+      len1,
+    );
+    if (ret[1]) {
+      throw takeFromExternrefTable0(ret[0]);
+    }
+  }
+  /**
+   * Trusted combined-Worker composition only; renderer requests do not route here.
+   * @param {string} request
+   * @returns {Promise<string>}
+   */
+  nativeAuthorityControl(request) {
+    const ptr0 = passStringToWasm0(
+      request,
+      wasm.__wbindgen_malloc,
+      wasm.__wbindgen_realloc,
+    );
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.webclientruntime_nativeAuthorityControl(
+      this.__wbg_ptr,
+      ptr0,
+      len0,
+    );
+    return ret;
+  }
   constructor() {
     const ret = wasm.webclientruntime_new();
     this.__wbg_ptr = ret;
@@ -186,8 +266,9 @@ export class WebClientRuntime {
    * @param {string} observation_id
    * @param {string} request_json
    * @param {Function} callback
+   * @param {Function | null} [control_callback]
    */
-  observe_json(observation_id, request_json, callback) {
+  observe_json(observation_id, request_json, callback, control_callback) {
     const ptr0 = passStringToWasm0(
       observation_id,
       wasm.__wbindgen_malloc,
@@ -207,6 +288,7 @@ export class WebClientRuntime {
       ptr1,
       len1,
       callback,
+      isLikeNone(control_callback) ? 0 : addToExternrefTable0(control_callback),
     );
     if (ret[1]) {
       throw takeFromExternrefTable0(ret[0]);
@@ -2853,7 +2935,7 @@ function __wbg_get_imports() {
       return ret;
     },
     __wbindgen_cast_0000000000000001: function (arg0, arg1) {
-      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1254, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+      // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1920, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
       const ret = makeMutClosure(
         arg0,
         arg1,

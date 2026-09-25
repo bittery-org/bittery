@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Locator, Page, Worker } from "@playwright/test";
 import { nanoid } from "nanoid";
+import type { VaultImageMetadataControl } from "../../../../packages/client-runtime/generated/vault-image-control/contract";
 import {
 	expect,
 	generateTestUser,
@@ -21,11 +23,14 @@ type LegacyLayout = [string, string | string[], [string, string | string[]][]];
 const LEGACY_DATABASES: {
 	name: string;
 	version: number;
+	currentVersion: number;
 	layout: LegacyLayout[];
+	currentLayout?: LegacyLayout[];
 }[] = [
 	{
 		name: "bittery_replica",
 		version: 7,
+		currentVersion: 8,
 		layout: [
 			["heads", "accountId", []],
 			...[
@@ -51,6 +56,7 @@ const LEGACY_DATABASES: {
 	{
 		name: "bittery_attachment_artifacts",
 		version: 2,
+		currentVersion: 3,
 		layout: [
 			["artifacts", ["accountId", "artifactId"], [["by_account", "accountId"]]],
 			[
@@ -91,6 +97,26 @@ const LEGACY_DATABASES: {
 	{
 		name: "bittery-vault-image-artifacts",
 		version: 1,
+		currentVersion: 3,
+		currentLayout: [
+			[
+				"artifacts",
+				["accountId", "operationId", "publicationId"],
+				[
+					["by_account", "accountId"],
+					["by_family", ["accountId", "operationId"]],
+				],
+			],
+			[
+				"chunks",
+				["accountId", "operationId", "publicationId", "chunkIndex"],
+				[
+					["by_account", "accountId"],
+					["by_family", ["accountId", "operationId"]],
+					["by_scope", ["accountId", "operationId", "publicationId"]],
+				],
+			],
+		],
 		layout: [
 			[
 				"artifacts",
@@ -137,16 +163,13 @@ type Head = {
 	replicaRevision: string;
 	lockEpoch: string;
 };
-type StoredImage = {
-	accountId: string;
-	operationId: string;
-	byteLength: string;
-	sha256: string;
+type StoredImage = VaultImageMetadataControl & {
 	published: boolean;
 };
 type StoredChunk = {
 	accountId: string;
 	operationId: string;
+	publicationId: string;
 	chunkIndex: number;
 	bytes: number[];
 };
@@ -158,6 +181,83 @@ type PhysicalSnapshot = {
 	images: StoredImage[];
 	chunks: StoredChunk[];
 };
+
+function expectProtectedImage(original: PhysicalSnapshot, operationId: string) {
+	const image = original.images.find(
+		(image) => image.operationId === operationId,
+	);
+	if (!image?.protection || !image.publicationId)
+		throw new Error("Accepted image has no protected publication");
+	const operation = original.operations.find(
+		(row) => row.recordId === operationId,
+	);
+	if (!operation) throw new Error("Accepted image Operation is missing");
+	expect(image.protection.witness).toEqual(
+		JSON.parse(operation.payloadJson).createVault.image.protectedWitness,
+	);
+	expect(image.sha256).toBe(createHash("sha256").update(PNG).digest("hex"));
+	const chunks = original.chunks.filter(
+		(chunk) => chunk.operationId === operationId,
+	);
+	expect(chunks).toHaveLength(image.protection.witness.chunkCount);
+	const digest = createHash("sha256");
+	let byteLength = 0;
+	for (const [index, chunk] of chunks.entries()) {
+		expect(chunk).toMatchObject({
+			accountId: image.accountId,
+			publicationId: image.publicationId,
+			chunkIndex: index,
+		});
+		expect(chunk.bytes).not.toEqual([...PNG]);
+		expect(chunk.bytes.length).toBeLessThanOrEqual(262144);
+		const bytes = Buffer.from(chunk.bytes);
+		expect(JSON.parse(bytes.toString("utf8"))).toMatchObject({
+			algorithm: "AES-GCM-AAD-V1",
+			ciphertext: expect.any(String),
+		});
+		digest.update(bytes);
+		byteLength += bytes.length;
+	}
+	expect(byteLength).toBe(image.protection.witness.ciphertextByteLength);
+	expect(digest.digest("hex")).toBe(image.protection.witness.ciphertextSha256);
+}
+
+async function expectPublishedImageAndCleanup(
+	page: Page,
+	accepted: { accountId: string; operationId: string; vaultId: string },
+) {
+	let imageUrl: string | undefined;
+	await expect
+		.poll(
+			async () => {
+				const current = await snapshot(page);
+				imageUrl = current.vaults
+					.filter((row) => row.accountId === accepted.accountId)
+					.map((row) => JSON.parse(row.payloadJson))
+					.find((vault) => vault.id === accepted.vaultId)?.imageUrl;
+				return typeof imageUrl === "string" && imageUrl.length > 0;
+			},
+			{ timeout: 30_000 },
+		)
+		.toBe(true);
+	if (!imageUrl) throw new Error("Current Vault has no published image URL");
+	const published = await page.request.get(imageUrl);
+	expect(published.ok()).toBe(true);
+	expect(await published.body()).toEqual(PNG);
+	await expect
+		.poll(
+			async () => {
+				const current = await snapshot(page);
+				return [...current.images, ...current.chunks].filter(
+					(row) =>
+						row.accountId === accepted.accountId &&
+						row.operationId === accepted.operationId,
+				).length;
+			},
+			{ timeout: 30_000 },
+		)
+		.toBe(0);
+}
 
 /** Read literal persisted records; fixture inspection never decrypts or reconstructs authority. */
 async function snapshot(page: Page): Promise<PhysicalSnapshot> {
@@ -376,8 +476,16 @@ async function damageRecoverableStorage(
 	operationId: string,
 	vaultRow: StoredRow | undefined,
 ): Promise<void> {
+	const publicationId = (await snapshot(page)).images.find(
+		(image) =>
+			image.accountId === accountId && image.operationId === operationId,
+	)?.publicationId;
+	if (!publicationId)
+		throw new Error(
+			"Missing exact protected image publication for fault injection",
+		);
 	await page.evaluate(
-		async ({ accountId, operationId, vaultRow }) => {
+		async ({ accountId, operationId, publicationId, vaultRow }) => {
 			async function change(
 				name: string,
 				stores: string[],
@@ -400,8 +508,11 @@ async function damageRecoverableStorage(
 					db.close();
 				}
 			}
+			// Remove one exact physical chunk, preserving the original key wrapper.
 			await change("bittery-vault-image-artifacts", ["chunks"], (tx) =>
-				tx.objectStore("chunks").delete([accountId, operationId, 0]),
+				tx
+					.objectStore("chunks")
+					.delete([accountId, operationId, publicationId, 0]),
 			);
 			if (!vaultRow)
 				throw new Error(
@@ -413,7 +524,7 @@ async function damageRecoverableStorage(
 					.put({ ...vaultRow, payloadJson: "{malformed-derived-authority" }),
 			);
 		},
-		{ accountId, operationId, vaultRow },
+		{ accountId, operationId, publicationId, vaultRow },
 	);
 }
 
@@ -423,18 +534,19 @@ async function acceptImageVault(page: Page, name: string, filename: string) {
 			const compositionPath = "/src/lib/crypto.ts";
 			const imagePath = "/src/lib/runtime-vault-image.ts";
 			const { runtimeClient } = await import(compositionPath);
-			const { grantRuntimeVaultImage } = await import(imagePath);
+			const { grantRuntimeVaultImage, prepareRuntimeVaultImageSelection } =
+				await import(imagePath);
 			const session = runtimeClient.session().getSnapshot();
 			const accountId = session.accounts.find(
 				(account: { access: string }) => account.access === "unlocked",
 			)?.accountId;
 			if (!accountId) throw new Error("Actual Runtime Account did not unlock");
-			const grant = grantRuntimeVaultImage(
-				accountId,
-				new File([new Uint8Array(png)], filename, {
-					type: "image/png",
-				}),
-			);
+			const select = prepareRuntimeVaultImageSelection(accountId);
+			const file = new File([new Uint8Array(png)], filename, {
+				type: "image/png",
+			});
+			select(file);
+			const grant = grantRuntimeVaultImage(accountId, file);
 			try {
 				return {
 					accountId,
@@ -526,7 +638,7 @@ test("locked recovery excludes another tab and repairs exact accepted Vault work
 			byteLength: String(PNG.length),
 		});
 		expect(original.chunks).toHaveLength(1);
-		expect(original.chunks[0]?.bytes).toEqual([...PNG]);
+		expectProtectedImage(original, accepted.operationId);
 
 		const dialog = await openRecovery(page);
 		await inspect(dialog);
@@ -821,6 +933,7 @@ test("locked recovery excludes another tab and repairs exact accepted Vault work
 				result: { type: "vaultApplied", vaultId: accepted.vaultId },
 			}),
 		);
+		await expectPublishedImageAndCleanup(page, accepted);
 	} finally {
 		await context.close();
 	}
@@ -954,18 +1067,18 @@ test("held prior-version connections block every recovery database upgrade until
 		]);
 		const after = await legacy.evaluate(async (databases) => {
 			const snapshots: Record<string, unknown> = {};
-			for (const { name, version, layout } of databases) {
+			for (const { name, currentVersion, layout, currentLayout } of databases) {
 				const db = await new Promise<IDBDatabase>((resolve, reject) => {
 					const open = indexedDB.open(name);
 					open.onsuccess = () => resolve(open.result);
 					open.onerror = () => reject(open.error);
 				});
 				try {
-					if (db.version !== version + 1)
+					if (db.version !== currentVersion)
 						throw new Error("Wrong migrated database version");
 					const stores = layout.map(([name]) => name).sort();
 					const tx = db.transaction(stores, "readonly");
-					for (const [store, keyPath, indexes] of layout) {
+					for (const [store, keyPath, indexes] of currentLayout ?? layout) {
 						const actual = tx.objectStore(store);
 						if (JSON.stringify(actual.keyPath) !== JSON.stringify(keyPath))
 							throw new Error("Historical key path changed");
@@ -996,7 +1109,13 @@ test("held prior-version connections block every recovery database upgrade until
 				),
 			);
 		}, LEGACY_DATABASES);
-		expect(after).toEqual(before);
+		const expected = structuredClone(before) as Record<
+			string,
+			[string, Record<string, unknown>[]][]
+		>;
+		for (const [, rows] of expected["bittery-vault-image-artifacts"] ?? [])
+			for (const row of rows) row.publicationId = "";
+		expect(after).toEqual(expected);
 	} finally {
 		await context.close();
 	}
@@ -1046,7 +1165,7 @@ test("explicit re-Bootstrap preserves accepted Vault work and image bytes before
 			target: { type: "vault", vaultId: accepted.vaultId },
 		});
 		expect(original.chunks).toHaveLength(1);
-		expect(original.chunks[0]?.bytes).toEqual([...PNG]);
+		expectProtectedImage(original, accepted.operationId);
 		const originalHead = original.heads.find(
 			(head) => head.accountId === accepted.accountId,
 		);
@@ -1183,6 +1302,7 @@ test("explicit re-Bootstrap preserves accepted Vault work and image bytes before
 				result: { type: "vaultApplied", vaultId: accepted.vaultId },
 			}),
 		);
+		await expectPublishedImageAndCleanup(page, accepted);
 	} finally {
 		await context.close();
 	}

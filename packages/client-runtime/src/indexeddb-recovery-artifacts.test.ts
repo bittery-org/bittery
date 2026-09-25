@@ -29,7 +29,7 @@ test("missing image bytes are added once; divergent present bytes and foreign sc
 	const request = db
 		.transaction("chunks", "readonly")
 		.objectStore("chunks")
-		.get(["a", "op", 0]);
+		.get(["a", "op", "", 0]);
 	const stored = await new Promise<{ bytes: Uint8Array }>((resolve, reject) => {
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () => reject(request.error);
@@ -82,5 +82,58 @@ test("restored Attachment chunks retain the physical ArrayBuffer representation 
 		addRecoveryArtifact("a", chunk, new Uint8Array([1, 0, 3])),
 	).rejects.toThrow();
 	expect(await read()).toEqual(before);
+	db.close();
+});
+
+test("protected image repair preserves raw and protected siblings and refuses generation substitution", async () => {
+	await addRecoveryArtifact("a", record, new Uint8Array([9]));
+	const protectedRecord = {
+		...record,
+		type: "protectedVaultImageChunk" as const,
+		publicationId: "protected-a",
+	};
+	await addRecoveryArtifact("a", protectedRecord, new Uint8Array([1, 255]));
+	await addRecoveryArtifact("a", protectedRecord, new Uint8Array([1, 255]));
+	await addRecoveryArtifact(
+		"a",
+		{ ...protectedRecord, publicationId: "protected-b" },
+		new Uint8Array([2]),
+	);
+	await expect(
+		addRecoveryArtifact("a", protectedRecord, new Uint8Array([2])),
+	).rejects.toThrow();
+	await expect(
+		addRecoveryArtifact(
+			"a",
+			{ ...protectedRecord, publicationId: "" },
+			new Uint8Array([9]),
+		),
+	).rejects.toThrow();
+	await expect(
+		addRecoveryArtifact("a", {
+			type: "vaultImageMetadata",
+			accountId: "a",
+			operationId: "op",
+			metadataJson: JSON.stringify({
+				accountId: "a",
+				operationId: "op",
+				publicationId: "protected-a",
+				protection: { opaque: true },
+			}),
+		}),
+	).rejects.toThrow();
+	const db = await openVaultImageArtifactDatabase();
+	const get = db.transaction("chunks").objectStore("chunks").getAll();
+	const rows = await new Promise<
+		Array<{ publicationId: string; bytes: Uint8Array }>
+	>((resolve, reject) => {
+		get.onsuccess = () => resolve(get.result);
+		get.onerror = () => reject(get.error);
+	});
+	expect(rows.map((row) => [row.publicationId, [...row.bytes]])).toEqual([
+		["", [9]],
+		["protected-a", [1, 255]],
+		["protected-b", [2]],
+	]);
 	db.close();
 });

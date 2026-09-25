@@ -4,13 +4,18 @@
 //! preparation protocol and the ordering between binary artifact publication and the guarded
 //! Replica checkpoint; hosts only supply streaming transport and ephemeral cryptographic material.
 
+use super::attachment_transcryption::{
+    scan_source, transcrypt_source, SourceOpen, TranscryptionError, TranscryptionMaterial,
+};
+pub(crate) use super::attachment_transcryption::{
+    DownloadPass, PreparationTransportError, SourceDownload,
+};
 use crate::{
     attachment_artifact_store::{
         AttachmentArtifactOwner, AttachmentArtifactStore, AttachmentArtifactStoreRequest,
         AttachmentArtifactStoreResponse, ProvisionalAttachmentArtifactScope,
         ProvisionalAttachmentArtifactStore, ProvisionalAttachmentArtifactStoreRequest,
         ProvisionalAttachmentArtifactStoreResponse, ProvisionalAttachmentArtifactWriter,
-        ARTIFACT_CHUNK_BYTES,
     },
     replica::{
         AttachmentMovePreparationRecord, AttachmentMoveProgress, AttachmentMoveUploadState,
@@ -20,21 +25,12 @@ use crate::{
     AccountId, RuntimeError, RuntimeErrorCode,
 };
 use async_trait::async_trait;
-use bittery_crypto_core::attachment_move::{
-    AttachmentBlobScope, AttachmentEnvelopeScanner, AttachmentMoveTranscryptor,
-    AttachmentPublicationIdentity,
-};
+use bittery_crypto_core::attachment_move::{AttachmentBlobScope, AttachmentPublicationIdentity};
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
 const BASE_BACKOFF_MS: u64 = 1_000;
 const MAX_BACKOFF_MS: u64 = 5 * 60 * 1_000;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DownloadPass {
-    Scan,
-    Transcrypt,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceDownloadRequest {
@@ -73,26 +69,6 @@ pub(crate) struct UploadGrant {
 pub(crate) struct Manifest {
     pub operation_id: String,
     pub uploads: Vec<UploadGrant>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PreparationTransportError {
-    Transient,
-    Busy,
-    StaleAuthority,
-    Invariant,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait]
-pub(crate) trait SourceDownload: Send {
-    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, PreparationTransportError>;
-}
-
-#[cfg(target_arch = "wasm32")]
-#[async_trait(?Send)]
-pub(crate) trait SourceDownload {
-    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, PreparationTransportError>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -484,26 +460,14 @@ impl AttachmentMovePreparationWorker {
         source: &AuthorityAttachmentRecord,
         writer: ProvisionalAttachmentArtifactWriter,
     ) -> Result<(AttachmentArtifactOwner, PreparedMoveAttachment), PreparationFailure> {
-        let mut first = self
-            .transfer
-            .open_source(source_request(preparation, source, DownloadPass::Scan))
+        let mut download = PreparationSource {
+            transfer: self.transfer.as_ref(),
+            preparation,
+            source,
+        };
+        let scan = scan_source(&mut download)
             .await
-            .map_err(PreparationFailure::from_transport)?;
-        let mut scanner = AttachmentEnvelopeScanner::new();
-        while let Some(chunk) = first
-            .next_chunk()
-            .await
-            .map_err(PreparationFailure::from_transport)?
-        {
-            scanner
-                .push(&chunk)
-                .map_err(|_| PreparationFailure::Retryable)?;
-        }
-        // Scanner, stream, authentication, and envelope failures can be caused by a failed or
-        // corrupted download. They are retryable preparation work, never a semantic outcome.
-        let scan = scanner
-            .finish()
-            .map_err(|_| PreparationFailure::Retryable)?;
+            .map_err(PreparationFailure::from_transcryption)?;
         let secrets = self
             .secrets
             .resolve(preparation, source)
@@ -520,72 +484,31 @@ impl AttachmentMovePreparationWorker {
             source.id.clone(),
         )
         .map_err(|_| PreparationFailure::Invariant)?;
-        let mut transcryptor = AttachmentMoveTranscryptor::new(
-            scan,
-            *source_key,
-            AttachmentBlobScope::new(
+        let material = TranscryptionMaterial {
+            source_key,
+            target_key,
+            source_scope: AttachmentBlobScope::new(
                 preparation.source_vault_id.clone(),
                 source.id.clone(),
                 source.uploaded_by.clone(),
             ),
-            *target_key,
-            AttachmentBlobScope::new(
+            target_scope: AttachmentBlobScope::new(
                 preparation.target_vault_id.clone(),
                 source.id.clone(),
                 source.uploaded_by.clone(),
             ),
             identity,
+        };
+        let owner = transcrypt_source(
+            &mut download,
+            scan,
+            material,
+            writer,
+            self.provisional_artifacts.as_ref(),
         )
-        .map_err(|_| PreparationFailure::Retryable)?;
-        let mut second = self
-            .transfer
-            .open_source(source_request(
-                preparation,
-                source,
-                DownloadPass::Transcrypt,
-            ))
-            .await
-            .map_err(PreparationFailure::from_transport)?;
-        let mut chunks = ArtifactChunker::default();
-        while let Some(chunk) = second
-            .next_chunk()
-            .await
-            .map_err(PreparationFailure::from_transport)?
-        {
-            let output = transcryptor
-                .push(&chunk)
-                .map_err(|_| PreparationFailure::Retryable)?;
-            chunks
-                .push(&writer, &output, self.provisional_artifacts.as_ref())
-                .await?;
-        }
-        let finished = transcryptor
-            .finish()
-            .map_err(|_| PreparationFailure::Retryable)?;
-        chunks
-            .push(
-                &writer,
-                &finished.final_chunk,
-                self.provisional_artifacts.as_ref(),
-            )
-            .await?;
-        chunks
-            .finish(&writer, self.provisional_artifacts.as_ref())
-            .await?;
-        match self
-            .provisional_artifacts
-            .invoke_provisional(ProvisionalAttachmentArtifactStoreRequest::Finalize {
-                writer,
-                publication_proof: finished.publication_proof,
-            })
-            .await
-            .map_err(PreparationFailure::Local)?
-        {
-            ProvisionalAttachmentArtifactStoreResponse::Finalized(owner) => {
-                Ok((owner, prepared_metadata))
-            }
-            _ => Err(PreparationFailure::Invariant),
-        }
+        .await
+        .map_err(PreparationFailure::from_transcryption)?;
+        Ok((owner, prepared_metadata))
     }
 
     async fn upload_artifact(
@@ -775,68 +698,35 @@ impl PreparationFailure {
             PreparationTransportError::Invariant => Self::Invariant,
         }
     }
-}
 
-#[derive(Default)]
-struct ArtifactChunker {
-    pending: Vec<u8>,
-    next_index: u32,
-}
-
-impl ArtifactChunker {
-    async fn push(
-        &mut self,
-        writer: &ProvisionalAttachmentArtifactWriter,
-        mut bytes: &[u8],
-        store: &dyn ProvisionalAttachmentArtifactStore,
-    ) -> Result<(), PreparationFailure> {
-        while !bytes.is_empty() {
-            let take = (ARTIFACT_CHUNK_BYTES - self.pending.len()).min(bytes.len());
-            self.pending.extend_from_slice(&bytes[..take]);
-            bytes = &bytes[take..];
-            if self.pending.len() == ARTIFACT_CHUNK_BYTES {
-                self.flush(writer, store).await?;
+    fn from_transcryption(error: TranscryptionError<PreparationTransportError>) -> Self {
+        match error {
+            TranscryptionError::Source(error) | TranscryptionError::Transport(error) => {
+                Self::from_transport(error)
             }
+            // Corrupted downloads and envelope authentication failures remain retryable work.
+            TranscryptionError::InvalidInput => Self::Retryable,
+            TranscryptionError::Artifact(error) => Self::Local(error),
+            TranscryptionError::Invariant => Self::Invariant,
         }
-        Ok(())
     }
+}
 
-    async fn finish(
-        &mut self,
-        writer: &ProvisionalAttachmentArtifactWriter,
-        store: &dyn ProvisionalAttachmentArtifactStore,
-    ) -> Result<(), PreparationFailure> {
-        if !self.pending.is_empty() {
-            self.flush(writer, store).await?;
-        }
-        Ok(())
-    }
+struct PreparationSource<'a> {
+    transfer: &'a dyn AttachmentMoveTransfer,
+    preparation: &'a AttachmentMovePreparationRecord,
+    source: &'a AuthorityAttachmentRecord,
+}
 
-    async fn flush(
-        &mut self,
-        writer: &ProvisionalAttachmentArtifactWriter,
-        store: &dyn ProvisionalAttachmentArtifactStore,
-    ) -> Result<(), PreparationFailure> {
-        let bytes = std::mem::take(&mut self.pending);
-        let response = store
-            .invoke_provisional(ProvisionalAttachmentArtifactStoreRequest::WriteChunk {
-                writer: writer.clone(),
-                chunk_index: self.next_index,
-                bytes,
-            })
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+impl SourceOpen for PreparationSource<'_> {
+    type Error = PreparationTransportError;
+
+    async fn open(&mut self, pass: DownloadPass) -> Result<Box<dyn SourceDownload>, Self::Error> {
+        self.transfer
+            .open_source(source_request(self.preparation, self.source, pass))
             .await
-            .map_err(PreparationFailure::Local)?;
-        if !matches!(
-            response,
-            ProvisionalAttachmentArtifactStoreResponse::ChunkWritten(_)
-        ) {
-            return Err(PreparationFailure::Invariant);
-        }
-        self.next_index = self
-            .next_index
-            .checked_add(1)
-            .ok_or(PreparationFailure::Invariant)?;
-        Ok(())
     }
 }
 

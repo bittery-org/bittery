@@ -8,7 +8,12 @@ impl Runtime {
             return Ok(());
         }
 
-        let Some(catalog) = self.platform_storage.load_device_catalog().await? else {
+        let admission_source = self.start_profile_admission_open();
+        let catalog = self.platform_storage.load_device_catalog().await?;
+        let Some(catalog) = self
+            .admit_profile_before_open(catalog, admission_source)
+            .await?
+        else {
             let _publication = self.publication.lock().expect("publication lock poisoned");
             self.ensure_not_closed()?;
             self.publish_restored_accounts(&[]);
@@ -16,11 +21,20 @@ impl Runtime {
             return Ok(());
         };
 
+        self.update_profile_admission_cleanup_status(Some(&catalog));
+
+        if catalog.profile_admission_pending() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::StorageUnavailable,
+                "Profile admission requires its matching source provider before startup",
+            ));
+        }
+
         let mut reconciled_accounts = Vec::with_capacity(catalog.accounts.len());
         let mut restored: Vec<(
             crate::replica::ReplicaSnapshot,
             AccountAccessState,
-            AccountDisplayIdentity,
+            AccountPresentation,
         )> = Vec::with_capacity(catalog.accounts.len());
         let mut orphaned_generations = Vec::new();
         let mut corrected = false;
@@ -51,31 +65,68 @@ impl Runtime {
                     "active Account Replica and generation metadata disagree",
                 ));
             }
-            // Startup cleanup is part of opening this Account. No Account work or projection may
-            // resume while a pre-accept plaintext artifact is still unowned.
-            self.sweep_vault_images_for_snapshot(&snapshot).await?;
-            let access = self
-                .restored_access_state(&account.account_id, &active)
-                .await?;
+            let access = if metadata.native_only {
+                AccountAccessState::Locked
+            } else {
+                self.restored_access_state(&account.account_id, &active)
+                    .await?
+            };
+            // Staging atomically consumed Replace into pending_install. If a lost owner
+            // never reached the Replica replacement, rolling back must restore that intent
+            // instead of admitting the retired old authority through Quick Unlock.
+            let pending_retirement = match &account.pending_install {
+                Some(pending) if pending.expected_active_incarnation.as_ref() == Some(&active) => {
+                    Some(crate::platform_storage::PendingAccountRetirementIntent {
+                        incarnation: active.clone(),
+                        purpose: crate::platform_storage::AccountRetirementPurpose::Replace,
+                    })
+                }
+                _ => account.pending_retirement.clone(),
+            };
             reconciled_accounts.push(DeviceCatalogAccount {
                 account_id: account.account_id.clone(),
                 active_incarnation: Some(active),
+                pending_retirement,
                 pending_install: None,
             });
-            restored.push((
-                snapshot,
-                access,
-                AccountDisplayIdentity {
-                    email: metadata.email,
-                },
-            ));
+            restored.push((snapshot, access, account_presentation(&metadata)));
+        }
+
+        let reconciled_catalog = catalog.with_accounts(reconciled_accounts)?;
+        if self
+            .resume_catalog_account_retirements(&reconciled_catalog)
+            .await?
+        {
+            // Fanout changes source Replica revisions. Carry the durable post-retirement rows
+            // into the later private cache instead of republishing the earlier loaded snapshots.
+            for (snapshot, _, _) in &mut restored {
+                let current = self
+                    .replica
+                    .load_uncached(&snapshot.account_id)
+                    .await?
+                    .ok_or_else(|| {
+                        startup_invariant("retirement lost a restored Account Replica")
+                    })?;
+                if current.incarnation != snapshot.incarnation
+                    || current.user_id != snapshot.user_id
+                {
+                    return Err(startup_invariant(
+                        "Account changed during startup retirement",
+                    ));
+                }
+                *snapshot = current;
+            }
+        }
+
+        if !restored.is_empty() {
+            self.ensure_image_device_key_under_catalog(&SystemInstallationEntropy)
+                .await?;
         }
 
         if corrected {
             self.ensure_not_closed()?;
-            let reconciled = DeviceCatalogDocument::new(reconciled_accounts)?;
             self.platform_storage
-                .store_device_catalog(&reconciled)
+                .store_device_catalog(&reconciled_catalog)
                 .await?;
             for (account_id, incarnation) in orphaned_generations {
                 let _ = self
@@ -91,6 +142,42 @@ impl Runtime {
                     .remove_current_session(&account_id, &incarnation)
                     .await;
             }
+        }
+
+        // Install only a private cache until local retirement and orphan cleanup finish. Public
+        // requests and subscriptions remain gated by ready=false throughout all fallible I/O.
+        {
+            let _publication = self.publication.lock().expect("publication lock poisoned");
+            self.ensure_not_closed()?;
+            self.replica.replace_cache(
+                &restored
+                    .iter()
+                    .map(|(snapshot, _, _)| snapshot.clone())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        for (snapshot, _, _) in &mut restored {
+            let execution = self.account_execution_lock_internal(&snapshot.account_id)?;
+            let _execution = execution.lock().await;
+            self.ensure_not_closed()?;
+            if snapshot.bootstrap.policy_verification_pending {
+                let _publication = self.publication.lock().expect("publication lock poisoned");
+                self.foreground_attachments
+                    .restore_policy_verification_pending(
+                        &snapshot.account_id,
+                        &snapshot.incarnation,
+                    )?;
+                self.pause_travel_plaintext_delivery(&snapshot.account_id, true);
+            }
+            if self.has_vault_retirement_work(snapshot) {
+                self.resume_vault_retirements(snapshot).await?;
+            }
+            let current = self.require_snapshot(&snapshot.account_id)?;
+            let current = self.protect_accepted_vault_images(&current).await?;
+            self.sweep_vault_images_for_snapshot(&current).await?;
+            self.ensure_not_closed()?;
+            // Publishing the original restored vector would resurrect the pre-cleanup cache.
+            *snapshot = self.require_snapshot(&snapshot.account_id)?;
         }
 
         let _publication = self.publication.lock().expect("publication lock poisoned");
@@ -153,7 +240,7 @@ impl Runtime {
         restored: &[(
             crate::replica::ReplicaSnapshot,
             AccountAccessState,
-            AccountDisplayIdentity,
+            AccountPresentation,
         )],
     ) {
         self.recovery_accounts
@@ -205,7 +292,10 @@ impl Runtime {
         self.device_revision.fetch_add(1, Ordering::SeqCst);
     }
 
-    pub async fn restore_known_accounts(
+    // Bare Account identities are a fixture restore seam, not validated installation authority.
+    // Production restoration goes through open() and its AccountMetadata checks.
+    #[cfg(test)]
+    pub(crate) async fn restore_known_accounts(
         &self,
         account_ids: Vec<AccountId>,
     ) -> Result<(), RuntimeError> {
@@ -298,3 +388,7 @@ impl Runtime {
         Ok(())
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "restore_fixture_tests.rs"]
+mod restore_fixture_tests;

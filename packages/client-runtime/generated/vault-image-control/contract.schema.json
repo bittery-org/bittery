@@ -1,5 +1,136 @@
 {
   "$defs": {
+    "EncryptedData": {
+      "description": "Encrypted data structure matching the TypeScript interface",
+      "properties": {
+        "algorithm": {
+          "description": "Algorithm identifier",
+          "type": "string"
+        },
+        "ciphertext": {
+          "description": "Base64-encoded ciphertext",
+          "type": "string"
+        },
+        "iv": {
+          "description": "Base64-encoded initialization vector",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ciphertext",
+        "iv",
+        "algorithm"
+      ],
+      "type": "object"
+    },
+    "ImageBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "byteLength": {
+          "format": "uint64",
+          "maximum": 2097152,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/ImageIdentity"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "byteLength",
+        "contentType",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "ImageIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "operationId",
+        "vaultId",
+        "userId"
+      ],
+      "type": "object"
+    },
+    "ProtectedImageMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ImageBinding"
+        },
+        "witness": {
+          "$ref": "#/$defs/ProtectedImageWitness"
+        },
+        "wrappedKey": {
+          "$ref": "#/$defs/EncryptedData"
+        }
+      },
+      "required": [
+        "witness",
+        "binding",
+        "wrappedKey"
+      ],
+      "type": "object"
+    },
+    "ProtectedImageWitness": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkCount": {
+          "format": "uint32",
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "ciphertextByteLength": {
+          "format": "uint64",
+          "maximum": 4194304,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "ciphertextSha256": {
+          "type": "string"
+        },
+        "formatVersion": {
+          "format": "uint32",
+          "maximum": 1,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "publicationId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "publicationId",
+        "ciphertextSha256",
+        "ciphertextByteLength",
+        "chunkCount"
+      ],
+      "type": "object"
+    },
     "VaultImageChunkWriteControl": {
       "enum": [
         "stored",
@@ -88,6 +219,46 @@
             "type",
             "metadata",
             "chunkIndex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "afterPublicationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scope": {
+              "$ref": "#/$defs/VaultImageScopeControl"
+            },
+            "type": {
+              "const": "readGeneration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "scope": {
+              "$ref": "#/$defs/VaultImageScopeControl"
+            },
+            "type": {
+              "const": "deleteGeneration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "scope"
           ],
           "type": "object"
         },
@@ -229,6 +400,23 @@
         {
           "additionalProperties": false,
           "properties": {
+            "generation": {
+              "$ref": "#/$defs/VaultImageGenerationControl"
+            },
+            "type": {
+              "const": "generation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "generation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "type": {
               "const": "missing",
               "type": "string"
@@ -293,6 +481,28 @@
         }
       ]
     },
+    "VaultImageGenerationControl": {
+      "additionalProperties": false,
+      "properties": {
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VaultImageMetadataControl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/VaultImageScopeControl"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
     "VaultImageMetadataControl": {
       "additionalProperties": false,
       "properties": {
@@ -307,6 +517,22 @@
         },
         "operationId": {
           "type": "string"
+        },
+        "protection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProtectedImageMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publicationId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "sha256": {
           "type": "string"
@@ -340,6 +566,12 @@
         },
         "operationId": {
           "type": "string"
+        },
+        "publicationId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -453,6 +685,71 @@
             },
             "type": {
               "const": "completeAccountRetirement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "accountId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "retireVaults",
+              "type": "string"
+            },
+            "vaultIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultIds"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "completeVaultRetirement",
+              "type": "string"
+            },
+            "vaultIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "accountId",
+            "vaultIds"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "forgetAccountVaultRetirements",
               "type": "string"
             }
           },

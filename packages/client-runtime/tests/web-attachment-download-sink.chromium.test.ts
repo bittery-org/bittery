@@ -2,8 +2,10 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chromium } from "../../../apps/extension/node_modules/playwright/index.mjs";
 
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
+let suiteBrowser: ReturnType<typeof chromium.launch> | undefined;
 
-afterAll(() => {
+afterAll(async () => {
+	if (suiteBrowser) await (await suiteBrowser).close();
 	for (const server of servers) server.stop(true);
 });
 
@@ -71,7 +73,9 @@ async function chromiumHarness() {
 		},
 	});
 	servers.push(server);
-	const browser = await chromium.launch({ headless: true });
+	suiteBrowser ??= chromium.launch({ headless: true });
+	// A fresh context isolates storage, Workers and pages for every case.
+	const browser = await (await suiteBrowser).newContext();
 	const page = await browser.newPage();
 	await page.goto(`http://127.0.0.1:${server.port}/`);
 	await page.waitForFunction(
@@ -81,6 +85,23 @@ async function chromiumHarness() {
 }
 
 describe("Attachment Download production sink in actual Chromium", () => {
+	test("Worker retirement preserves other Vaults and cannot revive an old picker through unlock", async () => {
+		const { page, browser } = await chromiumHarness();
+		try {
+			expect(
+				await page.evaluate(() => globalThis.exerciseSelectiveVaultSinks()),
+			).toEqual({
+				retirement: { type: "retired" },
+				cleanedAfterRetire: ["account-one/hidden"],
+				blocked: true,
+				visibleBegin: { type: "begun" },
+				stillHidden: true,
+				oldRejected: true,
+			});
+		} finally {
+			await browser.close();
+		}
+	});
 	test("requires an actually firing Worker timer before authenticated readiness", async () => {
 		const { page, browser } = await chromiumHarness();
 		try {

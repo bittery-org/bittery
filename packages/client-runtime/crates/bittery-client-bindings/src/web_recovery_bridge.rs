@@ -19,6 +19,7 @@ impl Drop for OwnedJsChunk {
 fn unavailable() -> core::RuntimeError {
     core::RuntimeError {
         recovery_bound: None,
+        team_page_problem: None,
         code: core::RuntimeErrorCode::StorageUnavailable,
         message: "Recovery storage is unavailable".into(),
     }

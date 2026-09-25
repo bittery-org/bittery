@@ -2,7 +2,10 @@ use std::{future::Future, sync::Arc, time::Duration as StdDuration};
 
 use axum::{
     body::{to_bytes, Body},
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, Request, StatusCode},
+    http::{
+        header::{ACCEPT, CONTENT_TYPE},
+        HeaderMap, HeaderValue, Method, Request, StatusCode,
+    },
     Router as HttpRouter,
 };
 use rand::random;
@@ -1429,6 +1432,153 @@ async fn bootstrap_vault_phase_returns_an_accessible_personal_vault_with_zero_it
             json!("encrypted-empty-vault-key")
         );
         assert!(response.body.get("items").is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn bootstrap_vault_key_version_requires_exact_accept_on_every_page() {
+    with_self_hosted_sync_test_app("sync_bootstrap_vault_key_version", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let ordinary_headers = authenticated_json_headers(&session.token);
+        let first_path = "/api/v1/sync/bootstrap?phase=vaults&limit=1";
+        let ordinary = app
+            .api_json(Method::GET, first_path, None, ordinary_headers.clone())
+            .await;
+        assert_eq!(ordinary.status, StatusCode::OK);
+        assert_eq!(ordinary.body["vaults"][0]["id"], fixture.primary_vault_id);
+        assert!(ordinary.body.get("vaultKeyVersionIncluded").is_none());
+        assert!(ordinary.body["vaults"][0].get("keyVersion").is_none());
+
+        for value in [
+            "application/json",
+            "application/vnd.bittery.sync-vault-key-version+json; charset=utf-8",
+            "application/json, application/vnd.bittery.sync-vault-key-version+json",
+            "APPLICATION/VND.BITTERY.SYNC-VAULT-KEY-VERSION+JSON",
+        ] {
+            let mut headers = ordinary_headers.clone();
+            headers.insert(ACCEPT, HeaderValue::from_str(value).unwrap());
+            let response = app.api_json(Method::GET, first_path, None, headers).await;
+            assert_eq!(response.status, StatusCode::OK, "{value}");
+            assert_eq!(
+                response.body, ordinary.body,
+                "{value} must keep ordinary JSON"
+            );
+        }
+        let mut repeated_accept = ordinary_headers.clone();
+        repeated_accept.append(
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.bittery.sync-vault-key-version+json"),
+        );
+        repeated_accept.append(
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.bittery.sync-vault-key-version+json"),
+        );
+        let repeated = app
+            .api_json(Method::GET, first_path, None, repeated_accept)
+            .await;
+        assert_eq!(repeated.body, ordinary.body);
+
+        let mut opted_in_headers = ordinary_headers.clone();
+        opted_in_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.bittery.sync-vault-key-version+json"),
+        );
+        let first = app
+            .api_json(Method::GET, first_path, None, opted_in_headers.clone())
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(first.body["vaultKeyVersionIncluded"], true);
+        assert_eq!(first.body["vaults"][0]["keyVersion"], 1);
+        let mut without_capability = first.body.clone();
+        without_capability
+            .as_object_mut()
+            .unwrap()
+            .remove("vaultKeyVersionIncluded");
+        without_capability["vaults"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("keyVersion");
+        assert_eq!(without_capability, ordinary.body);
+
+        // The pinned Sync cursor is an event watermark, not a snapshot of later Vault rows.
+        query("UPDATE vault SET key_version = 7 WHERE id = $1")
+            .bind(&fixture.secondary_vault_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        seed_sync_event(
+            &app.pool,
+            "event_sync_after_key_version_page_1",
+            "vault_updated",
+            &fixture.secondary_vault_id,
+            "vault",
+            Some(&fixture.secondary_vault_id),
+            &fixture.owner_user_id,
+            7,
+            None,
+            None,
+            datetime!(2025-05-01 15:00 UTC),
+        )
+        .await;
+        let second_path = format!(
+            "/api/v1/sync/bootstrap?phase=vaults&cursor={}&syncCursor={}&limit=1",
+            fixture.primary_vault_id, fixture.secondary_event_id
+        );
+        let second = app
+            .api_json(Method::GET, &second_path, None, opted_in_headers.clone())
+            .await;
+        assert_eq!(second.status, StatusCode::OK);
+        assert_eq!(second.body["vaultKeyVersionIncluded"], true);
+        assert_eq!(second.body["vaults"][0]["id"], fixture.secondary_vault_id);
+        assert_eq!(second.body["vaults"][0]["keyVersion"], 7);
+        assert_eq!(second.body["syncCursor"]["id"], fixture.secondary_event_id);
+        assert_eq!(second.body["hasMore"], false);
+
+        let empty_path = format!(
+            "/api/v1/sync/bootstrap?phase=vaults&cursor={}&syncCursor={}&limit=1",
+            fixture.secondary_vault_id, fixture.secondary_event_id
+        );
+        let empty = app
+            .api_json(Method::GET, &empty_path, None, opted_in_headers.clone())
+            .await;
+        assert_eq!(empty.status, StatusCode::OK);
+        assert_eq!(empty.body["vaults"], json!([]));
+        assert_eq!(empty.body["vaultKeyVersionIncluded"], true);
+
+        let unmarked_later_page = app
+            .api_json(Method::GET, &second_path, None, ordinary_headers)
+            .await;
+        assert_eq!(unmarked_later_page.status, StatusCode::OK);
+        assert!(unmarked_later_page
+            .body
+            .get("vaultKeyVersionIncluded")
+            .is_none());
+        assert!(unmarked_later_page.body["vaults"][0]
+            .get("keyVersion")
+            .is_none());
+
+        query("UPDATE vault SET key_version = 0 WHERE id = $1")
+            .bind(&fixture.secondary_vault_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let invalid_version = app
+            .api_json(Method::GET, &second_path, None, opted_in_headers.clone())
+            .await;
+        assert_eq!(invalid_version.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let items = app
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/bootstrap?phase=items",
+                None,
+                opted_in_headers,
+            )
+            .await;
+        assert_eq!(items.status, StatusCode::OK);
+        assert!(items.body.get("vaultKeyVersionIncluded").is_none());
     })
     .await;
 }

@@ -730,6 +730,7 @@ fn seed_with_uploader(
         .unwrap();
     let s = inner.snapshot(&account).unwrap();
     let mut p = AttachmentMovePreparationRecord {
+        accepted_item_category: None,
         account_id: account.clone(),
         operation_id: operation.into(),
         item_id: ITEM.into(),

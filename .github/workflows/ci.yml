@@ -239,6 +239,12 @@ jobs:
       - name: Desktop tests
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
+      - name: Staged native source lint
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --features native-runtime-legacy-source -- -D warnings
+
+      - name: Staged native source tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --features native-runtime-legacy-source
+
       # `cargo test` above regenerates apps/desktop/src/generated (ts-rs writes
       # the bindings from a #[test]), so the diff has to come after it. ADR 0012
       # claims CI diffs these; until now only the local check:ci:rust script did,

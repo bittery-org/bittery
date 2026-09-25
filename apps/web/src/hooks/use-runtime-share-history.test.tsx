@@ -39,7 +39,19 @@ async function fixture() {
 						access,
 						failure: null,
 						replicaRevision: "1",
-						displayIdentity: { email: "a@example.test" },
+						unlockCapabilities: {
+							password: false,
+							desktop: false,
+							signIn: false,
+						},
+						displayIdentity: {
+							email: "a@example.test",
+							name: "Test Account",
+							teamName: null,
+							teamAvatarUrl: null,
+							serverUrl: "https://vault.example.test",
+							secretKeyHint: "A3-A••••",
+						},
 					},
 				],
 			},
@@ -135,8 +147,18 @@ test("Share history, access logs and revocation use only Account-addressed Runti
 				.map((call) => JSON.parse(call.requestJson)),
 		).toEqual([
 			{ type: "listItemShareLinks", accountId: "account", itemId: "item" },
-			{ type: "listShareAccessLogs", accountId: "account", linkId: "link" },
-			{ type: "revokeShareLink", accountId: "account", linkId: "link" },
+			{
+				type: "listShareAccessLogs",
+				accountId: "account",
+				itemId: "item",
+				linkId: "link",
+			},
+			{
+				type: "revokeShareLink",
+				accountId: "account",
+				itemId: "item",
+				linkId: "link",
+			},
 			{ type: "listItemShareLinks", accountId: "account", itemId: "item" },
 		]);
 	} finally {

@@ -8,6 +8,10 @@ import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { handleNativeBiometricUnlockAll } from "./native-messaging";
+import {
+	nativeMessagingClient,
+	RetiredNativeDeliveryError,
+} from "./native-messaging-client";
 
 function isNonEmptyVaultKeys(value: unknown): value is VaultKeyData[] {
 	return (
@@ -48,7 +52,9 @@ async function hasLocalWriteCapability(accountId: string): Promise<boolean> {
 export async function hydrateDesktopAccountMaterial(
 	accountId: string,
 ): Promise<void> {
+	const generation = await nativeMessagingClient.captureDeliveryGeneration();
 	const account = await storage.getAccountMetadata(accountId);
+	nativeMessagingClient.assertCurrentDelivery(generation);
 	if (!account) {
 		return;
 	}
@@ -56,12 +62,21 @@ export async function hydrateDesktopAccountMaterial(
 	if (!(await isDesktopUnlockedNow())) {
 		return;
 	}
+	nativeMessagingClient.assertCurrentDelivery(generation);
 
 	const localToken = await storage.getAuthToken(accountId);
 	if (!localToken) {
 		const desktopToken = await desktopClient.getAuthToken(accountId);
 		if (desktopToken) {
-			await storage.storeAuthToken(desktopToken, accountId);
+			await nativeMessagingClient.withMaterialMutation(
+				generation,
+				accountId,
+				async (check, markMaterialWrite) => {
+					markMaterialWrite();
+					await storage.storeAuthToken(desktopToken, accountId);
+					check();
+				},
+			);
 		}
 	}
 
@@ -73,9 +88,18 @@ export async function hydrateDesktopAccountMaterial(
 			try {
 				const parsed = JSON.parse(rawVaultKeys);
 				if (isNonEmptyVaultKeys(parsed)) {
-					await storage.storeVaultKeys(parsed, accountId);
+					await nativeMessagingClient.withMaterialMutation(
+						generation,
+						accountId,
+						async (check, markMaterialWrite) => {
+							markMaterialWrite();
+							await storage.storeVaultKeys(parsed, accountId);
+							check();
+						},
+					);
 				}
 			} catch (error) {
+				if (error instanceof RetiredNativeDeliveryError) return;
 				console.warn(
 					`[desktop-key-material] Failed to parse vault keys for ${accountId}:`,
 					error,
@@ -85,8 +109,21 @@ export async function hydrateDesktopAccountMaterial(
 	}
 
 	try {
-		await storage.tryRestoreSession(false, accountId);
+		await nativeMessagingClient.withMaterialMutation(
+			generation,
+			accountId,
+			async (check, markMaterialWrite) => {
+				const alreadyUnlocked = !!(await storage.getMasterUnlockKey(accountId));
+				if (!alreadyUnlocked) markMaterialWrite();
+				const restored = await storage.tryRestoreSession(false, accountId);
+				check();
+				return restored && !alreadyUnlocked;
+			},
+			undefined,
+			(restoredNewMaterial) => restoredNewMaterial,
+		);
 	} catch (error) {
+		if (error instanceof RetiredNativeDeliveryError) return;
 		console.warn(
 			`[desktop-key-material] Session restore failed for ${accountId}:`,
 			error,

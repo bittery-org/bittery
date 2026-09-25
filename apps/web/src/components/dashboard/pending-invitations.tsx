@@ -1,5 +1,7 @@
-import { useApiClient } from "@bittery/shared/api";
-import { apiQueries } from "@bittery/shared/api-query";
+import {
+	useRuntimeClient,
+	useRuntimeSession,
+} from "@bittery/client-runtime/react";
 import {
 	Badge,
 	Button,
@@ -16,44 +18,112 @@ import {
 	IconMail as Mail,
 	IconX as X,
 } from "@bittery/ui/icons";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { de as dateFnsDe, enUS as dateFnsEnUS } from "date-fns/locale";
+import { useEffect, useRef } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/transitional-sync-provider";
 
 export function PendingInvitations() {
-	const api = useApiClient();
+	const runtime = useRuntimeClient();
+	const session = useRuntimeSession();
+	const queryClient = useQueryClient();
+	const accountId = session.state === "unlocked" ? session.accountId : null;
+	const activeMutation = useRef<AbortController | null>(null);
 	const invalidator = useQueryInvalidator();
-	const pendingQuery = useQuery(apiQueries.teams.pendingInvitations(api));
+	const pendingQuery = useQuery({
+		queryKey: ["runtime", "myTeamInvitations", accountId],
+		queryFn: ({ signal }) => {
+			if (!accountId) throw new Error("No unlocked Account");
+			return runtime.listMyTeamInvitations({ accountId }, { signal });
+		},
+		enabled: !!accountId,
+	});
 	const { locale, m } = useI18n();
+	useEffect(() => {
+		if (accountId === null) activeMutation.current?.abort();
+		return () => activeMutation.current?.abort();
+	}, [accountId]);
+	const refresh = async () => {
+		await Promise.all([
+			queryClient.invalidateQueries({
+				queryKey: ["runtime", "myTeamInvitations", accountId],
+			}),
+			invalidator.invalidateTeamInvitations(),
+		]);
+	};
 
 	// Invitations are addressed by id here: only the SHA-256 digest of the token
 	// is stored server-side, so the pending list cannot hand back the raw token.
 	const acceptMutation = useMutation({
-		mutationFn: (input: { invitationId: string }) =>
-			api.teams.invitations.acceptMine(input.invitationId).then((r) => r.data),
-		onSuccess: async (data) => {
-			toast.success(
-				m.dashboard_pending_toast_joined({ teamName: data.teamName }),
-			);
-			await invalidator.invalidateTeamInvitations();
+		mutationFn: async (input: { invitationId: string }) => {
+			if (!accountId) throw new Error(m.team_page_error_load_failed());
+			const controller = new AbortController();
+			activeMutation.current = controller;
+			try {
+				const result = await runtime.acceptMyTeamInvitation(
+					{ accountId, invitationId: input.invitationId },
+					{ signal: controller.signal },
+				);
+				return result;
+			} finally {
+				if (activeMutation.current === controller)
+					activeMutation.current = null;
+			}
+		},
+		onSuccess: (data) => {
+			switch (data.type) {
+				case "myTeamInvitationAccepted":
+					toast.success(
+						m.dashboard_pending_toast_joined({ teamName: data.teamName }),
+					);
+					break;
+				case "myTeamInvitationAcceptRefreshRequired":
+					toast.warning(
+						m.dashboard_pending_toast_accept_refresh_required({
+							teamName: data.teamName,
+						}),
+					);
+					break;
+				case "myTeamInvitationUncertain":
+					toast.warning(m.dashboard_pending_toast_uncertain());
+					break;
+			}
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
 		},
+		onSettled: refresh,
 	});
 
 	const declineMutation = useMutation({
-		mutationFn: (input: { invitationId: string }) =>
-			api.teams.invitations.declineMine(input.invitationId),
-		onSuccess: async () => {
-			toast.success(m.dashboard_pending_toast_declined());
-			await invalidator.invalidateTeamInvitations();
+		mutationFn: async (input: { invitationId: string }) => {
+			if (!accountId) throw new Error(m.team_page_error_load_failed());
+			const controller = new AbortController();
+			activeMutation.current = controller;
+			try {
+				const result = await runtime.declineMyTeamInvitation(
+					{ accountId, invitationId: input.invitationId },
+					{ signal: controller.signal },
+				);
+				return result;
+			} finally {
+				if (activeMutation.current === controller)
+					activeMutation.current = null;
+			}
+		},
+		onSuccess: (data) => {
+			if (data.type === "myTeamInvitationDeclined") {
+				toast.success(m.dashboard_pending_toast_declined());
+			} else {
+				toast.warning(m.dashboard_pending_toast_uncertain());
+			}
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
 		},
+		onSettled: refresh,
 	});
 
 	if (pendingQuery.isLoading || !pendingQuery.data?.length) {
@@ -113,7 +183,9 @@ export function PendingInvitations() {
 									onClick={() =>
 										declineMutation.mutate({ invitationId: invitation.id })
 									}
-									disabled={declineMutation.isPending}
+									disabled={
+										declineMutation.isPending || acceptMutation.isPending
+									}
 									data-testid="invitation-decline-button"
 								>
 									<X className="h-4 w-4" />
@@ -123,7 +195,9 @@ export function PendingInvitations() {
 									onClick={() =>
 										acceptMutation.mutate({ invitationId: invitation.id })
 									}
-									disabled={acceptMutation.isPending}
+									disabled={
+										acceptMutation.isPending || declineMutation.isPending
+									}
 								>
 									<Check className="mr-1 h-4 w-4" />
 									{m.dashboard_pending_action_accept()}

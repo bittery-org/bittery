@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { RecoveryLimitError } from "./recovery-limit";
 import { WebRecoveryExecutor } from "./web-recovery-executor";
 import type { WebStorageFamily } from "./web-storage-family";
@@ -151,4 +152,104 @@ test("a physical byte guard returns a terminal typed limit instead of corrupt-pr
 		bound: "archiveBytes",
 	});
 	await executor.invoke('{"type":"leaveMaintenance","recoveryId":"r"}');
+});
+
+test("protected recovery chunks cross the generated executor with exact binary pairing", async () => {
+	const previousDatabase = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"indexedDB",
+	);
+	const previousRange = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"IDBKeyRange",
+	);
+	Object.defineProperty(globalThis, "indexedDB", {
+		configurable: true,
+		value: new IDBFactory(),
+	});
+	Object.defineProperty(globalThis, "IDBKeyRange", {
+		configurable: true,
+		value: IDBKeyRange,
+	});
+	try {
+		const f = fixture();
+		await f.call({ type: "enterMaintenance", recoveryId: "r" });
+		const identity = {
+			accountId: "a",
+			operationId: "op",
+			publicationId: "protected-a",
+		};
+		expect(
+			await f.call({
+				type: "addArtifactEntry",
+				recoveryId: "r",
+				accountId: "a",
+				record: {
+					type: "protectedVaultImageMetadata",
+					...identity,
+					metadataJson: JSON.stringify({
+						...identity,
+						protection: { opaque: true },
+					}),
+				},
+			}),
+		).toEqual({ type: "artifactAdded" });
+		const request = {
+			type: "addArtifactEntry",
+			recoveryId: "r",
+			accountId: "a",
+			record: { type: "protectedVaultImageChunk", ...identity, chunkIndex: 0 },
+		};
+		expect(await f.call(request)).toEqual({
+			type: "unavailable",
+			reason: "corrupt",
+		});
+		const bytes = new Uint8Array([1, 255, 3]);
+		expect(
+			JSON.parse(
+				(await f.executor.invoke(JSON.stringify(request), bytes))
+					.controlResponseJson,
+			),
+		).toEqual({ type: "artifactAdded" });
+		expect(
+			JSON.parse(
+				(
+					await f.executor.invoke(
+						JSON.stringify({ ...request, accountId: "b" }),
+						bytes,
+					)
+				).controlResponseJson,
+			),
+		).toEqual({ type: "unavailable", reason: "corrupt" });
+		const metadata = await f.call({
+			type: "readEntry",
+			recoveryId: "r",
+			accountId: "a",
+		});
+		expect(metadata).toMatchObject({
+			type: "entry",
+			record: { type: "protectedVaultImageMetadata", ...identity },
+		});
+		const chunk = await f.executor.invoke(
+			JSON.stringify({
+				type: "readEntry",
+				recoveryId: "r",
+				accountId: "a",
+				cursor: metadata.nextCursor,
+			}),
+		);
+		expect(JSON.parse(chunk.controlResponseJson)).toMatchObject({
+			type: "entry",
+			record: request.record,
+		});
+		expect(chunk.binaryChunk).toEqual(bytes);
+		await f.call({ type: "leaveMaintenance", recoveryId: "r" });
+	} finally {
+		if (previousDatabase)
+			Object.defineProperty(globalThis, "indexedDB", previousDatabase);
+		else Reflect.deleteProperty(globalThis, "indexedDB");
+		if (previousRange)
+			Object.defineProperty(globalThis, "IDBKeyRange", previousRange);
+		else Reflect.deleteProperty(globalThis, "IDBKeyRange");
+	}
 });

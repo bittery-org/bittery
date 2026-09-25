@@ -39,6 +39,7 @@ pub(crate) fn personal_vault(vault_id: &str, user_id: &str) -> AuthorityVaultRec
         image_url: None,
         encrypted_vault_key,
         role: AuthorityVaultRole::Owner,
+        key_version: None,
     }
 }
 
@@ -76,9 +77,12 @@ pub(crate) fn test_operation(operation_id: &str, item_id: &str) -> OperationReco
             body: body.clone(),
         },
         request_fingerprint: Sha256Fingerprint::of_bytes(&body),
+        accepted_item_category: None,
         attachment_move_recovery: None,
+        update_vault: None,
         create_vault: None,
         scheduling: OperationSchedulingState::default(),
+        legacy_admission: None,
     }
 }
 

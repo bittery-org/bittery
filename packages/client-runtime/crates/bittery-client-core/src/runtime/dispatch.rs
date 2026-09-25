@@ -6,19 +6,29 @@
 //! status as a semantic result — reading an answer is `outcome.rs`'s job, and completing on one
 //! is a single reconciliation plan.
 
+#[cfg(test)]
+#[path = "dispatch_failure_scope_tests.rs"]
+mod failure_scope_tests;
+
+#[cfg(test)]
+#[path = "vault_retirement_dispatch_tests.rs"]
+mod vault_retirement_dispatch_tests;
+
 use super::outcome::{CompletionResult, OutcomeResolutionAuthBudget, SemanticAnswer};
 use super::*;
+#[cfg(test)]
+#[path = "held_create_tests.rs"]
+mod held_create_tests;
+#[cfg(test)]
+#[path = "held_existing_item_tests.rs"]
+mod held_existing_item_tests;
 use crate::{
     auth_http::AuthenticatedOutcome,
     http_transport::HttpHeader,
     platform_storage::CurrentSessionDocument,
-    replica::{
-        AuthorityVaultRole, AuthorityVaultType, OperationKind, OperationSchedulingState,
-        ReplicaSnapshot,
-    },
+    replica::{OperationKind, OperationSchedulingState, ReplicaSnapshot},
     server_contract::{
-        VaultImageContentType, VaultImageStagingBody, VaultImageStagingStatusResponse, VaultRole,
-        VaultType,
+        VaultImageContentType, VaultImageStagingBody, VaultImageStagingStatusResponse,
     },
     AccountId,
 };
@@ -39,25 +49,32 @@ const MAX_BACKOFF_MS: u64 = 5 * 60 * 1_000;
 ///
 /// The delay is deliberately not randomized. One Device retrying its own accepted work is not a
 /// thundering herd, and a reproducible schedule is worth more here than jitter.
-fn backoff_ms(attempt_count: u64) -> u64 {
+pub(super) fn backoff_ms(attempt_count: u64) -> u64 {
     let exponent = u32::try_from(attempt_count.saturating_sub(1).min(20)).unwrap_or(20);
     (BASE_BACKOFF_MS << exponent).min(MAX_BACKOFF_MS)
 }
 
-/// Suppresses duplicate sends inside one Runtime, and supplies nothing else.
+/// Suppresses duplicate sends inside one Runtime and bounds retries when local scheduling storage fails.
 ///
 /// It is in-memory and it expires. A crashed process leaves no lease behind, a stalled attempt
 /// cannot pin work forever, and two holders at once change only how much network is wasted: the
 /// Server's `(User, Operation ID)` table is what makes the effect happen once.
 #[derive(Default)]
 pub(crate) struct DispatchLeases {
-    held: Mutex<HashMap<String, u64>>,
+    held: Mutex<HashMap<String, DispatchLeaseEntry>>,
 }
 
-/// Releases its lease on drop, including on an unwind out of a dispatch attempt.
+struct DispatchLeaseEntry {
+    registration: Arc<()>,
+    expires_at: u64,
+}
+
+/// Releases only its own registration, unless the existing driver explicitly deferred it.
 pub(crate) struct DispatchLease {
     leases: Arc<DispatchLeases>,
     operation_id: String,
+    registration: Arc<()>,
+    deferred: bool,
 }
 
 impl DispatchLeases {
@@ -67,28 +84,75 @@ impl DispatchLeases {
         now_ms: u64,
     ) -> Option<DispatchLease> {
         let mut held = self.held.lock().expect("dispatch lease lock poisoned");
-        held.retain(|_, expires_at| *expires_at > now_ms);
+        held.retain(|_, entry| entry.expires_at > now_ms);
         if held.contains_key(operation_id) {
             return None;
         }
+        let registration = Arc::new(());
         held.insert(
             operation_id.to_owned(),
-            now_ms.saturating_add(DISPATCH_LEASE_MS),
+            DispatchLeaseEntry {
+                registration: registration.clone(),
+                expires_at: now_ms.saturating_add(DISPATCH_LEASE_MS),
+            },
         );
         Some(DispatchLease {
             leases: Arc::clone(self),
             operation_id: operation_id.to_owned(),
+            registration,
+            deferred: false,
         })
+    }
+
+    fn deadline(&self, operation_id: &str) -> Option<u64> {
+        self.held
+            .lock()
+            .expect("dispatch lease lock poisoned")
+            .get(operation_id)
+            .map(|entry| entry.expires_at)
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_held(&self, operation_id: &str) -> bool {
+        self.deadline(operation_id).is_some()
+    }
+}
+
+impl DispatchLease {
+    fn defer_until(mut self, deadline: u64) -> bool {
+        let mut held = self
+            .leases
+            .held
+            .lock()
+            .expect("dispatch lease lock poisoned");
+        let Some(entry) = held
+            .get_mut(&self.operation_id)
+            .filter(|entry| Arc::ptr_eq(&entry.registration, &self.registration))
+        else {
+            return false;
+        };
+        entry.expires_at = deadline;
+        self.deferred = true;
+        true
     }
 }
 
 impl Drop for DispatchLease {
     fn drop(&mut self) {
-        self.leases
+        if self.deferred {
+            return;
+        }
+        let mut held = self
+            .leases
             .held
             .lock()
-            .expect("dispatch lease lock poisoned")
-            .remove(&self.operation_id);
+            .expect("dispatch lease lock poisoned");
+        if held
+            .get(&self.operation_id)
+            .is_some_and(|entry| Arc::ptr_eq(&entry.registration, &self.registration))
+        {
+            held.remove(&self.operation_id);
+        }
     }
 }
 
@@ -102,12 +166,47 @@ pub(super) enum DispatchPass {
     WaitFor { milliseconds: u64 },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+type VaultRetirementFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+#[cfg(target_arch = "wasm32")]
+type VaultRetirementFuture<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>;
+
+/// One local cleanup attempt stays owned by the existing dispatch driver across unrelated wakes.
+struct VaultRetirementAttempt<'a> {
+    account_id: AccountId,
+    work: VaultRetirementFuture<'a>,
+}
+
+fn poll_vault_retirement_attempts(
+    active: &mut Vec<VaultRetirementAttempt<'_>>,
+    context: &mut std::task::Context<'_>,
+) -> std::task::Poll<()> {
+    let mut progressed = false;
+    let mut index = 0;
+    while index < active.len() {
+        if active[index].work.as_mut().poll(context).is_ready() {
+            drop(active.swap_remove(index));
+            progressed = true;
+        } else {
+            index += 1;
+        }
+    }
+    if progressed {
+        std::task::Poll::Ready(())
+    } else {
+        std::task::Poll::Pending
+    }
+}
+
 /// What one attempt at one Operation left behind.
 enum AttemptOutcome {
     /// Backoff moved, or the Server answered. Either way the next scan sees new durable truth.
     Progressed,
     /// This Account needs reauthentication. The Operation stays; the scan skips the Account.
     Parked,
+    /// Local scheduling storage failed; retain this dispatch registration until the next attempt.
+    RetryAfter { milliseconds: u64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -367,6 +466,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for ProductionOperation
         &self,
         grant: &super::create_vault_staging::CreateVaultUploadGrant,
         bytes: &[u8],
+        cancellation: RequestCancellation,
     ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
         let upload_url = self
             .upload
@@ -385,7 +485,7 @@ impl super::create_vault_staging::CreateVaultStagingPort for ProductionOperation
                 &grant.sha256,
                 &headers,
                 bytes,
-                RequestCancellation::new(),
+                cancellation,
             )
             .await
         {
@@ -420,8 +520,50 @@ impl super::create_vault_staging::CreateVaultStagingPort for ProductionOperation
 
     async fn renew_session(
         &self,
-    ) -> Result<(), super::create_vault_staging::CreateVaultStagingError> {
-        self.renewed_session().await
+    ) -> Result<(), super::create_vault_staging::CreateVaultRecoveryError> {
+        use super::create_vault_staging::CreateVaultRecoveryError;
+        let mut session = self.session.lock().await;
+        let captured = self.runtime.require_snapshot(&self.account_id)?;
+        if captured.incarnation != session.incarnation
+            || !self.runtime.completion_scope_is_current(&captured)
+        {
+            return Err(CreateVaultRecoveryError::ParkedFenced);
+        }
+        let refreshed = self
+            .runtime
+            .request_session_refresh(&session, &self.http, RequestCancellation::new())
+            .await;
+        let execution = self.runtime.account_execution_lock(&self.account_id)?;
+        let _guard = execution.lock().await;
+        if !self.runtime.completion_scope_is_current(&captured)
+            || self.runtime.require_snapshot(&self.account_id)?.user_id != captured.user_id
+        {
+            return Err(CreateVaultRecoveryError::ParkedFenced);
+        }
+        // An unsuccessful late refresh belongs to its original Session too. Check it before
+        // classifying authentication failure, so replacement credentials never inherit refusal.
+        if self
+            .runtime
+            .effective_session(&self.account_id, &captured.incarnation)
+            .await?
+            .as_ref()
+            != Some(&*session)
+        {
+            return Err(CreateVaultRecoveryError::ParkedFenced);
+        }
+        let refreshed = refreshed?;
+        *session = self
+            .runtime
+            .publish_session_refresh(&self.account_id, &session, refreshed)
+            .await
+            .map_err(|error| {
+                if error.code == RuntimeErrorCode::Cancelled {
+                    CreateVaultRecoveryError::ParkedFenced
+                } else {
+                    error.into()
+                }
+            })?;
+        Ok(())
     }
 }
 
@@ -480,60 +622,6 @@ impl super::create_vault_executor::CreateVaultExecutorPort for ProductionOperati
         Ok(super::create_vault_executor::CreateVaultOperationResponse {
             status: response.status,
             body: response.body,
-        })
-    }
-
-    async fn fetch_vault(
-        &self,
-        vault_id: &str,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityRecord,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        let session = self.session.lock().await;
-        let response = production_exchange(
-            self.http
-                .fetch_vault_authority(session.token.as_ref(), vault_id, RequestCancellation::new())
-                .await,
-        )?;
-        Ok(super::create_vault_executor::CreateVaultAuthorityRecord {
-            id: response.id,
-            name: response.name,
-            vault_type: match response.vault_type {
-                VaultType::Personal => AuthorityVaultType::Personal,
-                VaultType::Team => AuthorityVaultType::Team,
-            },
-            icon: response.icon,
-            image_url: response.image_url,
-            role: match response.user_role {
-                VaultRole::Owner => AuthorityVaultRole::Owner,
-                VaultRole::Admin => AuthorityVaultRole::Admin,
-                VaultRole::Member => AuthorityVaultRole::Member,
-                VaultRole::ReadOnly => AuthorityVaultRole::ReadOnly,
-            },
-        })
-    }
-
-    async fn fetch_vault_keys(
-        &self,
-        _vault_id: &str,
-        cursor: Option<&str>,
-    ) -> Result<
-        super::create_vault_executor::CreateVaultAuthorityPage,
-        super::create_vault_staging::CreateVaultStagingError,
-    > {
-        let session = self.session.lock().await;
-        let raw_response_body = production_exchange(
-            self.http
-                .fetch_vault_key_page_raw(
-                    session.token.as_ref(),
-                    cursor,
-                    RequestCancellation::new(),
-                )
-                .await,
-        )?;
-        Ok(super::create_vault_executor::CreateVaultAuthorityPage {
-            raw_response_body: Some(raw_response_body),
         })
     }
 
@@ -636,32 +724,6 @@ impl super::import_executor::ImportExecutorPort for ProductionOperationPort<'_> 
             body: value.body,
         })
     }
-    async fn fetch_items(
-        &self,
-        vault_id: &str,
-        item_ids: &[String],
-        cursor: Option<&str>,
-    ) -> Result<
-        super::import_executor::ImportAuthorityPage,
-        super::import_executor::ImportExecutorError,
-    > {
-        let session = self.session.lock().await;
-        let (raw_response_body, next_cursor) = import_exchange(
-            self.http
-                .fetch_import_authority_page(
-                    session.token.as_ref(),
-                    vault_id,
-                    item_ids,
-                    cursor,
-                    RequestCancellation::new(),
-                )
-                .await,
-        )?;
-        Ok(super::import_executor::ImportAuthorityPage {
-            raw_response_body,
-            next_cursor,
-        })
-    }
     async fn renew_session(&self) -> Result<(), super::import_executor::ImportExecutorError> {
         self.renewed_session().await.map_err(|error| match error {
             super::create_vault_staging::CreateVaultStagingError::Unauthorized => {
@@ -680,11 +742,18 @@ impl Runtime {
         &self,
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
+        hint: &crate::replica::ObservedOutcome,
         http: &AuthHttpClient<'_>,
         session: &mut CurrentSessionDocument,
         auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> CompletionResult {
-        if operation.kind == OperationKind::CreateVault {
+        if operation.kind == OperationKind::CreateVault
+            && (operation.vault_image_checkpoint()
+                != Some(crate::replica::CreateVaultCheckpoint::FinalRequestFrozen)
+                || !self
+                    .release_vault_image_acceptance_for_dispatch(&snapshot.account_id, operation)
+                    .await)
+        {
             return CompletionResult::Retry;
         }
         match self
@@ -692,19 +761,34 @@ impl Runtime {
             .await
         {
             ExactSendOutcome::Outcome(outcome) => {
-                self.complete_operation_fenced_with_auth_budget(
-                    &snapshot.account_id,
-                    operation,
-                    outcome,
-                    http,
-                    session,
-                    None,
-                    auth_budget,
-                )
-                .await
+                if operation.is_legacy_held() && &outcome != hint {
+                    return self.fail_account_module_at_snapshot(snapshot).await;
+                }
+                let result = self
+                    .complete_operation_fenced_with_auth_budget(
+                        &snapshot.account_id,
+                        operation,
+                        outcome,
+                        http,
+                        session,
+                        None,
+                        auth_budget,
+                    )
+                    .await;
+                if operation.is_legacy_held()
+                    && matches!(result, CompletionResult::Retry)
+                    && self.completion_scope_is_current(snapshot)
+                {
+                    self.persist_backoff(snapshot, operation).await;
+                }
+                result
             }
             ExactSendOutcome::IdentityReused => {
-                self.fail_account_module_fenced(&snapshot.account_id).await
+                if operation.is_legacy_held() {
+                    self.fail_account_module_at_snapshot(snapshot).await
+                } else {
+                    self.fail_account_module_fenced(&snapshot.account_id).await
+                }
             }
             ExactSendOutcome::Deferred | ExactSendOutcome::RetryScheduled => {
                 CompletionResult::Retry
@@ -725,6 +809,9 @@ impl Runtime {
         session: &mut CurrentSessionDocument,
         auth_budget: &mut OutcomeResolutionAuthBudget,
     ) -> ExactSendOutcome {
+        if operation.is_legacy_held() && !self.completion_scope_is_current(snapshot) {
+            return ExactSendOutcome::Deferred;
+        }
         let Ok(now_ms) = self.clock.now_ms() else {
             return ExactSendOutcome::Deferred;
         };
@@ -755,6 +842,9 @@ impl Runtime {
             {
                 Ok(renewed) => {
                     *session = renewed;
+                    if operation.is_legacy_held() && !self.completion_scope_is_current(snapshot) {
+                        return ExactSendOutcome::Deferred;
+                    }
                     answer = http
                         .dispatch_operation(
                             session.token.as_ref(),
@@ -770,8 +860,7 @@ impl Runtime {
                     return ExactSendOutcome::Reauthenticate;
                 }
                 Err(_) => {
-                    self.persist_backoff(snapshot, operation).await;
-                    return ExactSendOutcome::RetryScheduled;
+                    return self.schedule_exact_retry(snapshot, operation).await;
                 }
             }
         }
@@ -782,8 +871,7 @@ impl Runtime {
                     SemanticAnswer::Outcome(outcome) => ExactSendOutcome::Outcome(outcome),
                     SemanticAnswer::IdentityReused => ExactSendOutcome::IdentityReused,
                     SemanticAnswer::Undecided | SemanticAnswer::Transient => {
-                        self.persist_backoff(snapshot, operation).await;
-                        ExactSendOutcome::RetryScheduled
+                        self.schedule_exact_retry(snapshot, operation).await
                     }
                     SemanticAnswer::ReauthenticationRequired => ExactSendOutcome::Reauthenticate,
                 }
@@ -794,9 +882,23 @@ impl Runtime {
                 ExactSendOutcome::Reauthenticate
             }
             Ok(AuthenticatedOutcome::Transient) | Err(_) => {
-                self.persist_backoff(snapshot, operation).await;
-                ExactSendOutcome::RetryScheduled
+                self.schedule_exact_retry(snapshot, operation).await
             }
+        }
+    }
+
+    async fn schedule_exact_retry(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+    ) -> ExactSendOutcome {
+        if operation.is_legacy_held() && !self.completion_scope_is_current(snapshot) {
+            return ExactSendOutcome::Deferred;
+        }
+        if self.persist_backoff(snapshot, operation).await || !operation.is_legacy_held() {
+            ExactSendOutcome::RetryScheduled
+        } else {
+            ExactSendOutcome::Deferred
         }
     }
 
@@ -810,29 +912,138 @@ impl Runtime {
     #[doc(hidden)]
     pub async fn run_operation_dispatch(self: Arc<Self>) {
         if self.auth_client_config.is_none() {
-            // Without Server identity there is no request to make, and that never changes.
+            // Unconfigured Runtime instances cannot install authenticated Accounts.
             return;
         }
+        tokio::join!(
+            self.run_dispatch_loop(),
+            self.run_inactivity(),
+            self.run_account_refresh(),
+            self.run_native_authority_retirements()
+        );
+    }
+
+    async fn run_dispatch_loop(&self) {
+        let mut retirements = Vec::new();
         loop {
-            if self.is_closed() {
-                return;
-            }
-            // Enabling the wake-up before reading the Replica is what makes the loop safe to park:
-            // anything accepted, renewed, or closed during the scan is already registered here.
             let mut wake = std::pin::pin!(self.dispatch_wake.notified());
             wake.as_mut().enable();
-            let pass = self.dispatch_eligible_operations().await;
             if self.is_closed() {
                 return;
             }
-            match pass {
-                DispatchPass::Progressed => continue,
-                DispatchPass::Parked => wake.await,
-                DispatchPass::WaitFor { milliseconds } => {
-                    tokio::select! {
-                        () = wake => {}
-                        () = self.device_timer.sleep_ms(milliseconds) => {}
+            self.admit_vault_retirement_attempts(&mut retirements);
+            let active_accounts = retirements
+                .iter()
+                .map(|attempt| attempt.account_id.clone())
+                .collect();
+            let mut scan = std::pin::pin!(self.scan_eligible_operations(false, &active_accounts));
+            let mut retirement_completed = false;
+            // A wake may add another Account's cleanup while ordinary HTTP is in flight. Keep
+            // that exact dispatch future alive; a wake is not permission to cancel its request.
+            let pass = loop {
+                let mut changed = std::pin::pin!(self.dispatch_wake.notified());
+                changed.as_mut().enable();
+                if self.is_closed() {
+                    return;
+                }
+                self.admit_vault_retirement_attempts(&mut retirements);
+                let completed = std::future::poll_fn(|context| {
+                    poll_vault_retirement_attempts(&mut retirements, context)
+                });
+                tokio::select! {
+                    pass = &mut scan => break pass,
+                    () = completed => retirement_completed = true,
+                    () = changed => {},
+                }
+            };
+            if self.is_closed() {
+                return;
+            }
+            // The preserved scan excludes its original active retirement Accounts. Even a stale
+            // cleanup attempt that another caller already finished must release that exclusion.
+            // Its completion need not publish another wake, so scan fresh before parking.
+            if retirement_completed || matches!(pass, DispatchPass::Progressed) {
+                continue;
+            }
+            let retirement_deadline = self.admit_vault_retirement_attempts(&mut retirements);
+            let retirement_wait = retirement_deadline.and_then(|deadline| {
+                self.clock
+                    .now_ms()
+                    .ok()
+                    .map(|now| deadline.saturating_sub(now))
+            });
+            let wait = match (pass, retirement_wait) {
+                (DispatchPass::WaitFor { milliseconds }, Some(retirement)) => {
+                    Some(milliseconds.min(retirement))
+                }
+                (DispatchPass::WaitFor { milliseconds }, None) => Some(milliseconds),
+                (_, retirement) => retirement,
+            };
+            let completed = std::future::poll_fn(|context| {
+                poll_vault_retirement_attempts(&mut retirements, context)
+            });
+            match wait {
+                Some(milliseconds) => tokio::select! {
+                    () = completed => {},
+                    () = wake => {},
+                    () = self.device_timer.sleep_ms(milliseconds) => {},
+                },
+                None => tokio::select! { () = completed => {}, () = wake => {} },
+            }
+        }
+    }
+
+    fn admit_vault_retirement_attempts<'a>(
+        &'a self,
+        active: &mut Vec<VaultRetirementAttempt<'a>>,
+    ) -> Option<u64> {
+        let now = self.clock.now_ms().ok()?;
+        let mut earliest: Option<u64> = None;
+        for snapshot in self.replica.snapshots() {
+            if self.account_teardown_is_pending(&snapshot.account_id)
+                || !self.has_vault_retirement_work(&snapshot)
+                || active
+                    .iter()
+                    .any(|attempt| attempt.account_id == snapshot.account_id)
+            {
+                continue;
+            }
+            let deadline = self.vault_retirement_retry_deadline(&snapshot);
+            if deadline > now {
+                earliest = Some(earliest.map_or(deadline, |old| old.min(deadline)));
+                continue;
+            }
+            active.push(VaultRetirementAttempt {
+                account_id: snapshot.account_id.clone(),
+                work: Box::pin(async move {
+                    // Retain the failed attempt's existing backoff inside this same owner even if
+                    // an initial storage failure prevented publication of a foreground proof.
+                    match self.attempt_vault_retirement(snapshot).await {
+                        DispatchPass::Progressed => {}
+                        DispatchPass::WaitFor { milliseconds } => {
+                            self.device_timer.sleep_ms(milliseconds).await
+                        }
+                        DispatchPass::Parked => self.device_timer.sleep_ms(BASE_BACKOFF_MS).await,
                     }
+                }),
+            });
+        }
+        earliest
+    }
+
+    async fn attempt_vault_retirement(&self, snapshot: ReplicaSnapshot) -> DispatchPass {
+        let Ok(execution) = self.account_execution_lock(&snapshot.account_id) else {
+            return DispatchPass::Parked;
+        };
+        let _execution = execution.lock().await;
+        match self.resume_vault_retirements(&snapshot).await {
+            Ok(()) => DispatchPass::Progressed,
+            Err(_) => {
+                if let Ok(now) = self.clock.now_ms() {
+                    self.defer_vault_retirements(&snapshot, now.saturating_add(BASE_BACKOFF_MS));
+                }
+                DispatchPass::WaitFor {
+                    milliseconds: BASE_BACKOFF_MS,
                 }
             }
         }
@@ -840,6 +1051,7 @@ impl Runtime {
 
     /// Wakes the dispatcher because something that can change eligibility happened.
     pub(super) fn wake_dispatch(&self) {
+        self.inactivity.wake.notify_waiters();
         self.dispatch_wake.notify_waiters();
         self.live_sync_wake.notify_waiters();
     }
@@ -854,14 +1066,76 @@ impl Runtime {
     }
 
     /// Finds the first Operation this Device may send right now, and says what to do afterwards.
+    #[cfg(test)]
     pub(super) async fn dispatch_eligible_operations(&self) -> DispatchPass {
+        self.scan_eligible_operations(true, &HashSet::new()).await
+    }
+
+    fn dispatch_account_is_eligible(&self, captured: &ReplicaSnapshot) -> bool {
+        let Some(current) = self.replica.snapshot(&captured.account_id) else {
+            return false;
+        };
+        current.incarnation == captured.incarnation
+            && current.user_id == captured.user_id
+            && current.lock_epoch == captured.lock_epoch
+            && current.failure.is_none()
+            && self.completion_scope_is_current(&current)
+            && !self.has_vault_retirement_work(&current)
+            && self
+                .waiting_reasons
+                .lock()
+                .expect("waiting reason lock poisoned")
+                .get(&current.account_id)
+                != Some(&AccountWaitingReason::ReauthenticationRequired)
+    }
+
+    async fn scan_eligible_operations(
+        &self,
+        drive_retirements: bool,
+        active_retirements: &HashSet<AccountId>,
+    ) -> DispatchPass {
         let Ok(now_ms) = self.clock.now_ms() else {
             return DispatchPass::Parked;
         };
         let mut earliest: Option<u64> = None;
         let mut leased_elsewhere = false;
-        for snapshot in self.replica.snapshots() {
+        'accounts: for captured in self.replica.snapshots() {
+            // Earlier Accounts can await HTTP while another Account gains a physical retirement
+            // journal. Read that Account again at admission instead of relying on the old scan.
+            let Some(snapshot) = self.replica.snapshot(&captured.account_id) else {
+                continue;
+            };
+            if snapshot.incarnation != captured.incarnation {
+                continue;
+            }
+            if active_retirements.contains(&snapshot.account_id) {
+                continue;
+            }
+            // Visibility retirement is local work, independent of Session availability and of
+            // whether any accepted Operation remains. It must precede ordinary dispatch.
+            if !self.account_teardown_is_pending(&snapshot.account_id)
+                && self.has_vault_retirement_work(&snapshot)
+            {
+                if !drive_retirements {
+                    continue;
+                }
+                let deadline = self.vault_retirement_retry_deadline(&snapshot);
+                if deadline > now_ms {
+                    earliest = Some(earliest.map_or(deadline, |current| current.min(deadline)));
+                    continue;
+                }
+                match self.attempt_vault_retirement(snapshot).await {
+                    DispatchPass::Progressed => return DispatchPass::Progressed,
+                    DispatchPass::WaitFor { milliseconds } => {
+                        let deadline = now_ms.saturating_add(milliseconds);
+                        earliest = Some(earliest.map_or(deadline, |current| current.min(deadline)));
+                    }
+                    DispatchPass::Parked => {}
+                }
+                continue;
+            }
             if (snapshot.operations.is_empty()
+                && snapshot.cross_account_moves.is_empty()
                 && !snapshot.receipts.iter().any(|receipt| {
                     receipt
                         .create_vault_cleanup
@@ -870,20 +1144,62 @@ impl Runtime {
                             cleanup.local_artifact_pending || cleanup.remote_staging_pending
                         })
                 }))
-                || snapshot.failure.is_some()
-                || self.account_teardown_is_pending(&snapshot.account_id)
+                || !self.dispatch_account_is_eligible(&snapshot)
             {
                 continue;
             }
-            if self
-                .waiting_reasons
-                .lock()
-                .expect("waiting reason lock poisoned")
-                .get(&snapshot.account_id)
-                == Some(&AccountWaitingReason::ReauthenticationRequired)
-            {
-                // Parked on a Session, not on a clock. Only `note_session_available` frees it.
-                continue;
+            let mut account_earliest: Option<u64> = None;
+            let mut account_leased_elsewhere = false;
+            for entry in &snapshot.cross_account_moves {
+                // Missing original evidence is never scheduled, even when its source reservation
+                // is active. Gate before inspecting deadlines or acquiring an Operation lease.
+                let Some(workflow) = entry.captured() else {
+                    continue;
+                };
+                use crate::replica::{CrossAccountMoveDisposition, CrossAccountMoveStage};
+                if matches!(
+                    workflow.stage,
+                    CrossAccountMoveStage::Completed | CrossAccountMoveStage::Rejected
+                ) || matches!(
+                    workflow.disposition,
+                    CrossAccountMoveDisposition::Blocked { .. }
+                ) {
+                    continue;
+                }
+                if workflow.scheduling.not_before_ms > now_ms {
+                    let deadline = workflow.scheduling.not_before_ms;
+                    account_earliest =
+                        Some(account_earliest.map_or(deadline, |current| current.min(deadline)));
+                    continue;
+                }
+                let Some(lease) = self.dispatch_leases.acquire(&workflow.operation_id, now_ms)
+                else {
+                    account_leased_elsewhere = true;
+                    if let Some(deadline) = self.dispatch_leases.deadline(&workflow.operation_id) {
+                        account_earliest = Some(
+                            account_earliest.map_or(deadline, |current| current.min(deadline)),
+                        );
+                    }
+                    continue;
+                };
+                match self
+                    .dispatch_cross_account_move(&snapshot, &workflow.operation_id)
+                    .await
+                {
+                    DispatchPass::Progressed => return DispatchPass::Progressed,
+                    DispatchPass::Parked => drop(lease),
+                    DispatchPass::WaitFor { milliseconds } => {
+                        let deadline = self
+                            .clock
+                            .now_ms()
+                            .unwrap_or(now_ms)
+                            .saturating_add(milliseconds);
+                        lease.defer_until(deadline);
+                        account_earliest = Some(
+                            account_earliest.map_or(deadline, |current| current.min(deadline)),
+                        );
+                    }
+                }
             }
             for receipt in snapshot.receipts.iter().filter(|receipt| {
                 receipt
@@ -893,6 +1209,9 @@ impl Runtime {
                         cleanup.local_artifact_pending || cleanup.remote_staging_pending
                     })
             }) {
+                if !self.dispatch_account_is_eligible(&snapshot) {
+                    continue 'accounts;
+                }
                 let key = (snapshot.account_id.clone(), receipt.operation_id.clone());
                 if let Some(deadline) = self
                     .create_vault_cleanup_retry_deadlines
@@ -902,29 +1221,38 @@ impl Runtime {
                     .copied()
                     .filter(|deadline| *deadline > now_ms)
                 {
-                    earliest = Some(earliest.map_or(deadline, |current| current.min(deadline)));
+                    account_earliest =
+                        Some(account_earliest.map_or(deadline, |current| current.min(deadline)));
                     continue;
                 }
                 let Some(lease) = self.dispatch_leases.acquire(&receipt.operation_id, now_ms)
                 else {
-                    leased_elsewhere = true;
+                    account_leased_elsewhere = true;
+                    if let Some(deadline) = self.dispatch_leases.deadline(&receipt.operation_id) {
+                        account_earliest = Some(
+                            account_earliest.map_or(deadline, |current| current.min(deadline)),
+                        );
+                    }
                     continue;
                 };
                 let outcome = self
                     .attempt_create_vault_receipt_cleanup(&snapshot, &receipt.operation_id)
                     .await;
                 drop(lease);
-                return match outcome {
+                match outcome {
                     CleanupAttemptOutcome::Completed | CleanupAttemptOutcome::RetryScheduled => {
-                        DispatchPass::Progressed
+                        return DispatchPass::Progressed;
                     }
-                    CleanupAttemptOutcome::Parked => DispatchPass::Parked,
-                };
+                    CleanupAttemptOutcome::Parked => {}
+                }
             }
             for operation in &snapshot.operations {
+                if !self.dispatch_account_is_eligible(&snapshot) {
+                    continue 'accounts;
+                }
                 if operation.scheduling.not_before_ms > now_ms {
-                    earliest = Some(
-                        earliest.map_or(operation.scheduling.not_before_ms, |current| {
+                    account_earliest = Some(
+                        account_earliest.map_or(operation.scheduling.not_before_ms, |current| {
                             current.min(operation.scheduling.not_before_ms)
                         }),
                     );
@@ -934,15 +1262,44 @@ impl Runtime {
                     .dispatch_leases
                     .acquire(&operation.operation_id, now_ms)
                 else {
-                    leased_elsewhere = true;
+                    account_leased_elsewhere = true;
+                    if let Some(deadline) = self.dispatch_leases.deadline(&operation.operation_id) {
+                        account_earliest = Some(
+                            account_earliest.map_or(deadline, |current| current.min(deadline)),
+                        );
+                    }
                     continue;
                 };
-                let outcome = self.attempt_dispatch(&snapshot, operation).await;
-                drop(lease);
-                return match outcome {
-                    AttemptOutcome::Progressed => DispatchPass::Progressed,
-                    AttemptOutcome::Parked => DispatchPass::Parked,
-                };
+                match self.attempt_dispatch(&snapshot, operation).await {
+                    AttemptOutcome::Progressed => {
+                        drop(lease);
+                        return DispatchPass::Progressed;
+                    }
+                    AttemptOutcome::Parked => {
+                        drop(lease);
+                        // A selective image/Import fence must not starve another Vault or Account.
+                        // Continue this finite scan; never report progress merely to retry it.
+                    }
+                    AttemptOutcome::RetryAfter { milliseconds } => {
+                        let deadline = self
+                            .clock
+                            .now_ms()
+                            .unwrap_or(now_ms)
+                            .saturating_add(milliseconds);
+                        lease.defer_until(deadline);
+                        account_earliest = Some(
+                            account_earliest.map_or(deadline, |current| current.min(deadline)),
+                        );
+                    }
+                }
+            }
+            // An awaited attempt may have parked the whole Account. Its stale deadlines
+            // cannot schedule a wake; other Accounts keep their own eligible deadlines.
+            if self.dispatch_account_is_eligible(&snapshot) {
+                if let Some(deadline) = account_earliest {
+                    earliest = Some(earliest.map_or(deadline, |current| current.min(deadline)));
+                }
+                leased_elsewhere |= account_leased_elsewhere;
             }
         }
         match earliest {
@@ -976,8 +1333,7 @@ impl Runtime {
             Err(_) => return self.schedule_production_cleanup_retry(key),
         };
         let session = match self
-            .platform_storage
-            .load_current_session(&account_id, &snapshot.incarnation)
+            .effective_session(&account_id, &snapshot.incarnation)
             .await
         {
             Ok(Some(session)) => session,
@@ -1052,8 +1408,7 @@ impl Runtime {
             return;
         };
         let Ok(Some(session)) = self
-            .platform_storage
-            .load_current_session(&binding.account_id, &snapshot.incarnation)
+            .effective_session(&binding.account_id, &snapshot.incarnation)
             .await
         else {
             return;
@@ -1098,10 +1453,24 @@ impl Runtime {
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
     ) -> AttemptOutcome {
+        if operation.kind != OperationKind::FinalizeTeamLeaveRotationPlans
+            && operation
+                .touches_vaults(&snapshot.rotation_fenced_vault_ids())
+                .unwrap_or(true)
+        {
+            return AttemptOutcome::Parked;
+        }
         if operation.kind == OperationKind::ImportItems {
             return self.attempt_import_dispatch(snapshot, operation).await;
         }
-        if operation.kind == OperationKind::CreateVault {
+        if operation.kind == OperationKind::CreateVault
+            || (operation.kind == OperationKind::UpdateVault
+                && operation
+                    .vault_image_checkpoint()
+                    .is_some_and(|checkpoint| {
+                        checkpoint != crate::replica::CreateVaultCheckpoint::FinalRequestFrozen
+                    }))
+        {
             #[cfg(feature = "binding-test-harness")]
             if operation.create_vault.as_ref().is_some_and(|intent| {
                 self.create_vault_binding_pause_checkpoint
@@ -1140,10 +1509,23 @@ impl Runtime {
         else {
             return AttemptOutcome::Progressed;
         };
+        let rotation_fenced = snapshot.rotation_fenced_vault_ids();
+        if operation.kind != OperationKind::FinalizeTeamLeaveRotationPlans
+            && operation.touches_vaults(&rotation_fenced).unwrap_or(true)
+        {
+            return AttemptOutcome::Parked;
+        }
         let Ok(now_ms) = self.clock.now_ms() else {
             return AttemptOutcome::Parked;
         };
         if operation.scheduling.not_before_ms > now_ms {
+            return AttemptOutcome::Progressed;
+        }
+        if !self
+            .release_vault_image_acceptance_for_dispatch(&snapshot.account_id, &operation)
+            .await
+        {
+            self.persist_backoff(&snapshot, &operation).await;
             return AttemptOutcome::Progressed;
         }
         let account_id = &snapshot.account_id;
@@ -1166,8 +1548,7 @@ impl Runtime {
             }
         };
         let session = match self
-            .platform_storage
-            .load_current_session(account_id, &snapshot.incarnation)
+            .effective_session(account_id, &snapshot.incarnation)
             .await
         {
             Ok(Some(session)) => session,
@@ -1198,6 +1579,29 @@ impl Runtime {
             .await
     }
 
+    pub(super) async fn dispatch_rotation_once(&self, account_id: &AccountId, operation_id: &str) {
+        let Some(snapshot) = self.replica.snapshot(account_id) else {
+            return;
+        };
+        let Some(operation) = snapshot
+            .operations
+            .iter()
+            .find(|record| record.operation_id == operation_id && record.kind.is_rotation())
+            .cloned()
+        else {
+            return;
+        };
+        let Ok(now_ms) = self.clock.now_ms() else {
+            return;
+        };
+        let Some(lease) = self.dispatch_leases.acquire(operation_id, now_ms) else {
+            return;
+        };
+        let _ = self.attempt_dispatch(&snapshot, &operation).await;
+        drop(lease);
+        self.wake_dispatch();
+    }
+
     async fn attempt_import_dispatch(
         &self,
         snapshot: &ReplicaSnapshot,
@@ -1226,8 +1630,7 @@ impl Runtime {
             }
         };
         let session = match self
-            .platform_storage
-            .load_current_session(&account_id, &snapshot.incarnation)
+            .effective_session(&account_id, &snapshot.incarnation)
             .await
         {
             Ok(Some(session)) => session,
@@ -1281,8 +1684,7 @@ impl Runtime {
                 &super::create_vault_staging::CreateVaultRecoveryError::Fatal(error),
             ) {
                 CreateVaultRecoveryPolicy::FailAccount => {
-                    self.fail_account_module(&account_id).await;
-                    AttemptOutcome::Parked
+                    self.fail_import_dispatch(snapshot, operation).await
                 }
                 CreateVaultRecoveryPolicy::ReauthenticationRequired => {
                     self.mark_reauthentication_required(&account_id);
@@ -1300,11 +1702,42 @@ impl Runtime {
         }
     }
 
+    async fn fail_import_dispatch(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+    ) -> AttemptOutcome {
+        let Ok(execution_lock) = self.account_execution_lock(&snapshot.account_id) else {
+            return AttemptOutcome::Parked;
+        };
+        let _execution_guard = execution_lock.lock().await;
+        // The executor released execution before returning its local error. Never apply that
+        // error to authority accepted in the meantime, and retry a failed failure write normally.
+        self.fail_dispatch_at_snapshot(snapshot, operation).await
+    }
+
     async fn attempt_create_vault_dispatch(
         &self,
         snapshot: &ReplicaSnapshot,
         operation: &OperationRecord,
     ) -> AttemptOutcome {
+        // Resolve transport credentials under the same Account fence used by each later phase.
+        // The phase methods keep this captured lifetime after this initial guard is released.
+        let Ok(execution) = self.account_execution_lock(&snapshot.account_id) else {
+            return AttemptOutcome::Parked;
+        };
+        let execution_guard = execution.lock().await;
+        let captured =
+            match self.require_create_vault_attempt_snapshot(snapshot, &operation.operation_id) {
+                Ok(captured) => captured,
+                Err(_) => return AttemptOutcome::Parked,
+            };
+        let snapshot = &captured;
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|current| current.operation_id == operation.operation_id)
+            .expect("captured Vault attempt contains its accepted Operation");
         let account_id = snapshot.account_id.clone();
         let Some(auth_config) = self.auth_client_config.clone() else {
             return AttemptOutcome::Parked;
@@ -1325,8 +1758,7 @@ impl Runtime {
             }
         };
         let session = match self
-            .platform_storage
-            .load_current_session(&account_id, &snapshot.incarnation)
+            .effective_session(&account_id, &snapshot.incarnation)
             .await
         {
             Ok(Some(session)) => session,
@@ -1358,10 +1790,41 @@ impl Runtime {
             session: tokio::sync::Mutex::new(session),
             upload: Mutex::new(None),
         };
-        match self
-            .drive_create_vault_recovery_cycle(&account_id, &operation.operation_id, &port, &port)
+        drop(execution_guard);
+        let result = if operation.kind == OperationKind::UpdateVault {
+            let mut renewal = super::create_vault_staging::SessionRenewalBudget::default();
+            loop {
+                use super::create_vault_staging::CreateVaultStagingPass;
+                match self
+                    .drive_create_vault_staging_cycle_with_budget(
+                        snapshot,
+                        &operation.operation_id,
+                        &port,
+                        &mut renewal,
+                    )
+                    .await
+                {
+                    Ok(CreateVaultStagingPass::Progressed) => continue,
+                    Ok(CreateVaultStagingPass::DispatchReady) => return AttemptOutcome::Progressed,
+                    Ok(CreateVaultStagingPass::RetryScheduled) => {
+                        return AttemptOutcome::Progressed;
+                    }
+                    Ok(CreateVaultStagingPass::ReauthenticationRequired) => {
+                        return AttemptOutcome::Parked;
+                    }
+                    Err(error) => break Err(error),
+                }
+            }
+        } else {
+            self.drive_create_vault_recovery_at_snapshot(
+                snapshot,
+                &operation.operation_id,
+                &port,
+                &port,
+            )
             .await
-        {
+        };
+        match result {
             Ok(super::create_vault_executor::CreateVaultExecutorPass::Completed) => {
                 while matches!(
                     self.drive_create_vault_cleanup_cycle(
@@ -1382,17 +1845,15 @@ impl Runtime {
             }
             Err(error) => match create_vault_recovery_policy(&error) {
                 CreateVaultRecoveryPolicy::ParkedFenced => {
-                    // A guard can only fence after another durable write moved truth. That write
-                    // publishes the legitimate wake; reporting progress here would immediately
-                    // select the still-eligible Operation and turn contention into a hot loop.
+                    // A stale source or selectively unavailable image waits for its existing
+                    // authority/lifecycle wake. Reporting progress would immediately select the
+                    // still-eligible Operation and turn that wait into a hot loop.
                     AttemptOutcome::Parked
                 }
                 CreateVaultRecoveryPolicy::FailAccount => {
-                    // Contradictory Server authority or an impossible local image/outcome state
-                    // must stop the Account durably. Parking without a durable reason would make
-                    // the outer dispatcher select the same Operation forever.
-                    self.fail_account_module(&account_id).await;
-                    AttemptOutcome::Parked
+                    // Scoped staging/executor failures resolve at their origin. Any remaining
+                    // invariant may affect only the original transport's captured snapshot.
+                    self.fail_dispatch_at_snapshot(snapshot, operation).await
                 }
                 CreateVaultRecoveryPolicy::ReauthenticationRequired => {
                     self.mark_reauthentication_required(&account_id);
@@ -1400,8 +1861,13 @@ impl Runtime {
                 }
                 CreateVaultRecoveryPolicy::Parked => AttemptOutcome::Parked,
                 CreateVaultRecoveryPolicy::Retry => {
-                    self.persist_backoff(snapshot, operation).await;
-                    AttemptOutcome::Progressed
+                    if self.persist_backoff(snapshot, operation).await {
+                        AttemptOutcome::Progressed
+                    } else {
+                        AttemptOutcome::RetryAfter {
+                            milliseconds: BASE_BACKOFF_MS,
+                        }
+                    }
                 }
             },
         }
@@ -1416,11 +1882,12 @@ impl Runtime {
     ) -> AttemptOutcome {
         let account_id = &snapshot.account_id;
         let mut auth_budget = OutcomeResolutionAuthBudget::default();
+        let mut held_hint = None;
 
-        // A retry has already handed these exact bytes to the Server at least once, so the
-        // Server may already hold the answer this Device never saw. Asking creates no second
-        // effect; sending again would rely entirely on the Server's own deduplication.
-        if operation.scheduling.attempt_count > 0 {
+        // Retained retry history may include a legacy replacement attempt never sent under
+        // its current ID. Lookup safely handles both an undecided attempt and an answer this
+        // Device never saw; replay below proves the exact immutable request in either case.
+        if operation.is_legacy_held() || operation.scheduling.attempt_count > 0 {
             match self
                 .lookup_operation_outcome(
                     account_id,
@@ -1431,33 +1898,31 @@ impl Runtime {
                 )
                 .await
             {
-                SemanticAnswer::Outcome(outcome) => {
-                    if operation.kind == OperationKind::CreateItem {
-                        return self
-                            .finish_operation(
-                                snapshot,
-                                operation,
-                                outcome,
-                                http,
-                                &mut session,
-                                &mut auth_budget,
-                            )
-                            .await;
+                SemanticAnswer::Outcome(hint) => {
+                    // Lookup carries no request fingerprint. Replay the exact immutable request
+                    // for every kind: matching bytes replay the retained result; identity reuse
+                    // answers 422 without another semantic effect.
+                    if operation.is_legacy_held() {
+                        held_hint = Some(hint);
                     }
-                    // Lookup has no request fingerprint. For Share and existing-Item work it is
-                    // only evidence that a same-kind decision exists under this ID. Replaying the
-                    // exact immutable request proves identity: a matching fingerprint replays the
-                    // outcome, while reuse answers 422 without another semantic effect.
-                    let _outcome_hint = outcome;
                 }
                 SemanticAnswer::IdentityReused => {
-                    self.fail_account_module_fenced(account_id).await;
-                    return AttemptOutcome::Parked;
+                    return self.fail_dispatch_at_snapshot(snapshot, operation).await;
                 }
                 // Nothing was decided yet, so the identical bytes still have to go.
+                SemanticAnswer::Undecided if operation.is_legacy_held() => {
+                    return AttemptOutcome::Parked;
+                }
                 SemanticAnswer::Undecided => {}
                 SemanticAnswer::Transient => {
-                    self.persist_backoff(snapshot, operation).await;
+                    if operation.is_legacy_held() && !self.completion_scope_is_current(snapshot) {
+                        return AttemptOutcome::Parked;
+                    }
+                    if !self.persist_backoff(snapshot, operation).await
+                        && operation.is_legacy_held()
+                    {
+                        return AttemptOutcome::Parked;
+                    }
                     return AttemptOutcome::Progressed;
                 }
                 SemanticAnswer::ReauthenticationRequired => return AttemptOutcome::Parked,
@@ -1469,6 +1934,9 @@ impl Runtime {
             .await
         {
             ExactSendOutcome::Outcome(outcome) => {
+                if held_hint.as_ref().is_some_and(|hint| hint != &outcome) {
+                    return self.fail_dispatch_at_snapshot(snapshot, operation).await;
+                }
                 self.finish_operation(
                     snapshot,
                     operation,
@@ -1480,13 +1948,30 @@ impl Runtime {
                 .await
             }
             ExactSendOutcome::IdentityReused => {
-                self.fail_account_module_fenced(account_id).await;
-                AttemptOutcome::Parked
+                self.fail_dispatch_at_snapshot(snapshot, operation).await
             }
+            ExactSendOutcome::Deferred if operation.is_legacy_held() => AttemptOutcome::Parked,
             ExactSendOutcome::Deferred | ExactSendOutcome::RetryScheduled => {
                 AttemptOutcome::Progressed
             }
             ExactSendOutcome::Reauthenticate => AttemptOutcome::Parked,
+        }
+    }
+
+    async fn fail_dispatch_at_snapshot(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation: &OperationRecord,
+    ) -> AttemptOutcome {
+        match self.fail_account_module_at_snapshot(snapshot).await {
+            CompletionResult::Retry if self.completion_scope_is_current(snapshot) => {
+                if self.persist_backoff(snapshot, operation).await {
+                    AttemptOutcome::Progressed
+                } else {
+                    AttemptOutcome::Parked
+                }
+            }
+            _ => AttemptOutcome::Parked,
         }
     }
 
@@ -1518,7 +2003,12 @@ impl Runtime {
         {
             CompletionResult::Completed => AttemptOutcome::Progressed,
             CompletionResult::Retry => {
-                self.persist_backoff(snapshot, operation).await;
+                if operation.is_legacy_held() && !self.completion_scope_is_current(snapshot) {
+                    return AttemptOutcome::Parked;
+                }
+                if !self.persist_backoff(snapshot, operation).await && operation.is_legacy_held() {
+                    return AttemptOutcome::Parked;
+                }
                 AttemptOutcome::Progressed
             }
             CompletionResult::Reauthenticate | CompletionResult::Failed => AttemptOutcome::Parked,

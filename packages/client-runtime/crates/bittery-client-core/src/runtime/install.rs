@@ -1,6 +1,143 @@
+use super::installation_commit::{InstallationCommitFailure, InstallationDocuments};
 use super::*;
 
+#[path = "catalog_retirement.rs"]
+mod catalog_retirement;
+
 impl Runtime {
+    /// Guarded public Sign-in, polled without the ordinary request dispatcher's frame.
+    pub(super) async fn sign_in(
+        &self,
+        request: RuntimeRequest,
+        cancellation: RequestCancellation,
+        before_acceptance: impl FnOnce(),
+        accepted: impl FnOnce(),
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        let _admission = self.teardown_admission.read().await;
+        self.reject_request_during_pending_teardown(&request)?;
+        let RuntimeRequest::SignIn {
+            server_url,
+            email,
+            master_password,
+            secret_key,
+            insecure_transport_confirmed,
+        } = request
+        else {
+            unreachable!("the guarded request is Sign-in")
+        };
+        let master_password = Zeroizing::new(master_password);
+        let mut secret_key = Zeroizing::new(secret_key);
+        self.ensure_open()?;
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled before durable acceptance",
+            ));
+        }
+        let auth_config = self.auth_client_config.clone().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::AuthenticationUnavailable,
+                "authentication is implemented by a later vertical slice",
+            )
+        })?;
+        let normalized_email = bittery_crypto_core::normalize_email(&email);
+        let http = AuthHttpClient::new(
+            &self.http_transport,
+            &server_url,
+            insecure_transport_confirmed,
+            auth_config,
+        )?;
+        if !bittery_crypto_core::validate_secret_key(&secret_key) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationUnavailable,
+                "Secret Key is invalid",
+            ));
+        }
+        let pinned_kdf_profile = self
+            .resolve_sign_in_kdf_pin(&http.normalized_server_url(), &normalized_email)
+            .await?;
+        let verified = authenticate(
+            &http,
+            AuthenticationInput {
+                email: &normalized_email,
+                master_password: &master_password,
+                secret_key: &secret_key,
+                pinned_kdf_profile: pinned_kdf_profile.as_ref(),
+            },
+            cancellation.clone(),
+        )
+        .await?;
+        drop(master_password);
+        before_acceptance();
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled before durable Account acceptance",
+            ));
+        }
+
+        // Remote verification is complete. From this point the installer owns the accepted
+        // generation and must either publish it or fence it despite later caller cancellation.
+        accepted();
+        let evidence = AuthenticationInstallationEvidence::new(
+            std::mem::take(&mut *secret_key),
+            insecure_transport_confirmed,
+        );
+        self.install_verified_authentication(verified, evidence)
+            .await
+    }
+
+    /// Caller holds catalog serialization. Admission under Account execution only loads this
+    /// existing secret and must never acquire catalog serialization in the opposite order.
+    pub(super) async fn ensure_image_device_key_under_catalog(
+        &self,
+        entropy: &dyn InstallationEntropy,
+    ) -> Result<DeviceKeyDocument, RuntimeError> {
+        if let Some(document) = self.platform_storage.load_device_key().await? {
+            return Ok(document);
+        }
+        let catalog = self.platform_storage.load_device_catalog().await?;
+        if let Some(catalog) = catalog {
+            for account in catalog.accounts {
+                let snapshot = self.replica.load_uncached(&account.account_id).await?;
+                if snapshot.is_none() && account.active_incarnation.is_some() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::StorageUnavailable,
+                        "Device key initialization requires installed Account inventory",
+                    ));
+                }
+                if snapshot.is_some_and(|snapshot| {
+                    snapshot.operations.iter().any(|operation| {
+                        operation
+                            .vault_image()
+                            .is_some_and(|image| image.protected_witness.is_some())
+                    })
+                }) {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::StorageUnavailable,
+                        "Device key is missing for accepted protected Vault images",
+                    ));
+                }
+            }
+        }
+        let document = DeviceKeyDocument::new(entropy.generate_device_key());
+        self.ensure_not_closed()?;
+        self.platform_storage.store_device_key(&document).await?;
+        Ok(document)
+    }
+
+    pub(super) async fn require_image_device_key(&self) -> Result<DeviceKeyDocument, RuntimeError> {
+        self.platform_storage
+            .load_device_key()
+            .await?
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::StorageUnavailable,
+                    "Device key for protected Vault images is unavailable",
+                )
+            })
+    }
+
     #[cfg(test)]
     pub(crate) fn install_account(
         &self,
@@ -67,6 +204,8 @@ impl Runtime {
             .install_or_replace(account_id.clone(), user_id, incarnation)
             .await?;
         let next_lock_epoch = snapshot.lock_epoch;
+        self.native_authority.retire_account(&account_id);
+        let _biometric_retirement = self.biometric.retire_for_publication(&account_id);
         let _publication = self.publication.lock().expect("publication lock poisoned");
         let invalidated_delivery = self.invalidate_delivery(&account_id);
         self.replica.cache(snapshot);
@@ -97,6 +236,7 @@ impl Runtime {
             .remove(&account_id);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         drop(_publication);
+        drop(_biometric_retirement);
         drop(_execution_guard);
         drop(_catalog_guard);
         if let Some(token) = invalidated_delivery {
@@ -131,7 +271,11 @@ impl Runtime {
     ) -> Result<RuntimeResponse, RuntimeError> {
         let catalog_guard = self.catalog_transition.lock().await;
         self.ensure_open()?;
-        let original_catalog = self.platform_storage.load_device_catalog().await?;
+        self.require_native_identity_local_unlock_allowed(
+            &verified.normalized_server_url,
+            &verified.user.id,
+        )?;
+        let mut original_catalog = self.platform_storage.load_device_catalog().await?;
         let catalog = original_catalog
             .clone()
             .unwrap_or(DeviceCatalogDocument::new(Vec::new())?);
@@ -186,14 +330,9 @@ impl Runtime {
                 "generated Account identity collides with the Device catalog",
             ));
         }
-        // This is the first point at which the Account identity is known, and it is still before any
-        // installation write. A pending teardown of exactly this Account must fence it here.
-        if self.account_teardown_is_pending(&account_id) {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::AccountMissing,
-                "Account teardown is pending",
-            ));
-        }
+        // Only this already-verified path may retry Replace. Remove and Device Wipe still
+        // refuse installation before any write, while ordinary work sees both purposes as gated.
+        self.reject_installation_during_account_removal(&account_id)?;
         let previous_metadata = active_metadata.get(&account_id);
         let existing_catalog_account = catalog
             .accounts
@@ -216,8 +355,25 @@ impl Runtime {
             ));
         }
 
-        let execution_lock = self.account_execution_lock(&account_id)?;
-        let execution_guard = execution_lock.lock().await;
+        let mut execution_accounts = if is_replacement {
+            catalog
+                .accounts
+                .iter()
+                .map(|account| account.account_id.clone())
+                .collect::<Vec<_>>()
+        } else {
+            vec![account_id.clone()]
+        };
+        execution_accounts.sort();
+        execution_accounts.dedup();
+        let execution_locks = execution_accounts
+            .iter()
+            .map(|account| self.account_execution_lock(account))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut execution_guards = Vec::with_capacity(execution_locks.len());
+        for lock in &execution_locks {
+            execution_guards.push(lock.lock().await);
+        }
         self.ensure_open()?;
         let previous_snapshot = self.replica.snapshot(&account_id);
         match (&expected_active_incarnation, &previous_snapshot) {
@@ -231,15 +387,11 @@ impl Runtime {
             }
         }
 
-        let device_key = match self.platform_storage.load_device_key().await? {
-            Some(document) => document,
-            None => {
-                let document = DeviceKeyDocument::new(entropy.generate_device_key());
-                self.ensure_not_closed()?;
-                self.platform_storage.store_device_key(&document).await?;
-                document
-            }
-        };
+        self.require_native_identity_local_unlock_allowed(
+            &verified.normalized_server_url,
+            &verified.user.id,
+        )?;
+        let device_key = self.ensure_image_device_key_under_catalog(entropy).await?;
         let prepared = prepare_authenticated_installation(
             verified,
             evidence,
@@ -250,191 +402,76 @@ impl Runtime {
             clock,
         )?;
 
-        let staged_catalog = stage_catalog_install(
-            &catalog,
-            account_id.clone(),
-            incarnation.clone(),
-            expected_active_incarnation.clone(),
-        )?;
-        self.ensure_not_closed()?;
-        if let Err(error) = self
-            .platform_storage
-            .store_device_catalog(&staged_catalog)
-            .await
-        {
-            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
-                .await;
-            return Err(error);
-        }
-        if let Err(error) = self.ensure_not_closed() {
-            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
-                .await;
-            return Err(error);
-        }
-        if let Err(error) = self
-            .platform_storage
-            .store_account_metadata(&prepared.metadata)
-            .await
-        {
-            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
-                .await;
-            return Err(error);
-        }
-        if let Err(error) = self.ensure_not_closed() {
-            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
-                .await;
-            return Err(error);
-        }
-        if let Err(error) = self
-            .platform_storage
-            .store_quick_unlock(&prepared.quick_unlock)
-            .await
-        {
-            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
-                .await;
-            return Err(error);
-        }
-        if let Err(error) = self.ensure_not_closed() {
-            self.rollback_pre_replica_install(original_catalog.as_ref(), &account_id, &incarnation)
-                .await;
-            return Err(error);
-        }
-
-        let installed_snapshot = match self
-            .replica
-            .install_or_replace(
-                account_id.clone(),
-                prepared.metadata.user_id.clone(),
-                incarnation.clone(),
+        let installed = async {
+            if let Some(retired_incarnation) = &expected_active_incarnation {
+                self.gate_catalog_account_retirement(
+                    &account_id,
+                    crate::platform_storage::AccountRetirementPurpose::Replace,
+                );
+                let marked = self
+                    .mark_catalog_account_retirement(
+                        &catalog,
+                        &account_id,
+                        crate::platform_storage::AccountRetirementPurpose::Replace,
+                    )
+                    .await
+                    .map_err(InstallationCommitFailure::BeforeReplica)?;
+                self.retire_cross_account_destination_bindings(
+                    &marked,
+                    &account_id,
+                    retired_incarnation,
+                )
+                .await
+                .map_err(InstallationCommitFailure::BeforeReplica)?;
+                // A pre-Replica rollback must preserve the already committed retirement intent.
+                original_catalog = Some(marked);
+            }
+            self.persist_account_installation(
+                original_catalog.as_ref(),
+                previous_snapshot.as_ref(),
+                InstallationDocuments {
+                    metadata: &prepared.metadata,
+                    quick_unlock: Some(&prepared.quick_unlock),
+                    current_session: Some(&prepared.current_session),
+                },
             )
             .await
-        {
+        }
+        .await;
+        let installed_snapshot = match installed {
             Ok(snapshot) => snapshot,
-            Err(error) => match self.replica.load_uncached(&account_id).await {
-                Ok(durable)
-                    if durable_installation_is_unchanged(
-                        durable.as_ref(),
-                        previous_snapshot.as_ref(),
-                    ) =>
-                {
-                    self.rollback_pre_replica_install(
-                        original_catalog.as_ref(),
-                        &account_id,
-                        &incarnation,
-                    )
-                    .await;
-                    return Err(error);
-                }
-                Ok(Some(snapshot))
-                    if snapshot.incarnation == incarnation
-                        && snapshot.user_id == prepared.metadata.user_id =>
-                {
-                    let invalidated =
-                        self.fence_authenticated_installation(Some(snapshot), &account_id);
-                    drop(execution_guard);
-                    drop(catalog_guard);
-                    finish_generation_fence(invalidated);
-                    self.publish_all_unless_closed();
-                    return Err(error);
-                }
-                Ok(Some(third_head)) => {
-                    let invalidated =
-                        self.fence_authenticated_installation(Some(third_head), &account_id);
-                    drop(execution_guard);
-                    drop(catalog_guard);
-                    finish_generation_fence(invalidated);
-                    self.publish_all_unless_closed();
-                    return Err(startup_invariant(
-                        "Replica changed to an unexpected generation during installation",
-                    ));
-                }
-                Ok(None) | Err(_) => {
-                    let invalidated = self.fence_authenticated_installation(None, &account_id);
-                    drop(execution_guard);
-                    drop(catalog_guard);
-                    finish_generation_fence(invalidated);
-                    self.publish_all_unless_closed();
-                    return Err(startup_invariant(
-                        "Replica installation outcome could not be established",
-                    ));
-                }
-            },
+            Err(InstallationCommitFailure::BeforeReplica(error)) => {
+                drop(execution_guards);
+                drop(catalog_guard);
+                self.publish_all_unless_closed();
+                return Err(error);
+            }
+            Err(InstallationCommitFailure::AfterReplica { error, snapshot }) => {
+                let invalidated = self.fence_authenticated_installation(
+                    snapshot.map(|snapshot| *snapshot),
+                    &account_id,
+                );
+                drop(execution_guards);
+                drop(catalog_guard);
+                finish_generation_fence(invalidated);
+                self.publish_all_unless_closed();
+                return Err(error);
+            }
         };
-
-        if let Err(error) = self.ensure_not_closed() {
-            let invalidated =
-                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
-            drop(execution_guard);
-            drop(catalog_guard);
-            finish_generation_fence(invalidated);
-            self.publish_all_unless_closed();
-            return Err(error);
-        }
-
-        let promoted_catalog =
-            match promote_catalog_install(&staged_catalog, &account_id, &incarnation) {
-                Ok(catalog) => catalog,
-                Err(error) => {
-                    let invalidated = self
-                        .fence_authenticated_installation(Some(installed_snapshot), &account_id);
-                    drop(execution_guard);
-                    drop(catalog_guard);
-                    finish_generation_fence(invalidated);
-                    self.publish_all_unless_closed();
-                    return Err(error);
-                }
-            };
-        if let Err(error) = self
-            .platform_storage
-            .store_device_catalog(&promoted_catalog)
-            .await
-        {
-            let invalidated =
-                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
-            drop(execution_guard);
-            drop(catalog_guard);
-            finish_generation_fence(invalidated);
-            self.publish_all_unless_closed();
-            return Err(error);
-        }
-        if let Err(error) = self.ensure_not_closed() {
-            let invalidated =
-                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
-            drop(execution_guard);
-            drop(catalog_guard);
-            finish_generation_fence(invalidated);
-            self.publish_all_unless_closed();
-            return Err(error);
-        }
-        if let Err(error) = self
-            .platform_storage
-            .store_current_session(&prepared.current_session)
-            .await
-        {
-            let invalidated =
-                self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
-            drop(execution_guard);
-            drop(catalog_guard);
-            finish_generation_fence(invalidated);
-            self.publish_all_unless_closed();
-            return Err(error);
-        }
 
         let publication = self.publish_authenticated_installation(
             installed_snapshot.clone(),
             account_id.clone(),
-            incarnation.clone(),
-            AccountDisplayIdentity {
-                email: prepared.metadata.email.clone(),
-            },
+            account_presentation(&prepared.metadata),
             prepared.master_unlock_key,
+            Some(prepared.current_session.encrypted_private_key.clone()),
         );
-        let invalidated = match publication {
-            Ok(invalidated) if !self.is_closed() => invalidated,
-            Ok(first_invalidated) => {
+        let (invalidated, unlocked) = match publication {
+            Ok(publication) if !self.is_closed() => publication,
+            Ok((first_invalidated, _)) => {
                 let invalidated =
                     self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
-                drop(execution_guard);
+                drop(execution_guards);
                 drop(catalog_guard);
                 finish_generation_fence(first_invalidated);
                 finish_generation_fence(invalidated);
@@ -447,23 +484,18 @@ impl Runtime {
             Err(error) => {
                 let invalidated =
                     self.fence_authenticated_installation(Some(installed_snapshot), &account_id);
-                drop(execution_guard);
+                drop(execution_guards);
                 drop(catalog_guard);
                 finish_generation_fence(invalidated);
                 self.publish_all_unless_closed();
                 return Err(error);
             }
         };
-        drop(execution_guard);
+        self.complete_catalog_account_replacement(&account_id);
+        drop(execution_guards);
         drop(catalog_guard);
         finish_generation_fence(invalidated);
         self.publish_all_unless_closed();
-        // A Session is installed again, so anything parked on one may resume.
-        self.note_session_available(&account_id);
-        let _ = self
-            .bootstrap_account(&account_id, RequestCancellation::new())
-            .await;
-
         if let Some(old_incarnation) = expected_active_incarnation {
             let _ = self
                 .platform_storage
@@ -479,13 +511,26 @@ impl Runtime {
                 .await;
         }
 
+        if !unlocked {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::AuthenticationRequired,
+                "Connected Desktop authority requires native Account authorization",
+            ));
+        }
+        // A Session is installed again, so anything parked on one may resume.
+        self.note_local_unlock_completed(&account_id);
+        self.note_session_available(&account_id);
+        let _ = self
+            .bootstrap_account(&account_id, RequestCancellation::new())
+            .await;
+
         Ok(RuntimeResponse::SignedIn {
             account_id,
             user_id: prepared.metadata.user_id,
         })
     }
 
-    async fn rollback_pre_replica_install(
+    pub(super) async fn rollback_pre_replica_install(
         &self,
         original_catalog: Option<&DeviceCatalogDocument>,
         account_id: &AccountId,
@@ -513,11 +558,13 @@ impl Runtime {
             .await;
     }
 
-    fn fence_authenticated_installation(
+    pub(super) fn fence_authenticated_installation(
         &self,
         snapshot: Option<crate::replica::ReplicaSnapshot>,
         account_id: &AccountId,
     ) -> Option<Arc<DeliveryToken>> {
+        self.native_authority.retire_account(account_id);
+        let _biometric_retirement = self.biometric.retire_for_publication(account_id);
         let _publication = self.publication.lock().expect("publication lock poisoned");
         let invalidated = self.invalidate_delivery(account_id);
         let previous_revision = self
@@ -579,10 +626,37 @@ impl Runtime {
         &self,
         snapshot: crate::replica::ReplicaSnapshot,
         account_id: AccountId,
-        incarnation: crate::protocol::Incarnation,
-        display_identity: AccountDisplayIdentity,
+        display_identity: AccountPresentation,
         master_unlock_key: Zeroizing<[u8; 32]>,
+        encrypted_private_key: Option<String>,
+    ) -> Result<(Option<Arc<DeliveryToken>>, bool), RuntimeError> {
+        // Attachment and publication share native→biometric→publication ordering. A connection
+        // that appeared during physical installation leaves discoverable independent credentials
+        // and a Locked Account, never independently published live keys.
+        let native = self.native_local_installation_publication(
+            &display_identity.identity.server_url,
+            &snapshot.user_id,
+            &account_id,
+        );
+        let _biometric_retirement = self.biometric.retire_for_publication(&account_id);
+        let material = native.allowed.then(|| {
+            LiveMasterUnlockKey::with_private_key(master_unlock_key, encrypted_private_key)
+        });
+        let invalidated = self.publish_installed_account(snapshot, display_identity, material)?;
+        Ok((invalidated, native.allowed))
+    }
+
+    /// Publish installed metadata as Locked or with already-authorized live material. Callers own
+    /// installation admission and any required retirement of an existing Account generation.
+    pub(super) fn publish_installed_account(
+        &self,
+        snapshot: ReplicaSnapshot,
+        display_identity: AccountPresentation,
+        material: Option<LiveMasterUnlockKey>,
     ) -> Result<Option<Arc<DeliveryToken>>, RuntimeError> {
+        let account_id = snapshot.account_id.clone();
+        let incarnation = snapshot.incarnation.clone();
+        let lock_epoch = snapshot.lock_epoch;
         let _publication = self.publication.lock().expect("publication lock poisoned");
         if self.is_closed() {
             return Err(RuntimeError::new(
@@ -599,19 +673,25 @@ impl Runtime {
         self.unlocked_items
             .lock()
             .expect("unlocked projection lock poisoned")
-            .insert(account_id.clone(), Vec::new());
+            .remove(&account_id);
         self.clear_live_master_unlock_keys_for_account(&account_id);
-        self.live_master_unlock_keys
-            .lock()
-            .expect("live master unlock key lock poisoned")
-            .insert(
-                (account_id.clone(), incarnation),
-                LiveMasterUnlockKey::new(master_unlock_key),
-            );
+        let access = if let Some(material) = material {
+            self.unlocked_items
+                .lock()
+                .expect("unlocked projection lock poisoned")
+                .insert(account_id.clone(), Vec::new());
+            self.live_master_unlock_keys
+                .lock()
+                .expect("live master unlock key lock poisoned")
+                .insert((account_id.clone(), incarnation), material);
+            AccountAccessState::Unlocked
+        } else {
+            AccountAccessState::Locked
+        };
         self.account_access
             .lock()
             .expect("Account access lock poisoned")
-            .insert(account_id.clone(), AccountAccessState::Unlocked);
+            .insert(account_id.clone(), access);
         self.account_display_identities
             .lock()
             .expect("Account display identity lock poisoned")
@@ -619,7 +699,7 @@ impl Runtime {
         self.account_lock_epochs
             .lock()
             .expect("Account lock epoch lock poisoned")
-            .insert(account_id.clone(), 0);
+            .insert(account_id.clone(), lock_epoch);
         self.lock_epoch_pending
             .lock()
             .expect("pending lock epoch lock poisoned")
@@ -665,7 +745,15 @@ impl Runtime {
                 .await;
         }
 
-        let publication = self.publish_quick_unlock(&snapshot, prepared.master_unlock_key);
+        let publication = self
+            .native_local_unlock_publication(&snapshot)
+            .and_then(|_native| {
+                self.publish_account_unlock(
+                    &snapshot,
+                    prepared.master_unlock_key,
+                    Some(prepared.current_session.encrypted_private_key.clone()),
+                )
+            });
         let invalidated = match publication {
             Ok(invalidated) if !self.is_closed() => invalidated,
             Ok(first_invalidated) => {
@@ -691,6 +779,7 @@ impl Runtime {
         finish_generation_fence(invalidated);
         self.publish_all_unless_closed();
         // A Session is installed again, so anything parked on one may resume.
+        self.note_local_unlock_completed(&account_id);
         self.note_session_available(&account_id);
         let _ = self
             .bootstrap_account(&account_id, RequestCancellation::new())
@@ -714,10 +803,11 @@ impl Runtime {
         Err(error)
     }
 
-    fn publish_quick_unlock(
+    pub(super) fn publish_account_unlock(
         &self,
         expected: &crate::replica::ReplicaSnapshot,
         master_unlock_key: Zeroizing<[u8; 32]>,
+        encrypted_private_key: Option<String>,
     ) -> Result<Option<Arc<DeliveryToken>>, RuntimeError> {
         let _publication = self.publication.lock().expect("publication lock poisoned");
         if self.is_closed() {
@@ -729,7 +819,13 @@ impl Runtime {
         let current = self.replica.snapshot(&expected.account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;
-        if current.incarnation != expected.incarnation
+        if self.account_access_retirement_is_pending(&expected.account_id)
+            || self
+                .lock_epoch_pending
+                .lock()
+                .expect("pending lock epoch lock poisoned")
+                .contains_key(&expected.account_id)
+            || current.incarnation != expected.incarnation
             || current.user_id != expected.user_id
             || current.revision != expected.revision
             || current.lock_epoch != expected.lock_epoch
@@ -751,7 +847,7 @@ impl Runtime {
             .expect("live master unlock key lock poisoned")
             .insert(
                 (expected.account_id.clone(), expected.incarnation.clone()),
-                LiveMasterUnlockKey::new(master_unlock_key),
+                LiveMasterUnlockKey::with_private_key(master_unlock_key, encrypted_private_key),
             );
         self.account_access
             .lock()
@@ -764,6 +860,14 @@ impl Runtime {
     fn fence_quick_unlock(
         &self,
         expected: &crate::replica::ReplicaSnapshot,
+    ) -> Option<Arc<DeliveryToken>> {
+        self.fence_account_unlock(expected, AccountAccessState::SignedOut)
+    }
+
+    pub(super) fn fence_account_unlock(
+        &self,
+        expected: &crate::replica::ReplicaSnapshot,
+        access: AccountAccessState,
     ) -> Option<Arc<DeliveryToken>> {
         let _publication = self.publication.lock().expect("publication lock poisoned");
         let current = self.replica.snapshot(&expected.account_id)?;
@@ -779,7 +883,7 @@ impl Runtime {
         self.account_access
             .lock()
             .expect("Account access lock poisoned")
-            .insert(expected.account_id.clone(), AccountAccessState::SignedOut);
+            .insert(expected.account_id.clone(), access);
         self.device_revision.fetch_add(1, Ordering::SeqCst);
         invalidated
     }

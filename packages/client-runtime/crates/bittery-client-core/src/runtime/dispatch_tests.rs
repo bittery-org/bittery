@@ -120,7 +120,7 @@ impl crate::VaultImageSource for DispatchImageSource {
     }
 }
 
-struct DispatchImageSourcePort;
+pub(super) struct DispatchImageSourcePort;
 
 #[async_trait]
 impl crate::VaultImageSourcePort for DispatchImageSourcePort {
@@ -160,13 +160,36 @@ impl crate::VaultImageSourcePort for DispatchImageSourcePort {
     ) -> Result<(), crate::VaultImageSourceError> {
         Ok(())
     }
+    async fn retire_vaults(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(&self, _: &str) -> Result<(), crate::VaultImageSourceError> {
         Ok(())
     }
 }
 
 #[derive(Default)]
-struct ProductionVaultImageHttp {
+pub(super) struct ProductionVaultImageHttp {
     requests: Mutex<Vec<(String, String)>>,
     reject_create: AtomicBool,
     return_malformed_create_outcome: AtomicBool,
@@ -181,7 +204,10 @@ struct ProductionVaultImageHttp {
 
 #[async_trait]
 impl SerializedHttpExecutor for ProductionVaultImageHttp {
-    async fn invoke(&self, request_json: String) -> Result<String, RuntimeError> {
+    async fn invoke(
+        &self,
+        request_json: zeroize::Zeroizing<String>,
+    ) -> Result<String, RuntimeError> {
         let request: Value = serde_json::from_str(&request_json).unwrap();
         let method = request["method"].as_str().unwrap().to_owned();
         let url = request["url"].as_str().unwrap().to_owned();
@@ -465,7 +491,7 @@ async fn malformed_create_vault_outcome_fails_durably_without_mutation_or_dispat
 }
 
 #[tokio::test]
-async fn contradictory_create_vault_authority_fails_durably_without_a_dispatch_spin() {
+async fn retained_create_vault_receipts_without_reading_obsolete_point_authority() {
     let harness = seeded(false).await;
     let operation_id = match harness
         .runtime
@@ -506,14 +532,26 @@ async fn contradictory_create_vault_authority_fails_durably_without_a_dispatch_s
 
     assert!(matches!(
         runtime.dispatch_eligible_operations().await,
-        dispatch::DispatchPass::Parked
+        dispatch::DispatchPass::Progressed
     ));
     let after = runtime.replica().snapshot(&harness.account_id).unwrap();
-    assert_eq!(after.failure, Some(RuntimeErrorCode::InvariantViolation));
-    assert!(after
+    assert_eq!(after.failure, None);
+    assert_eq!(
+        after.bootstrap.state,
+        crate::replica::ReplicaState::RefreshRequired
+    );
+    assert_eq!(after.receipts.len(), 1);
+    assert_eq!(after.receipts[0].operation_id, operation_id);
+    assert!(!after
         .operations
         .iter()
         .any(|operation| operation.operation_id == operation_id));
+    assert!(server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|request| { !(request.0 == "GET" && request.1.contains("/api/v1/vaults/")) }));
     let requests = server.requests.lock().unwrap().len();
     assert!(matches!(
         runtime.dispatch_eligible_operations().await,
@@ -701,8 +739,140 @@ async fn production_create_lookup_and_put_share_one_session_renewal_budget() {
 }
 
 #[tokio::test]
+async fn a_selectively_parked_image_does_not_starve_another_vaults_accepted_work() {
+    let harness = seeded(false).await;
+    harness
+        .runtime
+        .platform_storage
+        .store_device_key(&DeviceKeyDocument::new([7; 32]))
+        .await
+        .unwrap();
+    let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
+    harness.runtime.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "parked-image-source",
+            Arc::new(DispatchImageSourcePort),
+            artifacts.clone(),
+        )
+        .unwrap(),
+    );
+    for name in ["First selected image", "Second selected image"] {
+        harness
+            .runtime
+            .request(
+                RuntimeRequest::CreateVault {
+                    account_id: harness.account_id.clone(),
+                    name: name.into(),
+                    vault_type: CreateVaultType::Personal,
+                    icon: "image".into(),
+                    image_source: Some(VaultImageSourceInput {
+                        capability_id: "browser-image".into(),
+                        byte_length: 11,
+                        content_type: "image/png".into(),
+                    }),
+                },
+                RequestCancellation::new(),
+            )
+            .await
+            .unwrap();
+    }
+    let server = Arc::new(ProductionVaultImageHttp::default());
+    server.reject_create.store(true, Ordering::SeqCst);
+    let runtime = Runtime::with_test_dispatch_environment(
+        harness.replica.clone(),
+        harness.platform.clone(),
+        server.clone(),
+        auth_config(),
+        harness.clock.clone(),
+        harness.timer.clone(),
+    );
+    runtime.replica.load(&harness.account_id).await.unwrap();
+    runtime.unlock_account(&harness.account_id).await.unwrap();
+    runtime.install_vault_image_ingress(
+        crate::VaultImageIngressFacade::new(
+            "parked-image-source",
+            Arc::new(DispatchImageSourcePort),
+            artifacts,
+        )
+        .unwrap(),
+    );
+    let before = runtime.replica.snapshot(&harness.account_id).unwrap();
+    assert_eq!(before.operations.len(), 2);
+    // Select the actual first scheduled Operation, independent of random ID ordering.
+    let parked = before.operations[0].clone();
+    let other = before.operations[1].clone();
+    let retirement = runtime
+        .foreground_attachments
+        .begin_vault_retirement(
+            &harness.account_id,
+            &before.incarnation,
+            &[parked.vault_id().to_owned()],
+            super::foreground_attachment_lifecycle::VaultRetirementProof::DurableJournal {
+                revision: before.revision,
+            },
+        )
+        .unwrap();
+    retirement.drain().await;
+    runtime
+        .foreground_attachments
+        .acknowledge_vault_retirement(&retirement)
+        .unwrap();
+    assert!(!runtime.has_vault_retirement_work(&before));
+    assert!(
+        matches!(
+            runtime.dispatch_eligible_operations().await,
+            dispatch::DispatchPass::Progressed
+        ),
+        "a parked image must not stop eligible work for another Vault"
+    );
+    let after = runtime.replica.snapshot(&harness.account_id).unwrap();
+    assert_eq!(after.operations, vec![parked.clone()]);
+    assert!(after
+        .receipts
+        .iter()
+        .any(|receipt| receipt.operation_id == other.operation_id));
+    let uploads = || {
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, url)| url == "https://objects.example.test/staged-image")
+            .count()
+    };
+    assert_eq!(uploads(), 1);
+    for _ in 0..2 {
+        assert!(matches!(
+            runtime.dispatch_eligible_operations().await,
+            dispatch::DispatchPass::Parked
+        ));
+    }
+    assert_eq!(uploads(), 1);
+    assert!(
+        harness.timer.requested().is_empty(),
+        "selective parking must not busy-loop on a timer"
+    );
+    assert_eq!(
+        runtime
+            .replica
+            .snapshot(&harness.account_id)
+            .unwrap()
+            .operations,
+        vec![parked]
+    );
+    runtime.close().await;
+    harness.runtime.close().await;
+}
+
+#[tokio::test]
 async fn production_create_vault_dispatch_stages_one_exact_image_before_put() {
     let harness = seeded(false).await;
+    harness
+        .runtime
+        .platform_storage
+        .store_device_key(&DeviceKeyDocument::new([7; 32]))
+        .await
+        .unwrap();
     let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
     harness.runtime.install_vault_image_ingress(
         crate::VaultImageIngressFacade::new(
@@ -764,6 +934,7 @@ async fn production_create_vault_dispatch_stages_one_exact_image_before_put() {
         .unwrap(),
     );
 
+    restarted.unlock_account(&harness.account_id).await.unwrap();
     restarted
         .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
         .await;
@@ -855,6 +1026,12 @@ async fn production_create_vault_dispatch_stages_one_exact_image_before_put() {
 #[tokio::test]
 async fn production_sign_out_best_effort_replays_pending_image_cleanup_without_a_test_port() {
     let harness = seeded(false).await;
+    harness
+        .runtime
+        .platform_storage
+        .store_device_key(&DeviceKeyDocument::new([7; 32]))
+        .await
+        .unwrap();
     let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
     harness.runtime.install_vault_image_ingress(
         crate::VaultImageIngressFacade::new(
@@ -981,6 +1158,7 @@ impl ExistingDispatchCase {
     fn request(self, account_id: AccountId) -> RuntimeRequest {
         match self {
             Self::Update => RuntimeRequest::UpdateItem {
+                guard: crate::ItemEditGuard::test_fixture(account_id.clone(), "item-existing"),
                 account_id,
                 item_id: "item-existing".into(),
                 draft: draft(),
@@ -1002,6 +1180,7 @@ impl ExistingDispatchCase {
                 account_id,
                 item_id: "item-existing".into(),
                 target_vault_id: "vault-2".into(),
+                target_account_id: None,
             },
             Self::PermanentlyDelete => RuntimeRequest::PermanentlyDeleteItem {
                 account_id,
@@ -1382,6 +1561,9 @@ async fn backoff_is_durable_and_is_honored_by_the_next_process() {
     assert_eq!(restored.scheduling.not_before_ms, START_MS + 1_000);
     assert_eq!(restored.operation_id, operation_id);
 
+    // This fixture isolates durable scheduling. A locked owner correctly retains the result
+    // until authority can be decrypted; an instantly advancing test timer would spin its retry.
+    restarted.unlock_account(&harness.account_id).await.unwrap();
     let before = harness.server.creates();
     let dispatcher = tokio::spawn(Arc::clone(&restarted).run_operation_dispatch());
     until("the restart waits out the remaining backoff", || {
@@ -1735,6 +1917,29 @@ impl crate::VaultImageSourcePort for RestartImageSourcePort {
     ) -> Result<(), crate::VaultImageSourceError> {
         Ok(())
     }
+    async fn retire_vaults(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn complete_vault_retirement(
+        &self,
+        _: &str,
+        _: &AccountId,
+        _: &[String],
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
+    async fn forget_account_vault_retirements(
+        &self,
+        _: &str,
+        _: &AccountId,
+    ) -> Result<(), crate::VaultImageSourceError> {
+        Ok(())
+    }
     async fn retire_runtime(&self, _: &str) -> Result<(), crate::VaultImageSourceError> {
         Ok(())
     }
@@ -1793,6 +1998,12 @@ async fn repaired_artifact_ready_vault_reaches_frozen_exact_put_in_a_fresh_runti
         ReplicaPersistence,
     };
     let harness = seeded(false).await;
+    harness
+        .runtime
+        .platform_storage
+        .store_device_key(&DeviceKeyDocument::new([7; 32]))
+        .await
+        .unwrap();
     let artifacts = Arc::new(crate::MemoryVaultImageArtifactStore::default());
     harness.runtime.install_vault_image_ingress(
         crate::VaultImageIngressFacade::new(
@@ -1828,25 +2039,23 @@ async fn repaired_artifact_ready_vault_reaches_frozen_exact_put_in_a_fresh_runti
     else {
         panic!("expected accepted image Vault");
     };
-    use sha2::Digest;
     let image_scope =
         crate::VaultImageArtifactScope::new(harness.account_id.clone(), operation_id.clone())
             .unwrap();
-    let image_metadata = crate::VaultImageArtifactMetadata::new(
-        image_scope,
-        vault_id.clone(),
-        11,
-        "image/png",
-        format!("{:x}", sha2::Sha256::digest(b"image-bytes")),
-    )
-    .unwrap();
-    assert_eq!(
+    let image_metadata =
+        crate::VaultImageArtifactPort::read_generation(artifacts.as_ref(), &image_scope, None)
+            .await
+            .unwrap()
+            .unwrap()
+            .metadata
+            .unwrap();
+    assert!(image_metadata.protection().is_some());
+    let image_ciphertext =
         crate::VaultImageArtifactPort::read_chunk(artifacts.as_ref(), &image_metadata, 0)
             .await
             .unwrap()
-            .unwrap(),
-        b"image-bytes"
-    );
+            .unwrap();
+    assert_ne!(image_ciphertext, b"image-bytes");
     harness.runtime.close().await;
     let ReplicaPersistenceResponse::Loaded {
         head: Some(head),
@@ -1954,6 +2163,7 @@ async fn repaired_artifact_ready_vault_reaches_frozen_exact_put_in_a_fresh_runti
             &DeviceCatalogDocument::new(vec![DeviceCatalogAccount {
                 account_id: harness.account_id.clone(),
                 active_incarnation: Some(repaired_head.incarnation.clone()),
+                pending_retirement: None,
                 pending_install: None,
             }])
             .unwrap(),
@@ -1964,6 +2174,7 @@ async fn repaired_artifact_ready_vault_reaches_frozen_exact_put_in_a_fresh_runti
     restarted.ready.store(false, Ordering::SeqCst);
     restarted.open().await.unwrap();
     store_session(&restarted, &harness.account_id, SECOND_TOKEN).await;
+    restarted.unlock_account(&harness.account_id).await.unwrap();
     restarted
         .dispatch_once_ignoring_lease(&harness.account_id, &operation_id)
         .await;
@@ -2022,6 +2233,178 @@ async fn repaired_artifact_ready_vault_reaches_frozen_exact_put_in_a_fresh_runti
             .await
             .unwrap()
             .unwrap(),
-        b"image-bytes"
+        image_ciphertext
+    );
+}
+
+#[path = "dispatch_isolation_tests.rs"]
+mod isolation;
+
+#[tokio::test]
+async fn legacy_retry_history_waits_for_its_deadline_then_replays_a_reminted_attempt_exactly() {
+    use crate::replica::{
+        item_operation_fingerprint, source_timestamp, ImmutableHttpRequest,
+        LegacyOperationAdmission, LegacyOperationDisposition, OperationKind, OperationRecord,
+        ReplicaItemRecord, ResourceRef, LEGACY_OPERATION_ADMISSION_VERSION,
+    };
+    let harness = seeded_with_existing_item(true, false).await;
+    let snapshot = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    let base = snapshot.bootstrap.snapshot().visible_items[0].clone();
+    let now = harness.clock.now();
+    let deadline = now + 2_000;
+    let operation_id = "reminted-attempt-never-sent";
+    let overlay = ReplicaItemRecord {
+        account_id: harness.account_id.clone(),
+        item_id: base.id.clone(),
+        vault_id: base.vault_id.clone(),
+        operation_id: operation_id.into(),
+        category: base.category.clone(),
+        encrypted_data: base.encrypted_data,
+        encryption_iv: base.encryption_iv,
+        encryption_algorithm: base.encryption_algorithm,
+        encryption_version: base.encryption_version,
+        encrypted_by_user_id: base.encrypted_by_user_id,
+        favorite: true,
+        version: base.version,
+        created_at: base.created_at,
+        updated_at: source_timestamp(now).unwrap(),
+        deleted_at: None,
+        attachments: base.attachments,
+        permanently_deleted: false,
+    };
+    let admission = LegacyOperationAdmission {
+        version: LEGACY_OPERATION_ADMISSION_VERSION, admission_id: "profile-admission".into(), source_queue_index: 0,
+        source_command: serde_json::from_value(json!({
+            "accountId":harness.account_id, "id":"original-source-command", "operationId":"original-semantic-operation", "attemptId":operation_id,
+            "type":"toggle_favorite", "entityId":base.id, "vaultId":base.vault_id, "favorite":true,
+            "baseVersion":base.version, "timestamp":now.to_string(), "retryCount":"5", "status":"retrying", "nextAttemptAt":deadline.to_string(),
+            "projectionClaimId":"departed-projector", "projectionClaimExpiresAt":(deadline+1_000_000).to_string()
+        })).unwrap(),
+        disposition: LegacyOperationDisposition::Normal,
+        overlay_sha256: Some(LegacyOperationAdmission::overlay_fingerprint(&overlay).unwrap()),
+        captured_failure_code: None,
+    };
+    let body = br#"{"favorite":true}"#.to_vec();
+    let operation = OperationRecord {
+        operation_id: operation_id.into(),
+        kind: OperationKind::SetItemFavorite,
+        target: ResourceRef::Item {
+            item_id: base.id.clone(),
+            vault_id: base.vault_id.clone(),
+        },
+        request_fingerprint: item_operation_fingerprint(
+            OperationKind::SetItemFavorite,
+            "PATCH /api/v1/items/{itemId}/favorite",
+            &base.id,
+            &body,
+            base.version,
+        ),
+        request: ImmutableHttpRequest {
+            method: HttpMethod::Patch,
+            path: format!("/api/v1/items/{}/favorite", base.id),
+            headers: vec![
+                HttpHeader {
+                    name: "Content-Type".into(),
+                    value: "application/merge-patch+json".into(),
+                },
+                HttpHeader {
+                    name: "If-Match".into(),
+                    value: format!("\"{}\"", base.version),
+                },
+            ],
+            body,
+        },
+        accepted_item_category: Some(base.category),
+        attachment_move_recovery: None,
+        create_vault: None,
+        update_vault: None,
+        scheduling: admission.initial_scheduling(),
+        legacy_admission: Some(Box::new(admission)),
+    };
+    harness
+        .runtime
+        .replica()
+        .execute(GuardedCommitPlan::new(
+            snapshot.account_id,
+            snapshot.incarnation,
+            snapshot.revision,
+            snapshot.lock_epoch,
+            vec![
+                PlanMutation::AcceptOperation(operation.clone()),
+                PlanMutation::PutOptimisticItem(overlay),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert!(matches!(
+        harness.runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::WaitFor {
+            milliseconds: 2_000
+        }
+    ));
+    harness.clock.advance(1_999);
+    assert!(matches!(
+        harness.runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::WaitFor { milliseconds: 1 }
+    ));
+    assert_eq!(harness.server.outcome_lookups(), 0);
+    assert!(harness.server.existing_item_mutation_requests().is_empty());
+    harness.server.script([Fault::Status(503)]);
+    harness.clock.advance(1);
+    assert!(matches!(
+        harness.runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::Progressed
+    ));
+    assert_eq!(harness.server.outcome_lookups(), 1);
+    let requests = harness.server.existing_item_mutation_requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].body, operation.request.body);
+    assert_eq!(
+        requests[0].url,
+        format!("{SERVER_URL}{}", operation.request.path)
+    );
+    assert!(requests[0]
+        .headers
+        .iter()
+        .any(|(name, value)| name == "Idempotency-Key" && value == operation_id));
+    let retried = harness.operation().unwrap();
+    assert_eq!(retried.scheduling.attempt_count, 6);
+    assert_eq!(retried.legacy_admission, operation.legacy_admission);
+    assert_eq!(retried.request, operation.request);
+    harness
+        .clock
+        .advance(retried.scheduling.not_before_ms - harness.clock.now());
+    assert!(matches!(
+        harness.runtime.dispatch_eligible_operations().await,
+        dispatch::DispatchPass::Progressed
+    ));
+    let completed = harness
+        .runtime
+        .replica()
+        .snapshot(&harness.account_id)
+        .unwrap();
+    assert!(completed.operations.is_empty());
+    assert!(completed.items.is_empty());
+    let receipt = completed
+        .receipts
+        .iter()
+        .find(|receipt| receipt.operation_id == operation_id)
+        .unwrap();
+    assert_eq!(
+        receipt.legacy_lineage.as_ref().unwrap().source_status,
+        Some(crate::replica::LegacyItemCommandStatus::Retrying)
+    );
+    assert_eq!(
+        receipt
+            .legacy_lineage
+            .as_ref()
+            .unwrap()
+            .source_operation_id
+            .as_deref(),
+        Some("original-semantic-operation")
     );
 }

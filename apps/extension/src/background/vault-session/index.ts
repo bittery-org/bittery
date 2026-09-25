@@ -9,6 +9,8 @@
  * would close a cycle at module-eval time in the worker.
  */
 
+import { nativeMessagingClient } from "../native-messaging-client";
+import { backgroundClientRuntime } from "../vault-runtime";
 import { createChromeSessionAdapter } from "./adapters/chrome-session-adapter";
 import { createDesktopAdapter } from "./adapters/desktop-adapter";
 import { createLifecycleAdapter } from "./adapters/lifecycle-adapter";
@@ -18,6 +20,10 @@ import type { SyncPort, VaultSessionPorts } from "./ports";
 
 let syncPort: SyncPort = { disconnect: () => {} };
 let sessionFallbackAccountId: string | null = null;
+
+nativeMessagingClient.configureProjectionRetirement((accountIds) =>
+	backgroundClientRuntime.accounts.retireUnlockedProjection(accountIds),
+);
 
 /** `sync-manager` registers its own disconnect once, at initialization. */
 export function setSyncPort(port: SyncPort): void {

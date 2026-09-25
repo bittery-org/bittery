@@ -88,16 +88,12 @@ impl JsBinaryTransferExecutor {
         artifact_id: String,
         generation: String,
         url: String,
-        mut headers: Vec<(String, String)>,
+        headers: Vec<(String, String)>,
         ciphertext_sha256: String,
         byte_length: u64,
         max_chunk_bytes: usize,
     ) -> Result<JsStagingUpload, BinaryTransferFailure> {
         validate_max_chunk(max_chunk_bytes)?;
-        // These values are ciphertext authority, not host choices. Duplicates are rejected by the
-        // generated browser adapter before Fetch begins.
-        headers.push(("content-type".into(), "application/octet-stream".into()));
-        headers.push(("x-amz-content-sha256".into(), ciphertext_sha256.clone()));
         let integrity = UploadIntegrity::new(byte_length, ciphertext_sha256.clone())
             .map_err(|_| BinaryTransferFailure::Invariant)?;
         let executor = self.executor.clone();

@@ -20,9 +20,15 @@ use std::{
 };
 use tokio::sync::Notify;
 
+pub(crate) enum BufferedObservation {
+    Projection(core::RuntimeProjection),
+    Control(core::ObservationControl),
+}
+
 pub(crate) struct BufferedSink {
-    queued: Mutex<VecDeque<(u64, core::RuntimeProjection)>>,
+    queued: Mutex<VecDeque<(u64, BufferedObservation)>>,
     closed: AtomicBool,
+    terminal: AtomicBool,
     draining: AtomicBool,
     lifecycle: AtomicU64,
     retirements: AtomicU64,
@@ -31,7 +37,10 @@ pub(crate) struct BufferedSink {
 
 impl core::ObservationSink for BufferedSink {
     fn publish(&self, projection: core::RuntimeProjection) {
-        if self.closed.load(Ordering::SeqCst) || self.retirements.load(Ordering::SeqCst) > 0 {
+        if self.closed.load(Ordering::SeqCst)
+            || self.terminal.load(Ordering::SeqCst)
+            || self.retirements.load(Ordering::SeqCst) > 0
+        {
             return;
         }
         // Capture at publication entry. If lifecycle invalidation wins the queue lock while this
@@ -42,12 +51,33 @@ impl core::ObservationSink for BufferedSink {
             .lock()
             .expect("Web observation buffer lock poisoned");
         if self.closed.load(Ordering::SeqCst)
+            || self.terminal.load(Ordering::SeqCst)
             || self.retirements.load(Ordering::SeqCst) > 0
             || lifecycle != self.lifecycle.load(Ordering::SeqCst)
         {
             return;
         }
-        queued.push_back((lifecycle, projection));
+        queued.push_back((lifecycle, BufferedObservation::Projection(projection)));
+        drop(queued);
+        self.wake.notify_one();
+    }
+
+    fn control(&self, control: core::ObservationControl) {
+        let core::ObservationControl::VaultExportRetired { .. } = &control;
+        let mut queued = self
+            .queued
+            .lock()
+            .expect("Web observation buffer lock poisoned");
+        if self.closed.load(Ordering::SeqCst) || self.terminal.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        // A terminal control owns no plaintext lease. Preserve it through later Account
+        // suspensions and deliver it outside this mutex so the host can acknowledge cleanup.
+        queued.clear();
+        queued.push_back((
+            self.lifecycle.load(Ordering::SeqCst),
+            BufferedObservation::Control(control),
+        ));
         drop(queued);
         self.wake.notify_one();
     }
@@ -58,6 +88,7 @@ impl BufferedSink {
         Self {
             queued: Mutex::new(VecDeque::new()),
             closed: AtomicBool::new(false),
+            terminal: AtomicBool::new(false),
             draining: AtomicBool::new(false),
             lifecycle: AtomicU64::new(0),
             retirements: AtomicU64::new(0),
@@ -73,7 +104,7 @@ impl BufferedSink {
         self.queued
             .lock()
             .expect("Web observation buffer lock poisoned")
-            .clear();
+            .retain(|(_, event)| matches!(event, BufferedObservation::Control(_)));
     }
 
     /// Resumes delivery after one asynchronous retirement request finishes.
@@ -105,16 +136,16 @@ impl BufferedSink {
     /// runs is delivered in turn by this same loop rather than by a second, interleaved drain.
     /// A drain that starts while another is already running therefore returns without touching
     /// the queue: the running drain owns it, and taking from it here would reorder delivery.
-    pub(crate) fn drain<E>(
+    pub(crate) fn drain_events<E>(
         &self,
-        mut deliver: impl FnMut(core::RuntimeProjection) -> Result<(), E>,
+        mut deliver: impl FnMut(BufferedObservation) -> Result<(), E>,
     ) -> Result<(), E> {
         if self.draining.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
         let _draining = DrainGuard(&self.draining);
         loop {
-            if self.closed.load(Ordering::SeqCst) || self.retirements.load(Ordering::SeqCst) > 0 {
+            if self.closed.load(Ordering::SeqCst) {
                 return Ok(());
             }
             let next = self
@@ -122,16 +153,30 @@ impl BufferedSink {
                 .lock()
                 .expect("Web observation buffer lock poisoned")
                 .pop_front();
-            let Some((lifecycle, projection)) = next else {
+            let Some((lifecycle, event)) = next else {
                 return Ok(());
             };
-            if self.retirements.load(Ordering::SeqCst) > 0
-                || lifecycle != self.lifecycle.load(Ordering::SeqCst)
+            if matches!(&event, BufferedObservation::Projection(_))
+                && (self.terminal.load(Ordering::SeqCst)
+                    || self.retirements.load(Ordering::SeqCst) > 0
+                    || lifecycle != self.lifecycle.load(Ordering::SeqCst))
             {
                 continue;
             }
-            deliver(projection)?;
+            deliver(event)?;
         }
+    }
+
+    // Existing ordinary-projection tests exercise the same queue/drain owner.
+    #[cfg(test)]
+    pub(crate) fn drain<E>(
+        &self,
+        mut deliver: impl FnMut(core::RuntimeProjection) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.drain_events(|event| match event {
+            BufferedObservation::Projection(projection) => deliver(projection),
+            BufferedObservation::Control(_) => Ok(()),
+        })
     }
 }
 
@@ -151,6 +196,7 @@ mod tests {
 
     fn status(revision: u64) -> core::RuntimeProjection {
         core::RuntimeProjection::RuntimeStatus(core::RuntimeStatusProjection {
+            profile_admission_cleanup: None,
             account_id: None,
             revision,
             accounts: Vec::new(),
@@ -330,5 +376,66 @@ mod tests {
 
         assert_eq!(failed, Err("host callback threw"));
         assert_eq!(collect(&sink), vec![2]);
+    }
+    #[test]
+    fn terminal_export_control_bypasses_suspended_private_delivery_once() {
+        let sink = sink();
+        sink.publish(status(1));
+        sink.begin_retirement();
+        let control = core::ObservationControl::VaultExportRetired {
+            reason: core::VaultExportRetirementReason::ScopeRetired,
+        };
+        sink.control(control.clone());
+        sink.begin_retirement(); // A later Account fence must preserve the queued control.
+        sink.control(control.clone());
+        sink.publish(status(2));
+        let mut controls = Vec::new();
+        sink.drain_events::<()>(|event| {
+            match event {
+                BufferedObservation::Control(value) => controls.push(value),
+                BufferedObservation::Projection(_) => panic!("private frame survived retirement"),
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            controls,
+            vec![control],
+            "terminal control is not a paused plaintext frame"
+        );
+        sink.end_retirement();
+        sink.end_retirement();
+        sink.publish(status(3));
+        sink.drain_events::<()>(|_| panic!("terminal Export cannot resume late frames"))
+            .unwrap();
+        sink.close();
+    }
+
+    #[test]
+    fn terminal_control_during_a_callback_follows_without_reentrant_drain() {
+        let sink = sink();
+        sink.publish(status(1));
+        sink.publish(status(2));
+        let mut observed = Vec::new();
+        sink.drain_events::<()>(|event| {
+            match event {
+                BufferedObservation::Projection(value) => {
+                    observed.push(value.revision());
+                    sink.control(core::ObservationControl::VaultExportRetired {
+                        reason: core::VaultExportRetirementReason::RuntimeClosed,
+                    });
+                    sink.drain_events::<()>(|_| panic!("nested drain stole control"))
+                        .unwrap();
+                }
+                BufferedObservation::Control(_) => observed.push(0),
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            observed,
+            vec![1, 0],
+            "retirement removes later private frames but preserves the control"
+        );
     }
 }

@@ -77,16 +77,50 @@ test("object-store fixture verifies received bytes and exposes the exact S3 chec
 			storageEnvironments[0]?.BITTERY_STORAGE_CDN_URL ?? "",
 		);
 		publicBase.port = String(port);
-		const url = `${publicBase}/vaults/vault-fixture/image.png`;
+		const operationId = "11111111-1111-4111-8111-111111111111";
+		const url = `${publicBase}/vaults/user-fixture/vault-fixture/create/${operationId}-${"a".repeat(64)}`;
+		const attemptsUrl = `http://127.0.0.1:${port}/__acceptance/image-upload-attempts?operationId=${operationId}`;
+		const uploadEvidence = (target: string) =>
+			fetch(
+				`http://127.0.0.1:${port}/__acceptance/object-upload?key=${encodeURIComponent(new URL(target).pathname)}`,
+			).then((response) => response.json());
+		expect(await (await fetch(attemptsUrl)).json()).toEqual({ attempts: 0 });
+		expect(await uploadEvidence(url)).toEqual({ attempts: 0, last: null });
 		const body = new Uint8Array([137, 80, 78, 71, 0, 255, 4]);
 		const checksum = createHash("sha256").update(body).digest("base64");
 		const headers = {
 			"content-type": "image/png",
+			"content-length": String(body.length),
+			"x-amz-content-sha256": createHash("sha256").update(body).digest("hex"),
 			"x-amz-checksum-sha256": checksum,
+			authorization: "fixture-must-not-retain-this-header",
 		};
-		expect((await fetch(url, { method: "PUT", headers, body })).status).toBe(
-			200,
-		);
+		expect(
+			(
+				await fetch(
+					`${url}?X-Amz-Signature=fixture-query-must-not-be-retained`,
+					{
+						method: "PUT",
+						headers,
+						body,
+					},
+				)
+			).status,
+		).toBe(200);
+		expect(await (await fetch(attemptsUrl)).json()).toEqual({ attempts: 1 });
+		expect(await uploadEvidence(url)).toEqual({
+			attempts: 1,
+			last: {
+				headers: {
+					"content-type": "image/png",
+					"content-length": String(body.length),
+					"x-amz-content-sha256": headers["x-amz-content-sha256"],
+					"x-amz-checksum-sha256": checksum,
+				},
+				byteLength: body.length,
+				sha256: createHash("sha256").update(body).digest("hex"),
+			},
+		});
 		const head = await fetch(url, { method: "HEAD" });
 		expect(head.status).toBe(200);
 		expect(head.headers.get("x-amz-checksum-sha256")).toBe(checksum);
@@ -100,10 +134,39 @@ test("object-store fixture verifies received bytes and exposes the exact S3 chec
 		const different = new Uint8Array([0, 1, 2]);
 		for (const target of [url, `${url}-absent`]) {
 			expect(
-				(await fetch(target, { method: "PUT", headers, body: different }))
-					.status,
+				(
+					await fetch(target, {
+						method: "PUT",
+						headers: { ...headers, "content-length": String(different.length) },
+						body: different,
+					})
+				).status,
 			).toBe(400);
 		}
+		// The rejected checksum attempt still reached storage and must not be reported as no upload.
+		expect(await (await fetch(attemptsUrl)).json()).toEqual({ attempts: 2 });
+		expect(await uploadEvidence(url)).toMatchObject({
+			attempts: 2,
+			last: {
+				byteLength: different.length,
+				sha256: createHash("sha256").update(different).digest("hex"),
+				headers: { "x-amz-checksum-sha256": checksum },
+			},
+		});
+		expect(await uploadEvidence(`${url}-unrelated`)).toEqual({
+			attempts: 0,
+			last: null,
+		});
+		expect(
+			(
+				await fetch(
+					`http://127.0.0.1:${port}/__acceptance/object-upload?key=invalid`,
+				)
+			).status,
+		).toBe(400);
+		expect(
+			(await fetch(attemptsUrl.replace(operationId, "invalid"))).status,
+		).toBe(400);
 		expect((await fetch(`${url}-absent`, { method: "HEAD" })).status).toBe(404);
 		expect(
 			(await fetch(url, { method: "HEAD" })).headers.get(
@@ -123,6 +186,19 @@ test("object-store fixture verifies received bytes and exposes the exact S3 chec
 				"x-amz-checksum-sha256",
 			),
 		).toBe(createHash("sha256").update(different).digest("base64"));
+		expect(await uploadEvidence(`${url}-legacy`)).toEqual({
+			attempts: 1,
+			last: {
+				headers: {
+					"content-type": null,
+					"content-length": String(different.length),
+					"x-amz-content-sha256": null,
+					"x-amz-checksum-sha256": null,
+				},
+				byteLength: different.length,
+				sha256: createHash("sha256").update(different).digest("hex"),
+			},
+		});
 		const cors = await fetch(url, {
 			method: "OPTIONS",
 			headers: {

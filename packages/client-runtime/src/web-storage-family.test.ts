@@ -60,9 +60,9 @@ test("normal shared lifetime covers all three version barriers and delayed store
 		(await indexedDB.databases()).map((x) => [x.name, x.version]).sort(),
 	).toEqual(
 		[
-			["bittery-vault-image-artifacts", 2],
+			["bittery-vault-image-artifacts", 3],
 			["bittery_attachment_artifacts", 3],
-			["bittery_replica", 8],
+			["bittery_replica", 10],
 		].sort(),
 	);
 	const pending = family.close();
@@ -80,9 +80,9 @@ test("maintenance excludes peer owners and releases the retired owner on explici
 	await expect(a.enterMaintenance()).rejects.toMatchObject({ reason: "busy" });
 	await b.close();
 	expect(await a.enterMaintenance()).toEqual({
-		replicaVersion: 8,
+		replicaVersion: 10,
 		attachmentArtifactsVersion: 3,
-		vaultImagesVersion: 2,
+		vaultImagesVersion: 3,
 	});
 	expect(held).toEqual(["exclusive"]);
 	await expect(b.open()).rejects.toMatchObject({ reason: "busy" });
@@ -114,7 +114,7 @@ test("partial family upgrade keeps earlier bytes but never grants maintenance", 
 	expect(
 		(await indexedDB.databases()).find((x) => x.name === "bittery_replica")
 			?.version,
-	).toBe(8);
+	).toBe(10);
 });
 test("close fences new executor calls and retains the lease until pending callbacks drain", async () => {
 	const callback = deferred();

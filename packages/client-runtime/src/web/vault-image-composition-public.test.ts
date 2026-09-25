@@ -11,7 +11,7 @@ type Equal<Left, Right> =
 type Assert<Value extends true> = Value;
 
 type _GrantFacadeStaysShallow = Assert<
-	Equal<keyof VaultImageSourceGrants, "discard" | "grant">
+	Equal<keyof VaultImageSourceGrants, "discard" | "grant" | "captureScope">
 >;
 type _CompositionDoesNotExposeRegistryAuthority = Assert<
 	Equal<"vaultImages" extends keyof WebClientRuntime ? true : false, false>
@@ -41,6 +41,7 @@ describe("Vault-image Web composition public surface", () => {
 		});
 		await owner.prepare("runtime-old");
 		const oldCapability = owner.grants.grant({
+			scope: owner.grants.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-old",
 			vaultId: "vault-a",
@@ -63,6 +64,7 @@ describe("Vault-image Web composition public surface", () => {
 		releaseCleanup();
 		await recovery;
 		const newCapability = owner.grants.grant({
+			scope: owner.grants.captureScope("account-a", "vault-a"),
 			accountId: "account-a",
 			operationId: "operation-new",
 			vaultId: "vault-a",
@@ -87,7 +89,11 @@ describe("Vault-image Web composition public surface", () => {
 				)
 			).type,
 		).toBe("sourceFailure");
-		expect(Object.keys(owner.grants)).toEqual(["grant", "discard"]);
+		expect(Object.keys(owner.grants)).toEqual([
+			"captureScope",
+			"grant",
+			"discard",
+		]);
 		expect("registry" in owner).toBe(false);
 	});
 });

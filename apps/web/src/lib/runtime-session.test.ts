@@ -67,6 +67,11 @@ describe("waiting for the Device to answer", () => {
 						access: "unlocked",
 						failure: null,
 						replicaRevision: "1",
+						unlockCapabilities: {
+							password: false,
+							desktop: false,
+							signIn: false,
+						},
 					},
 				],
 				closed: false,

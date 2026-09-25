@@ -202,6 +202,27 @@ describe("unlock all accounts", () => {
 		]);
 	});
 
+	it("stops an all-Account ceremony when its captured material lifetime retires", async () => {
+		const { storage } = await createStorage();
+		let retired = false;
+		const deps = passwordDeps(storage);
+		deps.materialPublication = {
+			check() {
+				if (retired) throw new Error("local material lifetime retired");
+			},
+			async run(_accountId, publish) {
+				const result = await publish(() => {});
+				retired = true;
+				return result;
+			},
+		};
+		await expect(
+			unlockAllWithPassword({ password: "pw" }, deps),
+		).rejects.toThrow("local material lifetime retired");
+		expect(await storage.getUnlockedAccounts()).toEqual(["acc-1"]);
+		await storage.lockAllAccounts();
+	});
+
 	it("reports a reason code per failure without any message text", async () => {
 		const { storage } = await createStorage({
 			withSecretKey: ["acc-2"],

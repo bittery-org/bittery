@@ -24,11 +24,11 @@ does not authorize SQLite for the Extension.
 | --- | --- |
 | Service-worker suspension/recycle, owner survives | Discover and reattach to the same offscreen document and Worker. Preserve its current lock state; do not create another Runtime or demand another unlock merely because the broker restarted. |
 | Concurrent popup/content-script wake or calls | Serialize document/Worker creation behind one readiness step and route every caller to the same owner. Reject stale replies after owner replacement; never reconstruct a request outcome from a lost reply. |
-| Actual Worker or offscreen-document loss | Reopen the same encrypted Replica with a new, locked Runtime. Require supported unlock before restoring keys or eligible work. Do not restore unlocked state from browser-session storage, cached projections or a retained key capsule. |
+| Actual Worker or offscreen-document loss | Reopen the same encrypted Replica with a new, locked Runtime. Require supported unlock before restoring live keys or work that needs them; existing Core eligibility still governs exact accepted ciphertext work with a usable Session. Do not restore unlocked state from browser-session storage, cached projections or a retained key capsule. |
 | Extension update/reload or browser restart | Start a new locked owner; retain encrypted Replica and supported Quick unlock material. Missing or invalid material follows existing Full sign-in behavior. |
 | Lock, removal or revocation during wake | Existing Runtime retirement wins over late callbacks and reattachment. No host restoration or keepalive may override it. |
 | Desktop connection | Connected Desktop continues to own lock/unlock; disconnect locks, and revocation overrides. A replacement Extension owner starts locked and follows Desktop authority for its next unlock, rather than introducing an independent local bypass. |
-| Owner unavailable during Sync or accepted work | Durable Operations, encrypted overlays and Cursor survive owner loss. After supported unlock, Core resumes reconciliation and catch-up. Caller closure or lost responses do not discard accepted work or justify replaying UI commands. |
+| Owner unavailable during Sync or accepted work | Durable Operations, encrypted overlays and Cursor survive owner loss. Core resumes exact ciphertext dispatch/reconciliation when its existing Session and authority guards permit; supported unlock restores live-key work and readable catch-up. Caller closure or lost responses do not discard accepted work or justify replaying UI commands. |
 
 Requiring unlock after actual owner loss is an **approved change** from legacy transparent
 service-worker session restoration in `apps/extension/src/background/services/session-restore.ts`.
@@ -85,3 +85,10 @@ primitives and routing, with no duplicated policy, restoration format or specula
 Independent Standards, Spec and simplification review approved the decision. Nine links were checked
 and `git diff --check` passed. No production integration tests were required or run for this
 documentation slice; full CI was waived and was not run.
+
+2026-09-09 delivery-contract clarification under74: owner loss still creates a locked replacement
+and never restores live keys from a capsule. The original table's broad “eligible work” phrasing
+now distinguishes that unlock requirement from the existing shared dispatcher, which can reconcile
+exact accepted ciphertext while locked when a usable Session and current guards permit it. Native
+70/93 capability acceptance exercises this distinction. This adds no host-specific retry or unlock
+policy and changes neither the accepted placement nor the cold-owner lock decision.

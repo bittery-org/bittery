@@ -524,6 +524,10 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             send_response.body["existingUserPublicKey"],
             json!("public-key")
         );
+        assert_eq!(
+            send_response.body["existingUserId"],
+            json!(fixture.invitee_user_id)
+        );
         let invitation_id = send_response.body["invitationId"]
             .as_str()
             .expect("invitation id should exist")

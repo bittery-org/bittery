@@ -1396,6 +1396,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/vaults/{vaultId}/deletions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["deleteVaultOperation"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/vaults/{vaultId}/image-uploads": {
         readonly parameters: {
             readonly query?: never;
@@ -1556,6 +1572,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/vaults/{vaultId}/metadata-updates": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["updateVaultMetadata"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/vaults/{vaultId}/type-conversions": {
         readonly parameters: {
             readonly query?: never;
@@ -1673,13 +1705,19 @@ export interface components {
         };
         readonly AttachmentUploadBody: {
             readonly contentType: string;
+            readonly durableUpload?: null | components["schemas"]["DurableAttachmentUploadBody"];
             readonly fileName: string;
             /** Format: int32 */
             readonly fileSize: number;
         };
+        readonly AttachmentUploadHeader: {
+            readonly name: string;
+            readonly value: string;
+        };
         readonly AttachmentUploadResponse: {
             readonly attachmentId: string;
             readonly key: string;
+            readonly uploadHeaders?: readonly components["schemas"]["AttachmentUploadHeader"][];
             readonly uploadUrl: string;
         };
         readonly AttachmentUsageResponse: {
@@ -1803,6 +1841,7 @@ export interface components {
             /** @enum {string} */
             readonly phase: "vaults";
             readonly syncCursor?: null | components["schemas"]["SyncCursorResponse"];
+            readonly vaultKeyVersionIncluded?: boolean | null;
             readonly vaults: readonly components["schemas"]["BootstrapVaultSummary"][];
         } | {
             readonly hasMore: boolean;
@@ -1817,6 +1856,8 @@ export interface components {
             readonly icon?: string | null;
             readonly id: string;
             readonly imageUrl?: string | null;
+            /** Format: int32 */
+            readonly keyVersion?: number | null;
             readonly name: string;
             readonly role: components["schemas"]["VaultRole"];
             readonly vaultType: components["schemas"]["VaultType"];
@@ -2207,6 +2248,10 @@ export interface components {
             readonly clientProof: string;
             readonly clientPublicKey: string;
         };
+        readonly DurableAttachmentUploadBody: {
+            readonly attachmentId: string;
+            readonly ciphertextSha256: string;
+        };
         readonly EmailAccessRequest: {
             readonly code: string;
             readonly email: components["schemas"]["EmailAddress"];
@@ -2581,6 +2626,16 @@ export interface components {
             readonly result: components["schemas"]["CreateVaultOperationResult"];
         } | {
             /** @enum {string} */
+            readonly kind: "update_vault";
+            readonly operationId: string;
+            readonly result: components["schemas"]["VaultMutationOperationResult"];
+        } | {
+            /** @enum {string} */
+            readonly kind: "delete_vault";
+            readonly operationId: string;
+            readonly result: components["schemas"]["VaultMutationOperationResult"];
+        } | {
+            /** @enum {string} */
             readonly kind: "import_items";
             readonly operationId: string;
             readonly result: components["schemas"]["ImportItemsOperationResult"];
@@ -2806,6 +2861,7 @@ export interface components {
             readonly role?: components["schemas"]["TeamRole"];
         };
         readonly SendInvitationResponse: {
+            readonly existingUserId?: string | null;
             readonly existingUserPublicKey?: string | null;
             readonly invitationId: string;
             readonly token: string;
@@ -3090,6 +3146,7 @@ export interface components {
             readonly publicKey: string;
             readonly userId: string;
         };
+        readonly VaultDeletionBody: Record<string, never>;
         readonly VaultDetailsResponseDto: {
             readonly createdAt: string;
             readonly icon?: string | null;
@@ -3202,6 +3259,23 @@ export interface components {
             readonly name: string;
             readonly role: components["schemas"]["VaultRole"];
             readonly userId: string;
+        };
+        readonly VaultMetadataUpdateBody: {
+            readonly icon?: string | null;
+            readonly imageKey?: string | null;
+            readonly name?: string | null;
+        };
+        /** @enum {string} */
+        readonly VaultMutationOperationRejectionCode: "vault_access_denied";
+        /** @description Vault mutations retain identity, never a stale metadata snapshot. */
+        readonly VaultMutationOperationResult: {
+            /** @enum {string} */
+            readonly status: "applied";
+            readonly vaultId: string;
+        } | {
+            readonly code: components["schemas"]["VaultMutationOperationRejectionCode"];
+            /** @enum {string} */
+            readonly status: "rejected";
         };
         /**
          * @description Vault role — maps to PostgreSQL `vault_role` enum.
@@ -12137,6 +12211,98 @@ export interface operations {
             };
         };
     };
+    readonly deleteVaultOperation: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
+            };
+            readonly path: {
+                readonly vaultId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["VaultDeletionBody"];
+            };
+        };
+        readonly responses: {
+            /** @description Retained semantic outcome */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
+                };
+            };
+            /** @description Malformed request or Operation ID */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Staging incomplete or current authority changed; retry the same Operation */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Payload too large */
+            readonly 413: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Operation ID was reused with different immutable request bytes */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error */
+            readonly 500: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     readonly createVaultImageUpload: {
         readonly parameters: {
             readonly query?: never;
@@ -13508,6 +13674,98 @@ export interface operations {
                 };
             };
             /** @description JSON body does not match the request schema */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error */
+            readonly 500: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    readonly updateVaultMetadata: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Required stable Operation ID */
+                readonly "Idempotency-Key": string;
+            };
+            readonly path: {
+                readonly vaultId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["VaultMetadataUpdateBody"];
+            };
+        };
+        readonly responses: {
+            /** @description Retained semantic outcome */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationOutcome"];
+                };
+            };
+            /** @description Malformed request or Operation ID */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Authentication required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Staging incomplete or current authority changed; retry the same Operation */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Payload too large */
+            readonly 413: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Operation ID was reused with different immutable request bytes */
             readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;

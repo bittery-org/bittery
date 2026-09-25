@@ -68,6 +68,9 @@ impl Runtime {
         let snapshot = self.replica.snapshot(&account_id).ok_or_else(|| {
             RuntimeError::new(RuntimeErrorCode::AccountMissing, "account is not installed")
         })?;
+        if self.travel_policy_verification_pending(&snapshot) {
+            return Err(super::travel_policy::pending_policy());
+        }
         if snapshot.failure.is_some() {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::AccountFailed,
@@ -97,29 +100,15 @@ impl Runtime {
 
         let operation_id = bittery_crypto_core::generate_uuid();
         let vault_id = bittery_crypto_core::generate_uuid();
-        let prepared_image = if let Some(source) = image_source {
-            let facade = self
-                .vault_image_ingress
-                .lock()
-                .expect("Vault image ingress lock poisoned")
-                .clone()
-                .ok_or_else(|| invalid_request("Vault image ingress is unavailable"))?;
-            Some(
-                facade
-                    .prepare_bound(
-                        account_id.clone(),
-                        operation_id.clone(),
-                        vault_id.clone(),
-                        source.capability_id,
-                        source.content_type,
-                        source.byte_length,
-                        &cancellation,
-                    )
-                    .await?,
+        let image = self
+            .prepare_vault_operation_image(
+                &snapshot,
+                &operation_id,
+                &vault_id,
+                image_source,
+                &cancellation,
             )
-        } else {
-            None
-        };
+            .await?;
         let vault_key = Zeroizing::new(generate_encryption_key());
         let encrypted_vault_key = encrypt_vault_key_with_muk(
             vault_key.as_slice(),
@@ -130,22 +119,8 @@ impl Runtime {
         drop(master_unlock_key);
         drop(vault_key);
 
-        let image = prepared_image.as_ref().map(|prepared| {
-            let metadata = prepared.metadata();
-            crate::replica::CreateVaultImageRecord {
-                byte_length: metadata.byte_length(),
-                content_type: metadata.content_type().to_owned(),
-                sha256: metadata.sha256().to_owned(),
-                object_key: format!(
-                    "vaults/{}/{}/create/{}-{}",
-                    snapshot.user_id,
-                    vault_id,
-                    operation_id,
-                    metadata.sha256()
-                ),
-            }
-        });
-        let checkpoint = if prepared_image.is_some() {
+        let has_image = image.is_some();
+        let checkpoint = if has_image {
             CreateVaultCheckpoint::ArtifactReady
         } else {
             CreateVaultCheckpoint::FinalRequestFrozen
@@ -164,7 +139,163 @@ impl Runtime {
         if checkpoint != CreateVaultCheckpoint::FinalRequestFrozen {
             request.body.clear();
         }
-        if prepared_image.is_some() {
+        let operation = OperationRecord {
+            operation_id: operation_id.clone(),
+            kind: OperationKind::CreateVault,
+            target: ResourceRef::Vault {
+                vault_id: vault_id.clone(),
+            },
+            request,
+            request_fingerprint,
+            accepted_item_category: None,
+            attachment_move_recovery: None,
+            update_vault: None,
+            create_vault: Some(create_vault),
+            scheduling: OperationSchedulingState::default(),
+            legacy_admission: None,
+        };
+        let replica_revision = self.commit_vault_operation(snapshot, operation).await?;
+        accepted();
+        self.device_revision.fetch_add(1, Ordering::SeqCst);
+        self.publish_all();
+        self.wake_dispatch();
+        if has_image {
+            self.finish_vault_image_acceptance_cleanup(&account_id, &operation_id)
+                .await;
+        }
+        if cancellation.is_cancelled() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::Cancelled,
+                "caller cancelled after durable Vault acceptance",
+            ));
+        }
+        Ok(RuntimeResponse::VaultCreationAccepted {
+            operation_id,
+            vault_id,
+            replica_revision,
+        })
+    }
+    pub(super) async fn prepare_vault_operation_image(
+        &self,
+        snapshot: &ReplicaSnapshot,
+        operation_id: &str,
+        vault_id: &str,
+        source: Option<VaultImageSourceInput>,
+        cancellation: &RequestCancellation,
+    ) -> Result<Option<crate::replica::CreateVaultImageRecord>, RuntimeError> {
+        let Some(source) = source else {
+            return Ok(None);
+        };
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone()
+            .ok_or_else(|| invalid_request("Vault image ingress is unavailable"))?;
+        let _loan = self.foreground_attachments.register_target(
+            &snapshot.account_id,
+            &snapshot.incarnation,
+            super::foreground_attachment_lifecycle::ForegroundAttachmentTarget::VaultImage {
+                vault_id: vault_id.to_owned(),
+                operation_id: operation_id.to_owned(),
+            },
+            cancellation.clone(),
+        )?;
+        let device_key = self.require_image_device_key().await?;
+        if !self.completion_scope_is_current(snapshot) || cancellation.is_cancelled() {
+            return Err(cancelled_before_acceptance());
+        }
+        let prepared = facade
+            .prepare_bound_protected(
+                snapshot.account_id.clone(),
+                operation_id.to_owned(),
+                vault_id.to_owned(),
+                source.capability_id,
+                source.content_type,
+                source.byte_length,
+                cancellation,
+                crate::vault_image::VaultImageProtection {
+                    user_id: &snapshot.user_id,
+                    device_key: device_key.key_bytes.as_slice(),
+                },
+            )
+            .await?;
+        if !self.completion_scope_is_current(snapshot) || cancellation.is_cancelled() {
+            return Err(cancelled_before_acceptance());
+        }
+        let metadata = prepared.metadata();
+        Ok(Some(crate::replica::CreateVaultImageRecord {
+            protected_witness: Some(
+                metadata
+                    .protection()
+                    .ok_or_else(|| invalid_request("Protected image publication is missing"))?
+                    .witness
+                    .clone(),
+            ),
+            raw_cleanup_pending: false,
+            byte_length: metadata.byte_length(),
+            content_type: metadata.content_type().to_owned(),
+            sha256: metadata.sha256().to_owned(),
+            object_key: format!(
+                "vaults/{}/{}/create/{}-{}",
+                snapshot.user_id,
+                vault_id,
+                operation_id,
+                metadata.sha256()
+            ),
+        }))
+    }
+
+    /// Source acceptance release is process-local; a reopened owner has no old handshake.
+    pub(super) async fn release_vault_image_acceptance_for_dispatch(
+        &self,
+        account_id: &AccountId,
+        operation: &OperationRecord,
+    ) -> bool {
+        if operation.vault_image().is_none() {
+            return true;
+        }
+        let identity = (account_id.clone(), operation.operation_id.clone());
+        let pending = self
+            .pending_vault_image_acceptance_cleanup
+            .lock()
+            .expect("Vault image acceptance cleanup lock poisoned")
+            .contains(&identity);
+        if pending {
+            self.finish_vault_image_acceptance_cleanup(account_id, &operation.operation_id)
+                .await;
+        }
+        !self
+            .pending_vault_image_acceptance_cleanup
+            .lock()
+            .expect("Vault image acceptance cleanup lock poisoned")
+            .contains(&identity)
+    }
+
+    async fn abort_vault_operation_image(&self, account_id: &AccountId, operation_id: &str) {
+        self.finish_vault_image_acceptance_cleanup(account_id, operation_id)
+            .await;
+        let facade = self
+            .vault_image_ingress
+            .lock()
+            .expect("Vault image ingress lock poisoned")
+            .clone();
+        if let Some(facade) = facade {
+            let _ = facade
+                .delete_bound(account_id.clone(), operation_id.to_owned())
+                .await;
+        }
+    }
+
+    pub(super) async fn commit_vault_operation(
+        &self,
+        snapshot: ReplicaSnapshot,
+        operation: OperationRecord,
+    ) -> Result<u64, RuntimeError> {
+        let has_image = operation.vault_image().is_some();
+        let account_id = snapshot.account_id.clone();
+        let operation_id = operation.operation_id.clone();
+        if has_image {
             if let Err(error) = self
                 .begin_vault_image_acceptance(&account_id, &operation_id)
                 .await
@@ -183,18 +314,6 @@ impl Runtime {
                 return Err(error);
             }
         }
-        let operation = OperationRecord {
-            operation_id: operation_id.clone(),
-            kind: OperationKind::CreateVault,
-            target: ResourceRef::Vault {
-                vault_id: vault_id.clone(),
-            },
-            request,
-            request_fingerprint,
-            attachment_move_recovery: None,
-            create_vault: Some(create_vault),
-            scheduling: OperationSchedulingState::default(),
-        };
         let lock_epoch = snapshot.lock_epoch;
         let result = self
             .replica
@@ -213,38 +332,16 @@ impl Runtime {
                 revision
             }
             Err(error) => {
-                if prepared_image.is_some() {
-                    self.finish_vault_image_acceptance_cleanup(&account_id, &operation_id)
+                if has_image {
+                    self.abort_vault_operation_image(&account_id, &operation_id)
                         .await;
-                    let facade = {
-                        self.vault_image_ingress
-                            .lock()
-                            .expect("Vault image ingress lock poisoned")
-                            .clone()
-                    };
-                    if let Some(facade) = facade {
-                        let _ = facade
-                            .delete_bound(account_id.clone(), operation_id.clone())
-                            .await;
-                    }
                 }
                 return Err(error);
             }
             Ok(RecomputedPlanResult::Missing) => {
-                if prepared_image.is_some() {
-                    self.finish_vault_image_acceptance_cleanup(&account_id, &operation_id)
+                if has_image {
+                    self.abort_vault_operation_image(&account_id, &operation_id)
                         .await;
-                    let facade = {
-                        self.vault_image_ingress
-                            .lock()
-                            .expect("Vault image ingress lock poisoned")
-                            .clone()
-                    };
-                    if let Some(facade) = facade {
-                        let _ = facade
-                            .delete_bound(account_id.clone(), operation_id.clone())
-                            .await;
-                    }
                 }
                 self.replica.remove_cached(&account_id);
                 return Err(RuntimeError::new(
@@ -253,20 +350,9 @@ impl Runtime {
                 ));
             }
             Ok(RecomputedPlanResult::Fenced { snapshot }) => {
-                if prepared_image.is_some() {
-                    self.finish_vault_image_acceptance_cleanup(&account_id, &operation_id)
+                if has_image {
+                    self.abort_vault_operation_image(&account_id, &operation_id)
                         .await;
-                    let facade = {
-                        self.vault_image_ingress
-                            .lock()
-                            .expect("Vault image ingress lock poisoned")
-                            .clone()
-                    };
-                    if let Some(facade) = facade {
-                        let _ = facade
-                            .delete_bound(account_id.clone(), operation_id.clone())
-                            .await;
-                    }
                 }
                 self.replica.cache(snapshot.clone());
                 self.clear_live_master_unlock_keys_for_account(&account_id);
@@ -284,25 +370,7 @@ impl Runtime {
                 ));
             }
         };
-        accepted();
-        self.device_revision.fetch_add(1, Ordering::SeqCst);
-        self.publish_all();
-        self.wake_dispatch();
-        if prepared_image.is_some() {
-            self.finish_vault_image_acceptance_cleanup(&account_id, &operation_id)
-                .await;
-        }
-        if cancellation.is_cancelled() {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::Cancelled,
-                "caller cancelled after durable Vault acceptance",
-            ));
-        }
-        Ok(RuntimeResponse::VaultCreationAccepted {
-            operation_id,
-            vault_id,
-            replica_revision,
-        })
+        Ok(replica_revision)
     }
 }
 

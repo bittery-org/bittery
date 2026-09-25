@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
+import { protectedImageStorageFixture } from "../tests/protected-image-storage-fixture";
 import { IndexedDbVaultImageArtifactExecutor } from "./indexeddb-vault-image-artifact-executor";
 
 beforeEach(() => {
@@ -22,6 +23,154 @@ const metadata = {
 };
 
 describe("IndexedDB Vault-image artifact", () => {
+	test("refuses an oversized corrupt stored chunk before returning another owned copy", async () => {
+		const databaseName = "oversized-physical-image-chunk";
+		const executor = new IndexedDbVaultImageArtifactExecutor({ databaseName });
+		await executor.invoke({ type: "begin", scope });
+		await executor.invoke(
+			{ type: "writeChunk", scope, chunkIndex: 0 },
+			new Uint8Array([97, 98, 99]),
+		);
+		await executor.invoke({ type: "publish", metadata });
+		await executor.close();
+		const db = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open(databaseName, 3);
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		const tx = db.transaction("chunks", "readwrite");
+		tx.objectStore("chunks").put({
+			...scope,
+			publicationId: "",
+			chunkIndex: 0,
+			bytes: new Uint8Array(262145),
+		});
+		await new Promise<void>((resolve, reject) => {
+			tx.oncomplete = () => resolve();
+			tx.onabort = () => reject(tx.error);
+		});
+		db.close();
+		const reopened = new IndexedDbVaultImageArtifactExecutor({ databaseName });
+		await expect(
+			reopened.invoke({ type: "readChunk", metadata, chunkIndex: 0 }),
+		).rejects.toThrow();
+		await reopened.close();
+	});
+
+	test("stores opaque protected bytes under their own publication and reopens them", async () => {
+		const { ciphertext, protectedScope, protectedMetadata } =
+			await protectedImageStorageFixture(scope, metadata);
+		const options = { databaseName: "protected-image-publication" };
+		const executor = new IndexedDbVaultImageArtifactExecutor(options);
+		await executor.invoke({ type: "begin", scope });
+		await executor.invoke(
+			{ type: "writeChunk", scope, chunkIndex: 0 },
+			new Uint8Array([97, 98, 99]),
+		);
+		await executor.invoke({ type: "publish", metadata });
+		await executor.invoke({ type: "begin", scope: protectedScope });
+		await executor.invoke(
+			{ type: "writeChunk", scope: protectedScope, chunkIndex: 0 },
+			ciphertext.slice(),
+		);
+		expect(
+			await executor.invoke({ type: "publish", metadata: protectedMetadata }),
+		).toEqual({ type: "published", result: "published" });
+		await executor.close();
+		const reopened = new IndexedDbVaultImageArtifactExecutor(options);
+		expect(
+			await reopened.invoke({
+				type: "readChunk",
+				metadata: protectedMetadata,
+				chunkIndex: 0,
+			}),
+		).toEqual({ type: "chunk", bytes: ciphertext });
+		expect(
+			await reopened.invoke({
+				type: "readGeneration",
+				scope,
+				afterPublicationId: null,
+			}),
+		).toMatchObject({ type: "generation", generation: { scope, metadata } });
+		expect(
+			await reopened.invoke({
+				type: "readGeneration",
+				scope,
+				afterPublicationId: "",
+			}),
+		).toMatchObject({
+			type: "generation",
+			generation: { scope: protectedScope, metadata: protectedMetadata },
+		});
+		expect(
+			await reopened.invoke({
+				type: "readGeneration",
+				scope,
+				afterPublicationId: protectedScope.publicationId,
+			}),
+		).toEqual({ type: "missing" });
+		expect(
+			await reopened.invoke({ type: "readChunk", metadata, chunkIndex: 0 }),
+		).toEqual({ type: "chunk", bytes: new Uint8Array([97, 98, 99]) });
+		await reopened.invoke({ type: "deleteGeneration", scope });
+		expect(
+			await reopened.invoke({ type: "readChunk", metadata, chunkIndex: 0 }),
+		).toEqual({ type: "missing" });
+		expect(
+			await reopened.invoke({
+				type: "readChunk",
+				metadata: protectedMetadata,
+				chunkIndex: 0,
+			}),
+		).toEqual({ type: "chunk", bytes: ciphertext });
+		await reopened.invoke({ type: "delete", scope });
+		expect(
+			await reopened.invoke({ type: "readChunk", metadata, chunkIndex: 0 }),
+		).toEqual({ type: "missing" });
+		expect(
+			await reopened.invoke({
+				type: "readChunk",
+				metadata: protectedMetadata,
+				chunkIndex: 0,
+			}),
+		).toEqual({ type: "missing" });
+		await reopened.close();
+	});
+
+	test("upgrades the actual legacy compound-key layout without changing raw image bytes", async () => {
+		const name = "legacy-image-upgrade";
+		const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open(name, 2);
+			request.onupgradeneeded = () => {
+				const artifacts = request.result.createObjectStore("artifacts", {
+					keyPath: ["accountId", "operationId"],
+				});
+				artifacts.createIndex("by_account", "accountId");
+				const chunks = request.result.createObjectStore("chunks", {
+					keyPath: ["accountId", "operationId", "chunkIndex"],
+				});
+				chunks.createIndex("by_account", "accountId");
+				chunks.createIndex("by_scope", ["accountId", "operationId"]);
+				artifacts.add({ ...metadata, published: true });
+				chunks.add({
+					...scope,
+					chunkIndex: 0,
+					bytes: new Uint8Array([97, 98, 99]),
+				});
+			};
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		legacy.close();
+		const executor = new IndexedDbVaultImageArtifactExecutor({
+			databaseName: name,
+		});
+		expect(
+			await executor.invoke({ type: "readChunk", metadata, chunkIndex: 0 }),
+		).toEqual({ type: "chunk", bytes: new Uint8Array([97, 98, 99]) });
+		await executor.close();
+	});
+
 	test("wipes every supplied binary even when validation rejects it", async () => {
 		const executor = new IndexedDbVaultImageArtifactExecutor({
 			databaseName: "vault-image-invalid-input-zeroization",

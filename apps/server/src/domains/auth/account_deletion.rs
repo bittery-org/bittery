@@ -199,6 +199,13 @@ pub(crate) async fn delete_server_account(
         )
         .await
         .map_err(ApiError::from)?;
+        // Finish the existing owned-Vault cascade while the Item authors still exist.
+        // Deleting the User first can check those author references before the cascade.
+        query("DELETE FROM vault WHERE created_by_id = $1")
+            .bind(&authority.user_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| database_error(error, "Failed to delete owned Account Vaults"))?;
         query("DELETE FROM \"user\" WHERE id = $1")
             .bind(&authority.user_id)
             .execute(&mut *transaction)

@@ -150,11 +150,10 @@ impl Runtime {
         {
             return Err(recovery_unavailable());
         }
-        let port = Arc::new(RecoveryPort::new(
-            executor,
-            bittery_crypto_core::generate_uuid(),
-            cancellation,
-        ));
+        let port = Arc::new(
+            RecoveryPort::new(executor, bittery_crypto_core::generate_uuid(), cancellation)
+                .with_platform_storage(self.platform_storage.as_ref().clone()),
+        );
         *self
             .storage_recovery
             .active

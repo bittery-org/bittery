@@ -3,6 +3,8 @@
 //! The module keeps crypto, authenticated HTTP, authoritative probing, and guarded Replica
 //! publication behind the Runtime request seam. These requests are deliberately not Operations.
 
+use super::foreground_attachment_lifecycle::ForegroundAttachmentTarget;
+use super::vault_key::unwrap_vault_key;
 use super::*;
 use crate::{
     auth_http::{
@@ -28,8 +30,7 @@ use bittery_crypto_core::{
         AttachmentBlobDecryptor, AttachmentBlobEncryptor, AttachmentBlobScope,
         AttachmentEnvelopeScanner, MAX_ATTACHMENT_ENVELOPE_INPUT_CHUNK,
     },
-    decrypt_vault_key_with_muk, decrypt_with_aad, encrypt_with_aad, generate_encryption_key,
-    AadContext, EncryptedData, WrappedVaultKeyData,
+    decrypt_with_aad, encrypt_with_aad, generate_encryption_key, AadContext, EncryptedData,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,10 +69,15 @@ pub trait AttachmentUploadSource {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait::async_trait]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the exact source claim includes Vault, Item and original file binding"
+)]
 pub trait AttachmentUploadSourcePort: Send + Sync {
     async fn claim(
         &self,
         account_id: &AccountId,
+        vault_id: &str,
         item_id: &str,
         name: &str,
         content_type: &str,
@@ -83,6 +89,23 @@ pub trait AttachmentUploadSourcePort: Send + Sync {
         account_id: &AccountId,
     ) -> Result<(), AttachmentUploadSourceError>;
     async fn complete_account_retirement(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError>;
+    /// Fence only Core-supplied Vault scopes; acknowledgement drains their plaintext owners.
+    async fn retire_vaults(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError>;
+    /// Only fresh verified authority may reopen a retired Vault in a new generation.
+    async fn complete_vault_retirement(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError>;
+    /// Remove/Wipe cleanup, after Account retirement; ordinary Lock preserves Vault fences.
+    async fn forget_account_vault_retirements(
         &self,
         account_id: &AccountId,
     ) -> Result<(), AttachmentUploadSourceError>;
@@ -90,10 +113,15 @@ pub trait AttachmentUploadSourcePort: Send + Sync {
 }
 #[cfg(target_arch = "wasm32")]
 #[async_trait::async_trait(?Send)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the exact source claim includes Vault, Item and original file binding"
+)]
 pub trait AttachmentUploadSourcePort {
     async fn claim(
         &self,
         account_id: &AccountId,
+        vault_id: &str,
         item_id: &str,
         name: &str,
         content_type: &str,
@@ -105,6 +133,23 @@ pub trait AttachmentUploadSourcePort {
         account_id: &AccountId,
     ) -> Result<(), AttachmentUploadSourceError>;
     async fn complete_account_retirement(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError>;
+    /// Fence only Core-supplied Vault scopes; acknowledgement drains their plaintext owners.
+    async fn retire_vaults(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError>;
+    /// Only fresh verified authority may reopen a retired Vault in a new generation.
+    async fn complete_vault_retirement(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError>;
+    /// Remove/Wipe cleanup, after Account retirement; ordinary Lock preserves Vault fences.
+    async fn forget_account_vault_retirements(
         &self,
         account_id: &AccountId,
     ) -> Result<(), AttachmentUploadSourceError>;
@@ -191,12 +236,45 @@ pub(super) struct UploadAttachmentRequest {
     pub source_capability_id: String,
 }
 
+struct PreparedAttachmentScope {
+    incarnation: crate::protocol::Incarnation,
+    vault_id: String,
+}
+
 pub(super) struct PreparedAttachmentUpload {
+    scope: PreparedAttachmentScope,
     request: UploadAttachmentRequest,
     facade: AttachmentUploadFacade,
     source: UploadSourceOwner,
 }
 impl AttachmentUploadFacade {
+    pub async fn retire_vaults(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        self.sources.retire_vaults(account_id, vault_ids).await
+    }
+
+    pub async fn complete_vault_retirement(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentUploadSourceError> {
+        self.sources
+            .complete_vault_retirement(account_id, vault_ids)
+            .await
+    }
+
+    pub async fn forget_account_vault_retirements(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentUploadSourceError> {
+        self.sources
+            .forget_account_vault_retirements(account_id)
+            .await
+    }
+
     pub fn new(
         sources: Arc<dyn AttachmentUploadSourcePort>,
         transfer: Arc<dyn AttachmentUploadTransferPort>,
@@ -401,6 +479,7 @@ pub trait AttachmentDownloadSinkPort: Send + Sync {
     fn claim(
         &self,
         account_id: &AccountId,
+        vault_id: &str,
         attachment_id: &str,
         capability_id: &str,
     ) -> Result<Box<dyn AttachmentDownloadSink>, AttachmentDownloadSinkError>;
@@ -415,6 +494,23 @@ pub trait AttachmentDownloadSinkPort: Send + Sync {
         account_id: &AccountId,
     ) -> Result<(), AttachmentDownloadSinkError>;
 
+    /// Fence only Core-supplied Vault scopes; acknowledgement drains their plaintext owners.
+    async fn retire_vaults(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError>;
+    /// Only fresh verified authority may reopen a retired Vault in a new generation.
+    async fn complete_vault_retirement(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError>;
+    /// Remove/Wipe cleanup, after Account retirement; ordinary Lock preserves Vault fences.
+    async fn forget_account_vault_retirements(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError>;
     async fn retire_runtime(&self) -> Result<(), AttachmentDownloadSinkError>;
 }
 
@@ -424,6 +520,7 @@ pub trait AttachmentDownloadSinkPort {
     fn claim(
         &self,
         account_id: &AccountId,
+        vault_id: &str,
         attachment_id: &str,
         capability_id: &str,
     ) -> Result<Box<dyn AttachmentDownloadSink>, AttachmentDownloadSinkError>;
@@ -438,6 +535,23 @@ pub trait AttachmentDownloadSinkPort {
         account_id: &AccountId,
     ) -> Result<(), AttachmentDownloadSinkError>;
 
+    /// Fence only Core-supplied Vault scopes; acknowledgement drains their plaintext owners.
+    async fn retire_vaults(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError>;
+    /// Only fresh verified authority may reopen a retired Vault in a new generation.
+    async fn complete_vault_retirement(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError>;
+    /// Remove/Wipe cleanup, after Account retirement; ordinary Lock preserves Vault fences.
+    async fn forget_account_vault_retirements(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError>;
     async fn retire_runtime(&self) -> Result<(), AttachmentDownloadSinkError>;
 }
 
@@ -572,6 +686,7 @@ async fn wait_for_download_cleanup_retry(
 }
 
 pub(super) struct PreparedAttachmentDownload {
+    scope: PreparedAttachmentScope,
     account_id: AccountId,
     attachment_id: String,
     sink_capability_id: String,
@@ -580,6 +695,33 @@ pub(super) struct PreparedAttachmentDownload {
 }
 
 impl AttachmentDownloadFacade {
+    pub async fn retire_vaults(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        self.sinks.retire_vaults(account_id, vault_ids).await
+    }
+
+    pub async fn complete_vault_retirement(
+        &self,
+        account_id: &AccountId,
+        vault_ids: &[String],
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        self.sinks
+            .complete_vault_retirement(account_id, vault_ids)
+            .await
+    }
+
+    pub async fn forget_account_vault_retirements(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), AttachmentDownloadSinkError> {
+        self.sinks
+            .forget_account_vault_retirements(account_id)
+            .await
+    }
+
     pub fn new(
         transfer: Arc<dyn AttachmentMoveTransferPort>,
         sinks: Arc<dyn AttachmentDownloadSinkPort>,
@@ -708,14 +850,32 @@ impl Runtime {
                     "Attachment Download sink is unavailable",
                 )
             })?;
-        let lifecycle = self
-            .foreground_attachments
-            .register_unresolved(&account_id, cancellation)?;
+        let snapshot = self.require_snapshot(&account_id)?;
+        let (_, vault) = attachment_and_vault(&snapshot, &attachment_id)?;
+        let scope = PreparedAttachmentScope {
+            incarnation: snapshot.incarnation.clone(),
+            vault_id: vault.id,
+        };
+        let lifecycle = self.foreground_attachments.register_target(
+            &account_id,
+            &scope.incarnation,
+            ForegroundAttachmentTarget::Attachment {
+                vault_id: scope.vault_id.clone(),
+                attachment_id: attachment_id.clone(),
+            },
+            cancellation,
+        )?;
         let sink = facade
             .sinks
-            .claim(&account_id, &attachment_id, &sink_capability_id)
+            .claim(
+                &account_id,
+                &scope.vault_id,
+                &attachment_id,
+                &sink_capability_id,
+            )
             .map_err(sink_error)?;
         Ok(PreparedAttachmentDownload {
+            scope,
             account_id,
             attachment_id,
             sink_capability_id,
@@ -775,6 +935,9 @@ impl Runtime {
 				));
 			}
 			let (source, vault) = attachment_and_vault(&snapshot, &attachment_id)?;
+            if snapshot.incarnation != prepared.scope.incarnation || vault.id != prepared.scope.vault_id {
+                return Err(retryable("Attachment sink authority changed after claim"));
+            }
 			let attachment_key = open_attachment_key(self, &snapshot, &source, &vault)?;
             let metadata = self
                 .platform_storage
@@ -785,9 +948,7 @@ impl Runtime {
             if metadata.user_id != snapshot.user_id {
                 return Err(invariant("Account metadata authority changed"));
             }
-            let mut session = self
-                .platform_storage
-                .load_current_session(&account_id, &snapshot.incarnation)
+            let mut session = self.effective_session(&account_id, &snapshot.incarnation)
                 .await
                 .map_err(|_| retryable("Session could not be loaded"))?
                 .ok_or_else(authentication_required)?;
@@ -923,11 +1084,7 @@ impl Runtime {
         .await;
 
         let result = match transfer {
-            Ok(())
-                if self
-                    .foreground_attachments
-                    .admit_finalization(prepared.sink.lifecycle(), &cancellation) =>
-            {
+            Ok(()) if self.admit_download_finalization(&prepared, &cancellation) => {
                 match prepared.sink.commit().await {
                     Ok(()) => Ok(()),
                     Err(error) => {
@@ -975,13 +1132,26 @@ impl Runtime {
                     "Attachment Upload source is unavailable",
                 )
             })?;
-        let lifecycle = self
-            .foreground_attachments
-            .register_unresolved(&request.account_id, cancellation)?;
+        let snapshot = self.require_snapshot(&request.account_id)?;
+        let (_, vault) = item_and_vault(&snapshot, &request.item_id)?;
+        let scope = PreparedAttachmentScope {
+            incarnation: snapshot.incarnation.clone(),
+            vault_id: vault.id,
+        };
+        let lifecycle = self.foreground_attachments.register_target(
+            &request.account_id,
+            &scope.incarnation,
+            ForegroundAttachmentTarget::Item {
+                vault_id: scope.vault_id.clone(),
+                item_id: request.item_id.clone(),
+            },
+            cancellation,
+        )?;
         let source = facade
             .sources
             .claim(
                 &request.account_id,
+                &scope.vault_id,
                 &request.item_id,
                 &request.name,
                 &request.content_type,
@@ -991,6 +1161,7 @@ impl Runtime {
             .await
             .map_err(upload_source_error)?;
         Ok(PreparedAttachmentUpload {
+            scope,
             request,
             facade,
             source: UploadSourceOwner::new(source, lifecycle, Arc::clone(&self.device_timer)),
@@ -1042,6 +1213,10 @@ impl Runtime {
             ));
         }
         let (_item, vault) = item_and_vault(&snapshot, &item_id)?;
+        if snapshot.incarnation != prepared.scope.incarnation || vault.id != prepared.scope.vault_id {
+            return Err(retryable("Attachment source authority changed after claim"));
+        }
+        self.require_vault_accepting_work(&snapshot, &vault.id)?;
         if snapshot.item_has_optimistic_owner(&item_id) {
             return Err(retryable(
                 "an optimistic Item owner must reconcile before Attachment Upload",
@@ -1070,11 +1245,11 @@ impl Runtime {
                 .map_err(upload_source_error)?;
             let metadata = self.platform_storage.load_account_metadata(&account_id, &snapshot.incarnation).await.map_err(|_| retryable("Account metadata could not be loaded"))?.ok_or_else(authentication_required)?;
             if metadata.user_id != snapshot.user_id { return Err(invariant("Account metadata authority changed")); }
-            let mut session = self.platform_storage.load_current_session(&account_id, &snapshot.incarnation).await.map_err(|_| retryable("Session could not be loaded"))?.ok_or_else(authentication_required)?;
+            let mut session = self.effective_session(&account_id, &snapshot.incarnation).await.map_err(|_| retryable("Session could not be loaded"))?.ok_or_else(authentication_required)?;
             let http = AuthHttpClient::new(&self.http_transport, &metadata.normalized_server_url, metadata.insecure_transport_confirmed, auth_config)?;
             let mut renewed = false;
             let file_size_i32 = i32::try_from(file_size).map_err(|_| size_rejected("Attachment plaintext is too large"))?;
-            let grant_body = AttachmentUploadBody { file_name: format!("{}.enc", URL_SAFE_NO_PAD.encode(&crypto_authority.attachment_key[..16])), content_type: "application/octet-stream".into(), file_size: file_size_i32 };
+            let grant_body = AttachmentUploadBody { file_name: format!("{}.enc", URL_SAFE_NO_PAD.encode(&crypto_authority.attachment_key[..16])), content_type: "application/octet-stream".into(), file_size: file_size_i32, durable_upload: None };
             let mut grant = http.create_attachment_upload_grant(session.token.as_ref(), &item_id, &grant_body, cancellation.clone()).await?;
             if matches!(grant, AuthenticatedOutcome::ReauthenticationRequired) {
                 renew_once(self, &account_id, &http, &mut session, &mut renewed, cancellation.clone()).await?;
@@ -1085,15 +1260,16 @@ impl Runtime {
                 AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::AccessDenied) => return Err(RuntimeError::new(RuntimeErrorCode::AccessDenied, "Attachment Upload was denied")),
                 AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::QuotaRejected) => return Err(RuntimeError::new(RuntimeErrorCode::QuotaExceeded, "Attachment quota was exceeded")),
                 AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::SizeRejected) => return Err(size_rejected("Attachment size was rejected")),
-                AuthenticatedOutcome::Transient => return Err(retryable("Attachment Upload grant failed")),
+                AuthenticatedOutcome::Ok(AttachmentUploadGrantAnswer::Conflict { .. }) | AuthenticatedOutcome::Transient => return Err(retryable("Attachment Upload grant failed")),
                 AuthenticatedOutcome::ReauthenticationRequired => { self.mark_reauthentication_required(&account_id); return Err(authentication_required()); }
             };
             if grant.attachment_id.is_empty() || grant.key.is_empty() || grant.upload_url.is_empty() { return Err(invariant("Attachment Upload grant is malformed")); }
             let prepared_crypto = crypto_authority.seal(&grant.attachment_id)?;
             let envelope_bytes = encrypted_attachment_storage_size(file_size)?;
-            let binary_lifecycle = self.foreground_attachments.register(
+            let binary_lifecycle = self.foreground_attachments.register_target(
                 &account_id,
                 &snapshot.incarnation,
+                ForegroundAttachmentTarget::Attachment { vault_id: vault.id.clone(), attachment_id: grant.attachment_id.clone() },
                 cancellation.clone(),
             )?;
             let upload = facade
@@ -1212,10 +1388,11 @@ impl Runtime {
                 AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Created(created)) if created.attachment_id == grant.attachment_id => {},
                 AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Created(_)) => return Err(invariant("Attachment metadata returned a foreign identity")),
                 AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::AccessDenied) => return Err(RuntimeError::new(RuntimeErrorCode::AccessDenied, "Attachment metadata creation was denied")),
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::QuotaRejected) => return Err(RuntimeError::new(RuntimeErrorCode::QuotaExceeded, "Attachment quota was exceeded")),
                 AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Missing) => return Err(RuntimeError::new(RuntimeErrorCode::AuthorityMissing, "Item authority is missing")),
                 AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Rejected) if !upload_was_ambiguous => return Err(retryable("Attachment metadata was rejected")),
                 AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Rejected) => {},
-                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Ambiguous) | AuthenticatedOutcome::Transient => {},
+                AuthenticatedOutcome::Ok(AttachmentMetadataCreateAnswer::Conflict { .. } | AttachmentMetadataCreateAnswer::Ambiguous) | AuthenticatedOutcome::Transient => {},
                 AuthenticatedOutcome::ReauthenticationRequired => { self.mark_reauthentication_required(&account_id); return Err(authentication_required()); }
             }
             let authority = fetch_item_authority(self, &http, AttachmentAuthority { account_id: &account_id, item_id: &item_id, attachment_id: &grant.attachment_id, expectation: AttachmentAuthorityExpectation::Uploaded { vault_id: &vault.id, uploaded_by: &snapshot.user_id, body: &body }, cancellation: cancellation.clone() }, &mut session, &mut renewed).await?;
@@ -1286,15 +1463,20 @@ impl Runtime {
             ));
         }
         let (_, vault) = attachment_and_vault(&snapshot, &attachment_id)?;
+        self.require_vault_accepting_work(&snapshot, &vault.id)?;
         if vault.role == AuthorityVaultRole::ReadOnly {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::ReadOnly,
                 "the Attachment belongs to a read-only Vault",
             ));
         }
-        let foreground_guard = self.foreground_attachments.register(
+        let foreground_guard = self.foreground_attachments.register_target(
             &account_id,
             &snapshot.incarnation,
+            ForegroundAttachmentTarget::Attachment {
+                vault_id: vault.id.clone(),
+                attachment_id: attachment_id.clone(),
+            },
             cancellation.clone(),
         )?;
         let auth_config = self.auth_client_config.clone().ok_or_else(|| {
@@ -1316,7 +1498,7 @@ impl Runtime {
         let mut session = tokio::select! {
             biased;
             () = cancellation.cancelled() => return Err(cancelled()),
-            result = self.platform_storage.load_current_session(&account_id, &snapshot.incarnation) => {
+            result = self.effective_session(&account_id, &snapshot.incarnation) => {
                 result.map_err(|_| retryable("Session could not be loaded"))?
                     .ok_or_else(authentication_required)?
             }
@@ -1481,15 +1663,20 @@ impl Runtime {
             ));
         }
         let (source_attachment, vault) = attachment_and_vault(&snapshot, &attachment_id)?;
+        self.require_vault_accepting_work(&snapshot, &vault.id)?;
         if vault.role == AuthorityVaultRole::ReadOnly {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::ReadOnly,
                 "the Attachment belongs to a read-only Vault",
             ));
         }
-        let foreground_guard = self.foreground_attachments.register(
+        let foreground_guard = self.foreground_attachments.register_target(
             &account_id,
             &snapshot.incarnation,
+            ForegroundAttachmentTarget::Attachment {
+                vault_id: vault.id.clone(),
+                attachment_id: attachment_id.clone(),
+            },
             cancellation.clone(),
         )?;
         let body = encrypt_attachment_name(self, &snapshot, &source_attachment, &vault, &name)?;
@@ -1512,7 +1699,7 @@ impl Runtime {
         let mut session = tokio::select! {
             biased;
             () = cancellation.cancelled() => return Err(cancelled()),
-            result = self.platform_storage.load_current_session(&account_id, &snapshot.incarnation) => {
+            result = self.effective_session(&account_id, &snapshot.incarnation) => {
                 result.map_err(|_| retryable("Session could not be loaded"))?
                     .ok_or_else(authentication_required)?
             }
@@ -1655,6 +1842,27 @@ impl Runtime {
         Ok(response)
     }
 
+    fn admit_download_finalization(
+        &self,
+        prepared: &PreparedAttachmentDownload,
+        cancellation: &RequestCancellation,
+    ) -> bool {
+        #[cfg(test)]
+        self.foreground_attachments.before_finalization_admission();
+        let _publication = self.publication.lock().expect("publication lock poisoned");
+        // Resolving the last live reason can precede its durable false acknowledgment.
+        // Final output shares the current aggregate gate until that receipt is adopted.
+        self.replica
+            .snapshot(&prepared.account_id)
+            .is_some_and(|current| {
+                current.incarnation == prepared.scope.incarnation
+                    && !self.travel_policy_verification_pending(&current)
+            })
+            && self
+                .foreground_attachments
+                .admit_finalization(prepared.sink.lifecycle(), cancellation)
+    }
+
     fn ensure_attachment_admission(
         &self,
         account_id: &AccountId,
@@ -1723,7 +1931,7 @@ fn encrypted_attachment_storage_size(file_size: u64) -> Result<u64, RuntimeError
         .ok_or_else(|| size_rejected("Attachment is too large"))
 }
 
-fn item_and_vault(
+pub(super) fn item_and_vault(
     snapshot: &crate::replica::ReplicaSnapshot,
     item_id: &str,
 ) -> Result<(AuthorityItemRecord, crate::replica::AuthorityVaultRecord), RuntimeError> {
@@ -1829,18 +2037,11 @@ fn prepare_upload_crypto(
     content_type: &str,
 ) -> Result<UploadCryptoAuthority, RuntimeError> {
     let muk = runtime
-        .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+        .copy_live_vault_key_material(&snapshot.account_id, &snapshot.incarnation)
         .ok_or_else(authentication_required)?;
-    let wrapped: WrappedVaultKeyData = serde_json::from_str(&vault.encrypted_vault_key)
-        .map_err(|_| invariant("Vault key authority is malformed"))?;
-    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != snapshot.user_id {
-        return Err(invariant(
-            "Vault key authority scope does not match the Account",
-        ));
-    }
     let vault_key = Zeroizing::new(
-        decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk.as_slice(), &wrapped.context)
-            .map_err(|_| invariant("Vault key could not be opened"))?,
+        unwrap_vault_key(vault, &snapshot.user_id, &muk)
+            .map_err(|error| invariant(&error.message))?,
     );
     let attachment_key = Zeroizing::new(generate_encryption_key());
     Ok(UploadCryptoAuthority {
@@ -2054,21 +2255,13 @@ async fn fetch_item_authority(
                     "authoritative state did not prove the Attachment Upload",
                 ));
             };
-            if uploaded.item_id != item_id
-                || uploaded.vault_id != vault_id
-                || uploaded.storage_key != body.storage_key
-                || uploaded.encrypted_attachment_key != body.encrypted_attachment_key
-                || uploaded.attachment_key_iv != body.attachment_key_iv
-                || uploaded.attachment_key_algorithm != body.attachment_key_algorithm
-                || uploaded.envelope_version != body.envelope_version
-                || uploaded.encrypted_name != body.encrypted_name
-                || uploaded.encrypted_content_type != body.encrypted_content_type
-                || uploaded.encryption_iv != body.encryption_iv
-                || uploaded.encrypted_content_type_iv != body.encrypted_content_type_iv
-                || uploaded.encryption_algorithm != body.encryption_algorithm
-                || uploaded.file_size != body.file_size
-                || uploaded.uploaded_by != uploaded_by
-            {
+            if !crate::replica::attachment_registration_matches(
+                uploaded,
+                body,
+                item_id,
+                vault_id,
+                uploaded_by,
+            ) {
                 return Err(retryable(
                     "authoritative Attachment Upload effect did not match exactly",
                 ));
@@ -2208,29 +2401,11 @@ fn encrypt_attachment_name(
     name: &str,
 ) -> Result<UpdateAttachmentBody, RuntimeError> {
     let muk = runtime
-        .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+        .copy_live_vault_key_material(&snapshot.account_id, &snapshot.incarnation)
         .ok_or_else(authentication_required)?;
-    let wrapped: WrappedVaultKeyData =
-        serde_json::from_str(&vault.encrypted_vault_key).map_err(|_| {
-            RuntimeError::new(
-                RuntimeErrorCode::InvariantViolation,
-                "Vault key authority is malformed",
-            )
-        })?;
-    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != snapshot.user_id {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::InvariantViolation,
-            "Vault key authority scope does not match the Account",
-        ));
-    }
     let vault_key = Zeroizing::new(
-        decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk.as_slice(), &wrapped.context)
-            .map_err(|_| {
-                RuntimeError::new(
-                    RuntimeErrorCode::InvariantViolation,
-                    "Vault key could not be opened",
-                )
-            })?,
+        unwrap_vault_key(vault, &snapshot.user_id, &muk)
+            .map_err(|error| invariant(&error.message))?,
     );
     let scope = |entity_type: &str, version: u64| AadContext {
         vault_id: attachment.vault_id.clone(),
@@ -2288,18 +2463,11 @@ fn open_attachment_key(
     vault: &crate::replica::AuthorityVaultRecord,
 ) -> Result<Zeroizing<[u8; 32]>, RuntimeError> {
     let muk = runtime
-        .copy_live_master_unlock_key(&snapshot.account_id, &snapshot.incarnation)
+        .copy_live_vault_key_material(&snapshot.account_id, &snapshot.incarnation)
         .ok_or_else(authentication_required)?;
-    let wrapped: WrappedVaultKeyData = serde_json::from_str(&vault.encrypted_vault_key)
-        .map_err(|_| invariant("Vault key authority is malformed"))?;
-    if wrapped.context.vault_id != vault.id || wrapped.context.user_id != snapshot.user_id {
-        return Err(invariant(
-            "Vault key authority scope does not match the Account",
-        ));
-    }
     let vault_key = Zeroizing::new(
-        decrypt_vault_key_with_muk(&vault.encrypted_vault_key, muk.as_slice(), &wrapped.context)
-            .map_err(|_| invariant("Vault key could not be opened"))?,
+        unwrap_vault_key(vault, &snapshot.user_id, &muk)
+            .map_err(|error| invariant(&error.message))?,
     );
     let scope = AadContext {
         vault_id: attachment.vault_id.clone(),

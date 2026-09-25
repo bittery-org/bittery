@@ -103,6 +103,40 @@ describe("IndexedDB Replica transaction failure injection", () => {
 			}
 		}
 	});
+
+	test("rolls back guarded Account deletion at every physical store boundary", async () => {
+		const install = requestWithLabel(
+			"installation-guards-account-isolation-and-incarnation",
+			"install account-a first incarnation",
+		);
+		const accepted = requestWithLabel(
+			"installation-guards-account-isolation-and-incarnation",
+			"accept Account-scoped encrypted Operation and overlay",
+		);
+		if (install.type !== "install" || accepted.type !== "commit") {
+			throw new Error("corpus representatives have unexpected request types");
+		}
+		for (let boundary = 1; boundary <= 13; boundary += 1) {
+			const databaseName = `failure-guarded-delete-${boundary}`;
+			const normal = executor(databaseName);
+			await invoke(normal, install);
+			await invoke(normal, accepted);
+			const before = await loaded(normal, "account-a");
+			if (before.type !== "loaded" || before.head === null) {
+				throw new Error("guarded deletion fixture must have an Account head");
+			}
+			const request: ReplicaPersistenceRequest = {
+				type: "deleteAccountIfUnchanged",
+				accountId: "account-a",
+				expectedHead: before.head,
+				expectedRows: before.rows,
+			};
+			await expect(
+				invoke(executor(databaseName, boundary), request),
+			).rejects.toThrow(`injected IndexedDB failure after write ${boundary}`);
+			expect(await loaded(normal, "account-a")).toEqual(before);
+		}
+	});
 	test("rejects cross-Account Put and Delete without changing either Account", async () => {
 		const databaseName = "cross-account-write-scope";
 		const target = executor(databaseName);

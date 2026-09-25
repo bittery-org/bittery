@@ -9,7 +9,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 // the two RustCrypto generations can coexist without ever being mixed up.
 // `rsa::rand_core::OsRng` is the OS entropy source, same as before.
 use rsa::rand_core::OsRng;
-use rsa::sha2::Sha256;
+use rsa::sha2::{Digest, Sha256};
 use rsa::{
     pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding},
     Oaep, RsaPrivateKey, RsaPublicKey,
@@ -20,6 +20,34 @@ use crate::error::CryptoError;
 
 /// RSA key size in bits
 const RSA_KEY_SIZE: usize = 4096;
+
+/// Full, versioned recipient fingerprint over canonical SPKI DER, not PEM spelling.
+pub fn rsa_public_key_fingerprint(pem: &str) -> Result<String, CryptoError> {
+    if pem.len() > 16_384 {
+        return Err(CryptoError::InvalidPem("Public key is too large".into()));
+    }
+    let public = parse_public_key_pem(pem)?;
+    let der = public
+        .to_public_key_der()
+        .map_err(|_| CryptoError::InvalidPem("Public key export failed".into()))?;
+    let mut digest = Sha256::new();
+    digest.update(b"bittery-recipient-key-v1\0");
+    digest.update(der.as_bytes());
+    use std::fmt::Write;
+    let mut fingerprint = String::from("BVK1-");
+    for byte in digest.finalize() {
+        write!(fingerprint, "{byte:02X}").expect("String formatting is infallible");
+    }
+    Ok(fingerprint)
+}
+
+/// Derive one's public identity from the private key, independently of the key directory.
+pub fn rsa_public_key_from_private(pem: &str) -> Result<String, CryptoError> {
+    let private = parse_private_key_pem(pem)?;
+    RsaPublicKey::from(&private)
+        .to_public_key_pem(LineEnding::LF)
+        .map_err(|_| CryptoError::InvalidPem("Public key export failed".into()))
+}
 
 /// RSA key pair in PEM format
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
@@ -131,6 +159,26 @@ fn parse_private_key_pem(pem: &str) -> Result<RsaPrivateKey, CryptoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recipient_fingerprint_is_canonical_and_derived_from_private_identity() {
+        let pair = generate_rsa_key_pair().unwrap();
+        let fingerprint = rsa_public_key_fingerprint(&pair.public_key).unwrap();
+        assert_eq!(fingerprint.len(), 69); // BVK1- plus all 256 digest bits.
+        assert_eq!(
+            fingerprint,
+            rsa_public_key_fingerprint(&pair.public_key.replace('\n', "\r\n")).unwrap()
+        );
+        let derived = rsa_public_key_from_private(&pair.private_key).unwrap();
+        assert_eq!(fingerprint, rsa_public_key_fingerprint(&derived).unwrap());
+        let attacker = generate_rsa_key_pair().unwrap();
+        assert_ne!(
+            fingerprint,
+            rsa_public_key_fingerprint(&attacker.public_key).unwrap()
+        );
+        assert!(rsa_public_key_fingerprint("not a key").is_err());
+        assert!(rsa_public_key_from_private(&pair.public_key).is_err());
+    }
 
     #[test]
     fn test_generate_key_pair() {
