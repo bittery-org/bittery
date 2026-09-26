@@ -54,7 +54,7 @@
 		"expo-status-bar": "~57.0.1",
 		"expo-updates": "~57.0.12",
 		"heroui-native": "1.0.8",
-		"lucide-react-native": "^0.525.0",
+		"lucide-react-native": "^1.31.0",
 		"react": "catalog:",
 		"react-dom": "catalog:",
 		"react-native": "~0.86.2",
