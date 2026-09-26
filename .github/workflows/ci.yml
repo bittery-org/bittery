@@ -556,7 +556,7 @@ jobs:
       # mobile imports the generated messages, and prebuild type-resolves the app.
       - run: pnpm run i18n:generate
 
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@v6
 
       # Generates apps/mobile/android, including the settings.gradle that
       # autolinks :credential-provider and the crypto bindings.
