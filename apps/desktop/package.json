@@ -50,11 +50,11 @@
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"@tanstack/router-plugin": "^1.168.28",
-		"@tauri-apps/cli": "^2.11.4",
+		"@tauri-apps/cli": "^2.11.5",
 		"@types/react": "catalog:",
 		"@types/react-dom": "catalog:",
-		"@vitejs/plugin-react": "^6.0.5",
+		"@vitejs/plugin-react": "^6.1.1",
 		"typescript": "~5.8.3",
-		"vite": "^8.2.1"
+		"vite": "^8.3.1"
 	}
 }
