@@ -7,12 +7,12 @@ packages:
   - packages/crypto/react-native
 
 catalog:
-  '@types/react': ~19.2.18
-  '@types/react-dom': ~19.2.4
+  '@types/react': ~19.3.0
+  '@types/react-dom': ~19.3.0
   dotenv: ^17.4.2
-  react: 19.2.8
-  react-dom: 19.2.8
-  zod: ^4.1.13
+  react: 19.3.1
+  react-dom: 19.3.1
+  zod: ^4.6.7
 
 onlyBuiltDependencies:
   - less
